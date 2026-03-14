@@ -96,7 +96,7 @@ An autonomous system that runs 24/7, spawns intelligent sessions with full works
 ### Recovery
 
 **Scenario: Atomic state persistence**
-- Given the system is writing state to disk
+- Given the system is writing state to persistent storage
 - When it performs the write
 - Then it uses crash-safe write semantics so a crash mid-write never corrupts state
 
@@ -117,8 +117,8 @@ An autonomous system that runs 24/7, spawns intelligent sessions with full works
 
 **Scenario: Orphaned process cleanup**
 - Given the system is running its periodic maintenance
-- When it checks for orphaned child processes
-- Then it terminates any processes not associated with an active run
+- When it checks for orphaned sessions
+- Then it terminates any sessions not associated with an active run
 
 ### Secrets
 

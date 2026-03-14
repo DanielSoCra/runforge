@@ -70,25 +70,10 @@ Writing precise specifications is valuable only if those specifications get impl
 - When the system finishes processing
 - Then the work request is closed with a report and the Operator is notified
 
-**Scenario: Delivery to staging**
+**Scenario: Delivery and verification**
 - Given all review and validation gates have passed
 - When the system delivers the implementation
-- Then it creates a proposal to integrate the work into the staging branch, performs a final review on the integration diff, and auto-integrates
-
-**Scenario: Staging environment deployment**
-- Given new work has been integrated into the staging branch
-- When the system triggers deployment
-- Then it runs the configured deployment process and polls for health confirmation within a timeout
-
-**Scenario: Post-deployment verification**
-- Given the staging environment is healthy
-- When the system runs post-deployment tests (automated functional tests, and interactive tests if applicable)
-- Then it captures results and proceeds if all pass
-
-**Scenario: Post-deployment failure and fix loop**
-- Given post-deployment tests fail
-- When the system processes the failure
-- Then it creates a targeted fix, applies it, re-deploys, and re-tests — up to a configured maximum number of attempts, after which it escalates
+- Then it integrates the work into the staging branch, deploys, and runs post-deployment verification (see FUNC-AC-QUALITY for verification details)
 
 **Scenario: Work request state transitions**
 - Given a work request in any state

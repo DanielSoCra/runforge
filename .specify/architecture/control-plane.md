@@ -30,7 +30,7 @@ Any phase can transition to "stuck" (retries exhausted or circular fix detected)
 
 Beyond the three built-in variants, Operators can define custom pipeline templates as declarative phase sequences. The system loads custom templates from configuration and selects them based on configurable matching criteria (e.g., work request labels or spec types). Phase names in the pipeline definition are abstract system names (e.g., "integrate," "deploy," "report") intentionally decoupled from external service terminology.
 
-**ResultsRecord** is an append-only entry written at pipeline completion. It contains: issue number, start timestamp, completion timestamp, pipeline variant, complexity classification, total cost, phases executed, fix attempt count, holdout pass flag, and outcome (complete, stuck, or escalated).
+**ResultsRecord** is an append-only entry written at pipeline completion. It contains: issue number, start timestamp, completion timestamp, pipeline variant, complexity classification, total cost, phases executed, fix attempt count, holdout pass flag, outcome (complete, stuck, or escalated), and — for bug runs — optional diagnosis fields (diagnosis type A/B/C and diagnosis confidence score).
 
 ## API Contract
 
@@ -53,7 +53,7 @@ The Daemon Control Plane exposes operator commands via a control interface bound
 ## System Boundaries
 
 - Daemon Control Plane OWNS: run state, daemon state, pipeline definitions, results ledger, instance lock, label state machine, notification dispatch.
-- Daemon Control Plane CALLS: Session Runtime (to spawn classifier and reporter sessions), Implementation Coordinator (to execute decompose and implement phases), Validation Service (to execute review, holdout, deploy, and test phases), Bug Diagnosis Service (to classify bug work requests), Knowledge Service (to retrieve gotchas for context injection into classifier/reporter sessions).
+- Daemon Control Plane CALLS: Session Runtime (to spawn classifier and reporter sessions), Implementation Coordinator (to execute decompose and implement phases), Validation Service (to execute review, holdout, integrate, deploy, and test phases), Bug Diagnosis Service (to classify bug work requests), Knowledge Service (to retrieve gotchas for context injection into classifier/reporter sessions, and to store exemplars on successful completion).
 - Daemon Control Plane EXPOSES: operator commands via the control interface (status, health, pause, resume, retry, release, logs).
 - Daemon Control Plane READS: work request source (polling for ready-labeled items, reading request bodies).
 - Daemon Control Plane WRITES: work request labels (claiming, completing, marking stuck), work request comments (reports, diagnoses), release proposals, results ledger entries. The Daemon Control Plane is the sole system that writes labels and comments on work requests. Other services return routing decisions; the Control Plane applies them.
@@ -82,9 +82,10 @@ The Daemon Control Plane exposes operator commands via a control interface bound
 **Completion:**
 1. Spawn a reporter session via Session Runtime to generate a structured report.
 2. Post the report as a comment on the work request.
-3. Label the work request "complete" and close it.
-4. Record the outcome in the results ledger.
-5. Notify the operator.
+3. Evaluate whether this run produced a first-of-type or superior implementation. If so, call Knowledge Service to store it as an exemplar.
+4. Label the work request "complete" and close it.
+5. Record the outcome in the results ledger (including diagnosis fields for bug runs).
+6. Notify the operator.
 
 **Integration flow:**
 1. Create an integration proposal from the feature branch to the staging branch.

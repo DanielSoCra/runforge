@@ -73,7 +73,7 @@ The test operation proceeds:
 
 **Review flow:**
 1. Receive the feature branch reference, spec content, and complexity classification.
-2. Gate 1 (deterministic): execute configured automated checks (test suite, type checking, linting) as a deterministic process. No intelligent session. Collect result signal and output. If fail: extract structured failure information, proceed to fix cycle.
+2. Gate 1 (deterministic): execute configured automated verification checks as a deterministic process. No intelligent session. Collect result signal and output. If fail: extract structured failure information, proceed to fix cycle.
 3. Gate 2 (spec compliance): spawn a fresh Reviewer session via Session Runtime. The reviewer receives: the implementation diff, the governing spec content (pre-loaded), and a structured rubric. The reviewer independently reads implementation artifacts and verifies every acceptance criterion. It produces structured findings. If fail: proceed to fix cycle.
 4. Gate 3 (quality, standard and complex only): spawn a fresh Reviewer session. The reviewer receives: the implementation diff, pattern expectations, and a quality rubric. It evaluates maintainability, pattern consistency, test quality, and convention alignment. If fail: proceed to fix cycle.
 5. Gate 4 (security, complex only): spawn a fresh Reviewer session. The reviewer receives: the implementation diff and a security rubric. It evaluates injection risks, authentication gaps, data validation, and concurrency safety. If fail: proceed to fix cycle.

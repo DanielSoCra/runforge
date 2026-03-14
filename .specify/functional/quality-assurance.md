@@ -78,6 +78,31 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 - When the system processes the failure
 - Then it escalates to the Spec Author as a spec gap — it never attempts to "fix" holdout failures, because they indicate the spec is incomplete, not that the implementation is wrong
 
+**Scenario: Integration review**
+- Given all review gates and holdout validation have passed
+- When the system prepares to integrate the work into the staging branch
+- Then it performs a final review on the integration diff before auto-integrating
+
+**Scenario: Staging deployment verification**
+- Given new work has been integrated into the staging branch
+- When the system deploys to the staging environment
+- Then it polls for health confirmation within a configured timeout
+
+**Scenario: Post-deployment testing**
+- Given the staging environment is healthy after deployment
+- When the system runs post-deployment tests (automated functional tests, and interactive tests if applicable)
+- Then it captures results and proceeds if all pass
+
+**Scenario: Post-deployment failure and fix loop**
+- Given post-deployment tests fail
+- When the system processes the failure
+- Then it creates a targeted fix, re-deploys, and re-tests — up to a configured maximum number of attempts, after which it escalates
+
+**Scenario: Test output truncation**
+- Given test output is verbose
+- When the system prepares failure context for a fix Worker
+- Then it truncates the output to only the relevant failure excerpt to prevent context flooding
+
 **Scenario: Graduated escalation**
 - Given repeated failures on the same issue
 - When the failure count crosses a threshold

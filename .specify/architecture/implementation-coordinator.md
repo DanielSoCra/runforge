@@ -40,7 +40,7 @@ The implement operation proceeds as follows:
       - Spawn a worker session via Session Runtime.
       - Monitor the worker's exit status.
    b. After all units in the batch complete: merge each unit's workspace into the feature branch in sequence.
-   c. Run post-integration verification (compile, type check) on the feature branch.
+   c. Run post-integration verification on the feature branch.
    d. Save checkpoint (batch number and completed units).
    e. Proceed to next batch.
 
