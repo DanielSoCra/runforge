@@ -46,3 +46,29 @@ ARCH-SDD-FLAVOR-PACKS:
 ARCH-SDD-SPEC-LIFECYCLE:
   parent: FUNC-SDD-VALIDATION
   status: approved
+
+# --- Auto-Claude L1 specs (roots — no parent) ---
+
+FUNC-AC-PIPELINE:
+  children: []
+  status: draft
+
+FUNC-AC-IMPLEMENTATION:
+  children: []
+  status: draft
+
+FUNC-AC-QUALITY:
+  children: []
+  status: draft
+
+FUNC-AC-SAFETY:
+  children: []
+  status: draft
+
+FUNC-AC-BUG-TRIAGE:
+  children: []
+  status: draft
+
+FUNC-AC-LEARNING:
+  children: []
+  status: draft

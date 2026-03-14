@@ -4,11 +4,121 @@
 
 **Goal:** Build a TypeScript daemon that polls GitHub Issues for spec implementation requests, spawns Claude Code CLI sessions to implement them autonomously, and manages the full pipeline from decomposition through dev deployment and release preparation.
 
-**Architecture:** Thin TypeScript orchestrator (the machine) wrapping Claude Code CLI sessions (the brain). GitHub Issues serve as the work queue. Git worktrees isolate parallel workers. State is JSON files on disk. Pipeline phases run sequentially per issue, with parallelism within the implement phase.
+**Architecture:** Three-layer design: Infrastructure (worker threads, rate limits, cost tracking) → Orchestration (FSM pipeline runner, agent config registry, recovery manager) → Intelligence (complexity gating, gotcha injection). GitHub Issues serve as the work queue. Git worktrees isolate parallel workers. State is JSON files on disk. A finite state machine drives phase transitions with sub-phase checkpointing.
 
-**Tech Stack:** TypeScript (tsx runtime, no build step), Commander.js (CLI), js-yaml (config), Node built-in child_process (spawning claude), Node built-in fs (state). No framework, no database.
+**Tech Stack:** TypeScript (tsx runtime, no build step), Commander.js (CLI), js-yaml (config), Node built-in worker_threads (session isolation), Node built-in child_process (spawning claude within workers), Node built-in fs (state). No framework, no database.
 
 **Design Doc:** `docs/specs/2026-03-14-auto-claude-design.md`
+
+**Conventions:**
+- `$PROJECT_ROOT` refers to the repository root directory. All commands run from there.
+- Auto-Claude's own source code is not spec-governed (no entries in `traceability.yml`). Specs may be added later.
+- Runtime state lives at `~/.auto-claude/state/{project}/`. The `state/` dir in-repo is a symlink (created by `auto-claude init`).
+
+---
+
+## Plan Additions
+
+These additions close gaps identified in `research/` without rewriting the rest of the implementation plan. Treat them as scope and sequencing constraints on the tasks below.
+
+### Addition 1: Explicit MVP before parallel factory
+
+- [ ] Add an **MVP milestone** section before Chunk 1 with this scope only:
+  - One daemon instance
+  - One active issue at a time
+  - One worker unit at a time
+  - Deterministic holdout runner
+  - Fast-fail guards for compile crashes, test runner crashes, and silent/stalled workers
+  - Dev deploy + health check
+  - Final report + notification
+- [ ] Mark these as **post-MVP hardening**, not day-one requirements:
+  - Parallel unit batches
+  - Prompt optimizer automation
+  - Maintenance mode
+  - Multi-project status aggregation
+- [ ] Update the chunk ordering note so MVP stability is proven before parallel worker execution is enabled.
+
+### Addition 2: Worktree hygiene and bootstrap
+
+- [ ] Extend the worktree plan with deterministic setup steps:
+  - Verify `.factory/worktrees/` is gitignored before creation
+  - Bootstrap repo dependencies inside the worktree
+  - Run a clean baseline verification command before assigning work
+  - Record any allocated ports or per-worktree env overrides
+  - Define cleanup policy for dirty or abandoned worktrees after crashes
+- [ ] Add tests covering worktree bootstrap failure and cleanup on shutdown.
+
+### Addition 3: Full run ledger and audit trail
+
+- [ ] Expand `RunState` / persisted state to include:
+  - `runId`
+  - `repoShaAtStart`
+  - `claimedAt`
+  - `completedAt`
+  - command history with exit codes
+  - artifact paths
+  - diff summary per phase
+- [ ] Add an append-only event log per run under `state/runs/issue-{N}/` so failures are reconstructable even when a phase crashes mid-stream.
+- [ ] Store each run's artifacts in a timestamped directory containing task graph, worker logs, review outputs, holdout results, and final report for post-mortem debugging.
+
+### Addition 4: Background process abstraction
+
+- [ ] Add a reusable background process manager for deploy and test phases with:
+  - spawn
+  - process ID / session ID
+  - log capture path
+  - polling
+  - timeout
+  - termination
+  - restart recovery
+- [ ] Refactor deploy-to-dev and long-running test commands to use this abstraction instead of ad hoc `exec` calls.
+- [ ] Add **heartbeat/admission checks** for daemon polling and dev health monitoring so deterministic checks run first and Claude sessions are only spawned when there is actual failure or work to process.
+
+### Addition 5: Sandbox and permissions policy
+
+- [ ] Add a dedicated safety task defining when `--dangerously-skip-permissions` is allowed.
+- [ ] Default unattended runs to a constrained environment:
+  - sandboxed Claude settings where possible
+  - otherwise container or VM isolation
+  - explicit filesystem and network boundaries
+- [ ] Treat permission bypass as an exception path with a documented rationale, not the default config for all agentic sessions.
+- [ ] Make holdout evaluation **structurally immutable** to agent sessions:
+  - agents may not read scenario files
+  - agents may not write scenario files
+  - agents may not modify the holdout runner or success-criteria definitions
+  - enforcement must be technical (permissions / file layout), not prompt-only
+
+### Addition 6: AgentSkills-compatible prompt pack
+
+- [ ] Add a task to make `prompts/` and related assets reusable as an AgentSkills-compatible pack for both interactive authoring and daemon execution.
+- [ ] Move prompt templates toward `SKILL.md` semantics with YAML frontmatter where:
+  - `description` contains triggering conditions only
+  - workflow/process instructions live in the body
+- [ ] Define precedence and activation rules for bundled prompts, workspace overrides, and user-level overrides.
+- [ ] Add a lightweight governance step for hooks / skills / prompt assets:
+  - allowed source locations
+  - hash or checksum recording
+  - human review before activation of new executable assets
+- [ ] Add hot-reload support for prompt / skill changes so updates can take effect without daemon restart.
+
+### Addition 7: Claude CLI compatibility cleanup
+
+- [ ] Update the session command plan to avoid specifying both `--print` and `-p` together.
+- [ ] Re-evaluate whether native Claude worktree support should replace some custom `.factory/worktrees` lifecycle code.
+- [ ] Add a compatibility note documenting the exact CLI behaviors the daemon depends on so upgrades can be tested intentionally.
+
+### Addition 8: Context budget and memory flush
+
+- [ ] Add hard session budget rules beyond cost:
+  - maximum turns
+  - maximum inactivity window
+  - maximum wall-clock runtime per session type
+- [ ] Before long-running sessions hit context limits, flush structured progress summaries to disk so recovery and reviewer sessions do not depend on bloated prior logs.
+
+### Addition 9: Post-MVP scale recommendations from research
+
+- [ ] Evaluate whether the custom FSM should remain lightweight or be replaced with XState once the MVP flow is stable and the state surface is real.
+- [ ] Treat multi-account / multi-profile rate-limit failover as a **post-MVP scaling task**, not a prerequisite for first implementation.
 
 ---
 
@@ -24,16 +134,19 @@
 - [ ] **Step 1: Initialize package.json**
 
 ```bash
-cd ~/code/auto-claude
+cd $PROJECT_ROOT
 npm init -y
 ```
 
 - [ ] **Step 2: Install dependencies**
 
 ```bash
-npm install commander js-yaml
-npm install -D typescript @types/node @types/js-yaml tsx vitest
+npm install commander js-yaml tsx minimatch
+# Note: worker_threads, http, crypto are Node built-ins — no extra deps needed
+npm install -D typescript @types/node @types/js-yaml vitest
 ```
+
+Note: `tsx` is a production dependency because the CLI entry point requires it at runtime.
 
 - [ ] **Step 3: Create tsconfig.json**
 
@@ -58,7 +171,7 @@ npm install -D typescript @types/node @types/js-yaml tsx vitest
 
 - [ ] **Step 4: Update .gitignore**
 
-Add `node_modules/`, `dist/`, `state/`, `.auto-claude/` to existing `.gitignore.
+Add `node_modules/`, `dist/`, `state/`, `.auto-claude/`, `.factory/` to existing `.gitignore`.
 
 - [ ] **Step 5: Add scripts to package.json**
 
@@ -77,8 +190,8 @@ Add `node_modules/`, `dist/`, `state/`, `.auto-claude/` to existing `.gitignore.
 
 Create `bin/auto-claude.mjs`:
 ```javascript
-#!/usr/bin/env node
-import('../src/index.ts')
+#!/usr/bin/env tsx
+import '../src/index.ts';
 ```
 
 - [ ] **Step 7: Commit**
@@ -93,11 +206,11 @@ git commit -m "feat: project scaffolding with tsx, commander, vitest"
 ### Task 2: Type definitions
 
 **Files:**
-- Create: `src/state/types.ts`
+- Create: `src/types.ts` (centralized — not in `state/`)
 
 - [ ] **Step 1: Write types**
 
-All core types for the system. These are the data structures that flow through the pipeline:
+All core types for the system. These are the data structures that flow through all three layers:
 
 ```typescript
 // Issue payload parsed from GitHub Issue body
@@ -133,6 +246,7 @@ export interface Unit {
   dependsOn: string[];
   batch: number;
   context: string;
+  verificationCommand: string;
 }
 
 // Run state persisted to disk
@@ -178,6 +292,7 @@ export interface RunState {
 
 export type PhaseName =
   | "detect"
+  | "classify"
   | "decompose"
   | "implement"
   | "review"
@@ -185,12 +300,97 @@ export type PhaseName =
   | "pr_to_dev"
   | "deploy_dev"
   | "test"
-  | "close_report"
-  | "release";
+  | "close_report";
+
+// Pipeline variants
+export type PipelineVariant = "feature" | "feature-simple" | "bug";
+
+// Complexity classification
+export type Complexity = "simple" | "standard" | "complex";
+export interface ComplexityAssessment {
+  complexity: Complexity;
+  reasoning: string;
+  estimatedUnits: number;
+  estimatedFiles: number;
+}
+
+// FSM types
+export interface StateConfig {
+  onEnter?: (ctx: RunContext) => Promise<void>;
+  execute: (ctx: RunContext) => Promise<PhaseResult>;
+  onExit?: (ctx: RunContext) => Promise<void>;
+  transitions: {
+    success: PhaseName | "complete";
+    failure: PhaseName | "stuck";
+    skip?: PhaseName;
+  };
+  retryable: boolean;
+  maxRetries?: number;
+}
+
+export type PhaseResult = { status: "success" } | { status: "failure"; error: string } | { status: "skip" };
+
+export interface RunContext {
+  issue: IssuePayload;
+  config: Config;
+  run: RunState;
+  pipelineVariant: PipelineVariant;
+  complexity?: ComplexityAssessment;
+}
+
+// Agent config registry
+export type SessionType =
+  | "coordinator" | "classifier" | "worker"
+  | "reviewer-spec" | "reviewer-quality" | "reviewer-security"
+  | "conflict-resolver" | "bug-worker" | "tester"
+  | "diagnostician" | "reporter" | "prompt-optimizer";
+
+export interface AgentConfig {
+  model: string;
+  mode: "one-shot" | "agentic";
+  promptTemplate: string;
+  maxTurns?: number;
+  timeoutMinutes: number;
+  maxBudgetUsd: number;         // maps to --max-budget-usd
+  skipPermissions: boolean;
+  prohibitedPaths?: string[];
+  thinkingLevel: "low" | "medium" | "high";
+  jsonSchema?: string;          // schema name for --output-format json --json-schema
+}
+
+// Worker exit status protocol
+export type WorkerExitStatus = "DONE" | "DONE_WITH_CONCERNS" | "BLOCKED" | "NEEDS_CONTEXT";
+
+// Sub-phase checkpointing
+export interface PhaseCheckpoint {
+  phase: PhaseName;
+  checkpoint: string;           // e.g., "batch-2-unit-3-complete"
+  data: Record<string, unknown>;
+  savedAt: string;
+}
+
+// Worker thread events
+export type WorkerEvent =
+  | { type: "session:started"; sessionType: SessionType }
+  | { type: "session:output"; line: string }
+  | { type: "session:cost"; inputTokens: number; outputTokens: number; model: string }
+  | { type: "session:completed"; exitCode: number }
+  | { type: "session:error"; error: string; isRateLimit: boolean };
+
+// Gotcha store
+export interface Gotcha {
+  id: string;
+  filePaths: string[];
+  gotcha: string;
+  source: "agent" | "human";
+  issueNumber: number;
+  createdAt: string;
+  hitCount: number;
+}
 
 // Notification event
 export interface NotifyEvent {
-  type: "started" | "phase_complete" | "stuck" | "complete" | "budget_exceeded" | "release_ready";
+  type: "started" | "phase_complete" | "stuck" | "complete" | "budget_exceeded" | "rate_limited" | "release_ready";
   issueNumber: number;
   message: string;
   details?: Record<string, unknown>;
@@ -208,10 +408,12 @@ export interface DaemonState {
 }
 ```
 
+// Note: Config interface is defined in src/config.ts (Task 3), not here. It is imported where needed.
+
 - [ ] **Step 2: Commit**
 
 ```bash
-git add src/state/types.ts
+git add src/types.ts
 git commit -m "feat: core type definitions"
 ```
 
@@ -250,6 +452,11 @@ claude:
   model: "opus"
   max_parallel_workers: 2
   skip_permissions: true
+  pricing:
+    opus_input: 15.0
+    opus_output: 75.0
+    sonnet_input: 3.0
+    sonnet_output: 15.0
 pipeline:
   deep_review_rounds: 3
   max_retries_per_phase: 2
@@ -331,12 +538,27 @@ safety:
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/code/auto-claude && npx vitest run src/__tests__/config.test.ts`
+Run: `cd $PROJECT_ROOT && npx vitest run src/__tests__/config.test.ts`
 Expected: FAIL — module not found
 
 - [ ] **Step 3: Write config.ts**
 
-Implement `loadConfig` and `validateConfig`: read YAML file, resolve `${ENV_VAR}` patterns, validate required fields (`project.repo`, `claude.model`, `safety.daily_budget_usd` etc.), return typed config object. Export the `Config` interface.
+Implement `loadConfig` and `validateConfig`: read YAML file, resolve `${ENV_VAR}` patterns, validate all required fields with explicit checks:
+
+Required sections and fields:
+- `project`: `name`, `repo`, `spec_dir`, `main_branch`, `dev_branch`
+- `cron`: `interval_minutes`
+- `claude`: `model`, `max_parallel_workers`, `skip_permissions`, `pricing` (with `opus_input`, `opus_output`, `sonnet_input`, `sonnet_output`)
+- `pipeline`: `deep_review_rounds`, `max_retries_per_phase`, `worker.max_review_fix_cycles`
+- `safety`: `daily_budget_usd`, `max_concurrent_runs`, `max_total_claude_sessions`, `worker_timeout_minutes`, `review_timeout_minutes`, `max_retries_per_issue`, `cooldown_between_pickups_seconds`, `auto_pause_after_consecutive_stuck`, `shutdown_grace_seconds`
+
+Optional sections (with defaults):
+- `dev`: `deploy_command`, `health_check_url`, `health_check_timeout_seconds` (default: 120)
+- `testing`: `unit_test_command`, `api_test_command`, `playwright` (default: disabled)
+- `notify`: `channels` (default: empty)
+- `release`: `trigger` (default: "on-demand"), `version_strategy` (default: "semver-auto")
+
+Return typed `Config` interface. Export it.
 
 - [ ] **Step 4: Create factory.config.example.yaml**
 
@@ -344,7 +566,7 @@ Full example config with comments, matching the design doc's Configuration secti
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `cd ~/code/auto-claude && npx vitest run src/__tests__/config.test.ts`
+Run: `cd $PROJECT_ROOT && npx vitest run src/__tests__/config.test.ts`
 Expected: 3 tests PASS
 
 - [ ] **Step 6: Commit**
@@ -412,16 +634,16 @@ describe("StateStore", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/code/auto-claude && npx vitest run src/__tests__/state.test.ts`
+Run: `cd $PROJECT_ROOT && npx vitest run src/__tests__/state.test.ts`
 Expected: FAIL
 
 - [ ] **Step 3: Implement StateStore**
 
-Class with methods: `createRun(issueNumber)`, `loadRun(issueNumber)`, `updatePhase(issueNumber, phase, update)`, `updateUnit(issueNumber, unitId, update)`, `addFix(issueNumber, fix)`, `saveTaskGraph(issueNumber, graph)`, `loadTaskGraph(issueNumber)`. All read/write JSON files under `{stateDir}/runs/issue-{N}/`.
+Class with methods: `createRun(issueNumber)`, `loadRun(issueNumber)`, `loadOrCreateRun(issueNumber)` (idempotent — loads if exists, creates if not), `updatePhase(issueNumber, phase, update)`, `updateUnit(issueNumber, unitId, update)`, `addFix(issueNumber, fix)`, `saveTaskGraph(issueNumber, graph)`, `loadTaskGraph(issueNumber)`. All read/write JSON files under `{stateDir}/runs/issue-{N}/`.
 
 - [ ] **Step 4: Run tests**
 
-Run: `cd ~/code/auto-claude && npx vitest run src/__tests__/state.test.ts`
+Run: `cd $PROJECT_ROOT && npx vitest run src/__tests__/state.test.ts`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -436,11 +658,11 @@ git commit -m "feat: state store with JSON file persistence"
 ### Task 5: Structured logger
 
 **Files:**
-- Create: `src/logger.ts`
+- Create: `src/infra/logger.ts`
 
 - [ ] **Step 1: Write logger**
 
-Simple structured JSON logger that writes to stdout and optionally to a file. One JSON object per line. Fields: `ts`, `level`, `phase`, `issue`, `unit`, `msg`, `pid`. No external dependencies — use `console.log` with `JSON.stringify`.
+Simple structured JSON logger that writes to stdout and optionally to a file. One JSON object per line. Fields: `ts`, `level`, `phase`, `issue`, `unit`, `msg`, `pid`. No external dependencies — use `console.log` with `JSON.stringify`. Import `appendFileSync` from `"fs"` at the top of the file (ESM import, not `require`).
 
 ```typescript
 export interface LogContext {
@@ -462,8 +684,7 @@ export function createLogger(logFile?: string) {
     const line = JSON.stringify(entry);
     console.log(line);
     if (logFile) {
-      const fs = require("fs");
-      fs.appendFileSync(logFile, line + "\n");
+      appendFileSync(logFile, line + "\n");
     }
   };
 
@@ -480,13 +701,72 @@ export type Logger = ReturnType<typeof createLogger>;
 - [ ] **Step 2: Commit**
 
 ```bash
-git add src/logger.ts
+git add src/infra/logger.ts
 git commit -m "feat: structured JSON logger"
+```
+
+### Task 5b: Cost tracker
+
+**Files:**
+- Create: `src/infra/cost.ts`
+- Create: `src/__tests__/cost.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { CostTracker, estimateCostFromTokens } from "../infra/cost.js";
+
+describe("CostTracker", () => {
+  it("estimates cost from token counts", () => {
+    const cost = estimateCostFromTokens({
+      model: "opus",
+      inputTokens: 10000,
+      outputTokens: 5000,
+      pricing: { opus_input: 15.0, opus_output: 75.0, sonnet_input: 3.0, sonnet_output: 15.0 },
+    });
+    // 10000/1M * 15 + 5000/1M * 75 = 0.15 + 0.375 = 0.525
+    expect(cost).toBeCloseTo(0.525);
+  });
+
+  it("tracks daily cost with reset", () => {
+    const tracker = new CostTracker(100); // $100 daily budget
+    tracker.addCost(50);
+    expect(tracker.withinBudget()).toBe(true);
+    tracker.addCost(60);
+    expect(tracker.withinBudget()).toBe(false);
+    tracker.resetDaily();
+    expect(tracker.withinBudget()).toBe(true);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+- [ ] **Step 3: Implement cost.ts**
+
+`CostTracker` class:
+- `addCost(usd)` — accumulates daily cost.
+- `withinBudget()` — returns `dailyCostUsd < budgetUsd`.
+- `resetDaily()` — resets accumulator (called when `dailyCostResetAt` crosses midnight).
+- `getDailyCost()` — returns current daily total.
+
+`estimateCostFromTokens(opts)` — pure function: converts token counts + pricing config to USD.
+
+`parseSessionCost(sessionLogDir)` — reads Claude session metadata from `~/.claude/projects/` to extract token counts. Falls back to duration-based estimation if metadata is unavailable.
+
+- [ ] **Step 4: Run tests, verify PASS**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/infra/cost.ts src/__tests__/cost.test.ts
+git commit -m "feat: cost tracker with token-based estimation and daily budget"
 ```
 
 ---
 
-## Chunk 2: Claude Session Management
+## Chunk 2: Infrastructure Layer — Session Management
 
 ### Task 6: Claude CLI session spawner
 
@@ -531,7 +811,7 @@ describe("claude session", () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd ~/code/auto-claude && npx vitest run src/__tests__/claude-session.test.ts`
+Run: `cd $PROJECT_ROOT && npx vitest run src/__tests__/claude-session.test.ts`
 
 - [ ] **Step 3: Implement session.ts**
 
@@ -545,7 +825,7 @@ Both use `child_process.spawn` directly. Handle process exit codes, timeout kill
 
 - [ ] **Step 4: Run tests**
 
-Run: `cd ~/code/auto-claude && npx vitest run src/__tests__/claude-session.test.ts`
+Run: `cd $PROJECT_ROOT && npx vitest run src/__tests__/claude-session.test.ts`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
@@ -642,7 +922,8 @@ describe("WorktreeManager", () => {
   afterEach(() => rmSync(repoDir, { recursive: true, force: true }));
 
   it("creates and removes a worktree", () => {
-    const wtPath = mgr.create("factory/issue-1", "unit-1");
+    // Uses "dev" (created in setup) as the base branch
+    const wtPath = mgr.create("dev", "unit-1");
     expect(wtPath).toContain("unit-1");
     const branches = execSync("git worktree list", { cwd: repoDir }).toString();
     expect(branches).toContain("unit-1");
@@ -663,7 +944,7 @@ describe("WorktreeManager", () => {
 - `merge(unitId, targetBranch)` — checks out targetBranch, runs `git merge --no-ff factory/{unitId}`, returns success/conflict status.
 - `listActive()` — parses `git worktree list` output.
 
-All methods use `execSync` for simplicity (these are fast git operations).
+All methods use `execFile` (promisified via `util.promisify`) with argument arrays to avoid shell injection and to avoid blocking the event loop during concurrent operations.
 
 - [ ] **Step 4: Run tests, verify PASS**
 
@@ -672,6 +953,616 @@ All methods use `execSync` for simplicity (these are fast git operations).
 ```bash
 git add src/claude/worktree.ts src/__tests__/worktree.test.ts
 git commit -m "feat: git worktree manager"
+```
+
+### Task 8b: Worker thread pool
+
+**Files:**
+- Create: `src/infra/worker-pool.ts`
+- Create: `src/infra/session-worker.ts`
+- Create: `src/infra/worker-events.ts`
+- Create: `src/__tests__/worker-pool.test.ts`
+
+- [ ] **Step 1: Write worker-events.ts**
+
+Typed event definitions for `postMessage()` communication between main thread and workers. Uses the `WorkerEvent` type from `types.ts`.
+
+- [ ] **Step 2: Write session-worker.ts**
+
+Worker thread entry point. Receives session config via `workerData`. Spawns `claude` child process, captures stdout/stderr to log file, enforces timeout, parses cost on completion, emits structured events via `parentPort.postMessage()`.
+
+- [ ] **Step 3: Write the failing test**
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { WorkerPool } from "../infra/worker-pool.js";
+
+describe("WorkerPool", () => {
+  it("enforces concurrency limit", async () => {
+    const pool = new WorkerPool({ maxConcurrent: 2 });
+    let running = 0;
+    let maxRunning = 0;
+
+    const task = () => new Promise<void>((resolve) => {
+      running++;
+      maxRunning = Math.max(maxRunning, running);
+      setTimeout(() => { running--; resolve(); }, 50);
+    });
+
+    await Promise.all([pool.run(task), pool.run(task), pool.run(task)]);
+    expect(maxRunning).toBeLessThanOrEqual(2);
+  });
+});
+```
+
+- [ ] **Step 4: Implement worker-pool.ts**
+
+`WorkerPool` class:
+- `spawn(sessionType, contextVars, cwd?)` — looks up `AgentConfig` from registry, creates a `Worker` from `session-worker.ts`, passes config via `workerData`, returns a `SessionHandle` with events and a `kill()` method.
+- Enforces `maxConcurrent` (from `safety.max_total_claude_sessions`) via a semaphore — queues excess requests.
+- `staggerDelayMs` config (default: 3000) — when launching multiple workers in a batch, stagger starts by this delay to avoid API thundering herd.
+- Tracks active workers for signal handler cleanup.
+- Relays worker events to caller via typed event emitter.
+
+Add a test for stagger behavior: spawn 3 workers with staggerDelayMs=100, verify that start times are at least 100ms apart.
+
+- [ ] **Step 5: Run tests, verify PASS**
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/infra/worker-pool.ts src/infra/session-worker.ts src/infra/worker-events.ts src/__tests__/worker-pool.test.ts
+git commit -m "feat: worker thread pool for session isolation"
+```
+
+---
+
+### Task 8c: Rate limit handler
+
+**Files:**
+- Create: `src/infra/rate-limit.ts`
+- Create: `src/__tests__/rate-limit.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { RateLimitHandler } from "../infra/rate-limit.js";
+
+describe("RateLimitHandler", () => {
+  it("sets cooldown on rate limit detection", () => {
+    const handler = new RateLimitHandler();
+    handler.recordRateLimit();
+    expect(handler.isCoolingDown()).toBe(true);
+  });
+
+  it("clears cooldown after expiry", () => {
+    const handler = new RateLimitHandler();
+    handler.recordRateLimit();
+    // Fast-forward past cooldown
+    handler.setCooldownUntil(new Date(Date.now() - 1000));
+    expect(handler.isCoolingDown()).toBe(false);
+  });
+
+  it("uses exponential backoff", () => {
+    const handler = new RateLimitHandler();
+    handler.recordRateLimit(); // 30s
+    const first = handler.getCooldownDuration();
+    handler.recordRateLimit(); // 60s
+    const second = handler.getCooldownDuration();
+    expect(second).toBeGreaterThan(first);
+  });
+});
+```
+
+- [ ] **Step 2: Implement rate-limit.ts**
+
+`RateLimitHandler`:
+- `recordRateLimit(retryAfter?)` — sets `cooldownUntil` using `Retry-After` value or exponential backoff (30s → 60s → 120s → 300s cap).
+- `isCoolingDown()` — returns `true` if `now < cooldownUntil`.
+- `getCooldownRemaining()` — returns milliseconds until cooldown expires.
+- `reset()` — clears cooldown after a successful session (resets backoff level).
+
+Detection: the worker thread checks for "rate limit", "429", or "too many requests" in stderr on session error and sets `isRateLimit: true` in the `session:error` event. The pool relays this to the handler.
+
+- [ ] **Step 3: Run tests, verify PASS**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/infra/rate-limit.ts src/__tests__/rate-limit.test.ts
+git commit -m "feat: rate limit handler with exponential backoff"
+```
+
+---
+
+### Task 8d: Worktree sparse checkout for scenario isolation
+
+**Files:**
+- Modify: `src/claude/worktree.ts`
+- Modify: `src/__tests__/worktree.test.ts`
+
+- [ ] **Step 1: Update WorktreeManager.create() to use sparse checkout**
+
+After creating the worktree, configure sparse checkout to exclude `.specify/scenarios/`:
+
+```bash
+git -C {worktreePath} sparse-checkout init
+git -C {worktreePath} sparse-checkout set '/*' '!/.specify/scenarios/'
+```
+
+This is the technical enforcement of AGENTS.md rule 4 — workers literally cannot see scenario files.
+
+- [ ] **Step 2: Add test for sparse checkout**
+
+Verify that after creating a worktree, `.specify/scenarios/` is not present in the worktree directory.
+
+- [ ] **Step 3: Run tests, verify PASS**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/claude/worktree.ts src/__tests__/worktree.test.ts
+git commit -m "feat: sparse checkout in worktrees excludes holdout scenarios"
+```
+
+---
+
+## Chunk 2b: Orchestration Layer
+
+### Task 8e: Finite state machine engine
+
+**Files:**
+- Create: `src/orchestration/fsm.ts`
+- Create: `src/__tests__/fsm.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { FSM } from "../orchestration/fsm.js";
+
+describe("FSM", () => {
+  it("transitions through states on success", async () => {
+    const visited: string[] = [];
+    const fsm = new FSM({
+      initial: "a",
+      states: {
+        a: {
+          execute: async () => { visited.push("a"); return { status: "success" }; },
+          transitions: { success: "b", failure: "stuck" },
+          retryable: false,
+        },
+        b: {
+          execute: async () => { visited.push("b"); return { status: "success" }; },
+          transitions: { success: "complete", failure: "stuck" },
+          retryable: false,
+        },
+      },
+    });
+    await fsm.run();
+    expect(visited).toEqual(["a", "b"]);
+    expect(fsm.currentState).toBe("complete");
+  });
+
+  it("retries on failure up to maxRetries", async () => {
+    let attempts = 0;
+    const fsm = new FSM({
+      initial: "a",
+      states: {
+        a: {
+          execute: async () => {
+            attempts++;
+            if (attempts < 3) return { status: "failure", error: "fail" };
+            return { status: "success" };
+          },
+          transitions: { success: "complete", failure: "stuck" },
+          retryable: true,
+          maxRetries: 3,
+        },
+      },
+    });
+    await fsm.run();
+    expect(attempts).toBe(3);
+    expect(fsm.currentState).toBe("complete");
+  });
+
+  it("transitions to stuck after max retries", async () => {
+    const fsm = new FSM({
+      initial: "a",
+      states: {
+        a: {
+          execute: async () => ({ status: "failure", error: "always fails" }),
+          transitions: { success: "complete", failure: "stuck" },
+          retryable: true,
+          maxRetries: 2,
+        },
+      },
+    });
+    await fsm.run();
+    expect(fsm.currentState).toBe("stuck");
+  });
+
+  it("skips states when skip transition used", async () => {
+    const visited: string[] = [];
+    const fsm = new FSM({
+      initial: "a",
+      states: {
+        a: {
+          execute: async () => { visited.push("a"); return { status: "skip" }; },
+          transitions: { success: "b", failure: "stuck", skip: "c" },
+          retryable: false,
+        },
+        b: {
+          execute: async () => { visited.push("b"); return { status: "success" }; },
+          transitions: { success: "c", failure: "stuck" },
+          retryable: false,
+        },
+        c: {
+          execute: async () => { visited.push("c"); return { status: "success" }; },
+          transitions: { success: "complete", failure: "stuck" },
+          retryable: false,
+        },
+      },
+    });
+    await fsm.run();
+    expect(visited).toEqual(["a", "c"]);
+  });
+
+  it("resumes from a given state", async () => {
+    const visited: string[] = [];
+    const fsm = new FSM({
+      initial: "b", // resume from b, skip a
+      states: {
+        a: {
+          execute: async () => { visited.push("a"); return { status: "success" }; },
+          transitions: { success: "b", failure: "stuck" },
+          retryable: false,
+        },
+        b: {
+          execute: async () => { visited.push("b"); return { status: "success" }; },
+          transitions: { success: "complete", failure: "stuck" },
+          retryable: false,
+        },
+      },
+    });
+    await fsm.run();
+    expect(visited).toEqual(["b"]);
+  });
+});
+```
+
+- [ ] **Step 2: Implement fsm.ts**
+
+Generic FSM engine (~100 lines):
+- Constructor takes `FSMDefinition` (states, initial state, context).
+- `run()` — executes the FSM: for current state, call `onEnter`, `execute`, `onExit`. On success/failure/skip, follow the transition. Retry on failure if `retryable`. Stop at `complete` or `stuck`.
+- `currentState` — readable property.
+- Emits events: `phase:enter`, `phase:exit`, `phase:retry`, `phase:stuck` for observability.
+- Supports `paused` state: any handler can throw a `PauseError` to pause the FSM. The FSM saves its state and stops. `resume()` continues from the paused state.
+
+- [ ] **Step 3: Run tests, verify PASS**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/orchestration/fsm.ts src/__tests__/fsm.test.ts
+git commit -m "feat: finite state machine engine for pipeline orchestration"
+```
+
+---
+
+### Task 8f: Agent config registry
+
+**Files:**
+- Create: `src/orchestration/agent-configs.ts`
+- Create: `src/__tests__/agent-configs.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { getAgentConfig, AGENT_CONFIGS } from "../orchestration/agent-configs.js";
+
+describe("agent-configs", () => {
+  it("returns config for known session types", () => {
+    const config = getAgentConfig("worker");
+    expect(config.model).toBe("opus");
+    expect(config.mode).toBe("agentic");
+    expect(config.skipPermissions).toBe(true);
+    expect(config.prohibitedPaths).toContain(".specify/scenarios/");
+  });
+
+  it("all session types have configs", () => {
+    const types = ["coordinator", "classifier", "worker", "reviewer-spec",
+      "reviewer-quality", "reviewer-security", "conflict-resolver", "bug-worker",
+      "tester", "diagnostician", "reporter", "prompt-optimizer"];
+    for (const t of types) {
+      expect(AGENT_CONFIGS[t]).toBeDefined();
+    }
+  });
+
+  it("applies config overrides", () => {
+    const config = getAgentConfig("worker", { timeoutMinutes: 120 });
+    expect(config.timeoutMinutes).toBe(120);
+  });
+});
+```
+
+- [ ] **Step 2: Implement agent-configs.ts**
+
+The `AGENT_CONFIGS` registry as described in the design doc. `getAgentConfig(sessionType, overrides?)` merges overrides from `factory.config.yaml` on top of defaults.
+
+- [ ] **Step 3: Run tests, verify PASS**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/orchestration/agent-configs.ts src/__tests__/agent-configs.test.ts
+git commit -m "feat: centralized agent config registry"
+```
+
+---
+
+### Task 8g: Recovery manager with circular fix detection
+
+**Files:**
+- Create: `src/orchestration/recovery.ts`
+- Create: `src/__tests__/recovery.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { RecoveryManager, CircularFixDetector } from "../orchestration/recovery.js";
+import { mkdtempSync, rmSync, readFileSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+
+describe("CircularFixDetector", () => {
+  it("returns retry for first occurrence", () => {
+    const detector = new CircularFixDetector();
+    expect(detector.recordError("implement", "TypeError: x is not a function")).toBe("retry");
+  });
+
+  it("returns escalate after 3 identical errors", () => {
+    const detector = new CircularFixDetector();
+    detector.recordError("implement", "TypeError: x is not a function");
+    detector.recordError("implement", "TypeError: x is not a function");
+    expect(detector.recordError("implement", "TypeError: x is not a function")).toBe("escalate");
+  });
+
+  it("normalizes errors (strips paths and timestamps)", () => {
+    const detector = new CircularFixDetector();
+    detector.recordError("implement", "Error at /Users/foo/bar.ts:42 at 2026-03-14T10:00:00Z");
+    detector.recordError("implement", "Error at /Users/baz/bar.ts:99 at 2026-03-14T11:00:00Z");
+    expect(detector.recordError("implement", "Error at /Users/qux/bar.ts:1 at 2026-03-14T12:00:00Z")).toBe("escalate");
+  });
+});
+
+describe("RecoveryManager", () => {
+  let dir: string;
+
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "ac-recovery-")); });
+  afterEach(() => rmSync(dir, { recursive: true }));
+
+  it("saves and loads checkpoints atomically", () => {
+    const mgr = new RecoveryManager(dir);
+    mgr.saveCheckpoint(42, { phase: "implement", checkpoint: "batch-1-unit-2-complete", data: { batch: 1 }, savedAt: new Date().toISOString() });
+    const cp = mgr.loadCheckpoint(42);
+    expect(cp?.checkpoint).toBe("batch-1-unit-2-complete");
+  });
+});
+```
+
+- [ ] **Step 2: Implement recovery.ts**
+
+`CircularFixDetector`:
+- `recordError(phase, error)` — normalizes error (strip timestamps, absolute paths, line numbers via regex), hashes with SHA-256, tracks count. Returns `"retry"` or `"escalate"` (at threshold 3).
+- `getErrorHashes()` / `loadErrorHashes(hashes)` — for persistence in `run.json`.
+
+`RecoveryManager`:
+- `saveCheckpoint(issueNumber, checkpoint)` — atomic write (temp → rename) to `{stateDir}/runs/issue-{N}/checkpoint.json`.
+- `loadCheckpoint(issueNumber)` — returns last checkpoint or `null`.
+- `clearCheckpoint(issueNumber)` — removes checkpoint file (on phase completion).
+
+- [ ] **Step 3: Run tests, verify PASS**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/orchestration/recovery.ts src/__tests__/recovery.test.ts
+git commit -m "feat: recovery manager with checkpointing and circular fix detection"
+```
+
+---
+
+### Task 8h: Pipeline definitions (feature, feature-simple, bug)
+
+**Files:**
+- Create: `src/orchestration/pipelines.ts`
+- Create: `src/__tests__/pipelines.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { getFeaturePipeline, getFeatureSimplePipeline, getBugPipeline } from "../orchestration/pipelines.js";
+
+describe("pipelines", () => {
+  it("feature pipeline includes all phases in order", () => {
+    const phases = Object.keys(getFeaturePipeline().states);
+    expect(phases).toEqual(["detect", "classify", "decompose", "implement", "review", "holdout", "pr_to_dev", "deploy_dev", "test", "close_report"]);
+  });
+
+  it("feature-simple pipeline skips decompose", () => {
+    const pipeline = getFeatureSimplePipeline();
+    expect(pipeline.states.classify.transitions.success).toBe("implement");
+    expect(pipeline.states["decompose"]).toBeUndefined();
+  });
+
+  it("bug pipeline skips classify, decompose, holdout", () => {
+    const pipeline = getBugPipeline();
+    expect(pipeline.states["classify"]).toBeUndefined();
+    expect(pipeline.states["decompose"]).toBeUndefined();
+    expect(pipeline.states["holdout"]).toBeUndefined();
+    expect(pipeline.states.detect.transitions.success).toBe("implement");
+  });
+});
+```
+
+- [ ] **Step 2: Implement pipelines.ts**
+
+Three functions that return FSM definitions with the correct state configs and transition maps. Phase `execute` functions are stubs that will be wired in the integration task. Each state config includes appropriate `onEnter`/`onExit` hooks for cost tracking, checkpoint saves, and gotcha injection.
+
+- [ ] **Step 3: Run tests, verify PASS**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/orchestration/pipelines.ts src/__tests__/pipelines.test.ts
+git commit -m "feat: pipeline definitions for feature, feature-simple, and bug variants"
+```
+
+---
+
+## Chunk 2c: Intelligence Layer
+
+### Task 8i: Complexity assessor
+
+**Files:**
+- Create: `src/intelligence/complexity.ts`
+- Create: `src/__tests__/complexity.test.ts`
+- Create: `prompts/classifier.md`
+
+- [ ] **Step 1: Write classifier prompt**
+
+Lightweight prompt: receives issue summary + spec list, outputs JSON `{complexity, reasoning, estimatedUnits, estimatedFiles}`. Uses sonnet for cost efficiency (~$0.01 per call).
+
+- [ ] **Step 2: Write the failing test**
+
+```typescript
+import { describe, it, expect } from "vitest";
+import { routePipeline, parseClassification } from "../intelligence/complexity.js";
+
+describe("complexity", () => {
+  it("routes simple classification to feature-simple", () => {
+    const variant = routePipeline({ complexity: "simple", reasoning: "one file change", estimatedUnits: 1, estimatedFiles: 2 });
+    expect(variant).toBe("feature-simple");
+  });
+
+  it("routes standard classification to feature", () => {
+    const variant = routePipeline({ complexity: "standard", reasoning: "multi-unit", estimatedUnits: 3, estimatedFiles: 8 });
+    expect(variant).toBe("feature");
+  });
+
+  it("parses valid classification JSON", () => {
+    const result = parseClassification('{"complexity":"complex","reasoning":"cross-cutting","estimatedUnits":7,"estimatedFiles":15}');
+    expect(result.complexity).toBe("complex");
+  });
+
+  it("throws on invalid classification", () => {
+    expect(() => parseClassification("not json")).toThrow();
+  });
+});
+```
+
+- [ ] **Step 3: Implement complexity.ts**
+
+`classify(issue, config, workerPool)` — assembles classifier prompt, runs one-shot session via worker pool, parses JSON output, returns `ComplexityAssessment`.
+
+`routePipeline(assessment)` — maps complexity to `PipelineVariant`. Returns extra review rounds for complex issues.
+
+`parseClassification(output)` — validates JSON against `ComplexityAssessment` schema.
+
+- [ ] **Step 4: Run tests, verify PASS**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/intelligence/complexity.ts src/__tests__/complexity.test.ts prompts/classifier.md
+git commit -m "feat: complexity assessor with pipeline routing"
+```
+
+---
+
+### Task 8j: Gotcha store
+
+**Files:**
+- Create: `src/intelligence/gotchas.ts`
+- Create: `src/__tests__/gotchas.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+```typescript
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { GotchaStore } from "../intelligence/gotchas.js";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+
+describe("GotchaStore", () => {
+  let dir: string;
+  let store: GotchaStore;
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "ac-gotchas-"));
+    store = new GotchaStore(join(dir, "gotchas.jsonl"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true }));
+
+  it("records and retrieves gotchas", () => {
+    store.record({ filePaths: ["app/models/*.rb"], gotcha: "needs explicit save", issueNumber: 42 });
+    const matches = store.match(["app/models/user.rb"]);
+    expect(matches).toHaveLength(1);
+    expect(matches[0].gotcha).toBe("needs explicit save");
+  });
+
+  it("does not match unrelated paths", () => {
+    store.record({ filePaths: ["app/models/*.rb"], gotcha: "needs explicit save", issueNumber: 42 });
+    const matches = store.match(["app/controllers/auth.rb"]);
+    expect(matches).toHaveLength(0);
+  });
+
+  it("parses GOTCHA markers from session output", () => {
+    const output = 'some text\nGOTCHA: {"filePaths": ["lib/*.ts"], "gotcha": "watch out"}\nmore text';
+    const gotchas = GotchaStore.parseFromOutput(output);
+    expect(gotchas).toHaveLength(1);
+    expect(gotchas[0].gotcha).toBe("watch out");
+  });
+
+  it("increments hitCount on match", () => {
+    store.record({ filePaths: ["app/*.rb"], gotcha: "test", issueNumber: 1 });
+    store.match(["app/foo.rb"]);
+    store.match(["app/bar.rb"]);
+    const all = store.all();
+    expect(all[0].hitCount).toBe(2);
+  });
+});
+```
+
+- [ ] **Step 2: Implement gotchas.ts**
+
+`GotchaStore`:
+- `record(gotcha)` — appends to JSONL file with unique ID and timestamp.
+- `match(codePaths)` — loads JSONL, matches `filePaths` globs against `codePaths` using `minimatch`. Increments `hitCount`. Returns matching gotchas.
+- `formatForPrompt(gotchas)` — renders matched gotchas as a markdown section for prompt injection.
+- `parseFromOutput(output)` — extracts `GOTCHA: {...}` markers from session output via regex.
+- `prune(maxAge, maxHits)` — moves old/overused gotchas to archive file.
+- `all()` — returns all active gotchas.
+- `promote(threshold, maxAge)` — finds gotchas with `hitCount >= threshold` and age < `maxAge` days. Writes proposed CLAUDE.md additions to `CLAUDE.md.proposed` for human review. Marks promoted gotchas as `promoted: true`.
+
+Uses `minimatch` for glob matching (add to dependencies: `npm install minimatch`).
+
+Add a test for the promotion logic: record multiple gotchas with varying hit counts, call `promote(threshold=3, maxAge=30)`, verify that only gotchas meeting the threshold are written to `CLAUDE.md.proposed` and marked as `promoted: true`.
+
+- [ ] **Step 3: Run tests, verify PASS**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/intelligence/gotchas.ts src/__tests__/gotchas.test.ts
+git commit -m "feat: gotcha store with JSONL persistence and glob matching"
 ```
 
 ---
@@ -818,69 +1709,70 @@ git commit -m "feat: github issue body parser"
 
 ## Chunk 4: Pipeline Phases 1-3
 
-### Task 12: Pipeline runner (orchestrator)
+### Task 12: Pipeline runner (FSM-based orchestrator)
 
 **Files:**
-- Create: `src/pipeline/runner.ts`
+- Create: `src/orchestration/runner.ts`
 
 - [ ] **Step 1: Implement runner.ts**
 
-The core orchestration loop. `PipelineRunner` class:
+The core orchestration wrapper around the FSM. `PipelineRunner` class:
 
 ```typescript
 export class PipelineRunner {
   constructor(
     private config: Config,
     private store: StateStore,
+    private workerPool: WorkerPool,
+    private recovery: RecoveryManager,
+    private circularDetector: CircularFixDetector,
+    private rateLimiter: RateLimitHandler,
+    private gotchaStore: GotchaStore,
     private logger: Logger,
   ) {}
 
-  async run(issue: IssuePayload): Promise<void> {
-    const run = this.store.loadRun(issue.issueNumber);
-    const phases: Array<{ name: PhaseName; execute: () => Promise<void> }> = [
-      { name: "detect", execute: () => this.detect(issue) },
-      { name: "decompose", execute: () => this.decompose(issue) },
-      { name: "implement", execute: () => this.implement(issue) },
-      { name: "review", execute: () => this.review(issue) },
-      { name: "holdout", execute: () => this.holdout(issue) },
-      { name: "pr_to_dev", execute: () => this.prToDev(issue) },
-      { name: "deploy_dev", execute: () => this.deployDev(issue) },
-      { name: "test", execute: () => this.test(issue) },
-      { name: "close_report", execute: () => this.closeReport(issue) },
-    ];
+  async run(issue: IssuePayload, variant: PipelineVariant): Promise<void> {
+    const run = this.store.loadOrCreateRun(issue.issueNumber);
+    const ctx: RunContext = { issue, config: this.config, run, pipelineVariant: variant };
 
-    for (const phase of phases) {
-      if (run.phases[phase.name].status === "completed") continue;
-      this.store.updatePhase(issue.issueNumber, phase.name, {
-        status: "in_progress",
-        startedAt: new Date().toISOString(),
-        attempt: (run.phases[phase.name].attempt || 0) + 1,
-      });
-      try {
-        await phase.execute();
-        this.store.updatePhase(issue.issueNumber, phase.name, {
-          status: "completed",
-          completedAt: new Date().toISOString(),
-        });
-      } catch (err) {
-        // handle retry or stuck
-      }
+    // Select pipeline definition based on variant
+    const pipelineDef = variant === "bug" ? getBugPipeline()
+      : variant === "feature-simple" ? getFeatureSimplePipeline()
+      : getFeaturePipeline();
+
+    // Wire phase execute functions to phase modules
+    this.wirePhaseHandlers(pipelineDef, ctx);
+
+    // Wire FSM hooks for cross-cutting concerns
+    this.wireHooks(pipelineDef, ctx);
+
+    // Resume from current phase if recovering from crash
+    const initialState = run.currentPhase;
+    const fsm = new FSM({ ...pipelineDef, initial: initialState, context: ctx });
+
+    // Run to completion, stuck, or paused
+    await fsm.run();
+
+    if (fsm.currentState === "stuck") {
+      await this.handleStuck(issue);
     }
   }
 }
 ```
 
-Each phase method is a stub that calls into the phase-specific module. The runner handles:
-- Resuming from the current phase (skip completed phases)
-- Retry logic with `max_retries_per_phase`
-- Marking `factory-stuck` after exhaustion
-- Logging phase transitions
+The runner:
+- Selects the FSM definition based on pipeline variant (feature/feature-simple/bug)
+- Wires phase modules as `execute` handlers on each FSM state
+- Wires `onEnter` hooks: log phase start, check budget via `CostTracker`, check rate limit via `RateLimitHandler`, inject gotchas via `GotchaStore`
+- Wires `onExit` hooks: record cost, save checkpoint via `RecoveryManager`, persist state
+- Integrates `CircularFixDetector` into the FSM's retry logic — if `recordError()` returns `"escalate"`, the FSM transitions to `stuck`
+- Resumes from `run.currentPhase` after crash
 
 - [ ] **Step 2: Commit**
 
 ```bash
-git add src/pipeline/runner.ts
-git commit -m "feat: pipeline runner with phase orchestration and resume"
+git add src/orchestration/runner.ts
+git commit -m "feat: FSM-based pipeline runner with cross-cutting hooks"
 ```
 
 ---
@@ -888,7 +1780,7 @@ git commit -m "feat: pipeline runner with phase orchestration and resume"
 ### Task 13: Phase 1 — Detect
 
 **Files:**
-- Create: `src/pipeline/detect.ts`
+- Create: `src/phases/detect.ts`
 
 - [ ] **Step 1: Implement detect.ts**
 
@@ -903,8 +1795,34 @@ Thin — most work was done by poller + claimer already.
 - [ ] **Step 2: Commit**
 
 ```bash
-git add src/pipeline/detect.ts
+git add src/phases/detect.ts
 git commit -m "feat: phase 1 detect"
+```
+
+---
+
+### Task 13b: Phase 1b — Classify
+
+**Files:**
+- Create: `src/phases/classify.ts`
+
+- [ ] **Step 1: Implement classify.ts**
+
+`classify(ctx: RunContext)`:
+1. Skip if bug pipeline (return `{ status: "skip" }`)
+2. Call `complexity.classify(ctx.issue, ctx.config, workerPool)` from intelligence layer
+3. Save classification to `run.json`
+4. Set `ctx.pipelineVariant` based on result:
+   - `simple` → `"feature-simple"`
+   - `standard`/`complex` → `"feature"`
+5. If variant changed from default, log and notify
+6. Return `{ status: "success" }`. The pipeline variant (feature vs feature-simple) is determined by the FSM definition itself — feature-simple's FSM has no decompose state and routes classify.success directly to implement. The classify phase does not need to return 'skip'.
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add src/phases/classify.ts
+git commit -m "feat: phase 1b classify with complexity-gated routing"
 ```
 
 ---
@@ -912,7 +1830,7 @@ git commit -m "feat: phase 1 detect"
 ### Task 14: Phase 2 — Decompose
 
 **Files:**
-- Create: `src/pipeline/decompose.ts`
+- Create: `src/phases/decompose.ts`
 - Create: `prompts/coordinator.md`
 
 - [ ] **Step 1: Write coordinator prompt**
@@ -931,12 +1849,12 @@ Full prompt from the design doc's coordinator section. Instructs Claude to:
 3. Parse output as JSON
 4. Validate against TaskGraph schema
 5. Save to `state/runs/issue-{N}/task-graph.json`
-6. Create feature branch: `git checkout -b factory/issue-{N}-{slug} dev`
+6. Create feature branch: `git checkout -b factory/issue-{N}-{slug} ${config.project.dev_branch}` (idempotent — if branch already exists from a previous attempt, check it out instead of creating)
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/pipeline/decompose.ts prompts/coordinator.md
+git add src/phases/decompose.ts prompts/coordinator.md
 git commit -m "feat: phase 2 decompose with coordinator prompt"
 ```
 
@@ -945,12 +1863,21 @@ git commit -m "feat: phase 2 decompose with coordinator prompt"
 ### Task 15: Phase 3 — Implement
 
 **Files:**
-- Create: `src/pipeline/implement.ts`
+- Create: `src/phases/implement.ts`
 - Create: `prompts/worker.md`
 
 - [ ] **Step 1: Write worker prompt**
 
-Full prompt from the design doc. Strict protocol: read specs (L3→L2→L1) → write plan → execute → /deep-review loop → test → commit. Includes max cycle limit and "needs-help" exit condition.
+Full prompt from the design doc. All spec content is pre-loaded in the prompt — the worker MUST NOT read spec files via Read tool (context isolation: the daemon pre-loads spec content, unit context, and gotchas into the prompt so workers never read spec files themselves). TDD protocol:
+1. Write failing test (RED)
+2. Verify test fails
+3. Implement code (GREEN)
+4. Verify test passes
+5. Refactor if needed
+6. Run full unit test suite
+7. Commit with exit status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
+
+Includes max cycle limit and "needs-help" exit condition.
 
 - [ ] **Step 2: Implement implement.ts**
 
@@ -960,9 +1887,11 @@ Full prompt from the design doc. Strict protocol: read specs (L3→L2→L1) → 
 3. For each batch (sequential):
    a. For each unit in batch (parallel):
       - Create worktree via WorktreeManager
-      - Assemble worker prompt with unit context + spec contents
-      - Spawn agentic Claude session in worktree cwd
+      - Pre-load spec content, unit context, and gotchas (context isolation — worker never reads spec files itself)
+      - Assemble worker prompt with all pre-loaded content injected
+      - Spawn agentic Claude session in worktree cwd following TDD protocol (RED → GREEN → refactor → commit)
       - Monitor process (timeout, exit code)
+      - Parse worker exit status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT
       - Update unit state
    b. Wait for all parallel workers to finish
    c. Merge worktrees into feature branch (`--no-ff`)
@@ -970,12 +1899,12 @@ Full prompt from the design doc. Strict protocol: read specs (L3→L2→L1) → 
    e. Post-merge verification (run compile/typecheck command if configured)
    f. Clean up worktrees
 
-Uses `Promise.all` for parallel workers within a batch, bounded by `max_parallel_workers`.
+Uses a concurrency-limited worker pool (implement a simple semaphore — do NOT use `Promise.all` directly as it launches all at once). The pool enforces `config.claude.max_parallel_workers` as the max concurrency.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/pipeline/implement.ts prompts/worker.md
+git add src/phases/implement.ts prompts/worker.md
 git commit -m "feat: phase 3 implement with parallel worktrees"
 ```
 
@@ -983,41 +1912,45 @@ git commit -m "feat: phase 3 implement with parallel worktrees"
 
 ## Chunk 5: Pipeline Phases 4-5
 
-### Task 16: Phase 4 — Review
+### Task 16: Phase 4 — Heterogeneous Review Gates
 
 **Files:**
-- Create: `src/pipeline/review.ts`
-- Create: `prompts/reviewer.md`
+- Create: `src/phases/review.ts`
+- Create: `prompts/reviewer-spec-compliance.md`
+- Create: `prompts/reviewer-code-quality.md`
+- Create: `prompts/reviewer-security.md`
 
-- [ ] **Step 1: Write reviewer prompt**
+- [ ] **Step 1: Write three reviewer prompts**
 
-From design doc: runs /deep-review, focuses on correctness (early rounds), edge cases (mid), polish (late). Outputs "REVIEW_CLEAN" when no issues found.
+Each reviewer is a fresh agent with a different focus:
+- `reviewer-spec-compliance.md` — verifies every acceptance criterion from the spec is met. Independent file reading, never trusts implementer. Outputs findings.
+- `reviewer-code-quality.md` — reviews for maintainability, patterns, YAGNI, test quality.
+- `reviewer-security.md` — reviews for injection, auth gaps, data validation, race conditions. Only used for `complex` classified issues.
 
 - [ ] **Step 2: Implement review.ts**
 
-`review(issue, config, store, logger)`:
-1. Determine number of rounds (from issue config override or pipeline default)
-2. For each round:
-   a. Spawn agentic Claude session on feature branch
-   b. Prompt includes round number and focus area
-   c. Capture output to `state/runs/issue-{N}/reviews/round-{M}.log`
-   d. Check output for "REVIEW_CLEAN" — if found, break early
-   e. If session made commits, continue to next round
-3. After all rounds, run full test suite
+`review(ctx: RunContext)`:
+1. **Gate 1 — Deterministic:** Run configured test/typecheck/lint commands. If fails, spawn worker to fix, then re-run gate 1. Checkpoint after gate 1 passes.
+2. **Gate 2 — Spec compliance:** Spawn `reviewer-spec` session via worker pool. Parse findings. If issues found, spawn worker to fix, checkpoint, restart from gate 1.
+3. **Gate 3 — Code quality:** Spawn `reviewer-quality` session. Same fix loop.
+4. **Gate 4 — Security (complex only):** If `ctx.complexity === "complex"`, spawn `reviewer-security` session. Same fix loop.
+5. Max fix cycles bounded by `config.pipeline.worker.max_review_fix_cycles`.
+6. For `simple` issues: only gates 1 + 2.
+7. Save all review outputs to `state/runs/issue-{N}/reviews/`.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/pipeline/review.ts prompts/reviewer.md
-git commit -m "feat: phase 4 review with N-round deep-review loop"
+git add src/phases/review.ts prompts/reviewer-spec-compliance.md prompts/reviewer-code-quality.md prompts/reviewer-security.md
+git commit -m "feat: phase 4 heterogeneous review gates"
 ```
 
 ---
 
-### Task 17: Phase 4b — Holdout validation
+### Task 17: Phase 5 — Holdout validation
 
 **Files:**
-- Create: `src/pipeline/holdout.ts`
+- Create: `src/phases/holdout.ts`
 
 - [ ] **Step 1: Implement holdout.ts**
 
@@ -1035,16 +1968,16 @@ git commit -m "feat: phase 4 review with N-round deep-review loop"
 - [ ] **Step 2: Commit**
 
 ```bash
-git add src/pipeline/holdout.ts
-git commit -m "feat: phase 4b holdout validation via shell runner"
+git add src/phases/holdout.ts
+git commit -m "feat: phase 5 holdout validation via shell runner"
 ```
 
 ---
 
-### Task 18: Phase 5 — PR to Dev
+### Task 18: Phase 6 — PR to Dev
 
 **Files:**
-- Create: `src/pipeline/pr.ts`
+- Create: `src/phases/pr.ts`
 
 - [ ] **Step 1: Implement pr.ts**
 
@@ -1058,18 +1991,18 @@ git commit -m "feat: phase 4b holdout validation via shell runner"
 - [ ] **Step 2: Commit**
 
 ```bash
-git add src/pipeline/pr.ts
-git commit -m "feat: phase 5 PR to dev with auto-merge"
+git add src/phases/pr.ts
+git commit -m "feat: phase 6 PR to dev with auto-merge"
 ```
 
 ---
 
 ## Chunk 6: Pipeline Phases 6-8
 
-### Task 19: Phase 6 — Deploy to Dev
+### Task 19: Phase 7 — Deploy to Dev
 
 **Files:**
-- Create: `src/pipeline/deploy-dev.ts`
+- Create: `src/phases/deploy-dev.ts`
 
 - [ ] **Step 1: Implement deploy-dev.ts**
 
@@ -1087,16 +2020,16 @@ Uses Node built-in `http`/`https` for health checks (no external deps).
 - [ ] **Step 2: Commit**
 
 ```bash
-git add src/pipeline/deploy-dev.ts
-git commit -m "feat: phase 6 deploy to dev with health check polling"
+git add src/phases/deploy-dev.ts
+git commit -m "feat: phase 7 deploy to dev with health check polling"
 ```
 
 ---
 
-### Task 20: Phase 7 — Smoke + UI Tests
+### Task 20: Phase 8 — Smoke + UI Tests
 
 **Files:**
-- Create: `src/pipeline/test.ts`
+- Create: `src/phases/test.ts`
 - Create: `prompts/tester.md`
 
 - [ ] **Step 1: Write tester prompt**
@@ -1111,26 +2044,28 @@ From design doc: runs API smoke tests and Playwright UI tests against dev server
 3. If `issue.config.hasUi && config.testing.playwright.enabled`:
    Run `config.testing.playwright.command` — capture output
 4. If any test fails:
-   a. Create fix branch: `factory/issue-{N}-fix-{attempt}`
-   b. Spawn worker Claude session with failure context
-   c. After fix: merge fix to dev, re-deploy, re-test (loop)
-   d. Track attempt in `run.fixes[]`
-   e. After `max_retries_per_phase`: label `factory-stuck`, throw
+   a. Redirect test output to file: `> state/runs/issue-{N}/test_output.txt 2>&1`
+   b. Truncate before injecting into fix prompt: last 100 lines, or grep for ERROR/FAIL/FAILED patterns. Full output saved to file; only relevant excerpt injected into fix session prompt.
+   c. Create fix branch: `factory/issue-{N}-fix-{attempt}`
+   d. Spawn worker Claude session with truncated failure context
+   e. After fix: merge fix to dev, re-deploy, re-test (loop)
+   f. Track attempt in `run.fixes[]`
+   g. After `max_retries_per_phase`: label `factory-stuck`, throw
 5. Save test output to `state/runs/issue-{N}/test_output.txt`
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/pipeline/test.ts prompts/tester.md
-git commit -m "feat: phase 7 smoke and UI tests with fix loop"
+git add src/phases/test.ts prompts/tester.md
+git commit -m "feat: phase 8 smoke and UI tests with fix loop"
 ```
 
 ---
 
-### Task 21: Phase 8 — Close Issue + Report
+### Task 21: Phase 9 — Close Issue + Report
 
 **Files:**
-- Create: `src/pipeline/report.ts`
+- Create: `src/phases/report.ts`
 - Create: `prompts/reporter.md`
 
 - [ ] **Step 1: Write reporter prompt**
@@ -1151,8 +2086,8 @@ From design doc: generates report from diff, test results, review logs, traceabi
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/pipeline/report.ts prompts/reporter.md
-git commit -m "feat: phase 8 close issue with report generation"
+git add src/phases/report.ts prompts/reporter.md
+git commit -m "feat: phase 9 close issue with report generation"
 ```
 
 ---
@@ -1165,12 +2100,13 @@ git commit -m "feat: phase 8 close issue with report generation"
 - Create: `src/notify/index.ts`
 - Create: `src/notify/markdown.ts`
 - Create: `src/notify/slack.ts`
+- Create: `src/notify/email.ts` (stub — logs "email notification not yet implemented")
 
 - [ ] **Step 1: Implement notification modules**
 
 `src/notify/index.ts` — `notify(event, config, logger)`: iterates configured channels, dispatches to each.
 
-`src/notify/markdown.ts` — `notifyMarkdown(event, path)`: writes report to `{path}/{date}-issue-{N}.md`, stages and commits it.
+`src/notify/markdown.ts` — `notifyMarkdown(event, path)`: writes report to `{path}/{date}-issue-{N}.md`. Does NOT stage or commit — notifications must be side-effect free with respect to git state.
 
 `src/notify/slack.ts` — `notifySlack(event, webhookUrl)`: POST JSON payload to Slack webhook using Node `https` module. Format: message with issue link, phase status, summary.
 
@@ -1187,8 +2123,10 @@ git commit -m "feat: notification system with markdown and slack channels"
 
 ### Task 23: Bug diagnosis flow
 
+Note: `diagnose.ts` runs in the cron loop before pipeline dispatch — it is NOT an FSM phase. It lives in `src/phases/` for organizational convenience but could alternatively live in `src/intelligence/`.
+
 **Files:**
-- Create: `src/pipeline/diagnose.ts`
+- Create: `src/phases/diagnose.ts`
 - Create: `prompts/diagnostician.md`
 
 - [ ] **Step 1: Write diagnostician prompt**
@@ -1211,7 +2149,7 @@ From design doc: triages bugs into Type A (implementation bug), Type B (spec gap
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/pipeline/diagnose.ts prompts/diagnostician.md
+git add src/phases/diagnose.ts prompts/diagnostician.md
 git commit -m "feat: bug diagnosis with Type A/B/C triage"
 ```
 
@@ -1225,7 +2163,11 @@ git commit -m "feat: bug diagnosis with Type A/B/C triage"
 - Create: `src/index.ts`
 - Create: `src/cli/init.ts`
 - Create: `src/cli/start.ts`
+- Create: `src/cli/stop.ts`
 - Create: `src/cli/status.ts`
+- Create: `src/cli/logs.ts`
+- Create: `src/cli/pause-resume.ts`
+- Create: `src/cli/retry.ts`
 - Create: `src/cli/release.ts`
 
 - [ ] **Step 1: Implement CLI with Commander**
@@ -1290,11 +2232,26 @@ program.parse();
 - [ ] **Step 3: Implement start command**
 
 `src/cli/start.ts`:
-1. Load config
-2. Write PID lock file (`~/.auto-claude/state/{project}/daemon.lock`). Check for existing lock — if PID is alive, refuse to start.
+1. **Preflight checks:**
+   - Run `claude --version` — verify Claude CLI is installed (minimum version TBD).
+   - Run `gh auth status` — verify GitHub CLI is authenticated.
+   - Verify configured repo exists: `gh repo view {config.project.repo}`.
+   - Verify dev branch exists: `git rev-parse --verify {config.project.dev_branch}`.
+   - Verify clean working tree (warn if dirty, but don't block).
+2. **Lock file** (`~/.auto-claude/state/{repo-path-hash}/daemon.lock`):
+   - Attempt exclusive create with `fs.writeFileSync(path, pid, { flag: 'wx' })`.
+   - If exists: read PID, check liveness via `process.kill(pid, 0)`. If alive, refuse to start. If dead, remove stale lock and proceed.
 3. Write `daemon.json` with PID, startedAt, configPath.
-4. If `--daemon`: generate launchd plist (macOS) or systemd unit (Linux), load it.
-5. If foreground: start the cron loop directly.
+4. **Register signal handlers** (SIGTERM, SIGINT, SIGHUP):
+   - Set drain mode (stop accepting new issues).
+   - Wait for active Claude child processes to complete (up to `safety.shutdown_grace_seconds`).
+   - Kill remaining child processes after grace period.
+   - Clean up active worktrees via `WorktreeManager`.
+   - Flush all `run.json` state files.
+   - Remove lock file.
+   - Exit cleanly.
+5. If `--daemon`: generate launchd plist (macOS) or systemd unit (Linux), load it.
+6. If foreground: start the cron loop directly.
 
 Cron loop:
 ```typescript
@@ -1314,15 +2271,31 @@ async function cronLoop(config: Config) {
 }
 ```
 
-- [ ] **Step 4: Implement status command**
+- [ ] **Step 4: Implement stop command**
 
-`src/cli/status.ts`: reads `daemon.json` and all `run.json` files. Prints formatted status table.
+`src/cli/stop.ts`: reads `daemon.lock` for PID, sends `SIGTERM`. Waits up to 10s for process to exit, then `SIGKILL` if still alive.
 
-- [ ] **Step 5: Implement release command**
+- [ ] **Step 5: Implement status command**
+
+`src/cli/status.ts`: reads `daemon.json` and all `run.json` files. Prints formatted status table with daily cost, active runs, and next poll time.
+
+- [ ] **Step 6: Implement logs command**
+
+`src/cli/logs.ts`: tails the structured JSON log file. With `--run N`, filters to entries matching `issue: N`. Formats log entries for human readability.
+
+- [ ] **Step 7: Implement pause/resume commands**
+
+`src/cli/pause-resume.ts`: reads `daemon.json`, sets `paused: true/false`, writes back. The cron loop checks `paused` before polling.
+
+- [ ] **Step 8: Implement retry command**
+
+`src/cli/retry.ts`: takes issue number, verifies it's labeled `factory-stuck`, swaps label to `factory-ready` via `gh issue edit`, resets run state for that issue.
+
+- [ ] **Step 9: Implement release command**
 
 `src/cli/release.ts`: reads all closed issues since last release tag, assembles release notes, spawns reporter Claude session, creates PR dev→main via `gh pr create`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add src/index.ts src/cli/ bin/
@@ -1360,7 +2333,7 @@ git commit -m "feat: launchd and systemd daemon management"
 ### Task 26: Phase 9 — Release
 
 **Files:**
-- Create: `src/pipeline/release.ts`
+- Create: `src/phases/release.ts`
 
 - [ ] **Step 1: Implement release.ts**
 
@@ -1377,72 +2350,314 @@ git commit -m "feat: launchd and systemd daemon management"
 - [ ] **Step 2: Commit**
 
 ```bash
-git add src/pipeline/release.ts
+git add src/phases/release.ts
 git commit -m "feat: phase 9 release PR creation"
 ```
 
 ---
 
-### Task 27: Integration — wire everything together
+### Task 27: Integration — wire all three layers together
 
 **Files:**
-- Modify: `src/pipeline/runner.ts`
+- Modify: `src/orchestration/runner.ts`
 - Modify: `src/cli/start.ts`
 
-- [ ] **Step 1: Wire pipeline phases into runner**
+- [ ] **Step 1: Wire phase modules into FSM pipeline definitions**
 
-Import all phase modules into `runner.ts`. Each phase method calls the corresponding module function with the right arguments.
+Import all phase modules into `pipelines.ts`. Each FSM state's `execute` function calls the corresponding phase module. Wire `onEnter`/`onExit` hooks:
+- `onEnter`: log phase start, check `CostTracker.withinBudget()`, check `RateLimitHandler.isCoolingDown()`, inject gotchas via `GotchaStore.match()` + `formatForPrompt()`
+- `onExit`: parse session cost via `parseSessionCost()`, call `CostTracker.addCost()`, save checkpoint via `RecoveryManager.saveCheckpoint()`, persist state atomically
 
 - [ ] **Step 2: Wire cron loop into start command**
 
-Connect `pollForIssues` → `parseIssueBody` → `PipelineRunner.run()` in the cron loop. Add:
-- Budget tracking (sum `totalTokenCostUsd` across active runs)
-- Concurrent run limiting
+Connect `pollForIssues` → `parseIssueBody` → classify (for features) → `PipelineRunner.run(issue, variant)` in the cron loop. Add:
+- Initialize all infrastructure: `WorkerPool`, `CostTracker`, `RateLimitHandler`, `GotchaStore`
+- Initialize orchestration: `RecoveryManager`, `CircularFixDetector`
+- Budget tracking: `CostTracker.withinBudget()` before polling, daily reset check each iteration
+- Concurrent run limiting via worker pool
 - Cooldown between pickups
 - Consecutive stuck detection + auto-pause
+- Rate limit detection: worker pool relays `session:error` with `isRateLimit: true` to `RateLimitHandler`
 
 - [ ] **Step 3: Add bug handling branch**
 
-In the cron loop, handle `bug` labeled issues: run `diagnose()` first, then either route to pipeline (Type A) or label and notify (Type B/C).
+In the cron loop, handle `bug` labeled issues: run `diagnose()` first, then either route to `PipelineRunner.run(issue, "bug")` (Type A) or label and notify (Type B/C).
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Wire gotcha parsing into session completion**
+
+After each Claude session completes, scan output for `GOTCHA: {...}` markers via `GotchaStore.parseFromOutput()`, record any found gotchas.
+
+- [ ] **Step 5: Wire circular fix detection into retry logic**
+
+In the FSM's retry path (inside `runner.ts`), call `CircularFixDetector.recordError()` before retrying. If `"escalate"` is returned, transition to `stuck` immediately.
+
+- [ ] **Step 6: Wire orphan scanning into the cron loop**
+
+Every 5 minutes, check all tracked child PIDs in the worker pool and kill any that aren't associated with an active run. This prevents leaked processes from crashed or abandoned sessions from accumulating.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/pipeline/runner.ts src/cli/start.ts
-git commit -m "feat: wire all pipeline phases and cron loop together"
+git add src/orchestration/runner.ts src/orchestration/pipelines.ts src/cli/start.ts
+git commit -m "feat: wire all three layers — infra, orchestration, intelligence"
 ```
 
 ---
 
-### Task 28: Prompt templates — write all remaining prompts
+### Task 27b: JSON schemas for structured output
+
+**Files:**
+- Create: `schemas/task-graph.json`
+- Create: `schemas/complexity-assessment.json`
+- Create: `schemas/bug-diagnosis.json`
+- Create: `schemas/report.json`
+
+- [ ] **Step 1: Write JSON schemas**
+
+JSON Schema definitions matching the TypeScript types. These are passed to `--json-schema` for CLI-validated output:
+- `task-graph.json` — validates `TaskGraph` (issueNumber, featureBranch, units array with id/title/specs/batch/dependsOn/verificationCommand). `verificationCommand` is a required field per unit.
+- `complexity-assessment.json` — validates `ComplexityAssessment` (complexity enum, reasoning, estimatedUnits, estimatedFiles)
+- `bug-diagnosis.json` — validates diagnosis output (type A/B/C, confidence, affectedSpecs, suggestedAction)
+- `report.json` — validates report output (summary, specsImplemented, changes, testResults, metrics)
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add schemas/
+git commit -m "feat: JSON schemas for structured CLI output"
+```
+
+---
+
+### Task 27c: PreToolUse hooks for scenario isolation
+
+**Files:**
+- Create: `.claude/hooks.json`
+- Create: `scripts/hook-deny-paths.py`
+
+- [ ] **Step 1: Write hooks configuration**
+
+Configure `PreToolUse` hooks that block access to protected paths. Each hook is a shell command that receives tool input as JSON on stdin and returns exit code 2 to block:
+
+```json
+{
+  "hooks": [
+    {
+      "type": "preToolUse",
+      "event": "Read",
+      "command": "python3 scripts/hook-deny-paths.py"
+    },
+    {
+      "type": "preToolUse",
+      "event": "Write",
+      "command": "python3 scripts/hook-deny-paths.py"
+    }
+  ]
+}
+```
+
+The `scripts/hook-deny-paths.py` script reads the tool input from stdin (JSON with `file_path` field), checks against a deny list (`.specify/scenarios/`, `.specify/methodology/`, `state/`, `.factory/`, `.auto-claude/`, `src/` for writes), and exits with code 2 + a reason message to block. Create `scripts/hook-deny-paths.py` as part of this task.
+
+This provides deterministic enforcement at the tool boundary — works in ALL sessions, not just worktrees. Blocked paths:
+- Read on `.specify/scenarios/**` — holdout isolation
+- Write on `.specify/methodology/**` — methodology is immutable
+- Read/Write on `state/**`, `.factory/**`, `.auto-claude/**` — internal state isolation
+- Write on `src/**` — daemon source is read-only for workers
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add .claude/hooks.json scripts/hook-deny-paths.py
+git commit -m "feat: PreToolUse hook blocks scenario file access"
+```
+
+---
+
+### Task 27d: Secrets management
+
+**Files:**
+- Create: `src/infra/secrets.ts`
+
+- [ ] **Step 1: Implement secrets.ts**
+
+`SecretsManager`:
+- `resolve(config)` — on startup, resolve all secrets from env vars and config. Returns in-memory snapshot. Throws if any required secret is missing.
+- `reload(config)` — resolve all secrets fresh. If all succeed, atomically swap snapshot. If any fail, keep last-known-good and log warning.
+- Required secrets: `GITHUB_TOKEN` (for `gh` CLI), optional: `SLACK_WEBHOOK_URL`, any deploy credentials.
+- Never passes secrets to Claude prompts — only used by daemon's deterministic code.
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add src/infra/secrets.ts
+git commit -m "feat: secrets management with atomic swap"
+```
+
+---
+
+### Task 27e: Control plane HTTP interface
+
+**Files:**
+- Create: `src/infra/control-plane.ts`
+
+- [ ] **Step 1: Implement control-plane.ts**
+
+Minimal HTTP server (Node built-in `http` module) bound to a local port for instance locking + status:
+
+- Port: `17532 + hash(repoPath) % 1000`
+- `GET /status` — returns JSON: active runs, current phases, daily cost, uptime
+- `GET /health` — returns 200 (liveness probe for systemd/launchd)
+- `POST /pause` — sets paused state
+- `POST /resume` — clears paused state
+- `GET /logs?issue=N` — streams log entries for a specific run
+
+Port binding IS the instance lock — if port is in use, another daemon owns it, fail fast. OS releases on crash (no stale locks).
+
+- [ ] **Step 2: Commit**
+
+```bash
+git add src/infra/control-plane.ts
+git commit -m "feat: control plane HTTP interface with port-based locking"
+```
+
+### Task 27f: Results ledger
+
+**Files:**
+- Create: `src/infra/results-ledger.ts`
+- Create: `src/__tests__/results-ledger.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Test that `ResultsLedger.record(result)` appends a line to `~/.auto-claude/state/{project}/results.csv` and that the line matches the expected CSV format. Test: append a result, read back, verify CSV format.
+
+- [ ] **Step 2: Implement results-ledger.ts**
+
+`ResultsLedger` class:
+- `record(result)` — appends a CSV line to `~/.auto-claude/state/{project}/results.csv`.
+- Columns: `issue_number`, `started_at`, `completed_at`, `pipeline_variant`, `complexity`, `total_cost_usd`, `phases_run`, `fix_attempts`, `holdout_pass`, `outcome`.
+- Creates the CSV file with a header row if it does not exist.
+- Called by the runner after each issue completes (or gets stuck).
+
+- [ ] **Step 3: Run tests, verify PASS**
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/infra/results-ledger.ts src/__tests__/results-ledger.test.ts
+git commit -m "feat: results ledger with CSV append for run tracking"
+```
+
+---
+
+### Task 28: Prompt templates — write all prompts
 
 **Files:**
 - Verify/update: `prompts/coordinator.md`
+- Verify/update: `prompts/classifier.md` (created in Task 8i)
 - Verify/update: `prompts/worker.md`
-- Verify/update: `prompts/reviewer.md`
+- Create: `prompts/reviewer-spec-compliance.md`
+- Create: `prompts/reviewer-code-quality.md`
+- Create: `prompts/reviewer-security.md`
+- Create: `prompts/conflict-resolver.md`
+- Create: `prompts/bug-worker.md`
 - Verify/update: `prompts/tester.md`
 - Verify/update: `prompts/diagnostician.md`
 - Verify/update: `prompts/reporter.md`
+- Create: `prompts/prompt-optimizer.md`
 
-- [ ] **Step 1: Review and finalize all 6 prompt templates**
+- [ ] **Step 1: Review and finalize all 12 prompt templates**
 
-Ensure each prompt matches the design doc specifications. Use `{{variable}}` syntax for all dynamic values. Each prompt should be self-contained and follow the exact protocol described in the design.
+Ensure each prompt matches the design doc specifications. Use `{{variable}}` syntax for all dynamic values.
+
+**Worker protocol** — `worker.md` MUST describe the TDD protocol: write failing test → verify failure → implement → verify pass → refactor → commit. All spec content is pre-loaded in the prompt — the worker MUST NOT read spec files via Read tool. Must exit with structured status: DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT.
+
+**Worker exit status** — `worker.md` and `bug-worker.md` MUST exit with one of: `DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT`. Include instructions for when to use each status.
+
+**Containment rules** — all worker and reviewer prompts MUST include:
+- "Never read or access files under `.specify/scenarios/`."
+- "Never modify files outside your worktree directory."
+- "Never modify files under `src/` of the auto-claude daemon itself."
+
+**Gotcha emission** — `worker.md` and all reviewer prompts MUST include:
+- "When you discover a non-obvious pitfall, emit: `GOTCHA: {\"filePaths\": [\"<glob>\"], \"gotcha\": \"<description>\"}`"
+- Include `{{known_gotchas}}` placeholder.
+
+**prompt-optimizer.md** — reads current prompt template + accumulated gotchas + error patterns. Outputs proposed revisions with reasoning for each change. Written to `prompts/{name}.md.proposed`.
 
 - [ ] **Step 2: Commit**
 
 ```bash
 git add prompts/
-git commit -m "feat: finalize all 6 prompt templates"
+git commit -m "feat: finalize all 12 prompt templates with exit status protocol"
 ```
 
 ---
 
-### Task 29: End-to-end smoke test
+### Task 29: Pipeline phase unit tests
+
+**Files:**
+- Create: `src/__tests__/runner.test.ts`
+- Create: `src/__tests__/decompose.test.ts`
+- Create: `src/__tests__/implement.test.ts`
+- Create: `src/__tests__/holdout.test.ts`
+- Create: `src/__tests__/test-phase.test.ts`
+
+- [ ] **Step 1: Write runner tests**
+
+Test `PipelineRunner`:
+- Skips completed phases on resume (create run with detect=completed, verify detect is not re-executed)
+- Retries failed phases up to `max_retries_per_phase`
+- Labels issue `factory-stuck` after retries exhausted
+- Bug pipeline variant skips decompose and holdout phases
+
+- [ ] **Step 2: Write decompose tests**
+
+Test decompose phase:
+- Validates task-graph JSON output (mock Claude returning valid JSON)
+- Rejects invalid JSON (mock Claude returning garbage)
+- Uses `config.project.dev_branch` for feature branch creation (not hardcoded)
+
+- [ ] **Step 3: Write implement tests**
+
+Test implement phase:
+- Respects `max_parallel_workers` concurrency limit
+- Handles worker timeout (mock a slow process)
+- Spawns conflict-resolution on merge conflict
+- Runs post-merge verification
+
+- [ ] **Step 4: Write holdout tests**
+
+Test holdout phase:
+- Passes on exit code 0
+- Labels `needs-spec-update` on non-zero exit code
+- Skips gracefully when no scenario runner is configured
+
+- [ ] **Step 5: Write test-phase tests**
+
+Test the test phase (test.ts):
+- Creates fix branch on test failure
+- Tracks fix attempts in `run.fixes[]`
+- Stops after `max_retries_per_phase` fix attempts
+
+- [ ] **Step 6: Run all tests**
+
+Run: `cd $PROJECT_ROOT && npx vitest run src/__tests__/runner.test.ts src/__tests__/decompose.test.ts src/__tests__/implement.test.ts src/__tests__/holdout.test.ts src/__tests__/test-phase.test.ts`
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/__tests__/runner.test.ts src/__tests__/decompose.test.ts src/__tests__/implement.test.ts src/__tests__/holdout.test.ts src/__tests__/test-phase.test.ts
+git commit -m "test: pipeline phase unit tests for runner, decompose, implement, holdout, test"
+```
+
+---
+
+### Task 30: End-to-end smoke test
 
 **Files:**
 - Create: `src/__tests__/e2e.test.ts`
 
-- [ ] **Step 1: Write integration test**
+- [ ] **Step 1: Write integration tests**
 
 Test the full pipeline with mocked externals:
 - Mock `gh` commands (return sample issue JSON)
@@ -1450,11 +2665,16 @@ Test the full pipeline with mocked externals:
 - Use real git operations in a temp repo
 - Verify: run state transitions correctly, worktrees created/cleaned, labels swapped
 
-This is a "happy path" test — no failures, no retries.
+Include BOTH happy path AND failure paths:
+- **Happy path:** issue detected → decomposed → implemented → reviewed → PR → complete
+- **Retry path:** implement phase fails once, retries successfully
+- **Stuck path:** implement phase fails `max_retries_per_phase` times, issue labeled `factory-stuck`
+- **Resume path:** create a run with some phases completed, verify runner resumes from correct phase
+- **Budget exceeded:** verify cron loop pauses when daily cost exceeds budget
 
 - [ ] **Step 2: Run test**
 
-Run: `cd ~/code/auto-claude && npx vitest run src/__tests__/e2e.test.ts`
+Run: `cd $PROJECT_ROOT && npx vitest run src/__tests__/e2e.test.ts`
 
 - [ ] **Step 3: Commit**
 
@@ -1465,7 +2685,7 @@ git commit -m "test: end-to-end smoke test with mocked externals"
 
 ---
 
-### Task 30: Documentation + final commit
+### Task 31: Documentation + final commit
 
 **Files:**
 - Create: `README.md`
@@ -1474,10 +2694,11 @@ git commit -m "test: end-to-end smoke test with mocked externals"
 
 Brief README covering: what Auto-Claude is, prerequisites (node, claude CLI, gh CLI), quick start (`auto-claude init` → edit config → `auto-claude start`), link to design doc.
 
-- [ ] **Step 2: Final commit and push**
+- [ ] **Step 2: Final commit**
 
 ```bash
 git add README.md
 git commit -m "docs: add README with quick start guide"
-git push origin main
 ```
+
+Note: Do NOT push automatically. The user will push when ready.
