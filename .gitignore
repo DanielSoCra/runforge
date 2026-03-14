@@ -1,0 +1,8 @@
+node_modules/
+dist/
+state/
+.superpowers/
+*.log
+.env
+.env.*
+~/.auto-claude/

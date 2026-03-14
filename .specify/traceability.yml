@@ -1,0 +1,48 @@
+# Spec-Driven Development — Traceability Map
+#
+# Maps specs across layers and to code/test files.
+# References point upward (child -> parent). Children are listed for convenience.
+#
+# Format:
+#   SPEC-ID:
+#     parent: PARENT-SPEC-ID        # L2/L3 only — upward reference
+#     children: [CHILD-IDS]          # optional — downward references
+#     code_paths: [file paths]       # L3 only — governed source files
+#     test_paths: [file paths]       # L3 only — validation test files
+#     status: draft|approved|deprecated
+
+# --- Methodology L1 specs (roots — no parent) ---
+
+FUNC-SDD-SPEC-AUTHORING:
+  children: [ARCH-SDD-TRACEABILITY]
+  status: approved
+
+FUNC-SDD-LAYER-SEPARATION:
+  children: [ARCH-SDD-LAYER-CONTRACT, ARCH-SDD-FLAVOR-PACKS]
+  status: approved
+
+FUNC-SDD-HOLDOUT-TESTING:
+  children: []
+  status: approved
+
+FUNC-SDD-VALIDATION:
+  children: [ARCH-SDD-SPEC-LIFECYCLE]
+  status: approved
+
+# --- Methodology L2 specs ---
+
+ARCH-SDD-LAYER-CONTRACT:
+  parent: FUNC-SDD-LAYER-SEPARATION
+  status: approved
+
+ARCH-SDD-TRACEABILITY:
+  parent: FUNC-SDD-SPEC-AUTHORING
+  status: approved
+
+ARCH-SDD-FLAVOR-PACKS:
+  parent: FUNC-SDD-LAYER-SEPARATION
+  status: approved
+
+ARCH-SDD-SPEC-LIFECYCLE:
+  parent: FUNC-SDD-VALIDATION
+  status: approved

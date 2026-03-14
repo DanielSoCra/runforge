@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "SDD Spec Frontmatter",
+  "description": "Validates YAML frontmatter in Spec-Driven Development specification files.",
+  "type": "object",
+  "required": ["id", "type", "domain", "status", "version"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^(FUNC|ARCH|SC|[A-Z]{2,6})-[A-Za-z0-9-]+$",
+      "description": "Unique spec identifier. FUNC-* for L1, ARCH-* for L2, SC-* for scenarios, custom prefix for L3 (e.g., RAIL-*, PY-*, NEST-*)."
+    },
+    "type": {
+      "type": "string",
+      "enum": ["functional", "architecture", "stack-specific", "scenario"]
+    },
+    "domain": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Business or technical domain this spec belongs to."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "approved", "deprecated"]
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Spec version. Integer, starting at 1. Incremented on material changes."
+    },
+    "layer": {
+      "type": "integer",
+      "enum": [1, 2, 3],
+      "description": "Spec layer: 1=functional, 2=architecture, 3=stack-specific. Not used for scenarios."
+    },
+    "stack": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Target stack matching flavors/ directory name (e.g., rails, nestjs, python-fastapi). Extensible."
+    },
+    "references": {
+      "type": "string",
+      "pattern": "^(FUNC|ARCH|[A-Z]{2,6})-[A-Za-z0-9-]+$",
+      "description": "ID of the parent layer spec (child → parent)."
+    },
+    "code_paths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "description": "Source files governed by this spec (L3 only)."
+    },
+    "test_paths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1,
+      "description": "Test files that validate this spec (L3 only)."
+    },
+    "priority": {
+      "type": "string",
+      "enum": ["critical", "high", "medium"],
+      "description": "Scenario priority."
+    },
+    "covers": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(FUNC|ARCH|SC|[A-Z]{2,6})-[A-Za-z0-9-]+$"
+      },
+      "minItems": 1,
+      "description": "Spec IDs this scenario validates."
+    },
+    "deprecated_by": {
+      "type": "string",
+      "pattern": "^(FUNC|ARCH|SC|[A-Z]{2,6})-[A-Za-z0-9-]+$",
+      "description": "Spec ID that supersedes this one."
+    },
+    "deprecation_reason": {
+      "type": "string",
+      "description": "Why this spec was deprecated."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "type": { "const": "functional" } }
+      },
+      "then": {
+        "required": ["layer"],
+        "properties": {
+          "layer": { "const": 1 },
+          "id": { "pattern": "^FUNC-[A-Za-z0-9-]+$" }
+        },
+        "not": {
+          "anyOf": [
+            { "required": ["stack"] },
+            { "required": ["code_paths"] },
+            { "required": ["test_paths"] },
+            { "required": ["references"] }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "type": { "const": "architecture" } }
+      },
+      "then": {
+        "required": ["layer", "references"],
+        "properties": {
+          "layer": { "const": 2 },
+          "id": { "pattern": "^ARCH-[A-Za-z0-9-]+$" }
+        },
+        "not": {
+          "anyOf": [
+            { "required": ["stack"] },
+            { "required": ["code_paths"] },
+            { "required": ["test_paths"] }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "type": { "const": "stack-specific" } }
+      },
+      "then": {
+        "required": ["layer", "stack", "references", "code_paths", "test_paths"],
+        "properties": {
+          "layer": { "const": 3 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "type": { "const": "scenario" } }
+      },
+      "then": {
+        "required": ["priority", "covers"],
+        "properties": {
+          "id": { "pattern": "^SC-[A-Za-z0-9-]+$" }
+        },
+        "not": {
+          "anyOf": [
+            { "required": ["layer"] },
+            { "required": ["stack"] },
+            { "required": ["code_paths"] },
+            { "required": ["test_paths"] },
+            { "required": ["references"] }
+          ]
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}
