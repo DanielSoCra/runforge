@@ -50,25 +50,57 @@ ARCH-SDD-SPEC-LIFECYCLE:
 # --- Auto-Claude L1 specs (roots — no parent) ---
 
 FUNC-AC-PIPELINE:
-  children: []
+  children: [ARCH-AC-CONTROL-PLANE]
   status: draft
 
 FUNC-AC-IMPLEMENTATION:
-  children: []
+  children: [ARCH-AC-IMPLEMENTATION]
   status: draft
 
 FUNC-AC-QUALITY:
-  children: []
+  children: [ARCH-AC-VALIDATION]
   status: draft
 
 FUNC-AC-SAFETY:
-  children: []
+  children: [ARCH-AC-SESSION-RUNTIME]
   status: draft
 
 FUNC-AC-BUG-TRIAGE:
-  children: []
+  children: [ARCH-AC-DIAGNOSIS]
   status: draft
 
 FUNC-AC-LEARNING:
+  children: [ARCH-AC-KNOWLEDGE]
+  status: draft
+
+# --- Auto-Claude L2 specs ---
+
+ARCH-AC-CONTROL-PLANE:
+  parent: FUNC-AC-PIPELINE
+  children: []
+  status: draft
+
+ARCH-AC-IMPLEMENTATION:
+  parent: FUNC-AC-IMPLEMENTATION
+  children: []
+  status: draft
+
+ARCH-AC-VALIDATION:
+  parent: FUNC-AC-QUALITY
+  children: []
+  status: draft
+
+ARCH-AC-SESSION-RUNTIME:
+  parent: FUNC-AC-SAFETY
+  children: []
+  status: draft
+
+ARCH-AC-DIAGNOSIS:
+  parent: FUNC-AC-BUG-TRIAGE
+  children: []
+  status: draft
+
+ARCH-AC-KNOWLEDGE:
+  parent: FUNC-AC-LEARNING
   children: []
   status: draft
