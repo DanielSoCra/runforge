@@ -18,7 +18,7 @@ The Implementation Coordinator decomposes work requests into parallel units, man
 
 **TaskGraph** represents the decomposition of a work request. It contains: the work request identifier (issue number), the feature branch name, and an ordered array of units.
 
-**Unit** represents a single parallelizable work assignment. It contains: a unique identifier, a human-readable title, an array of governing spec identifiers, pre-loaded spec content (the full text of each spec, assembled by the coordinator), an array of expected artifact locations (file paths the unit will create or modify), an array of dependency identifiers (other units that must complete first, used for batch ordering), a batch number (units in the same batch run concurrently), a verification command (used by the worker to confirm its implementation), and assembled context (a text block containing the unit description, spec content, and any additional context the worker needs).
+**Unit** represents a single parallelizable work assignment. It contains: a unique identifier, a human-readable title, an array of governing spec identifiers, pre-loaded spec content (the full text of each spec, assembled by the coordinator), an array of expected artifact locations, an array of dependency identifiers (other units that must complete first, used for batch ordering), a batch number (units in the same batch run concurrently), a verification command (used by the worker to confirm its implementation), and assembled context (a text block containing the unit description, spec content, and any additional context the worker needs).
 
 **UnitState** tracks execution status for a single unit. It contains: the unit identifier, a status (pending, running, completed, completed-with-concerns, blocked, needs-context, failed), the workspace path, the current attempt number, and an error description if failed.
 
@@ -51,12 +51,20 @@ The implement operation proceeds as follows:
 - Blocked: escalate to the operator without consuming a retry attempt. Do not merge.
 - Needs-more-context: re-run the unit with additional spec content from the parent layer. Consumes one retry attempt.
 
+**Fix** — Called by the Validation Service when review gates or tests fail. Request: findings (structured issues from review or test failure), affected artifact locations, governing specs. Response: fix result (success/failure, changes made).
+
+The fix operation proceeds:
+1. Create a single-unit workspace from the target branch.
+2. Assemble context with the findings, governing spec content, and affected artifact locations.
+3. Spawn a worker session via Session Runtime using a regression-test-first protocol.
+4. Merge the fix into the target branch.
+
 ## System Boundaries
 
 - Implementation Coordinator OWNS: task graph, unit assignments, unit state tracking, merge sequencing, workspace-to-branch integration.
 - Implementation Coordinator CALLS: Session Runtime (to spawn Coordinator sessions for decomposition, Worker sessions for implementation, and Conflict Resolver sessions for merge conflicts), Knowledge Service (to retrieve matching pitfalls for each unit's expected artifact locations before context assembly).
-- Daemon Control Plane CALLS Implementation Coordinator for: the decompose phase and the implement phase.
-- Implementation Coordinator DOES NOT own the feature branch lifecycle (branch creation and deletion are coordinated with the Daemon Control Plane) but it does perform all merges into the feature branch.
+- Daemon Control Plane CALLS Implementation Coordinator for: the decompose phase and the implement phase. Validation Service CALLS Implementation Coordinator for: the fix operation (when review gates or tests fail).
+- The Daemon Control Plane creates and deletes feature branches. The Implementation Coordinator receives the feature branch name and performs all merges into it, but does not create or delete branches.
 
 ## Event Flows
 
@@ -65,8 +73,9 @@ The implement operation proceeds as follows:
 2. Assemble the coordinator prompt: work request summary, full spec content (in understanding order), traceability map, and instructions for producing a task graph.
 3. Spawn a one-shot coordinator session via Session Runtime with structured output validation.
 4. Receive the task graph. Validate: all unit identifiers are unique, batch numbers are sequential, dependency references are valid, no unit depends on a unit in the same or later batch.
-5. Save the task graph. Create the feature branch.
-6. Return the validated task graph to the Daemon Control Plane.
+5. Evaluate each unit's scope against context capacity. If a unit's specification content, expected artifacts, and surrounding context exceed a single reasoning context, recursively decompose it into smaller sub-units until each fits within one context.
+6. Save the task graph. Create the feature branch.
+7. Return the validated task graph to the Daemon Control Plane.
 
 **Implementation flow (per batch):**
 1. Read the task graph and checkpoint. Skip completed batches.
@@ -80,6 +89,8 @@ The implement operation proceeds as follows:
 5. For successful units: merge each workspace into the feature branch sequentially. If a merge conflict occurs, spawn a Conflict Resolver session.
 6. Run post-integration verification on the feature branch. If verification fails, retry the entire batch (up to max retries).
 7. Save checkpoint. Proceed to next batch.
+
+Worker sessions follow a test-driven execution protocol: write a failing verification, confirm it fails, implement the solution, confirm the verification passes, refactor if needed, then commit. This protocol is enforced via the worker's prompt template.
 
 **Conflict resolution flow:**
 1. Detect merge conflict during workspace-to-branch integration.
@@ -104,5 +115,7 @@ The implement operation proceeds as follows:
 **Unit scope too large:** If a worker exits with "needs-more-context" and re-running with parent-layer spec content does not resolve it, the unit may need further decomposition. Escalate to the operator as stuck.
 
 **Coordinator produces invalid task graph:** Retry the decomposition session once. If the second attempt also produces invalid output, escalate to stuck.
+
+**Spec divergence:** When a worker encounters existing implementation that diverges from the governing specification, it treats the divergence as a reconciliation task — aligning the implementation to match the spec rather than treating it as an error condition.
 
 **Batch partially complete on crash:** Resume from the checkpoint. Units already merged are skipped. Units not yet started are re-run. Units that were running at crash time are re-run (their workspaces may be in an inconsistent state and are recreated).

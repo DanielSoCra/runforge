@@ -18,7 +18,7 @@ The Daemon Control Plane is the always-on orchestrator that owns the pipeline li
 
 **RunState** represents a single pipeline execution. It contains: the work request identifier (issue number), the current phase name, a map of phase names to their completion status, an array of sub-phase checkpoints (each with a phase name and a position marker), cumulative cost in currency units, an array of fix attempts (each with a phase name, attempt number, and error hash), a map of error hashes to occurrence counts for circular fix detection, and timestamps for start and last update.
 
-**DaemonState** represents the daemon's global status. It contains: process identifier, uptime start timestamp, daily cost accumulator, daily cost reset timestamp, a paused flag, consecutive stuck count, and configuration path.
+**DaemonState** represents the daemon's global status. It contains: process identifier, uptime start timestamp, daily cost accumulator, daily cost reset timestamp, a paused flag, consecutive stuck count, configuration path, and a configurable maximum number of concurrent work requests. The Daemon Control Plane enforces this concurrency limit (distinct from session concurrency managed by Session Runtime). When the limit is reached, newly detected work requests remain queued until an active run completes.
 
 **PipelineDefinition** is a declarative description of a pipeline variant. It contains: a variant name (feature, feature-simple, or bug), an ordered list of phase names, a map of phase names to their transition rules (success target, failure target, skip target), and per-phase configuration overrides (retryable flag, max retry count). Three built-in variants exist:
 
@@ -28,11 +28,13 @@ The Daemon Control Plane is the always-on orchestrator that owns the pipeline li
 
 Any phase can transition to "stuck" (retries exhausted or circular fix detected) or "paused" (budget exceeded, rate limited, or operator signal). Paused resumes from the current phase.
 
+Beyond the three built-in variants, Operators can define custom pipeline templates as declarative phase sequences. The system loads custom templates from configuration and selects them based on configurable matching criteria (e.g., work request labels or spec types). Phase names in the pipeline definition are abstract system names (e.g., "integrate," "deploy," "report") intentionally decoupled from external service terminology.
+
 **ResultsRecord** is an append-only entry written at pipeline completion. It contains: issue number, start timestamp, completion timestamp, pipeline variant, complexity classification, total cost, phases executed, fix attempt count, holdout pass flag, and outcome (complete, stuck, or escalated).
 
 ## API Contract
 
-The Daemon Control Plane exposes operator commands via a control interface bound to an exclusive local port.
+The Daemon Control Plane exposes operator commands via a control interface bound to an exclusive local resource.
 
 **Status query** — Request: none. Response: list of active runs (each with issue number, current phase, cost so far), daily cost total, uptime duration, paused flag, consecutive stuck count. Status: success or unavailable.
 
@@ -44,7 +46,7 @@ The Daemon Control Plane exposes operator commands via a control interface bound
 
 **Retry command** — Request: issue number. Response: acknowledgment. Effect: resets the run state for the specified issue and re-enters the pipeline from the beginning. Status: success, not-found, or not-stuck.
 
-**Release command** — Request: none. Response: acknowledgment. Effect: triggers creation of a release proposal from the staging branch to the production branch with aggregated notes. Status: success or no-completed-work.
+**Release command** — Request: none. Response: acknowledgment. Effect: triggers creation of a release proposal from the staging branch to the production branch with aggregated notes. The release proposal is created and the system waits for Operator approval. The system does not auto-merge release proposals — the Operator must explicitly approve and merge. Status: success or no-completed-work.
 
 **Log query** — Request: issue number (optional). Response: structured log entries for the specified run, or recent daemon-level entries if no issue specified. Status: success or not-found.
 
@@ -54,7 +56,7 @@ The Daemon Control Plane exposes operator commands via a control interface bound
 - Daemon Control Plane CALLS: Session Runtime (to spawn classifier and reporter sessions), Implementation Coordinator (to execute decompose and implement phases), Validation Service (to execute review, holdout, deploy, and test phases), Bug Diagnosis Service (to classify bug work requests), Knowledge Service (to retrieve gotchas for context injection into classifier/reporter sessions).
 - Daemon Control Plane EXPOSES: operator commands via the control interface (status, health, pause, resume, retry, release, logs).
 - Daemon Control Plane READS: work request source (polling for ready-labeled items, reading request bodies).
-- Daemon Control Plane WRITES: work request labels (claiming, completing, marking stuck), work request comments (reports, diagnoses), release proposals, results ledger entries.
+- Daemon Control Plane WRITES: work request labels (claiming, completing, marking stuck), work request comments (reports, diagnoses), release proposals, results ledger entries. The Daemon Control Plane is the sole system that writes labels and comments on work requests. Other services return routing decisions; the Control Plane applies them.
 
 ## Event Flows
 
@@ -67,7 +69,7 @@ The Daemon Control Plane exposes operator commands via a control interface bound
 **FSM phase execution (per phase):**
 1. onEnter: check daily budget (pause if exceeded), check rate limit state (pause if cooling down), load phase configuration.
 2. execute: delegate to the owning service for this phase. Detect and classify are owned by the control plane itself. Decompose and implement are delegated to Implementation Coordinator. Review, holdout, deploy, and test are delegated to Validation Service. Report is owned by the control plane (via Session Runtime for the reporter session).
-3. onExit: record cost from the phase, save checkpoint to RunState, write RunState to persistent storage using crash-safe semantics (write to temporary location, then atomic rename).
+3. onExit: record cost from the phase, save checkpoint to RunState, write RunState to persistent storage using crash-safe write semantics.
 4. On success: transition to the next phase per the pipeline definition.
 5. On failure: check the error hash against the circular fix detector. If 3+ occurrences of the same logical error: transition to stuck immediately. Otherwise: retry up to the phase's max retry count, then transition to stuck.
 
@@ -84,6 +86,12 @@ The Daemon Control Plane exposes operator commands via a control interface bound
 4. Record the outcome in the results ledger.
 5. Notify the operator.
 
+**Integration flow:**
+1. Create an integration proposal from the feature branch to the staging branch.
+2. Delegate a final review on the integration diff to the Validation Service.
+3. If the review passes: auto-integrate the proposal into the staging branch.
+4. If the review fails: route the findings back to the fix cycle (delegated to Implementation Coordinator).
+
 **Graceful shutdown:**
 1. On shutdown signal: enter drain mode (stop claiming new work).
 2. Wait for active sessions to complete, up to a configured grace period.
@@ -93,7 +101,7 @@ The Daemon Control Plane exposes operator commands via a control interface bound
 6. Release the instance lock.
 
 **Crash resumption:**
-1. On startup: acquire instance lock (exclusive port binding). If port is in use, reject immediately.
+1. On startup: acquire exclusive instance lock. If the lock is held, reject immediately.
 2. Scan for RunState files with incomplete runs.
 3. For each incomplete run: initialize the FSM at the saved phase and checkpoint position. Completed sub-phases are not re-executed.
 
@@ -109,6 +117,6 @@ The Daemon Control Plane exposes operator commands via a control interface bound
 
 **Consecutive stuck runs:** When the configured threshold of consecutive stuck work requests is reached, auto-pause the daemon and notify the operator.
 
-**Crash mid-write:** Atomic state writes (write-to-temporary-then-rename) prevent corruption. On restart, the last successfully written state is loaded.
+**Crash mid-write:** Crash-safe state write semantics prevent corruption. On restart, the last successfully written state is loaded.
 
-**Instance conflict:** If a second instance attempts to start for the same project, it fails immediately because the port is already bound. A secondary mechanism (process identifier file) provides convenience for status queries and stale-lock detection.
+**Instance conflict:** If a second instance attempts to start for the same project, it fails immediately because the instance lock is already held. A secondary status mechanism provides convenience for status queries and stale-lock detection.

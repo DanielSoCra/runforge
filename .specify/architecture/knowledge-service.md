@@ -16,11 +16,11 @@ The Knowledge Service accumulates, structures, and distributes institutional kno
 
 ## Data Model
 
-**Gotcha** represents a captured pitfall observation. It contains: a unique identifier, an array of artifact patterns (path patterns indicating which files or directories the observation applies to), a description (what the pitfall is and how to avoid it), the source work request identifier (where it was first observed), a confidence score (extracted from the session or defaulted), a creation timestamp, a hit count (incremented each time the gotcha is matched and injected into a session context), and a promoted flag (true once the gotcha has been merged into permanent documentation).
+**Gotcha** represents a captured pitfall observation. It contains: a unique identifier, an array of artifact patterns, a description (what the pitfall is and how to avoid it), the source work request identifier (where it was first observed), a confidence score (extracted from the session or defaulted), a creation timestamp, a hit count (incremented each time the gotcha is matched and injected into a session context), and a promoted flag (true once the gotcha has been merged into permanent documentation).
 
 **GotchaStore** is the persistent collection of all gotchas. It is an append-only structured log. Each entry is a self-contained record. The store supports: appending new entries, querying by artifact pattern match, incrementing hit counts, marking entries as promoted, and archiving entries that meet staleness criteria.
 
-**Exemplar** represents a reference implementation for a deliverable type. It contains: the deliverable type name (a category of artifact, such as "data model," "service endpoint," or "migration"), a reference to the implementation (branch and file paths), a quality score (assigned during review), and a creation timestamp.
+**Exemplar** represents a reference implementation for a deliverable type. It contains: the deliverable type name (a category of artifact, such as "data model," "service endpoint," or "migration"), a reference to the implementation, a quality score (assigned during review), and a creation timestamp.
 
 **ExemplarStore** is the collection of all exemplars. It supports: looking up by deliverable type, replacing an exemplar when a superior implementation is identified, and listing all exemplars.
 
@@ -34,7 +34,7 @@ The Knowledge Service accumulates, structures, and distributes institutional kno
 
 **Store gotcha** — Called by Session Runtime after each session completes. Request: an array of extracted gotcha markers (each with artifact patterns and description), the source work request identifier. Response: acknowledgment with the number of new gotchas stored and the number of duplicates deduplicated (if a gotcha with the same artifact patterns and similar description already exists, the hit count is incremented instead of creating a duplicate).
 
-**Match gotchas** — Called by Implementation Coordinator (and other services) before assembling session context. Request: an array of expected artifact locations (file paths). Response: an array of matching Gotchas, filtered to only those whose artifact patterns match the requested locations. Gotchas marked as promoted are excluded (their knowledge is already in permanent documentation). Each matched gotcha's hit count is incremented.
+**Match gotchas** — Called by Implementation Coordinator (and other services) before assembling session context. Request: an array of expected artifact locations. Response: an array of matching Gotchas, filtered to only those whose artifact patterns match the requested locations. Gotchas marked as promoted are excluded (their knowledge is already in permanent documentation). Each matched gotcha's hit count is incremented.
 
 **Get exemplar** — Called by Validation Service during review for consistency comparison. Request: a deliverable type name. Response: the Exemplar for that type, or none if no exemplar exists yet.
 

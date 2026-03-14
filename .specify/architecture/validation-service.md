@@ -47,11 +47,11 @@ The holdout operation proceeds:
 2. Collect structured output: scenario identifiers and pass/fail results.
 3. If any scenario fails: return failure. The Daemon Control Plane labels the work request "needs-spec-update" and halts the pipeline. No fix attempt is made — holdout failures indicate spec gaps.
 
-**Deploy** — Called by the Daemon Control Plane. Request: branch reference, deployment command, health check endpoint, health check timeout. Response: healthy, or failed with details.
+**Deploy** — Called by the Daemon Control Plane. Request: branch reference, deployment command, health verification target, health verification timeout. Response: healthy, or failed with details.
 
 The deploy operation proceeds:
 1. Trigger the configured deployment process.
-2. Poll the health check endpoint at regular intervals until healthy or timeout.
+2. Poll the health verification target at regular intervals until healthy or timeout.
 3. Return the health status.
 
 **Test** — Called by the Daemon Control Plane. Request: test commands (automated functional tests, interactive tests if applicable), max fix attempts. Response: all-passed, failed-and-fixed (with fix count), or escalated.
@@ -73,7 +73,7 @@ The test operation proceeds:
 
 **Review flow:**
 1. Receive the feature branch reference, spec content, and complexity classification.
-2. Gate 1 (deterministic): execute configured automated checks (test suite, type checking, linting) as a subprocess. No intelligent session. Collect exit code and output. If fail: extract structured failure information, proceed to fix cycle.
+2. Gate 1 (deterministic): execute configured automated checks (test suite, type checking, linting) as a deterministic process. No intelligent session. Collect result signal and output. If fail: extract structured failure information, proceed to fix cycle.
 3. Gate 2 (spec compliance): spawn a fresh Reviewer session via Session Runtime. The reviewer receives: the implementation diff, the governing spec content (pre-loaded), and a structured rubric. The reviewer independently reads implementation artifacts and verifies every acceptance criterion. It produces structured findings. If fail: proceed to fix cycle.
 4. Gate 3 (quality, standard and complex only): spawn a fresh Reviewer session. The reviewer receives: the implementation diff, pattern expectations, and a quality rubric. It evaluates maintainability, pattern consistency, test quality, and convention alignment. If fail: proceed to fix cycle.
 5. Gate 4 (security, complex only): spawn a fresh Reviewer session. The reviewer receives: the implementation diff and a security rubric. It evaluates injection risks, authentication gaps, data validation, and concurrency safety. If fail: proceed to fix cycle.
@@ -87,12 +87,12 @@ The test operation proceeds:
 
 **Holdout flow:**
 1. Receive branch reference and scenario runner command.
-2. Execute the scenario runner as a deterministic subprocess. The runner receives the branch reference and returns structured output (scenario identifiers with pass/fail).
+2. Execute the scenario runner as a deterministic process. The runner receives the branch reference and returns structured output (scenario identifiers with pass/fail).
 3. Parse results. If all pass: return success. If any fail: return failure with failed scenario identifiers. Never expose scenario content.
 
 **Deployment verification flow:**
 1. Trigger deployment via configured command.
-2. Poll health endpoint at configurable intervals.
+2. Poll health verification target at configurable intervals.
 3. If healthy within timeout: proceed to test phase.
 4. If timeout: return deployment failure.
 
@@ -109,7 +109,7 @@ Each reviewer session starts with a fresh context. It has no knowledge of the im
 
 **Gate findings:** Enter fix cycle. Findings are structured (severity, location, description) so the fix worker receives actionable context.
 
-**Holdout failure:** Never attempt a fix. Label the work request "needs-spec-update." Post the list of failed scenario identifiers (not content) as a comment. Halt the pipeline. This is the correct behavior — holdout failures indicate spec gaps, not implementation bugs.
+**Holdout failure:** Never attempt a fix. Return the routing decision to the Daemon Control Plane, which applies the "needs-spec-update" label and posts the list of failed scenario identifiers (not content) as a comment. Halt the pipeline. This is the correct behavior — holdout failures indicate spec gaps, not implementation bugs.
 
 **Deployment health timeout:** Retry the deployment up to a configured number of attempts. If all attempts fail: escalate to stuck.
 

@@ -18,7 +18,7 @@ The Bug Diagnosis Service classifies bug reports by root cause before any fix is
 
 **BugReport** represents the input to the diagnosis process. It contains: the work request identifier (issue number), title, body text, labels, and any referenced spec identifiers extracted from the body.
 
-**BugDiagnosis** is the structured output of the Diagnostician session. It contains: a classification type (A, B, or C), a confidence score (a decimal between 0 and 1), an array of affected spec identifiers, an array of affected artifact locations (file paths), a suggested action description, and a reasoning narrative explaining the classification.
+**BugDiagnosis** is the structured output of the Diagnostician session. It contains: a classification type (A, B, or C), a confidence score (a decimal between 0 and 1), an array of affected spec identifiers, an array of affected artifact locations, a suggested action description, and a reasoning narrative explaining the classification.
 
 **ConfidenceThreshold** is a configurable value (default: 0.7) below which any diagnosis is routed to a human rather than acted upon automatically.
 
@@ -37,16 +37,16 @@ The diagnose operation proceeds:
 
 **Route Type A** — When classification is Type A and confidence is at or above the threshold. Effect: return the diagnosis to the Daemon Control Plane with a recommendation to use the bug pipeline variant. The Daemon Control Plane creates a targeted fix run using the bug pipeline (implement with regression-test-first protocol, review, integrate, deploy, test, report).
 
-**Route Type B** — When classification is Type B and confidence is at or above the threshold. Effect: post the structured diagnosis as a comment on the work request. Label the work request "needs-spec-update." Notify the Spec Author. The diagnosis comment includes: the classification, the affected specs, and the suggested spec changes. No fix is attempted — the implementation is correct per the spec; the spec is incomplete.
+**Route Type B** — When classification is Type B and confidence is at or above the threshold. Effect: return the routing decision to the Daemon Control Plane, which posts the structured diagnosis as a comment on the work request and applies the "needs-spec-update" label. Notify the Spec Author. The diagnosis comment includes: the classification, the affected specs, and the suggested spec changes. No fix is attempted — the implementation is correct per the spec; the spec is incomplete.
 
-**Route Type C or low confidence** — When classification is Type C (any confidence), or when confidence on any type is below the threshold. Effect: post the structured diagnosis as a comment on the work request. Label the work request "needs-human." Notify the operator. The comment includes: the classification, confidence score, reasoning, and a note that human judgment is required.
+**Route Type C or low confidence** — When classification is Type C (any confidence), or when confidence on any type is below the threshold. Effect: return the routing decision to the Daemon Control Plane, which posts the structured diagnosis as a comment on the work request and applies the "needs-human" label. Notify the operator. The comment includes: the classification, confidence score, reasoning, and a note that human judgment is required.
 
 ## System Boundaries
 
 - Bug Diagnosis Service OWNS: diagnosis logic, classification schema, confidence threshold configuration, bug pipeline variant definition, routing rules.
 - Bug Diagnosis Service CALLS: Session Runtime (to spawn Diagnostician sessions with structured output).
 - Daemon Control Plane CALLS Bug Diagnosis Service when a bug-labeled work request is detected during the detect phase.
-- Bug Diagnosis Service ROUTES results as follows: Type A (above threshold) returns to the Daemon Control Plane with the bug pipeline variant recommendation. Type B (above threshold) writes to the work request and labels "needs-spec-update." Type C or low confidence writes to the work request and labels "needs-human."
+- Bug Diagnosis Service ROUTES results as follows: Type A (above threshold) returns to the Daemon Control Plane with the bug pipeline variant recommendation. Type B (above threshold) returns the routing decision to the Daemon Control Plane, which applies the "needs-spec-update" label and comment. Type C or low confidence returns the routing decision to the Daemon Control Plane, which applies the "needs-human" label and comment.
 - Bug Diagnosis Service DOES NOT perform fixes — it only classifies and routes. Type A fixes are executed by the Daemon Control Plane using the Implementation Coordinator through the bug pipeline variant.
 
 ## Event Flows
@@ -68,16 +68,16 @@ The diagnose operation proceeds:
 
 **Type B routing flow:**
 1. Diagnosis: Type B, confidence >= threshold.
-2. Post diagnosis as a structured comment on the work request: classification, affected specs, reasoning, suggested spec changes.
-3. Label the work request "needs-spec-update."
+2. Return routing decision to the Daemon Control Plane with the structured diagnosis: classification, affected specs, reasoning, suggested spec changes.
+3. The Daemon Control Plane posts the diagnosis as a comment and applies the "needs-spec-update" label.
 4. Notify the Spec Author via configured channels.
 5. Pipeline halts. The work request awaits spec updates.
 6. When the Spec Author updates the spec and relabels the work request as "ready," it re-enters the standard pipeline as a new feature implementation.
 
 **Type C / low confidence routing flow:**
 1. Diagnosis: Type C (any confidence), or any type with confidence below threshold.
-2. Post diagnosis as a structured comment on the work request: classification, confidence score, reasoning, and a note that human review is required.
-3. Label the work request "needs-human."
+2. Return routing decision to the Daemon Control Plane with the structured diagnosis: classification, confidence score, reasoning, and a note that human review is required.
+3. The Daemon Control Plane posts the diagnosis as a comment and applies the "needs-human" label.
 4. Notify the operator via configured channels.
 5. Pipeline halts. The work request awaits operator decision.
 

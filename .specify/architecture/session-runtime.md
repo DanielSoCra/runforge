@@ -26,7 +26,7 @@ The registry contains entries for all session types: coordinator, classifier, wo
 
 **CostTracker** maintains spending state. It contains: a daily total in currency units, per-run cost maps (run identifier to cumulative cost), a daily budget limit, and a reset timestamp (when the daily window rolls over).
 
-**SecretsSnapshot** holds resolved credentials in memory. It contains: a map of secret names to resolved values, a last-known-good fallback snapshot, and a resolution timestamp. Secrets are resolved from environment variables and configuration on startup and on reload signals.
+**SecretsSnapshot** holds resolved credentials in memory. It contains: a map of secret names to resolved values, a last-known-good fallback snapshot, and a resolution timestamp. Secrets are resolved from configured credential sources on startup and on reload signals.
 
 **ContainmentPolicy** defines structural access restrictions for sessions. It contains: an array of path patterns excluded from workspaces (holdout scenarios, methodology definitions, system state, system source), an array of path patterns blocked at the tool boundary (same paths, as defense-in-depth), and behavioral constraints included in session prompts (explicit prohibitions). Three layers enforce the same boundaries independently.
 
@@ -38,7 +38,7 @@ The spawn operation proceeds:
 1. Look up the AgentConfig for the requested session type.
 2. Check budget: query the CostTracker. If the daily total exceeds the budget limit, reject the request and signal the Daemon Control Plane to pause.
 3. Check rate limit: query the WorkerPool's rate limit state. If a cooldown is active, reject the request and signal the Daemon Control Plane to pause.
-4. If the session requires a workspace: create an isolated workspace from the specified branch. Apply structural exclusions — holdout scenarios, methodology definitions, system state, and the system's own source are not present in the workspace filesystem. This is a structural guarantee, not a prompt instruction.
+4. If the session requires a workspace: create an isolated workspace from the specified branch. Apply structural exclusions — holdout scenarios, methodology definitions, system state, and the system's own source are not present in the workspace environment. This is a structural guarantee, not a prompt instruction.
 5. Apply stagger delay if other sessions started recently.
 6. Assemble the prompt: load the template, inject context variables, append behavioral constraints.
 7. Start the session process with: the assembled prompt, the model tier, the execution mode, the budget cap, the timeout, the maximum turn count (if agentic), and the structured output schema (if applicable). Credentials are never included in the prompt or session environment.
@@ -53,7 +53,7 @@ The spawn operation proceeds:
 
 **Report rate limit** — Called when a session encounters a rate limit signal. Request: optional retry-after duration. Effect: set cooldown-until timestamp using the provided duration or escalating backoff (increasing delays on consecutive signals, up to a configured maximum). Notify the Daemon Control Plane.
 
-**Reload secrets** — Called on a reload signal. Request: none. Effect: re-resolve all secrets from environment and configuration. If all succeed, atomically swap the snapshot. If any fail, keep the last-known-good snapshot and log a warning. Response: success or partial-failure (with which secrets failed).
+**Reload secrets** — Called on a reload signal. Request: none. Effect: re-resolve all secrets from configured credential sources. If all succeed, atomically swap the snapshot. If any fail, keep the last-known-good snapshot and log a warning. Response: success or partial-failure (with which secrets failed).
 
 ## System Boundaries
 
@@ -69,7 +69,7 @@ The spawn operation proceeds:
 2. Session Runtime looks up the AgentConfig.
 3. Budget check: if daily total >= limit, reject with budget-exceeded signal.
 4. Rate limit check: if cooldown-until is in the future, reject with rate-limited signal.
-5. Workspace creation (if needed): create an isolated copy of the specified branch. Apply sparse exclusions so that prohibited paths do not exist in the workspace filesystem.
+5. Workspace creation (if needed): create an isolated copy of the specified branch. Apply structural exclusions so that prohibited paths do not exist in the workspace environment.
 6. Stagger: if the last session started less than the stagger delay ago, wait for the remaining interval.
 7. Prompt assembly: load template, inject context variables, append containment prohibitions.
 8. Process start: launch the session process in an isolated execution context with budget cap and timeout.
@@ -78,7 +78,7 @@ The spawn operation proceeds:
 11. Return result to caller.
 
 **Rate limit detection flow:**
-1. A session process reports an error matching rate limit patterns (specific exit code combined with error output containing rate limit indicators).
+1. A session process reports error signals matching rate limit patterns.
 2. Session Runtime sets cooldown-until using: the retry-after duration if available, otherwise escalating backoff (base delay doubled on each consecutive signal, capped at a configured maximum).
 3. Increment consecutive rate limit count.
 4. Notify the Daemon Control Plane (which transitions to paused state).
@@ -92,19 +92,19 @@ The spawn operation proceeds:
 5. Daily reset: when the current time passes the reset timestamp, zero the daily total and set a new reset timestamp.
 
 **Secrets management flow:**
-1. On startup: resolve each configured secret from environment variables. If any required secret is missing, refuse to start.
+1. On startup: resolve each configured secret from configured credential sources. If any required secret is missing, refuse to start.
 2. On reload signal: resolve all secrets into a new snapshot. If all succeed, atomically replace the current snapshot. If any fail, keep the current snapshot and log a warning.
 3. During operation: deterministic operations (deployment commands, notification webhooks, source control interactions) read from the current snapshot. Intelligent sessions never receive any part of the snapshot.
 
 **Containment enforcement flow (three independent layers):**
-1. Workspace exclusion: when creating a workspace, structurally exclude prohibited paths. Sessions running in the workspace cannot see these paths because they do not exist in the workspace filesystem.
-2. Tool-level blocking: a deterministic policy intercepts tool calls (file reads, file writes) and blocks access to prohibited path patterns. Blocked calls return an explicit denial message to the session — not a silent failure.
+1. Workspace exclusion: when creating a workspace, structurally exclude prohibited paths. Sessions running in the workspace cannot see these paths because they do not exist in the workspace environment.
+2. Tool-level blocking: a deterministic policy intercepts resource access requests and blocks access to prohibited path patterns. Blocked calls return an explicit denial message to the session — not a silent failure.
 3. Behavioral constraints: session prompts include explicit prohibitions against accessing holdout scenarios, modifying artifacts outside the workspace, and modifying the system's own source.
 4. Post-session audit: after completion, scan the session's activity log for references to prohibited paths. If a violation is detected, flag the run and notify the Daemon Control Plane (which transitions to stuck with a containment breach note).
 
 **Orphaned process cleanup flow:**
-1. Periodically (configurable interval): scan for child processes not associated with any active SessionHandle.
-2. For each orphaned process: terminate it and log the event.
+1. Periodically (configurable interval): scan for managed sessions not associated with any active SessionHandle.
+2. For each orphaned session: terminate it and log the event.
 
 ## Error Handling
 
