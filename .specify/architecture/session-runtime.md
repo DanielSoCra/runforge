@@ -28,6 +28,8 @@ The registry contains entries for all session types: coordinator, classifier, wo
 
 **SecretsSnapshot** holds resolved credentials in memory. It contains: a map of secret names to resolved values, a last-known-good fallback snapshot, and a resolution timestamp. Secrets are resolved from configured credential sources on startup and on reload signals.
 
+**WorkspacePool** manages pre-provisioned isolated environments. It contains: a set of ready environments (each pre-loaded with the project repository, dependencies, and build caches), a target pool size (how many ready environments to maintain), a provisioning status (how many are being prepared), and the environment specification (what a ready environment includes). Environments are disposable ("cattle, not pets") — on failure or completion, they are destroyed and replaced. The pool maintains a warm supply so that workspace allocation takes seconds, not minutes. Each environment has: no access to production systems, no access to real user data, and restricted external network access. The compute hosts that run the pool are dedicated resources owned by the Operator.
+
 **ContainmentPolicy** defines access restrictions for sessions. It contains: an array of path patterns excluded from workspaces (holdout scenarios, methodology definitions, system state, system source), an array of path patterns blocked at the tool boundary (same paths, as defense-in-depth), content inspection rules for general-purpose operations (patterns that indicate exfiltration, out-of-scope modification, or untrusted execution), read/write classification rules (which operations are read-only vs write, affecting scrutiny level), and behavioral constraints included in session prompts (explicit prohibitions). Five layers enforce containment independently: workspace exclusion, path blocking, content inspection, read/write classification, and behavioral constraints — plus a sixth detective layer (post-session audit).
 
 ## API Contract
@@ -69,7 +71,7 @@ The spawn operation proceeds:
 2. Session Runtime looks up the AgentConfig.
 3. Budget check: if daily total >= limit, reject with budget-exceeded signal.
 4. Rate limit check: if cooldown-until is in the future, reject with rate-limited signal.
-5. Workspace creation (if needed): provision an isolated environment with no access to production systems, no real user data, and restricted external network access. Clone the specified branch into this environment. Apply structural exclusions so that prohibited paths do not exist. The environment itself is the primary safety boundary — containment layers within it are defense-in-depth. Environments are disposable ("cattle, not pets") and can be destroyed and re-provisioned quickly.
+5. Workspace creation (if needed): allocate an isolated environment from the Workspace Pool (see below). Apply structural exclusions so that prohibited paths do not exist. The environment itself is the primary safety boundary — containment layers within it are defense-in-depth.
 6. Stagger: if the last session started less than the stagger delay ago, wait for the remaining interval.
 7. Prompt assembly: load template, inject context variables, append containment prohibitions.
 8. Process start: launch the session process in an isolated execution context with budget cap and timeout.
@@ -109,6 +111,13 @@ The spawn operation proceeds:
 2. When capacity approaches limits (configurable threshold, e.g., 80%), trigger compaction: summarize older conversation turns while preserving recent context and the current task state.
 3. If the session is mid-workflow (executing tool calls), use a workflow-aware continuation prompt so the session resumes its task without losing thread.
 4. Compaction uses a lower-cost model for summarization to minimize expense.
+
+**Workspace pool management flow:**
+1. On daemon startup: provision environments up to the target pool size. Each environment clones the repository, installs dependencies, and warms build caches.
+2. Periodically: check pool level. If below target (environments consumed by sessions), provision replacements in the background.
+3. On workspace allocation: remove a ready environment from the pool, apply branch-specific checkout and structural exclusions, return to the caller.
+4. On session completion: destroy the environment (do not reuse — environments are single-use to prevent cross-session contamination).
+5. On pool refresh: when the main branch advances, update the base image so newly provisioned environments start from a recent checkout.
 
 **Orphaned process cleanup flow:**
 1. Periodically (configurable interval): scan for managed sessions not associated with any active SessionHandle.
