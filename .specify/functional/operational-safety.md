@@ -31,6 +31,16 @@ An autonomous system that runs 24/7, starts autonomous work with broad project a
 - When its spending reaches the per-task limit
 - Then the task is terminated independently of the daily budget — two independent circuit breakers
 
+**Scenario: Configurable execution substrate**
+- Given the Operator configures how the system runs autonomous work
+- When the system starts
+- Then it uses the configured execution method — either direct programmatic control (requiring an account with usage-based billing) or process-based execution (compatible with subscription-based plans) — without affecting the behavior visible to other parts of the system
+
+**Scenario: Subscription-aware resource management**
+- Given the system is configured to use a subscription-based execution method
+- When it manages concurrent work
+- Then it respects the subscription's rolling usage windows and adjusts concurrency and session reuse accordingly — preferring to resume existing sessions and routing cheap tasks to lower-cost models
+
 **Scenario: Budget reset**
 - Given the daily budget has been exceeded
 - When the 24-hour window resets (or the Operator intervenes)

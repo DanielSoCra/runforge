@@ -30,6 +30,23 @@ The registry contains entries for all session types: coordinator, classifier, wo
 
 **WorkspacePool** manages pre-provisioned isolated environments. It contains: a set of ready environments (each pre-loaded with the project repository, dependencies, and build caches), a target pool size (how many ready environments to maintain), a provisioning status (how many are being prepared), and the environment specification (what a ready environment includes). Environments are disposable ("cattle, not pets") — on failure or completion, they are destroyed and replaced. The pool maintains a warm supply so that workspace allocation takes seconds, not minutes. Each environment has: no access to production systems, no access to real user data, and restricted external network access. The compute hosts that run the pool are dedicated resources owned by the Operator.
 
+**ProviderAdapter** abstracts the execution substrate so the rest of the system does not depend on how sessions are physically run. Two adapter implementations exist:
+
+- **SDK Adapter** — uses the Claude Agent SDK (a TypeScript library) for programmatic session execution. Sessions are async function calls that return typed message streams. Hooks are TypeScript callbacks. Subagent definitions are native objects. Requires an API key. Best for production use with high concurrency and precise cost tracking (API response headers provide exact token counts).
+
+- **CLI Adapter** — spawns Claude Code CLI processes (`claude -p`) for session execution. Sessions are operating system processes producing structured output on stdout. Hooks are configured via the project's hook configuration files (shell scripts). Subagent definitions are passed as structured data via CLI flags. Works with both API key authentication and subscription-based authentication (no API key required — uses the Operator's existing subscription). Best for subscription users with lower concurrency needs.
+
+Both adapters expose the same interface to the Session Runtime: spawn a session by type with context variables and workspace requirements, receive a session result containing output, structured data, cost, extracted pitfall markers, and exit status. The adapter selection is a configuration choice made by the Operator.
+
+**Subscription-specific considerations:** When using the CLI Adapter with a subscription, additional constraints apply:
+
+- Message budget tracking uses a rolling window (e.g., 5-hour window) instead of a simple daily total, because subscription quotas reset on a rolling basis rather than at midnight.
+- Concurrency limits should be lower than API-mode defaults, because subscription throughput is more constrained.
+- Session reuse (resuming an existing session instead of starting fresh) is preferred where possible to conserve message quota.
+- Lower-cost model tiers should be preferred for cheap sessions (classification, reporting) to conserve quota for expensive sessions (implementation, review).
+
+**AgentDefinition** describes a session type as a self-contained agent specification. It contains: a name, a description (when this agent should be used), a system prompt (the agent's instructions), an array of allowed tools, an optional model override, a permission mode, optional hooks, an optional maximum turn count, optional skill references, and an optional workspace isolation mode. Agent definitions serve as the canonical format for all session types — they replace raw prompt templates with full agent specifications that include tools, model, containment, and behavior in a single artifact. The same agent definition works with both the SDK Adapter (as a native object) and the CLI Adapter (serialized to the CLI's agent format).
+
 **ContainmentPolicy** defines access restrictions for sessions. It contains: an array of path patterns excluded from workspaces (holdout scenarios, methodology definitions, system state, system source), an array of path patterns blocked at the tool boundary (same paths, as defense-in-depth), content inspection rules for general-purpose operations (patterns that indicate exfiltration, out-of-scope modification, or untrusted execution), read/write classification rules (which operations are read-only vs write, affecting scrutiny level), and behavioral constraints included in session prompts (explicit prohibitions). Six layers enforce containment independently: five preventive (workspace exclusion, path blocking, content inspection, read/write classification, behavioral constraints) and one detective (post-session audit).
 
 ## API Contract
@@ -37,16 +54,19 @@ The registry contains entries for all session types: coordinator, classifier, wo
 **Spawn session** — Called by all services that need intelligent work. Request: session type, context variables (a map of named text blocks to inject into the prompt template), workspace requirements (whether an isolated workspace is needed, and the base branch). Response: session result containing the session output, parsed structured data (if the session type uses a schema), cost incurred, any extracted pitfall markers, and the exit status.
 
 The spawn operation proceeds:
-1. Look up the AgentConfig for the requested session type.
-2. Check budget: query the CostTracker. If the daily total exceeds the budget limit, reject the request and signal the Daemon Control Plane to pause.
+1. Look up the AgentDefinition for the requested session type.
+2. Check budget: query the CostTracker. If the daily total (or rolling window for subscription mode) exceeds the budget limit, reject the request and signal the Daemon Control Plane to pause.
 3. Check rate limit: query the WorkerPool's rate limit state. If a cooldown is active, reject the request and signal the Daemon Control Plane to pause.
-4. If the session requires a workspace: create an isolated workspace from the specified branch. Apply structural exclusions — holdout scenarios, methodology definitions, system state, and the system's own source are not present in the workspace environment. This is a structural guarantee, not a prompt instruction.
+4. If the session requires a workspace: allocate an isolated environment from the Workspace Pool. Apply structural exclusions — holdout scenarios, methodology definitions, system state, and the system's own source are not present in the workspace environment. This is a structural guarantee, not a prompt instruction.
 5. Apply stagger delay if other sessions started recently.
-6. Assemble the prompt: load the template, inject context variables, append behavioral constraints.
-7. Start the session process with: the assembled prompt, the model tier, the execution mode, the budget cap, the timeout, the maximum turn count (if agentic), and the structured output schema (if applicable). Credentials are never included in the prompt or session environment.
-8. Monitor the session: enforce the timeout (kill if exceeded), watch for rate limit signals in error output.
-9. On completion: parse cost from session metadata (token counts converted via pricing table). If metadata is unavailable, estimate based on session duration and model tier. Parse structured output if applicable. Parse pitfall markers from session output. Scan the activity log for containment violations (references to prohibited paths).
-10. Update the CostTracker (session cost, run cost, daily total).
+6. Resolve the AgentDefinition into a session request: combine the agent's system prompt with the caller's context variables, apply containment constraints, and select the appropriate model tier.
+7. Delegate to the configured ProviderAdapter:
+   - **SDK Adapter**: call `query()` with the agent definition, context, allowed tools, hooks (as callbacks), and structured output schema. Receive an async message stream.
+   - **CLI Adapter**: spawn a `claude -p` process with the prompt, `--allowedTools`, `--max-turns`, `--output-format json`, `--json-schema` (if applicable), and `--agents` (if subagents are needed). Parse structured JSON from stdout.
+   In subscription mode, the CLI Adapter also checks the rolling message budget and may use `--resume` to continue an existing session when possible.
+8. Monitor the session: enforce the timeout (kill if exceeded), track tool call patterns for repetition detection, watch for rate limit signals, intercept oversized tool responses.
+9. On completion: extract cost (from API response headers in SDK mode, or from CLI metadata in CLI mode; estimate from duration if neither available). Parse structured output. Parse pitfall markers from session output. Audit for containment violations.
+10. Update the CostTracker (session cost, run cost, daily or rolling total).
 11. Return the session result to the caller.
 
 **Check budget** — Called before spawning. Request: none. Response: available (with remaining budget) or exceeded.
@@ -59,10 +79,11 @@ The spawn operation proceeds:
 
 ## System Boundaries
 
-- Session Runtime OWNS: session lifecycle (spawn, monitor, kill), worker pool (concurrency, stagger, rate limit state), cost tracking (per-session, per-run, daily), secrets snapshot, agent config registry, containment enforcement (workspace exclusion, tool-level blocking, behavioral constraints, post-session audit).
+- Session Runtime OWNS: provider adapter selection, agent definitions, session lifecycle (spawn, monitor, kill), worker pool (concurrency, stagger, rate limit state), cost tracking (per-session, per-run, daily/rolling), secrets snapshot, containment enforcement (six independent layers), workspace pool, repetition detection, large response offloading, context compaction.
 - Session Runtime IS CALLED BY: Daemon Control Plane (for classifier, reporter sessions), Implementation Coordinator (for coordinator, worker, conflict resolver sessions), Validation Service (for reviewer sessions), Bug Diagnosis Service (for diagnostician sessions), Knowledge Service (for prompt optimizer sessions).
+- Session Runtime ABSTRACTS the execution substrate: callers spawn sessions by type and receive results. Whether the session runs via the SDK (API key) or via CLI processes (subscription) is a configuration choice invisible to callers.
 - Session Runtime NEVER exposes credentials to intelligent sessions. Credentials are used only by the daemon's deterministic operations (deployment, notification, source control interaction).
-- Session Runtime ENFORCES containment boundaries that no other service can override. Three independent layers apply: structural workspace exclusion, deterministic tool-level blocking, and behavioral prompt constraints.
+- Session Runtime ENFORCES containment boundaries that no other service can override. Six independent layers apply: workspace exclusion, path blocking, content inspection, read/write classification, behavioral constraints, and post-session audit.
 
 ## Event Flows
 
