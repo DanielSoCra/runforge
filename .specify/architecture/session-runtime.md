@@ -69,7 +69,7 @@ The spawn operation proceeds:
 2. Session Runtime looks up the AgentConfig.
 3. Budget check: if daily total >= limit, reject with budget-exceeded signal.
 4. Rate limit check: if cooldown-until is in the future, reject with rate-limited signal.
-5. Workspace creation (if needed): create an isolated copy of the specified branch. Apply structural exclusions so that prohibited paths do not exist in the workspace environment.
+5. Workspace creation (if needed): provision an isolated environment with no access to production systems, no real user data, and restricted external network access. Clone the specified branch into this environment. Apply structural exclusions so that prohibited paths do not exist. The environment itself is the primary safety boundary — containment layers within it are defense-in-depth. Environments are disposable ("cattle, not pets") and can be destroyed and re-provisioned quickly.
 6. Stagger: if the last session started less than the stagger delay ago, wait for the remaining interval.
 7. Prompt assembly: load template, inject context variables, append containment prohibitions.
 8. Process start: launch the session process in an isolated execution context with budget cap and timeout.

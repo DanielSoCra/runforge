@@ -90,7 +90,7 @@ The fix operation proceeds:
 6. Run post-integration verification on the feature branch. If verification fails, retry the entire batch (up to max retries).
 7. Save checkpoint. Proceed to next batch.
 
-Worker sessions follow a test-driven execution protocol: write a failing verification, confirm it fails, implement the solution, confirm the verification passes, refactor if needed, then commit. This protocol is enforced via the worker's prompt template.
+Worker sessions follow a test-driven execution protocol: write a failing verification, confirm it fails, implement the solution, confirm the verification passes, refactor if needed, then run local verification checks (automated checks, formatting) and fix any issues before committing. This "shift left" approach ensures the review phase receives already-clean work rather than catching basic hygiene issues. The protocol is enforced via the worker's prompt template.
 
 **Conflict resolution flow:**
 1. Detect merge conflict during workspace-to-branch integration.

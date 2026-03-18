@@ -38,10 +38,15 @@ An autonomous system that runs 24/7, starts autonomous work with broad project a
 
 ### Containment
 
+**Scenario: Environment-level isolation**
+- Given autonomous work needs a workspace
+- When the system provisions that workspace
+- Then the workspace is an isolated environment with no access to production systems, no access to real user data, and restricted external network access — making operations within the workspace safe by default
+
 **Scenario: Protected work environment**
-- Given autonomous work is assigned
-- When the system prepares that work environment
-- Then holdout scenarios, operational state, methodology definitions, and the system's own implementation are excluded from what that work can access
+- Given an isolated workspace has been provisioned
+- When the system prepares it for a specific task
+- Then holdout scenarios, operational state, methodology definitions, and the system's own implementation are additionally excluded from what that work can access
 
 **Scenario: Access blocking**
 - Given autonomous work attempts to access a prohibited resource (holdout scenarios, methodology definitions, operational state, the system's own implementation)

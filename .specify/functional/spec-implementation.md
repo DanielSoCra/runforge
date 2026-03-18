@@ -35,6 +35,11 @@ Implementing specifications requires decomposing them into parallelizable units,
 - When work begins
 - Then it begins by establishing or selecting verification that can fail before the change and pass after it; for bug fixes this verification is a regression test
 
+**Scenario: Local verification before handoff**
+- Given a Worker has written implementation changes
+- When the Worker prepares to commit
+- Then it runs local verification checks (automated checks, formatting) and fixes issues before committing — so the review phase receives already-clean work rather than catching basic hygiene issues
+
 **Scenario: Graduated exit status**
 - Given an implementation unit has finished
 - When it reports its result

@@ -105,6 +105,11 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 - When the system prepares failure context for a follow-up fix
 - Then it truncates the output to only the relevant failure excerpt to prevent context flooding
 
+**Scenario: Diminishing returns awareness**
+- Given the system has already attempted multiple fix cycles on the same issue
+- When the marginal improvement per cycle decreases
+- Then the system escalates sooner rather than exhausting all configured fix cycles — speed and cost matter alongside completeness
+
 **Scenario: Graduated escalation**
 - Given repeated failures on the same issue
 - When the failure count crosses a threshold
