@@ -32,7 +32,7 @@ The Implementation Coordinator decomposes work requests into parallel units, man
 
 The implement operation proceeds as follows:
 
-1. Create the feature branch from the staging branch.
+1. Receive the feature branch name (created by the Daemon Control Plane before calling this operation).
 2. For each batch (sequentially, starting from the checkpoint batch):
    a. For each unit in the batch (concurrently, with a stagger delay between starts):
       - Create an isolated workspace branched from the feature branch.
@@ -74,8 +74,8 @@ The fix operation proceeds:
 3. Spawn a one-shot coordinator session via Session Runtime with structured output validation.
 4. Receive the task graph. Validate: all unit identifiers are unique, batch numbers are sequential, dependency references are valid, no unit depends on a unit in the same or later batch.
 5. Evaluate each unit's scope against context capacity. If a unit's specification content, expected artifacts, and surrounding context exceed a single reasoning context, recursively decompose it into smaller sub-units until each fits within one context.
-6. Save the task graph. Create the feature branch.
-7. Return the validated task graph to the Daemon Control Plane.
+6. Save the task graph.
+7. Return the validated task graph to the Daemon Control Plane. The Control Plane creates the feature branch before calling the implement operation.
 
 **Implementation flow (per batch):**
 1. Read the task graph and checkpoint. Skip completed batches.

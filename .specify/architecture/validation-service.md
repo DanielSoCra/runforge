@@ -20,7 +20,7 @@ The Validation Service provides independent verification of implementations thro
 
 **ReviewRound** represents a complete pass through all applicable gates. It contains: an ordered array of ReviewGates, the fix attempt number (starting at zero for the first pass), and a timestamp.
 
-**GateSequence** defines which gates apply for a given complexity level. Simple work requests use gates 1 and 2 only. Standard work requests use gates 1 through 3. Complex work requests use all 4 gates.
+**GateSequence** defines which gates apply based on complexity and risk. Default mapping: simple → gates 1 and 2, standard → gates 1 through 3, complex → all 4 gates. Risk override: if the work request is flagged as security-sensitive (based on spec content, affected artifact locations, or explicit labeling), gate 4 (security) is included regardless of complexity classification. Gate selection uses the maximum of complexity-required gates and risk-required gates.
 
 **FixCycle** tracks a fix-and-re-review iteration. It contains: the review round that produced findings, the fix attempt number, and a reference to the worker session that performed the fix. Fix cycles are bounded by a configured maximum.
 
@@ -32,10 +32,10 @@ The Validation Service provides independent verification of implementations thro
 
 ## API Contract
 
-**Review** — Called by the Daemon Control Plane. Request: feature branch reference, governing spec content, complexity classification, max fix cycles. Response: passed (all gates clear), failed-and-fixed (passed after fix cycles, with fix count), or escalated (max fix cycles exceeded).
+**Review** — Called by the Daemon Control Plane. Request: feature branch reference, governing spec content, complexity classification, risk-sensitive flag, max fix cycles. Response: passed (all gates clear), failed-and-fixed (passed after fix cycles, with fix count), or escalated (max fix cycles exceeded).
 
 The review operation proceeds:
-1. Determine the gate sequence based on complexity classification.
+1. Determine the gate sequence based on complexity classification and risk-sensitive flag (see GateSequence). If risk-sensitive, include gate 4 regardless of complexity.
 2. Execute gates in order. If any gate fails, stop the sequence.
 3. On gate failure: delegate fix creation to the Implementation Coordinator (which spawns a fix worker), then re-run all gates from gate 1.
 4. Repeat until all gates pass or max fix cycles is reached.
@@ -45,7 +45,7 @@ The review operation proceeds:
 The holdout operation proceeds:
 1. Execute the configured scenario runner as a deterministic process against the implementation branch. No intelligent session is involved.
 2. Collect structured output: scenario identifiers and pass/fail results.
-3. If any scenario fails: return failure. The Daemon Control Plane labels the work request "needs-spec-update" and halts the pipeline. No fix attempt is made — holdout failures indicate spec gaps.
+3. If any scenario fails: return failure with the failed scenario identifiers to the Daemon Control Plane. The Control Plane delegates diagnosis to the Bug Diagnosis Service to determine whether the failure reflects a spec gap (→ needs-spec-update), an implementation defect (→ fix cycle), or a validation gap (→ needs-human). No automatic fix or label is applied before diagnosis completes.
 
 **Deploy** — Called by the Daemon Control Plane. Request: branch reference, deployment command, health verification target, health verification timeout. Response: healthy, or failed with details.
 
@@ -109,7 +109,7 @@ Each reviewer session starts with a fresh context. It has no knowledge of the im
 
 **Gate findings:** Enter fix cycle. Findings are structured (severity, location, description) so the fix worker receives actionable context.
 
-**Holdout failure:** Never attempt a fix. Return the routing decision to the Daemon Control Plane, which applies the "needs-spec-update" label and posts the list of failed scenario identifiers (not content) as a comment. Halt the pipeline. This is the correct behavior — holdout failures indicate spec gaps, not implementation bugs.
+**Holdout failure:** Return the failed scenario identifiers to the Daemon Control Plane. The Control Plane delegates to the Bug Diagnosis Service for classification: spec gap (→ needs-spec-update), implementation defect (→ targeted fix cycle), or validation gap (→ needs-human). The Validation Service does not interpret holdout failures — it only reports them.
 
 **Deployment health timeout:** Retry the deployment up to a configured number of attempts. If all attempts fail: escalate to stuck.
 

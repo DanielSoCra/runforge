@@ -53,7 +53,7 @@ The Daemon Control Plane exposes operator commands via a control interface bound
 ## System Boundaries
 
 - Daemon Control Plane OWNS: run state, daemon state, pipeline definitions, results ledger, instance lock, label state machine, notification dispatch.
-- Daemon Control Plane CALLS: Session Runtime (to spawn classifier and reporter sessions), Implementation Coordinator (to execute decompose and implement phases), Validation Service (to execute review, holdout, integrate, deploy, and test phases), Bug Diagnosis Service (to classify bug work requests), Knowledge Service (to retrieve gotchas for context injection into classifier/reporter sessions, and to store exemplars on successful completion).
+- Daemon Control Plane CALLS: Session Runtime (to spawn classifier and reporter sessions), Implementation Coordinator (to execute decompose and implement phases), Validation Service (to execute review, holdout, integrate, deploy, and test phases), Bug Diagnosis Service (to classify bug work requests AND to diagnose holdout failures), Knowledge Service (to retrieve gotchas for context injection into classifier/reporter sessions, and to store exemplars on successful completion).
 - Daemon Control Plane EXPOSES: operator commands via the control interface (status, health, pause, resume, retry, release, logs).
 - Daemon Control Plane READS: work request source (polling for ready-labeled items, reading request bodies).
 - Daemon Control Plane WRITES: work request labels (claiming, completing, marking stuck), work request comments (reports, diagnoses), release proposals, results ledger entries. The Daemon Control Plane is the sole system that writes labels and comments on work requests. Other services return routing decisions; the Control Plane applies them.
@@ -68,7 +68,7 @@ The Daemon Control Plane exposes operator commands via a control interface bound
 
 **FSM phase execution (per phase):**
 1. onEnter: check daily budget (pause if exceeded), check rate limit state (pause if cooling down), load phase configuration.
-2. execute: delegate to the owning service for this phase. Detect and classify are owned by the control plane itself. Decompose and implement are delegated to Implementation Coordinator. Review, holdout, deploy, and test are delegated to Validation Service. Report is owned by the control plane (via Session Runtime for the reporter session).
+2. execute: delegate to the owning service for this phase. Detect and classify are owned by the control plane itself. Decompose and implement are delegated to Implementation Coordinator. Review, holdout, deploy, and test are delegated to Validation Service. Report is owned by the control plane (via Session Runtime for the reporter session). Special case — holdout failure: if the Validation Service reports holdout failures, the Control Plane delegates to the Bug Diagnosis Service to classify the failure (spec gap → needs-spec-update, implementation defect → fix cycle, validation gap → needs-human) before deciding the transition.
 3. onExit: record cost from the phase, save checkpoint to RunState, write RunState to persistent storage using crash-safe write semantics.
 4. On success: transition to the next phase per the pipeline definition.
 5. On failure: check the error hash against the circular fix detector. If 3+ occurrences of the same logical error: transition to stuck immediately. Otherwise: retry up to the phase's max retry count, then transition to stuck.
