@@ -75,9 +75,21 @@ The spawn operation proceeds:
 6. Stagger: if the last session started less than the stagger delay ago, wait for the remaining interval.
 7. Prompt assembly: load template, inject context variables, append containment prohibitions.
 8. Process start: launch the session process in an isolated execution context with budget cap and timeout.
-9. Monitoring: track elapsed time and activity. On timeout: kill the process, return timeout status.
+9. Monitoring: track elapsed time, activity, tool call patterns, and response sizes. On timeout: kill the process, return timeout status.
 10. Completion: parse output, extract cost, extract pitfall markers, audit for violations.
 11. Return result to caller.
+
+**Large response offloading flow:**
+1. After each tool call completes, the Session Runtime inspects the response size.
+2. If the response exceeds a configurable threshold (e.g., 200,000 characters), the content is offloaded to a temporary reference location accessible to the session.
+3. The response is replaced with a brief message indicating the content's location and size, so the session can selectively access portions rather than ingesting the full response.
+4. This applies to all tool responses in all session types — not just test output. Any tool (artifact reading, command execution, search results) can produce oversized responses.
+
+**Within-session repetition detection flow:**
+1. During session execution, the Session Runtime tracks consecutive tool calls with identical names and parameters.
+2. When the same call is made more than a configurable number of times consecutively (e.g., 5), the repetition is flagged.
+3. On flag: the repeated call is blocked, and an intervention message is injected into the session context indicating the repetition and requesting a different approach.
+4. This detects stuck loops within a single session — distinct from circular fix detection, which operates across retries at the pipeline level.
 
 **Rate limit detection flow:**
 1. A session process reports error signals matching rate limit patterns.

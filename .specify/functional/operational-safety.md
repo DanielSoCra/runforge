@@ -63,6 +63,16 @@ An autonomous system that runs 24/7, starts autonomous work with broad project a
 - When the operation's content is analyzed before execution
 - Then operations that exfiltrate data to external destinations, modify resources outside the project scope, or execute untrusted external instructions are blocked — even if the tool itself is permitted
 
+**Scenario: Large response offloading**
+- Given an operation produces a response that exceeds a size threshold
+- When the response is returned to the autonomous work
+- Then the system offloads the oversized content and provides a reference instead — preventing any single tool response from flooding the working context
+
+**Scenario: Within-session repetition detection**
+- Given autonomous work makes the same operation with the same inputs repeatedly
+- When the repetition count exceeds a configured threshold
+- Then the system intervenes to break the loop — the work must try a different approach rather than repeating the same action indefinitely
+
 **Scenario: Read vs write classification**
 - Given autonomous work requests an operation on a resource
 - When the system evaluates the request
