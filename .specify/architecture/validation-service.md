@@ -40,10 +40,11 @@ The review operation proceeds:
 3. On gate failure: delegate fix creation to the Implementation Coordinator (which spawns a fix worker), then re-run all gates from gate 1.
 4. Repeat until all gates pass or max fix cycles is reached.
 
-**Holdout** — Called by the Daemon Control Plane. Request: branch reference, scenario runner command. Response: all-passed, or failed with an array of scenario identifiers that failed (never scenario content).
+**Holdout** — Called by the Daemon Control Plane. Request: branch reference, scenario runner command (may be absent if no scenario runner is configured). Response: all-passed, skipped (no runner configured), or failed with an array of scenario identifiers that failed (never scenario content).
 
 The holdout operation proceeds:
-1. Execute the configured scenario runner as a deterministic process against the implementation branch. No intelligent session is involved.
+1. If no scenario runner is configured: return skipped. The pipeline continues without holdout validation, but a warning is logged. Holdout is strongly recommended but not mandatory — projects without scenarios yet can still use the system.
+2. Execute the configured scenario runner as a deterministic process against the implementation branch. No intelligent session is involved.
 2. Collect structured output: scenario identifiers and pass/fail results.
 3. If any scenario fails: return failure with the failed scenario identifiers to the Daemon Control Plane. The Control Plane delegates diagnosis to the Bug Diagnosis Service to determine whether the failure reflects a spec gap (→ needs-spec-update), an implementation defect (→ fix cycle), or a validation gap (→ needs-human). No automatic fix or label is applied before diagnosis completes.
 

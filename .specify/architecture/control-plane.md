@@ -16,7 +16,7 @@ The Daemon Control Plane is the always-on orchestrator that owns the pipeline li
 
 ## Data Model
 
-**RunState** represents a single pipeline execution. It contains: the work request identifier (issue number), the current phase name, a map of phase names to their completion status, an array of sub-phase checkpoints (each with a phase name and a position marker), cumulative cost in currency units, an array of fix attempts (each with a phase name, attempt number, and error hash), a map of error hashes to occurrence counts for circular fix detection, and timestamps for start and last update.
+**RunState** represents a single pipeline execution. It contains: the work request identifier (issue number), the current phase name, a map of phase names to their completion status, an array of sub-phase checkpoints (each with a phase name and a position marker), cumulative cost in currency units, a per-run budget limit (configurable, distinct from daily and per-session limits — three independent cost circuit breakers), an array of fix attempts (each with a phase name, attempt number, and error hash), a map of error hashes to occurrence counts for circular fix detection, and timestamps for start and last update.
 
 **DaemonState** represents the daemon's global status. It contains: process identifier, uptime start timestamp, daily cost accumulator, daily cost reset timestamp, a paused flag, consecutive stuck count, configuration path, and a configurable maximum number of concurrent work requests. The Daemon Control Plane enforces this concurrency limit (distinct from session concurrency managed by Session Runtime). When the limit is reached, newly detected work requests remain queued until an active run completes.
 
@@ -63,11 +63,14 @@ The Daemon Control Plane exposes operator commands via a control interface bound
 **Work detection and claiming:**
 1. Cron loop polls the work request source for items labeled "ready."
 2. On detection: swap label to "in-progress," parse the request body, create a RunState.
-3. If the request is a bug: delegate to Bug Diagnosis Service, receive classification and pipeline variant selection, then enter the FSM.
+3. If the request is a bug: delegate to Bug Diagnosis Service, receive classification. Route by result:
+   - Type A (implementation bug, confidence above threshold): enter the bug pipeline FSM variant.
+   - Type B (spec gap, confidence above threshold): apply "needs-spec-update" label and comment with diagnosis. Do NOT enter the FSM. Pipeline halts.
+   - Type C or low confidence: apply "needs-human" label and comment with diagnosis. Do NOT enter the FSM. Pipeline halts.
 4. If the request is a feature: spawn a classifier session via Session Runtime, receive complexity assessment (simple/standard/complex), select the corresponding pipeline variant, then enter the FSM.
 
 **FSM phase execution (per phase):**
-1. onEnter: check daily budget (pause if exceeded), check rate limit state (pause if cooling down), load phase configuration.
+1. onEnter: check daily budget (pause if exceeded), check per-run budget (escalate to stuck if exceeded), check rate limit state (pause if cooling down), load phase configuration.
 2. execute: delegate to the owning service for this phase. Detect and classify are owned by the control plane itself. Decompose and implement are delegated to Implementation Coordinator. Review, holdout, deploy, and test are delegated to Validation Service. Report is owned by the control plane (via Session Runtime for the reporter session). Special case — holdout failure: if the Validation Service reports holdout failures, the Control Plane delegates to the Bug Diagnosis Service to classify the failure (spec gap → needs-spec-update, implementation defect → fix cycle, validation gap → needs-human) before deciding the transition.
 3. onExit: record cost from the phase, save checkpoint to RunState, write RunState to persistent storage using crash-safe write semantics.
 4. On success: transition to the next phase per the pipeline definition.
@@ -112,7 +115,9 @@ The Daemon Control Plane exposes operator commands via a control interface bound
 
 **Circular fix detection:** When the same logical error (normalized by stripping timestamps and resource-specific identifiers) occurs 3 or more times within a single run, transition to stuck immediately without exhausting remaining retries.
 
-**Budget exceeded:** Pause the daemon. Notify the operator. Resume automatically when the daily budget window resets, or when the operator intervenes.
+**Daily budget exceeded:** Pause the daemon. Notify the operator. Resume automatically when the daily budget window resets, or when the operator intervenes.
+
+**Per-run budget exceeded:** Transition the run to stuck. Notify the operator. Other runs are not affected. This prevents a single complex issue from consuming the entire daily budget.
 
 **Rate limited:** Pause with an escalating cooldown period (increasing delays on consecutive rate limit signals, up to a configured maximum). Resume automatically when the cooldown expires.
 

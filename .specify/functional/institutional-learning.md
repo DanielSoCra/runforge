@@ -80,7 +80,7 @@ Each new piece of implementation work starts with limited project memory. When a
 **Scenario: Operator review gate**
 - Given proposed instruction improvements exist
 - When the Operator reviews them
-- Then the Operator can approve, reject, or modify the proposals before they take effect
+- Then the Operator can approve or reject each proposal — rejected proposals can be revised externally and resubmitted as new proposals
 
 **Scenario: Instruction rollback**
 - Given approved instruction changes cause degraded performance
