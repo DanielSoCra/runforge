@@ -20,7 +20,13 @@ The Knowledge Service accumulates, structures, and distributes institutional kno
 
 **GotchaStore** is the persistent collection of all gotchas. It is an append-only structured log. Each entry is a self-contained record. The store supports: appending new entries, querying by artifact pattern match, incrementing hit counts, marking entries as promoted, and archiving entries that meet staleness criteria.
 
-**Exemplar** represents a reference implementation for a deliverable type. It contains: the deliverable type name (a category of artifact, such as "data model," "service endpoint," or "migration"), a reference to the implementation, a quality score (assigned during review), and a creation timestamp.
+**Exemplar** represents a reference implementation for a deliverable type. It contains: the deliverable type name, a reference to the implementation, a quality score (assigned during review), and a creation timestamp.
+
+**DeliverableType** categorizes the kind of artifact a unit produces (e.g., "data model," "service endpoint," "migration," "background job," "integration test suite"). Deliverable type is determined by:
+- The L3 spec category referenced by the unit's governing specs (primary signal).
+- The task graph's unit metadata, where the Coordinator assigns a type based on the unit's scope description.
+- Operator-configured mappings from spec patterns to deliverable types.
+If the type cannot be determined automatically, the unit is not exemplar-eligible. The Operator can manually assign deliverable types to completed work via the control interface.
 
 **ExemplarStore** is the collection of all exemplars. It supports: looking up by deliverable type, replacing an exemplar when a superior implementation is identified, and listing all exemplars.
 
@@ -106,6 +112,12 @@ The Knowledge Service accumulates, structures, and distributes institutional kno
 6. The operator is notified that proposals are available for review.
 7. On approval: the proposed version replaces the current instructions. The previous version is archived in the version history with a timestamp.
 8. On rejection: the proposal is archived with "rejected" status. The current instructions remain unchanged. The system does not re-propose the same changes for a configurable cooldown period.
+
+**Mutable vs protected instruction boundary:**
+The system distinguishes between two categories of instructions:
+- **Mutable instructions** (owned by Knowledge Service): session prompt templates, project-specific convention documentation, and gotcha-promoted permanent documentation. These are the "lever" that the optimization flow can propose changes to. They live in the project's prompt and convention directories.
+- **Protected instructions** (NOT owned by Knowledge Service): the SDD methodology definitions, the spec layer contract, holdout scenarios, and the system's own operational logic. These are structurally excluded from the optimization flow — the prompt optimizer session never receives protected content as mutable input. Changes to protected instructions require explicit Operator approval outside the optimization flow.
+The optimization flow only proposes changes to mutable instructions. It cannot propose changes to methodology, layer contracts, or the system itself. This boundary is enforced by the Knowledge Service's context assembly: protected instruction paths are excluded from the optimization context.
 
 **Instruction rollback flow:**
 1. The operator identifies that an approved instruction change caused degraded performance.

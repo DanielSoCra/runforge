@@ -20,7 +20,13 @@ The Validation Service provides independent verification of implementations thro
 
 **ReviewRound** represents a complete pass through all applicable gates. It contains: an ordered array of ReviewGates, the fix attempt number (starting at zero for the first pass), and a timestamp.
 
-**GateSequence** defines which gates apply based on complexity and risk. Default mapping: simple → gates 1 and 2, standard → gates 1 through 3, complex → all 4 gates. Risk override: if the work request is flagged as security-sensitive (based on spec content, affected artifact locations, or explicit labeling), gate 4 (security) is included regardless of complexity classification. Gate selection uses the maximum of complexity-required gates and risk-required gates.
+**GateSequence** defines which gates apply based on complexity and risk. Default mapping: simple → gates 1 and 2, standard → gates 1 through 3, complex → all 4 gates. Risk override: if the work request is flagged as security-sensitive, gate 4 (security) is included regardless of complexity classification. Gate selection uses the maximum of complexity-required gates and risk-required gates.
+
+**RiskDetection** determines whether a work request is security-sensitive. Three signals are checked:
+- Explicit labeling: the work request carries a security-sensitive label or tag set by the Spec Author.
+- Spec content: the referenced specifications mention authentication, authorization, payment processing, credential handling, data encryption, or access control.
+- Artifact location: the expected artifact locations overlap with configured security-sensitive paths (e.g., authentication modules, payment handlers, permission systems).
+Any one signal is sufficient to flag the request as risk-sensitive. The Operator configures the security-sensitive path patterns and keyword lists.
 
 **FixCycle** tracks a fix-and-re-review iteration. It contains: the review round that produced findings, the fix attempt number, and a reference to the worker session that performed the fix. Fix cycles are bounded by a configured maximum.
 
@@ -110,7 +116,7 @@ Each reviewer session starts with a fresh context. It has no knowledge of the im
 
 **Gate findings:** Enter fix cycle. Findings are structured (severity, location, description) so the fix worker receives actionable context.
 
-**Holdout failure:** Return the failed scenario identifiers to the Daemon Control Plane. The Control Plane delegates to the Bug Diagnosis Service for classification: spec gap (→ needs-spec-update), implementation defect (→ targeted fix cycle), or validation gap (→ needs-human). The Validation Service does not interpret holdout failures — it only reports them.
+**Holdout failure:** Return the failed scenario identifiers to the Daemon Control Plane. The Control Plane delegates to the Bug Diagnosis Service, which classifies using the standard Type A/B/C framework: Type A (implementation defect → targeted fix cycle), Type B (spec gap → needs-spec-update), Type C or low confidence (→ needs-human). The Validation Service does not interpret holdout failures — it only reports them.
 
 **Deployment health timeout:** Retry the deployment up to a configured number of attempts. If all attempts fail: escalate to stuck.
 

@@ -53,7 +53,8 @@ The Daemon Control Plane exposes operator commands via a control interface bound
 ## System Boundaries
 
 - Daemon Control Plane OWNS: run state, daemon state, pipeline definitions, results ledger, instance lock, label state machine, notification dispatch.
-- Daemon Control Plane CALLS: Session Runtime (to spawn classifier and reporter sessions), Implementation Coordinator (to execute decompose and implement phases), Validation Service (to execute review, holdout, integrate, deploy, and test phases), Bug Diagnosis Service (to classify bug work requests AND to diagnose holdout failures), Knowledge Service (to retrieve gotchas for context injection into classifier/reporter sessions, and to store exemplars on successful completion).
+- Daemon Control Plane CALLS: Session Runtime (to spawn classifier and reporter sessions), Implementation Coordinator (to execute decompose and implement phases, and to create fix branches when integration review fails), Validation Service (to execute review, holdout, deploy, and test phases, and to perform integration diff review), Bug Diagnosis Service (to classify bug work requests AND to diagnose holdout failures), Knowledge Service (to retrieve gotchas for context injection into classifier/reporter sessions, and to store exemplars on successful completion).
+- Daemon Control Plane OWNS the integrate phase directly: it creates the integration proposal, delegates the diff review to Validation Service, and performs the merge itself. Integrate is not delegated to another service.
 - Daemon Control Plane EXPOSES: operator commands via the control interface (status, health, pause, resume, retry, release, logs).
 - Daemon Control Plane READS: work request source (polling for ready-labeled items, reading request bodies).
 - Daemon Control Plane WRITES: work request labels (claiming, completing, marking stuck), work request comments (reports, diagnoses), release proposals, results ledger entries. The Daemon Control Plane is the sole system that writes labels and comments on work requests. Other services return routing decisions; the Control Plane applies them.
@@ -67,11 +68,18 @@ The Daemon Control Plane exposes operator commands via a control interface bound
    - Type A (implementation bug, confidence above threshold): enter the bug pipeline FSM variant.
    - Type B (spec gap, confidence above threshold): apply "needs-spec-update" label and comment with diagnosis. Do NOT enter the FSM. Pipeline halts.
    - Type C or low confidence: apply "needs-human" label and comment with diagnosis. Do NOT enter the FSM. Pipeline halts.
-4. If the request is a feature: spawn a classifier session via Session Runtime, receive complexity assessment (simple/standard/complex), select the corresponding pipeline variant, then enter the FSM.
+4. If the request is a feature: spawn a classifier session via Session Runtime, receive complexity assessment, select the corresponding pipeline variant, then enter the FSM.
+
+**Complexity classification contract:**
+The classifier receives: work request summary, list of referenced spec identifiers, and estimated scope description. It returns a structured assessment containing: complexity level (simple/standard/complex), reasoning, estimated unit count, and estimated artifact count. Classification criteria:
+- Simple: 1 unit, 3 or fewer artifacts expected, no cross-cutting concerns.
+- Standard: 2-5 units, moderate scope, single domain.
+- Complex: 6+ units, cross-cutting concerns, multiple domains or significant architectural changes.
+These thresholds are configurable by the Operator.
 
 **FSM phase execution (per phase):**
 1. onEnter: check daily budget (pause if exceeded), check per-run budget (escalate to stuck if exceeded), check rate limit state (pause if cooling down), load phase configuration.
-2. execute: delegate to the owning service for this phase. Detect and classify are owned by the control plane itself. Decompose and implement are delegated to Implementation Coordinator. Review, holdout, deploy, and test are delegated to Validation Service. Report is owned by the control plane (via Session Runtime for the reporter session). Special case — holdout failure: if the Validation Service reports holdout failures, the Control Plane delegates to the Bug Diagnosis Service to classify the failure (spec gap → needs-spec-update, implementation defect → fix cycle, validation gap → needs-human) before deciding the transition.
+2. execute: delegate to the owning service for this phase. Detect, classify, integrate, and report are owned by the Control Plane itself. Decompose and implement are delegated to Implementation Coordinator. Review, holdout, deploy, and test are delegated to Validation Service. Special case — holdout failure: if the Validation Service reports holdout failures, the Control Plane delegates to the Bug Diagnosis Service, which uses the same Type A/B/C classification: Type A (implementation defect, the implementation deviated from the spec) → targeted fix cycle via Implementation Coordinator; Type B (spec gap, the spec doesn't cover the failing scenario) → needs-spec-update; Type C or low confidence → needs-human.
 3. onExit: record cost from the phase, save checkpoint to RunState, write RunState to persistent storage using crash-safe write semantics.
 4. On success: transition to the next phase per the pipeline definition.
 5. On failure: check the error hash against the circular fix detector. If 3+ occurrences of the same logical error: transition to stuck immediately. Otherwise: retry up to the phase's max retry count, then transition to stuck.
@@ -91,10 +99,15 @@ The Daemon Control Plane exposes operator commands via a control interface bound
 6. Notify the operator.
 
 **Integration flow:**
-1. Create an integration proposal from the feature branch to the staging branch.
-2. Delegate a final review on the integration diff to the Validation Service.
-3. If the review passes: auto-integrate the proposal into the staging branch.
-4. If the review fails: route the findings back to the fix cycle (delegated to Implementation Coordinator).
+1. Acquire integration lock (only one run integrates at a time — prevents concurrent merge conflicts on the staging branch).
+2. Rebase or merge the feature branch onto the latest staging branch to pick up changes from other completed runs.
+3. Create an integration proposal from the feature branch to the staging branch.
+4. Delegate a final review on the integration diff to the Validation Service.
+5. If the review passes: auto-integrate the proposal into the staging branch. Release integration lock.
+6. If the review fails: route the findings back to the fix cycle (delegated to Implementation Coordinator). Release integration lock, re-acquire when fix is ready.
+
+**Cross-run conflict handling:**
+When multiple runs are active concurrently, they work on isolated feature branches and do not interfere during implementation or review. Conflicts can only arise during integration. The integration lock serializes merges to the staging branch. If a rebase (step 2) produces conflicts, the Control Plane spawns a Conflict Resolver session (via Implementation Coordinator) to resolve them against the spec intent before proceeding with the integration review.
 
 **Graceful shutdown:**
 1. On shutdown signal: enter drain mode (stop claiming new work).
