@@ -70,7 +70,7 @@ The fix operation proceeds:
 
 **Decomposition flow:**
 1. Receive work request body, spec content, and traceability map from the Daemon Control Plane.
-2. Assemble the coordinator prompt: work request summary, full spec content (in understanding order), traceability map, and instructions for producing a task graph.
+2. Assemble the coordinator prompt: work request summary, full spec content (in understanding order: business context first, then architecture, then patterns — this order helps the Coordinator understand the scope before seeing implementation details), traceability map, and instructions for producing a task graph.
 3. Spawn a one-shot coordinator session via Session Runtime with structured output validation.
 4. Receive the task graph. Validate: all unit identifiers are unique, batch numbers are sequential, dependency references are valid, no unit depends on a unit in the same or later batch.
 5. Evaluate each unit's scope against context capacity. If a unit's specification content, expected artifacts, and surrounding context exceed a single reasoning context, recursively decompose it into smaller sub-units until each fits within one context.
@@ -82,7 +82,7 @@ The fix operation proceeds:
 2. For the current batch, spawn units concurrently with stagger delay:
    a. Create an isolated workspace from the feature branch (with structural exclusions applied by Session Runtime).
    b. Query Knowledge Service for pitfalls matching the unit's expected artifact locations.
-   c. Assemble the unit prompt: spec content (pre-loaded, never referenced by path), unit context, pitfalls, verification command.
+   c. Assemble the unit prompt: spec content in implementation order (patterns first, then architecture, then business context — the reverse of understanding order, so the Worker sees actionable patterns before abstract intent), unit context, pitfalls, verification command. All content is pre-loaded; Workers never reference spec artifacts by path.
    d. Spawn a worker session via Session Runtime.
 3. As each unit completes, record its exit status and cost.
 4. After all units in the batch finish: process exit statuses (route blocked/needs-context as needed).
