@@ -28,7 +28,7 @@ The registry contains entries for all session types: coordinator, classifier, wo
 
 **SecretsSnapshot** holds resolved credentials in memory. It contains: a map of secret names to resolved values, a last-known-good fallback snapshot, and a resolution timestamp. Secrets are resolved from configured credential sources on startup and on reload signals.
 
-**ContainmentPolicy** defines structural access restrictions for sessions. It contains: an array of path patterns excluded from workspaces (holdout scenarios, methodology definitions, system state, system source), an array of path patterns blocked at the tool boundary (same paths, as defense-in-depth), and behavioral constraints included in session prompts (explicit prohibitions). Three layers enforce the same boundaries independently.
+**ContainmentPolicy** defines access restrictions for sessions. It contains: an array of path patterns excluded from workspaces (holdout scenarios, methodology definitions, system state, system source), an array of path patterns blocked at the tool boundary (same paths, as defense-in-depth), content inspection rules for general-purpose operations (patterns that indicate exfiltration, out-of-scope modification, or untrusted execution), read/write classification rules (which operations are read-only vs write, affecting scrutiny level), and behavioral constraints included in session prompts (explicit prohibitions). Five layers enforce containment independently: workspace exclusion, path blocking, content inspection, read/write classification, and behavioral constraints — plus a sixth detective layer (post-session audit).
 
 ## API Contract
 
@@ -96,11 +96,19 @@ The spawn operation proceeds:
 2. On reload signal: resolve all secrets into a new snapshot. If all succeed, atomically replace the current snapshot. If any fail, keep the current snapshot and log a warning.
 3. During operation: deterministic operations (deployment commands, notification webhooks, source control interactions) read from the current snapshot. Intelligent sessions never receive any part of the snapshot.
 
-**Containment enforcement flow (three independent layers):**
+**Containment enforcement flow (five independent layers):**
 1. Workspace exclusion: when creating a workspace, structurally exclude prohibited paths. Sessions running in the workspace cannot see these paths because they do not exist in the workspace environment.
-2. Tool-level blocking: a deterministic policy intercepts resource access requests and blocks access to prohibited path patterns. Blocked calls return an explicit denial message to the session — not a silent failure.
-3. Behavioral constraints: session prompts include explicit prohibitions against accessing holdout scenarios, modifying artifacts outside the workspace, and modifying the system's own source.
-4. Post-session audit: after completion, scan the session's activity log for references to prohibited paths. If a violation is detected, flag the run and notify the Daemon Control Plane (which transitions to stuck with a containment breach note).
+2. Tool-level path blocking: a deterministic policy intercepts resource access requests and blocks access to prohibited path patterns. Blocked calls return an explicit denial message to the session — not a silent failure.
+3. Operation content inspection: before executing general-purpose operations (commands, network requests), the system analyzes what the operation does — not just what resource it accesses. Operations that exfiltrate data to external destinations, modify resources outside project scope, or execute untrusted external instructions are blocked even if the tool itself is permitted. This is a content-based layer on top of the path-based layer.
+4. Read/write classification: the system distinguishes read-only operations from write operations. Read-only operations (viewing artifacts, querying status) receive lower scrutiny. Write operations (modifying artifacts, executing commands with side effects) receive higher scrutiny. The same tool may be allowed for reading but require additional verification for writing.
+5. Behavioral constraints: session prompts include explicit prohibitions against accessing holdout scenarios, modifying artifacts outside the workspace, and modifying the system's own source.
+6. Post-session audit: after completion, scan the session's activity log for references to prohibited paths and suspicious operations. If a violation is detected, flag the run and notify the Daemon Control Plane (which transitions to stuck with a containment breach note).
+
+**Context compaction flow:**
+1. During long-running agentic sessions, the Session Runtime monitors context capacity usage.
+2. When capacity approaches limits (configurable threshold, e.g., 80%), trigger compaction: summarize older conversation turns while preserving recent context and the current task state.
+3. If the session is mid-workflow (executing tool calls), use a workflow-aware continuation prompt so the session resumes its task without losing thread.
+4. Compaction uses a lower-cost model for summarization to minimize expense.
 
 **Orphaned process cleanup flow:**
 1. Periodically (configurable interval): scan for managed sessions not associated with any active SessionHandle.

@@ -18,7 +18,7 @@ Spec quality determines output quality. Garbage specs produce garbage code regar
 - **Stakeholder** — validates L1 specs (business intent)
 - **Architect** — validates L2 specs (system design)
 - **Builder** — validates L3 specs (pattern conformance)
-- **Validation Engine** — automated structural checks (schema validation, blocklist enforcement)
+- **Automated Validator** — performs structural checks that support human review
 
 ## Behavior
 
@@ -34,13 +34,13 @@ Spec quality determines output quality. Garbage specs produce garbage code regar
 
 **Scenario: L3 conformance validation**
 - Given an L3 spec
-- When the Validation Engine checks it
+- When the Automated Validator checks it
 - Then it confirms the spec uses only patterns and short examples, not complete implementations
 
-**Scenario: Schema validation**
+**Scenario: Structural validation**
 - Given a spec at any layer
-- When its frontmatter is checked against schema.json
-- Then the schema validates required fields, allowed fields, and layer-specific constraints
+- When its structure is checked against the layer rules
+- Then required fields, allowed fields, and layer-specific constraints are validated before content review begins
 
 ## Success Criteria
 

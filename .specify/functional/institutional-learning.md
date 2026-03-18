@@ -11,11 +11,10 @@ layer: 1
 
 ## Problem Statement
 
-Each intelligent session starts with a blank slate. A Worker that discovers a subtle project pitfall carries that knowledge only for the duration of its session. The next Worker hitting the same pitfall rediscovers it from scratch, wasting time and tokens. Without a structured learning system, the organization's accumulated implementation knowledge exists only in human heads.
+Each new piece of implementation work starts with limited project memory. When a subtle pitfall is discovered during one change, the next similar change should not have to rediscover it from scratch. Without a structured learning system, the organization's accumulated implementation knowledge exists only in human heads.
 
 ## Actors
 
-- **Worker** — discovers pitfalls and patterns during implementation, emits structured observations
 - **Operator** — reviews and approves proposed knowledge promotions and instruction improvements
 
 ## Behavior
@@ -23,25 +22,25 @@ Each intelligent session starts with a blank slate. A Worker that discovers a su
 ### Knowledge Capture
 
 **Scenario: Pitfall observation**
-- Given a Worker encounters a non-obvious pitfall about the project
+- Given implementation work encounters a non-obvious pitfall about the project
 - When it recognizes the pitfall
 - Then it emits a structured observation with: affected artifact patterns, description, and the current work request as source
 
 **Scenario: Observation persistence**
-- Given a session has completed
-- When the system parses the activity record
+- Given a piece of work has completed
+- When the system reviews the resulting activity
 - Then it extracts structured observations and stores them with: affected artifact patterns, description, source work request, confidence score, creation date, and hit count
 
 ### Knowledge Injection
 
 **Scenario: Relevant pitfall injection**
-- Given a Worker is about to begin implementation
-- When the system prepares the Worker's context
+- Given implementation work is about to begin
+- When the system prepares the working context
 - Then it matches the unit's expected artifact locations against stored observations and injects matching pitfalls into the context
 
 **Scenario: Irrelevant pitfall filtering**
 - Given stored observations exist for unrelated artifact locations
-- When the system prepares a Worker's context
+- When the system prepares working context for a new unit
 - Then only observations matching the current unit's artifact locations are injected — no irrelevant noise
 
 ### Knowledge Promotion
@@ -59,7 +58,7 @@ Each intelligent session starts with a blank slate. A Worker that discovers a su
 **Scenario: Promotion approval**
 - Given the Operator approves a promotion
 - When the promoted content is merged into permanent documentation
-- Then the observation stops being injected per-session — it is now available in every session's context automatically
+- Then the observation stops being injected case by case — it is now available automatically to future work
 
 **Scenario: Observation archival**
 - Given observations older than a configurable age with low hit counts
@@ -93,7 +92,7 @@ Each intelligent session starts with a blank slate. A Worker that discovers a su
 **Scenario: Exemplar creation**
 - Given a first successful implementation of a deliverable type
 - When the system records the completed work
-- Then the implementation becomes a reference standard that future Reviewers compare against
+- Then the implementation becomes a reference standard that future reviews compare against
 
 **Scenario: Exemplar evolution**
 - Given a clearly superior implementation of the same deliverable type is completed
@@ -110,18 +109,18 @@ Each intelligent session starts with a blank slate. A Worker that discovers a su
 **Scenario: Pattern feedback loop**
 - Given extracted patterns exist
 - When the system processes new work requests
-- Then patterns flow back into project-specific convention documentation, creating a feedback loop where implementation knowledge improves with every issue processed
+- Then patterns inform proposed updates to project-specific convention documentation, creating a feedback loop without changing permanent guidance automatically
 
 ## Success Criteria
 
-- Workers receive relevant institutional knowledge before starting — they don't rediscover known pitfalls
-- Recurring patterns are promoted to permanent documentation, reducing per-session injection overhead
-- Operating instructions improve over time based on empirical outcomes
+- New implementation work receives relevant institutional knowledge before starting — it does not rediscover known pitfalls
+- Recurring patterns are promoted to permanent documentation, reducing repeated ad hoc context injection
+- Proposed operating instruction improvements are grounded in empirical outcomes
 - All knowledge changes require Operator approval — the system proposes, the human disposes
 
 ## Constraints
 
 - Knowledge promotion and instruction improvement always require Operator approval
 - Observations older than a configurable age with low hit counts are archived to prevent unbounded growth
-- The system gets smarter with every issue it processes, but never autonomously changes its own behavior — all changes are proposed
+- The system may temporarily enrich future work context from approved knowledge stores, but permanent changes to instructions, documentation, or evaluation standards always require Operator approval
 - Learned patterns are structured data (key, description, confidence score, source), not unstructured prose

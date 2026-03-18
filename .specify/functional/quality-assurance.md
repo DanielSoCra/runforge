@@ -15,81 +15,83 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 
 ## Actors
 
-- **Spec Compliance Reviewer** — verifies acceptance criteria are met (intelligent, not human)
-- **Quality Reviewer** — evaluates implementation quality, patterns, test coverage (intelligent, not human)
-- **Security Reviewer** — evaluates security and edge cases for complex work (intelligent, not human)
-- **Validation Engine** — runs holdout scenarios (deterministic, not intelligent)
 - **Operator** — reviews escalated issues
+- **Spec Author** — receives cases where the specification must be clarified or extended
 
 ## Behavior
 
 **Scenario: Heterogeneous review gates**
-- Given a completed implementation on a unified branch
+- Given a completed implementation
 - When the system begins quality assurance
-- Then it runs a sequence of different review gates, not identical rounds: deterministic checks first, then spec compliance, then implementation quality, then security (complex work only)
+- Then it runs a sequence of distinct assurance stages: automated checks first, then spec compliance review, then implementation quality review, then security review when needed
 
-**Scenario: Deterministic gate (gate 1)**
-- Given the unified branch is ready for review
-- When gate 1 runs
-- Then it executes automated verification checks — no intelligent session needed
+**Scenario: Automated checks**
+- Given an implementation is ready for review
+- When quality assurance begins
+- Then automated verification checks run before human-like review begins
 
-**Scenario: Spec compliance gate (gate 2)**
-- Given gate 1 has passed
-- When gate 2 runs
-- Then a fresh Spec Compliance Reviewer verifies every acceptance criterion from the spec is met, reading artifacts independently — never trusting the implementer's report
+**Scenario: Spec compliance review**
+- Given automated checks have passed
+- When spec compliance review begins
+- Then the system verifies every acceptance criterion independently rather than trusting the implementation report
 
-**Scenario: Implementation quality gate (gate 3)**
-- Given gate 2 has passed
-- When gate 3 runs
-- Then a fresh Quality Reviewer evaluates maintainability, patterns, test quality, and architectural consistency
+**Scenario: Implementation quality review**
+- Given spec compliance review has passed
+- When implementation quality review begins
+- Then the system evaluates maintainability, patterns, test quality, and architectural consistency
 
-**Scenario: Security gate (gate 4, complex work only)**
-- Given gate 3 has passed and the work was classified as complex
-- When gate 4 runs
-- Then a fresh Security Reviewer evaluates injection risks, authentication gaps, data validation, and race conditions
+**Scenario: Security review**
+- Given implementation quality review has passed and the work is complex or security-sensitive
+- When security review begins
+- Then the system evaluates injection risks, authentication gaps, data validation, and race conditions
 
 **Scenario: Gate failure and fix cycle**
 - Given any gate finds issues
 - When the system processes the findings
-- Then a Worker fixes the issues and all gates re-run from gate 1 — up to a configured maximum number of fix cycles, after which the system escalates to the Operator
+- Then the issues are fixed and all assurance stages re-run from the beginning — up to a configured maximum number of fix cycles, after which the system escalates to the Operator
 
 **Scenario: Simple work review**
 - Given a work request classified as simple
 - When the system begins quality assurance
-- Then only gates 1 and 2 run
+- Then only automated checks and spec compliance review run by default
+
+**Scenario: High-risk work review**
+- Given a work request affects security-sensitive behavior
+- When the system begins quality assurance
+- Then security review runs even if the work was classified as simple or standard
 
 **Scenario: Structured evaluation rubric**
-- Given a Reviewer is assessing an implementation
+- Given the system is assessing an implementation
 - When it evaluates quality
 - Then it uses structured rubric dimensions (spec compliance, test quality, pattern consistency, security, convention alignment) — not unstructured prose
 
 **Scenario: Reviewer independence**
-- Given a Reviewer begins its assessment
+- Given the system begins an independent assessment
 - When it examines the implementation
-- Then it starts with a fresh context, no knowledge of the implementation process, and independently verifies all claims
+- Then it evaluates the implementation independently and does not rely on the implementer's account of what was built
 
 **Scenario: Holdout validation**
 - Given all review gates have passed
-- When the Validation Engine runs holdout scenarios
-- Then it executes scenarios that no intelligent actor has ever seen, reporting only pass/fail counts and scenario identifiers — never scenario content
+- When holdout validation runs
+- Then it executes scenarios that were not available during implementation or review, reporting outcomes without exposing scenario content
 
 **Scenario: Holdout failure**
 - Given a holdout scenario fails
 - When the system processes the failure
-- Then it escalates to the Spec Author as a spec gap — it never attempts to "fix" holdout failures, because they indicate the spec is incomplete, not that the implementation is wrong
+- Then it triggers diagnosis to determine whether the failure reflects a spec gap, an implementation defect, or a validation gap before further action is taken, and routes specification issues to the Spec Author
 
 **Scenario: Integration review**
 - Given all review gates and holdout validation have passed
-- When the system prepares to integrate the work into the staging branch
-- Then it performs a final review on the integration diff before auto-integrating
+- When the system prepares to promote the work
+- Then it performs a final integration review before the work moves forward
 
-**Scenario: Staging deployment verification**
-- Given new work has been integrated into the staging branch
-- When the system deploys to the staging environment
+**Scenario: Pre-production verification**
+- Given new work has been promoted to a pre-production environment
+- When the system verifies that environment
 - Then it polls for health confirmation within a configured timeout
 
 **Scenario: Post-deployment testing**
-- Given the staging environment is healthy after deployment
+- Given the pre-production environment is healthy after delivery
 - When the system runs post-deployment tests (automated functional tests, and interactive tests if applicable)
 - Then it captures results and proceeds if all pass
 
@@ -100,7 +102,7 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 
 **Scenario: Test output truncation**
 - Given test output is verbose
-- When the system prepares failure context for a fix Worker
+- When the system prepares failure context for a follow-up fix
 - Then it truncates the output to only the relevant failure excerpt to prevent context flooding
 
 **Scenario: Graduated escalation**
@@ -111,13 +113,14 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 ## Success Criteria
 
 - Every implementation passes all applicable review gates before proceeding
-- Reviewers never have access to holdout scenarios — isolation is what makes validation trustworthy
-- Holdout failures are correctly classified as spec gaps, not implementation bugs
+- Holdout scenarios are never available during implementation or review — isolation is what makes validation trustworthy
+- Holdout failures trigger diagnosis instead of being auto-classified or auto-fixed
 - First implementations become reference standards for consistency (see FUNC-AC-LEARNING)
 
 ## Constraints
 
-- Evaluation rubrics are immutable to the executing Worker — the Worker cannot alter its own evaluation criteria
-- Reviewers explicitly distrust the implementer — independent artifact reading, independent verification
-- Holdout scenarios are structurally inaccessible to all intelligent actors, not merely prompt-instructed
+- Work under review cannot alter the criteria it is judged against
+- Review is based on independent artifact reading and verification rather than trusting implementation claims
+- Holdout scenarios remain inaccessible during implementation and review, not merely hidden by instruction
 - Escalation is graduated, not binary — repeated identical failures escalate faster than novel failures
+- Complexity classification determines the default review depth, but risk-sensitive work still receives the review gates needed for safe delivery

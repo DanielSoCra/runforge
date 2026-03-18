@@ -11,12 +11,11 @@ layer: 1
 
 ## Problem Statement
 
-An autonomous system that runs 24/7, spawns intelligent sessions with full workspace environment access, and makes real commits to real repositories poses significant operational risks: runaway costs, leaked credentials, corrupted state, orphaned processes, and containment breaches. Safety must be structural — enforced by the system's architecture, not by trusting intelligent actors to follow instructions.
+An autonomous system that runs 24/7, starts autonomous work with broad project access, and makes real changes in real repositories poses significant operational risks: runaway costs, leaked credentials, corrupted state, orphaned work, and containment breaches. Safety must be structural — enforced by the system's design, not by trusting intelligent actors to follow instructions.
 
 ## Actors
 
 - **Operator** — sets budget limits, reviews safety events, manages credentials
-- **Worker** — any intelligent actor whose access must be constrained
 
 ## Behavior
 
@@ -24,13 +23,13 @@ An autonomous system that runs 24/7, spawns intelligent sessions with full works
 
 **Scenario: Daily budget enforcement**
 - Given the Operator has configured a daily spending limit
-- When the system is about to spawn an intelligent session
+- When the system is about to start a new autonomous task
 - Then it verifies the daily spend is within budget before proceeding — if exceeded, the system pauses and notifies the Operator
 
-**Scenario: Per-session budget cap**
-- Given an intelligent session is running
-- When its spending reaches the per-session limit
-- Then the session is terminated independently of the daily budget — two independent circuit breakers
+**Scenario: Per-task budget cap**
+- Given an autonomous task is running
+- When its spending reaches the per-task limit
+- Then the task is terminated independently of the daily budget — two independent circuit breakers
 
 **Scenario: Budget reset**
 - Given the daily budget has been exceeded
@@ -39,30 +38,40 @@ An autonomous system that runs 24/7, spawns intelligent sessions with full works
 
 ### Containment
 
-**Scenario: Workspace isolation**
-- Given a Worker is assigned a unit of work
-- When the system creates a workspace for the Worker
-- Then holdout scenarios, system state, methodology definitions, and the system's own implementation are all structurally excluded from the Worker's environment — Workers cannot access them
+**Scenario: Protected work environment**
+- Given autonomous work is assigned
+- When the system prepares that work environment
+- Then holdout scenarios, operational state, methodology definitions, and the system's own implementation are excluded from what that work can access
 
-**Scenario: Tool-level access blocking**
-- Given a Worker attempts to access a prohibited resource (holdout scenarios, methodology definitions, system state, the system's own implementation)
-- When the access request reaches the tool boundary
-- Then it is blocked deterministically — the Worker receives an explicit denial, not a silent failure
+**Scenario: Access blocking**
+- Given autonomous work attempts to access a prohibited resource (holdout scenarios, methodology definitions, operational state, the system's own implementation)
+- When the access request is evaluated
+- Then it is blocked deterministically with an explicit denial, not a silent failure
 
 **Scenario: Behavioral constraints**
-- Given a Worker's operating instructions
+- Given autonomous work is started
 - When the instructions are loaded
-- Then they include explicit prohibitions against accessing holdout scenarios, modifying artifacts outside the workspace, and modifying the system's own implementation
+- Then they include explicit prohibitions against accessing holdout scenarios, modifying artifacts outside the assigned work, and modifying the system's own implementation
 
-**Scenario: Post-session audit**
-- Given an intelligent session has completed
-- When the system audits the activity record
+**Scenario: Operation content inspection**
+- Given autonomous work executes a general-purpose operation (e.g., running a command or making a network request)
+- When the operation's content is analyzed before execution
+- Then operations that exfiltrate data to external destinations, modify resources outside the project scope, or execute untrusted external instructions are blocked — even if the tool itself is permitted
+
+**Scenario: Read vs write classification**
+- Given autonomous work requests an operation on a resource
+- When the system evaluates the request
+- Then read-only operations receive lower scrutiny than write operations — the same tool may be allowed for reading but require additional verification for writing
+
+**Scenario: Post-task audit**
+- Given an autonomous task has completed
+- When the system audits the recorded activity
 - Then it scans for references to prohibited resources — violations trigger immediate escalation
 
-**Scenario: Session timeout**
-- Given an intelligent session has been running longer than its configured timeout
+**Scenario: Task timeout**
+- Given an autonomous task has been running longer than its configured timeout
 - When the timeout is reached
-- Then the session is terminated and the phase is retried or escalated
+- Then the task is terminated and the phase is retried or escalated
 
 ### Concurrency and Auto-Pause
 
@@ -95,15 +104,15 @@ An autonomous system that runs 24/7, spawns intelligent sessions with full works
 
 ### Recovery
 
-**Scenario: Atomic state persistence**
-- Given the system is writing state to persistent storage
-- When it performs the write
-- Then it uses crash-safe write semantics so a crash mid-write never corrupts state
+**Scenario: Safe state persistence**
+- Given the system is recording operational state
+- When it saves progress
+- Then it does so safely enough that a crash during the save does not corrupt recovery state
 
-**Scenario: Sub-phase checkpointing**
+**Scenario: Progress recovery**
 - Given a long-running phase (implementation, review, testing)
-- When a sub-unit of work completes within the phase
-- Then the system saves a checkpoint so crash recovery resumes within the phase, not at the phase boundary
+- When meaningful progress is completed within the phase
+- Then the system records that progress so recovery resumes near the interruption point, not from the start of the phase
 
 **Scenario: Circular fix detection**
 - Given a phase has failed and the system is about to retry
@@ -113,12 +122,12 @@ An autonomous system that runs 24/7, spawns intelligent sessions with full works
 **Scenario: Graceful shutdown**
 - Given the system receives a shutdown signal
 - When it begins shutting down
-- Then it stops accepting new work, waits for active sessions to complete (up to a grace period), terminates remaining sessions, cleans up temporary workspaces, and releases all locks
+- Then it stops accepting new work, waits for active work to complete up to a grace period, safely stops remaining work, cleans up temporary artifacts, and releases exclusive control
 
-**Scenario: Orphaned process cleanup**
+**Scenario: Orphaned work cleanup**
 - Given the system is running its periodic maintenance
-- When it checks for orphaned sessions
-- Then it terminates any sessions not associated with an active run
+- When it checks for orphaned work
+- Then it terminates any work still running without an active run
 
 ### Secrets
 
@@ -135,18 +144,18 @@ An autonomous system that runs 24/7, spawns intelligent sessions with full works
 **Scenario: Credential isolation from intelligent actors**
 - Given credentials are needed for deterministic operations (deploy, notify, source control)
 - When the system uses them
-- Then they are never passed to intelligent sessions — only the system's deterministic operations use credentials
+- Then they are never passed to autonomous tasks — only the system's trusted operational steps use credentials
 
 ## Success Criteria
 
-- The system operates unattended overnight without exceeding budget, leaking credentials, or leaving orphaned processes
-- Safety enforcement is structural (workspace exclusion, tool-level blocking, process termination), not behavioral (prompts alone)
+- The system operates unattended overnight without exceeding budget, leaking credentials, or leaving orphaned work
+- Safety enforcement is structural, not instruction-only
 - State survives crashes without corruption
 - Identical repeated failures are detected and escalated, not retried endlessly
 
 ## Constraints
 
 - Containment must not depend on trusting intelligent actors to follow instructions — structural enforcement is required
-- Cost control must have at least two independent mechanisms (daily budget + per-session cap)
+- Cost control must have at least two independent mechanisms (daily budget + per-task cap)
 - The system must survive overnight unattended operation for normal conditions
 - Credential management follows the principle: deterministic operations use credentials, intelligent operations do not

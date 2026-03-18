@@ -15,41 +15,40 @@ In a spec-driven system, a bug is not simply "a wrong implementation." It is an 
 
 ## Actors
 
-- **Diagnostician** — analyzes bug reports to classify root cause (intelligent, not human)
+- **Reporter** — surfaces behavior that appears incorrect
 - **Spec Author** — receives spec gap diagnoses, updates specifications
 - **Operator** — receives escalations for expectation mismatches
-- **Worker** — fixes implementation bugs via targeted regression-test-first workflow
 
 ## Behavior
 
 **Scenario: Diagnosis before fix**
 - Given a bug report enters the system
 - When the system begins processing
-- Then the Diagnostician analyzes the error report, the implementation, and the governing specifications before any fix is attempted
+- Then the system analyzes the error report, the implementation, and the governing specifications before any fix is attempted
 
 **Scenario: Structured classification output**
-- Given the Diagnostician has analyzed a bug
+- Given the system has analyzed a bug
 - When it produces its diagnosis
 - Then the output includes: classification type (A/B/C), confidence score, affected specifications, and suggested resolution path
 
 **Scenario: Low confidence routing**
-- Given the Diagnostician's confidence score is below a configurable confidence threshold (default: 70%)
+- Given the diagnosis confidence score is below the required confidence threshold
 - When the system evaluates the diagnosis
 - Then it routes to the Operator rather than guessing — wrong classification wastes more resources than human review
 
 **Scenario: Type A — Implementation bug**
 - Given the spec clearly describes expected behavior but the implementation deviates
-- When the Diagnostician classifies this as Type A
+- When the system classifies this as Type A
 - Then the system routes to a targeted fix: write a regression test that reproduces the bug, then fix the implementation to make it pass
 
 **Scenario: Type A fix workflow**
 - Given a Type A bug has been classified
-- When the Worker begins the fix
-- Then it skips decomposition (bugs are single-unit fixes) and holdout validation (not applicable), using a regression-test-first workflow
+- When the targeted fix begins
+- Then it uses a regression-test-first workflow and treats the work as one focused fix rather than decomposing it further
 
 **Scenario: Type B — Spec gap**
 - Given the implementation matches exactly what the spec describes, but the spec doesn't cover the reported case
-- When the Diagnostician classifies this as Type B
+- When the system classifies this as Type B
 - Then the system escalates to the Spec Author with a structured diagnosis and suggested spec changes — it does NOT attempt to modify the implementation
 
 **Scenario: Type B re-entry**
@@ -59,12 +58,12 @@ In a spec-driven system, a bug is not simply "a wrong implementation." It is an 
 
 **Scenario: Type C — Expectation mismatch**
 - Given both the spec and the implementation are correct, but the reporter expected different behavior
-- When the Diagnostician classifies this as Type C
+- When the system classifies this as Type C
 - Then the system escalates to the Operator — this requires rethinking the business requirement, not modifying the implementation or the specs
 
 **Scenario: Feedback loop visibility**
 - Given Type B bugs have been classified over time
-- When the system records classifications in the results ledger
+- When the system records classifications over time
 - Then the Operator can view trend metrics showing the distribution of bug types across time periods
 
 ## Success Criteria
@@ -76,7 +75,7 @@ In a spec-driven system, a bug is not simply "a wrong implementation." It is an 
 
 ## Constraints
 
-- The Diagnostician never guesses at low confidence — routing to human is always preferable to a wrong classification
-- Type B bugs prove that holdout scenarios are working correctly — a holdout failure that surfaces a spec gap is the system functioning as designed
+- The system never guesses at low confidence — routing to human is always preferable to a wrong classification
+- Holdout failures and bug reports may reveal spec gaps, implementation defects, or expectation mismatches; diagnosis determines which
 - Bug fixes always start with a regression test — the test proves the bug exists before any fix is attempted
 - The system never "fixes" a Type B bug by changing the implementation — the implementation is correct per the spec

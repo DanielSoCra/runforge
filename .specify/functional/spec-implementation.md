@@ -15,61 +15,60 @@ Implementing specifications requires decomposing them into parallelizable units,
 
 ## Actors
 
-- **Coordinator** — decomposes work requests into parallelizable units (intelligent, not human)
-- **Worker** — implements a single unit from pre-loaded context (intelligent, not human)
+- **Operator** — receives escalations when automated implementation cannot proceed safely
 - **Spec Author** — authored the specifications that govern the implementation
 
 ## Behavior
 
 **Scenario: Decomposition into parallel units**
 - Given a work request with referenced specifications
-- When the Coordinator analyzes the scope
-- Then it produces a structured task graph of units grouped into parallel batches, where units within a batch have no output-level overlap
+- When the system analyzes the scope
+- Then it produces a work plan broken into independently executable units, grouped so unrelated work can proceed in parallel
 
 **Scenario: Unit context isolation**
 - Given a unit assignment
-- When the Worker receives its task
-- Then all spec content, unit context, and known pitfalls are pre-loaded into the Worker's context — the Worker never accesses specification artifacts directly
+- When implementation begins
+- Then the assigned unit receives the governing context, task context, and known pitfalls it needs up front rather than reconstructing that context on its own
 
-**Scenario: Test-driven implementation**
-- Given a Worker has received its assignment
-- When the Worker begins implementation
-- Then it follows a strict test-driven protocol: write a failing test, verify it fails, implement the solution, verify the test passes, refactor if needed, then commit
+**Scenario: Verification-first implementation**
+- Given an implementation unit has been assigned
+- When work begins
+- Then it begins by establishing or selecting verification that can fail before the change and pass after it; for bug fixes this verification is a regression test
 
 **Scenario: Graduated exit status**
-- Given a Worker has finished its assignment
+- Given an implementation unit has finished
 - When it reports its result
-- Then it exits with one of: completed, completed-with-concerns, blocked, or needs-more-context — each triggering different system behavior
+- Then it reports whether the work completed cleanly, completed with concerns, is blocked, or needs more context — each causing a distinct follow-up path
 
 **Scenario: Completed-with-concerns routing**
-- Given a Worker exits with "completed-with-concerns"
+- Given an implementation unit finishes with concerns
 - When the system processes this status
 - Then it proceeds but schedules additional review rounds
 
 **Scenario: Blocked routing**
-- Given a Worker exits with "blocked"
+- Given an implementation unit cannot proceed safely
 - When the system processes this status
 - Then it escalates to the Operator without consuming retry attempts
 
 **Scenario: Needs-more-context routing**
-- Given a Worker exits with "needs-more-context"
+- Given an implementation unit cannot proceed with the context it has
 - When the system processes this status
 - Then it re-runs the unit with additional spec content from the layer above
 
 **Scenario: Parallel batch execution**
 - Given a batch of units with no output overlap
 - When the system executes the batch
-- Then all units in the batch run simultaneously in isolated workspaces
+- Then all units in the batch can proceed in parallel without interfering with one another
 
 **Scenario: Sequential batch merging**
 - Given a batch of units has completed
 - When the system merges results
-- Then each unit merges into the unified branch, and post-integration verification runs before the next batch begins
+- Then the completed work is combined and verified before dependent work continues
 
 **Scenario: Merge conflict resolution**
 - Given a merge conflict occurs between units
 - When the system detects the conflict
-- Then it spawns a specialized resolution step that favors spec intent over either branch
+- Then it resolves the conflict in favor of the governing specification rather than either conflicting change set
 
 **Scenario: Simple work requests**
 - Given a work request classified as "simple"
@@ -78,24 +77,29 @@ Implementing specifications requires decomposing them into parallelizable units,
 
 **Scenario: Spec divergence**
 - Given an existing implementation that does not match the governing spec
-- When the Worker encounters this divergence
+- When the system encounters this divergence during implementation
 - Then it treats this as a reconciliation task, not an error — aligning the implementation to the spec
 
 **Scenario: Context size heuristic**
-- Given a unit whose scope exceeds a single reasoning context
-- When the Coordinator evaluates the unit
-- Then it decomposes the unit further until each sub-unit fits in one context
+- Given a unit whose scope exceeds what can be handled reliably as one piece of work
+- When the system evaluates the unit
+- Then it decomposes the unit further until each sub-unit can be handled reliably
+
+**Scenario: Context capacity during implementation**
+- Given a Worker's session approaches its reasoning capacity during a long implementation
+- When the system detects capacity is nearing limits
+- Then it compacts older context while preserving the current task state, so the Worker can continue without losing critical working information
 
 ## Success Criteria
 
 - Multi-unit features are implemented in parallel without output conflicts
-- Workers produce test-driven implementations that pass their verification commands
+- Implementation units produce changes backed by verification appropriate to the change, and that verification passes before the unit is complete
 - Merge conflicts are resolved automatically in favor of spec intent
-- Workers never access specification artifacts directly — all context is pre-loaded
+- Implementation work receives the governing context it needs without reconstructing it from raw specification artifacts
 
 ## Constraints
 
-- Workers operate in complete isolation — they cannot see or affect each other's work
-- All spec content is pre-loaded by the system — Workers never browse the specification repository
-- If a unit's scope doesn't fit in a single reasoning context, it must be decomposed further
-- Each unit includes a verification command that the Worker uses to confirm its implementation
+- Implementation units work independently — they cannot see or affect each other's output while executing
+- Governing context is prepared before implementation begins
+- If a unit's scope cannot be handled reliably as one piece of work, it must be decomposed further
+- Each unit includes a clear verification method that confirms the intended outcome
