@@ -26,7 +26,6 @@ services:
     env_file: .env.prod
     environment:
       NODE_ENV: production
-      DAEMON_URL: http://daemon:3847
     networks:
       - app
     depends_on:

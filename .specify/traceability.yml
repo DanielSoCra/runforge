@@ -232,6 +232,7 @@ STACK-AC-DASHBOARD:
     - docker-compose.prod.yml
     - Caddyfile
     - dashboard/Dockerfile
+    - .env.prod.example
   test_paths:
     - dashboard/**/*.test.ts
     - dashboard/**/*.test.tsx
