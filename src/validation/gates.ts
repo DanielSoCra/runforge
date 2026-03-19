@@ -13,9 +13,9 @@ export function createGate1(commands: string[]): Gate {
     async execute(cwd: string): Promise<GateResult> {
       const findings: ReviewFinding[] = [];
       for (const cmd of commands) {
-        const [bin, ...args] = cmd.split(' ');
-        if (!bin) continue;
-        const result = await runCommand(bin, args, { cwd, timeoutMs: 120_000 });
+        if (!cmd.trim()) continue;
+        // Use sh -c to handle quoted arguments and pipes correctly
+        const result = await runCommand('sh', ['-c', cmd], { cwd, timeoutMs: 120_000 });
         if (!result.ok) {
           findings.push({
             severity: 'critical',

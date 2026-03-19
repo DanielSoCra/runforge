@@ -52,7 +52,7 @@ export async function runReview(
       // Re-run all gates from the beginning
       continue;
     } else {
-      // No fix handler — escalate immediately
+      // No fix handler — return failure (caller decides escalation)
       return { passed: false, gateResults, fixCycles: 0, escalated: false };
     }
   }

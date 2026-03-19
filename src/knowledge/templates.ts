@@ -12,7 +12,7 @@ export async function loadTemplate(path: string): Promise<Result<string>> {
 }
 
 export function renderTemplate(template: string, variables: Record<string, string>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
+  return template.replace(/\{\{([\w-]+)\}\}/g, (_match, key: string) => {
     return Object.prototype.hasOwnProperty.call(variables, key) ? (variables[key] ?? _match) : _match;
   });
 }

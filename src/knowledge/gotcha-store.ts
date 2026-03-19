@@ -100,6 +100,8 @@ export class GotchaStore {
 
   private patternsMatch(a: string[], b: string[]): boolean {
     if (a.length !== b.length) return false;
-    return a.every((p, i) => p === b[i]);
+    const sortedA = [...a].sort();
+    const sortedB = [...b].sort();
+    return sortedA.every((p, i) => p === sortedB[i]);
   }
 }

@@ -57,7 +57,11 @@ export async function getWorktreeDiffSize(
 ): Promise<Result<number>> {
   const branchName = `unit/${unitId}`;
   const result = await git(['diff', '--stat', `${baseBranch}...${branchName}`], repoRoot);
-  if (!result.ok) return ok(0); // no diff = 0 lines
+  if (!result.ok) {
+    // Empty diff (no changes) is expected — but git errors should propagate
+    if (result.error.message.includes('unknown revision')) return ok(0);
+    return err(result.error);
+  }
 
   // Parse last line: " X files changed, Y insertions(+), Z deletions(-)"
   const lines = result.value.split('\n');

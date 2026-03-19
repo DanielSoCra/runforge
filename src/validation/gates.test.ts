@@ -62,8 +62,8 @@ describe('createGate1', () => {
     await gate.execute('/my/project');
 
     expect(mockRunCommand).toHaveBeenCalledWith(
-      'vitest',
-      ['run'],
+      'sh',
+      ['-c', 'vitest run'],
       { cwd: '/my/project', timeoutMs: 120_000 },
     );
   });

@@ -32,7 +32,7 @@ export async function decompose(
     // Retry once
     const retry = await runtime.spawnSession(
       'coordinator',
-      { variables: { workRequest: request.body, specs: specContent, specRefs: request.specRefs.join(', ') } },
+      { variables: { workRequest: `Title: ${request.title}\n\n${request.body}`, specs: specContent, specRefs: request.specRefs.join(', ') } },
       request.issueNumber,
     );
     if (!retry.ok) return retry;
