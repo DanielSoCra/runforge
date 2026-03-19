@@ -10,4 +10,4 @@ All rules in `AGENTS.md` apply. This file adds Claude Code-specific behavior.
 - After implementing L3 work, verify it aligns with L2 (architecture), L1 (functional behavior), and L0 (vision and boundaries). If any layer contradicts your implementation, the higher layer wins.
 - Always run the affected spec's `test_paths` after making changes.
 - Always update `traceability.yml` when creating new files.
-- Use spec templates in `.specify/templates/` when creating new specs.
+- When creating or reviewing specs, use the appropriate skill: `l1-spec-guardian` (FUNC-*), `l2-spec-guardian` (ARCH-*), `l3-spec-guardian` (stack-specific).

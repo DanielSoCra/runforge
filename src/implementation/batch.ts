@@ -132,7 +132,7 @@ async function executeUnit(
       output: result.output,
     };
   } finally {
-    // 4. Remove worktree directory but keep the branch for merging
+    // Remove worktree directory but keep branch alive for merge by coordinator
     await git(['worktree', 'remove', `workspaces/${unit.id}`, '--force'], repoRoot).catch(() => {});
   }
 }
