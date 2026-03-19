@@ -1,0 +1,47 @@
+version: '3.9'
+
+networks:
+  app:
+    driver: bridge
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - app
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      NODE_ENV: production
+      DAEMON_URL: http://daemon:3847
+    networks:
+      - app
+    depends_on:
+      - daemon
+
+  daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile.daemon
+    restart: unless-stopped
+    env_file: .env.prod
+    ports: []  # NOT exposed externally — internal network only
+    networks:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:

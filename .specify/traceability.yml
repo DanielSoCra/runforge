@@ -229,6 +229,9 @@ STACK-AC-DASHBOARD:
     - dashboard/app/api/daemon/pause/route.ts
     - dashboard/app/api/daemon/resume/route.ts
     - dashboard/app/api/daemon/status/route.ts
+    - docker-compose.prod.yml
+    - Caddyfile
+    - dashboard/Dockerfile
   test_paths:
     - dashboard/**/*.test.ts
     - dashboard/**/*.test.tsx
