@@ -56,10 +56,20 @@ export async function runPipeline(
       // No handler = auto-success (for phases not yet implemented)
       const event: PhaseEvent = 'success';
       const currentPhase = run.phase;
+
+      // Check for completion before advancing (prevents infinite loop on report)
+      if (isComplete(currentPhase, event)) {
+        run.phaseCompletions[currentPhase] = true;
+        await stateMgr.saveRunState(run);
+        return { outcome: 'complete', run };
+      }
+
       const advanced = advancePhase(run, table, event, maxAttempts, retryCounts);
       if (!advanced) {
         return { outcome: 'error', run, error: `No transition for ${currentPhase}:${event}` };
       }
+      // Persist auto-advanced phases (crash recovery)
+      await stateMgr.saveRunState(run);
       continue;
     }
 

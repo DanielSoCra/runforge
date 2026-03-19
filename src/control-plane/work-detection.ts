@@ -16,13 +16,15 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
         const { data } = await octokit.issues.listForRepo({
           owner, repo, labels: 'ready', state: 'open', per_page: 100,
         });
-        const requests: WorkRequest[] = data.map((issue) => ({
-          issueNumber: issue.number,
-          title: issue.title,
-          body: issue.body ?? '',
-          labels: issue.labels.map((l) => typeof l === 'string' ? l : l.name ?? ''),
-          specRefs: extractSpecRefs(issue.body ?? ''),
-        }));
+        const requests: WorkRequest[] = data
+          .filter((issue) => !('pull_request' in issue && issue.pull_request))
+          .map((issue) => ({
+            issueNumber: issue.number,
+            title: issue.title,
+            body: issue.body ?? '',
+            labels: issue.labels.map((l) => typeof l === 'string' ? l : l.name ?? ''),
+            specRefs: extractSpecRefs(issue.body ?? ''),
+          }));
         return ok(requests);
       } catch (e) {
         return err(e instanceof Error ? e : new Error(String(e)));
