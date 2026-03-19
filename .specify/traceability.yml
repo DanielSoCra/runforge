@@ -244,6 +244,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/app/api/daemon/pause/route.ts
     - packages/dashboard/app/api/daemon/resume/route.ts
     - packages/dashboard/app/api/daemon/status/route.ts
+    - supabase/migrations/003_command_center.sql
     - docker-compose.prod.yml
     - Caddyfile
     - packages/dashboard/Dockerfile
