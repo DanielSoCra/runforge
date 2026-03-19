@@ -65,9 +65,11 @@ export function buildCompositeContext(
   // Apply token budget: preserve promptInjection, drop skills before agents, last-activated first
   while (estimateTokens(ctx) > tokenBudget) {
     if (ctx.skills.length > 0) {
-      ctx.skills.pop(); // last-in = last-activated (sorted ascending, last = latest)
+      const dropped = ctx.skills.pop()!; // last-in = last-activated (sorted ascending, last = latest)
+      console.warn(`[plugins] token budget exceeded — dropped skill: ${dropped.pluginId}/${dropped.name}`);
     } else if (ctx.agents.length > 0) {
-      ctx.agents.pop();
+      const dropped = ctx.agents.pop()!;
+      console.warn(`[plugins] token budget exceeded — dropped agent: ${dropped.pluginId}/${dropped.name}`);
     } else {
       break;
     }
