@@ -213,6 +213,11 @@ STACK-AC-DASHBOARD:
     - dashboard/components/sidebar.tsx
     - dashboard/components/run-table.tsx
     - dashboard/components/realtime-provider.tsx
+    - dashboard/actions/repos.ts
+    - dashboard/actions/repos.test.ts
+    - dashboard/app/(dashboard)/repos/page.tsx
+    - dashboard/app/(dashboard)/repos/new/page.tsx
+    - dashboard/app/(dashboard)/repos/[id]/page.tsx
   test_paths:
     - dashboard/**/*.test.ts
     - dashboard/**/*.test.tsx
