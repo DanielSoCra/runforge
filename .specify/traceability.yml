@@ -200,6 +200,10 @@ STACK-AC-DASHBOARD:
     - supabase/
     - package.json
     - package-lock.json
+    - dashboard/app/(dashboard)/runs/page.tsx
+    - dashboard/app/(dashboard)/runs/[id]/page.tsx
+    - dashboard/components/cost-chart.tsx
+    - dashboard/app/(dashboard)/cost/page.tsx
   test_paths:
     - dashboard/**/*.test.ts
     - dashboard/**/*.test.tsx
