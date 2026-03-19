@@ -2,8 +2,9 @@
 import { spawn } from 'child_process';
 import { ok, err, type Result } from '../../lib/result.js';
 import type { AgentDefinition, SessionContext, SessionResult, ExitStatus, PitfallMarker } from '../../types.js';
+import type { ProviderAdapter } from './types.js';
 
-export class CliAdapter {
+export class CliAdapter implements ProviderAdapter {
   buildArgs(def: AgentDefinition, prompt: string, jsonSchema?: string): string[] {
     const args = [
       '-p', prompt,
