@@ -1,0 +1,19 @@
+import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+
+export const BugDiagnosisSchema = z
+  .object({
+    type: z.enum(['A', 'B', 'C']),
+    confidence: z.number().min(0).max(1),
+    affectedSpecs: z.array(z.string()),
+    affectedArtifacts: z.array(z.string()),
+    suggestedAction: z.string(),
+    reasoning: z.string(),
+  })
+  .refine(
+    (d) => d.affectedSpecs.length + d.affectedArtifacts.length >= 1,
+    { message: 'At least one affected spec or artifact required' },
+  );
+
+export type BugDiagnosisOutput = z.infer<typeof BugDiagnosisSchema>;
+export const bugDiagnosisJsonSchema = JSON.stringify(zodToJsonSchema(BugDiagnosisSchema));
