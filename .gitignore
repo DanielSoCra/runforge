@@ -3,6 +3,8 @@ dist/
 state/
 .superpowers/
 *.log
+*.tmp
 .env
 .env.*
+!.env*.example
 ~/.auto-claude/

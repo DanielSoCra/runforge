@@ -1,0 +1,21 @@
+{
+  "repo": {
+    "owner": "your-github-username",
+    "name": "your-repo-name"
+  },
+  "controlPort": 3847,
+  "pollIntervalMs": 30000,
+  "maxConcurrentRuns": 1,
+  "dailyBudget": 50,
+  "perRunBudget": 10,
+  "adapter": "cli",
+  "branches": {
+    "staging": "staging",
+    "production": "main"
+  },
+  "webhooks": [],
+  "validation": {
+    "gate1Commands": ["vitest run", "tsc --noEmit", "eslint --max-warnings 0 src/"],
+    "maxFixCycles": 3
+  }
+}
