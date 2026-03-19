@@ -119,6 +119,11 @@ ARCH-AC-KNOWLEDGE:
   children: [STACK-AC-KNOWLEDGE]
   status: draft
 
+ARCH-AC-HANDOFF:
+  parent: FUNC-AC-HANDOFF
+  children: [STACK-AC-HANDOFF-RUNTIME, STACK-AC-HANDOFF-COORDINATOR]
+  status: draft
+
 # --- Auto-Claude L3 specs (stack-specific) ---
 
 # STACK-AC-CONVENTIONS is a cross-cutting spec — it references L0 directly
