@@ -29,6 +29,8 @@ describe('togglePlugin', () => {
 });
 
 describe('enableAllSuggested', () => {
+  beforeEach(() => vi.clearAllMocks());
+
   it('enables each suggested plugin independently and returns failed ids', async () => {
     vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
     const upsert = vi.fn()
@@ -37,5 +39,14 @@ describe('enableAllSuggested', () => {
     vi.mocked(createServerClient).mockReturnValue({ from: () => ({ upsert }) } as never);
     const result = await enableAllSuggested('repo-id', ['web-stack', 'unknown']);
     expect(result.failed).toContain('unknown');
+  });
+
+  it('tracks failed ids when a valid plugin upsert returns a db error', async () => {
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
+    const upsert = vi.fn().mockResolvedValueOnce({ error: { message: 'db error' } });
+    vi.mocked(createServerClient).mockReturnValue({ from: () => ({ upsert }) } as never);
+    const result = await enableAllSuggested('repo-id', ['web-stack']);
+    expect(result.failed).toContain('web-stack');
+    expect(result.succeeded).toHaveLength(0);
   });
 });
