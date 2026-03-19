@@ -120,25 +120,46 @@ export async function POST() {
 ```
 
 ```sql
--- Atomic first-user-is-admin: Postgres function called on auth callback
-CREATE OR REPLACE FUNCTION bootstrap_first_admin(
-  p_user_id uuid, p_provider_handle text
-) RETURNS void AS $$
+-- Atomic first-user-is-admin + invitation acceptance: Postgres function called on auth callback
+-- Returns: 'admin' | 'viewer' | 'denied'
+CREATE OR REPLACE FUNCTION bootstrap_user_access(
+  p_user_id uuid,
+  p_provider_handle text
+) RETURNS text LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE
+  v_role team_role;
 BEGIN
-  -- Lock the team_members table to prevent race conditions
   LOCK TABLE team_members IN EXCLUSIVE MODE;
+
+  -- First user: always admin
   IF NOT EXISTS (SELECT 1 FROM team_members) THEN
     INSERT INTO team_members (user_id, role) VALUES (p_user_id, 'admin');
-  ELSE
-    INSERT INTO team_members (user_id, role)
-    SELECT p_user_id, role FROM invitations
-    WHERE provider_handle = p_provider_handle AND status = 'pending'
-    LIMIT 1;
-    UPDATE invitations SET status = 'accepted'
-    WHERE provider_handle = p_provider_handle AND status = 'pending';
+    RETURN 'admin';
   END IF;
+
+  -- Already a member (re-login)
+  IF EXISTS (SELECT 1 FROM team_members WHERE user_id = p_user_id) THEN
+    SELECT role INTO v_role FROM team_members WHERE user_id = p_user_id;
+    RETURN v_role::text;
+  END IF;
+
+  -- Check for pending invitation
+  SELECT role INTO v_role FROM invitations
+  WHERE provider_handle = p_provider_handle
+    AND status = 'pending'
+    AND expires_at > now()
+  LIMIT 1;
+
+  IF v_role IS NULL THEN
+    RETURN 'denied';
+  END IF;
+
+  INSERT INTO team_members (user_id, role) VALUES (p_user_id, v_role);
+  UPDATE invitations SET status = 'accepted'
+    WHERE provider_handle = p_provider_handle AND status = 'pending';
+  RETURN v_role::text;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 ```
 
 ```sql
@@ -167,7 +188,7 @@ $$ LANGUAGE sql SECURITY DEFINER;
 - Supabase Realtime only broadcasts changes to rows the client can SELECT via RLS. Ensure viewer RLS policies allow reading the `runs` table.
 - **Docker networking:** The dashboard container uses `http://daemon:3847` to reach the daemon — not `localhost` (which refers to the container itself) and not `host.docker.internal` (unreliable and not needed). Ensure both services are on the same Docker network in `docker-compose.prod.yml`.
 - Caddy's automatic HTTPS requires ports 80 and 443 open. Hetzner firewall must allow inbound HTTP/HTTPS from anywhere for cert provisioning.
-- The first-user-is-admin logic must be atomic. Use the `bootstrap_first_admin` Postgres function shown in Examples — do not implement this in application code with separate SELECT + INSERT.
+- The first-user-is-admin logic must be atomic. Use the `bootstrap_user_access` Postgres function shown in Examples — do not implement this in application code with separate SELECT + INSERT. The function returns `'admin'`, `'viewer'`, or `'denied'` so the auth callback can redirect accordingly.
 - RLS test coverage: the `supabase/tests/` directory must include integration tests that verify admin can read/write all tables, viewer can only read, and unauthenticated requests are rejected.
 - Repos always start with `enabled: false`. The UI should guide the admin through: create repo → add credentials → enable. Do not auto-enable on creation.
 - The `app.encryption_key` Postgres setting must be set at the database level: `ALTER DATABASE postgres SET app.encryption_key = 'your-secret'`. This is done once in a migration and is not a per-connection setting.

@@ -195,7 +195,11 @@ STACK-AC-KNOWLEDGE:
 STACK-AC-DASHBOARD:
   parent: ARCH-AC-DASHBOARD
   children: []
-  code_paths: [dashboard/, supabase/]
+  code_paths:
+    - dashboard/
+    - supabase/
+    - package.json
+    - package-lock.json
   test_paths:
     - dashboard/**/*.test.ts
     - dashboard/**/*.test.tsx
