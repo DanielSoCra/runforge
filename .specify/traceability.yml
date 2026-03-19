@@ -74,3 +74,10 @@ CTRL-FSM-ENGINE:
   test_paths:
     - src/control-plane/fsm.test.ts
   status: approved
+
+CTRL-STATE-PERSISTENCE:
+  code_paths:
+    - src/control-plane/state.ts
+  test_paths:
+    - src/control-plane/state.test.ts
+  status: approved
