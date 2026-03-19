@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runReview } from './review.js';
 import type { Gate } from './gates.js';
-import type { GateResult } from '../types.js';
+import type { GateResult, ReviewFinding } from '../types.js';
 
 function makeGate(type: 'deterministic' | 'spec-compliance' | 'quality' | 'security', result: GateResult): Gate {
   return {
@@ -73,12 +73,124 @@ describe('runReview', () => {
     expect(result.gateResults[0]).toEqual(failedGateResult);
   });
 
-  it('accepts maxFixCycles parameter without breaking', async () => {
+  it('accepts maxFixCycles option without breaking', async () => {
     const gate1 = makeGate('deterministic', { gate: 'deterministic', passed: true, findings: [] });
 
-    const result = await runReview([gate1], '/workspace', 5);
+    const result = await runReview([gate1], '/workspace', { maxFixCycles: 5 });
 
     expect(result.passed).toBe(true);
     expect(result.fixCycles).toBe(0);
+  });
+
+  // Fix cycle tests
+
+  it('runs fix cycle when gate fails and fixHandler succeeds, then passes', async () => {
+    let callCount = 0;
+    const gate1: Gate = {
+      type: 'deterministic',
+      execute: vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) {
+          return { gate: 'deterministic', passed: false, findings: [{ severity: 'critical', location: 'tsc', description: 'type error' }] };
+        }
+        return { gate: 'deterministic', passed: true, findings: [] };
+      }),
+    };
+
+    const fixHandler = vi.fn().mockResolvedValue(true);
+
+    const result = await runReview([gate1], '/workspace', { maxFixCycles: 3, fixHandler });
+
+    expect(result.passed).toBe(true);
+    expect(result.fixCycles).toBe(1);
+    expect(result.escalated).toBe(false);
+    expect(fixHandler).toHaveBeenCalledTimes(1);
+    expect(gate1.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('re-runs ALL gates from gate 1 after a fix cycle', async () => {
+    let gate2CallCount = 0;
+    const gate1: Gate = {
+      type: 'deterministic',
+      execute: vi.fn()
+        .mockResolvedValueOnce({ gate: 'deterministic', passed: false, findings: [{ severity: 'critical', location: 'tsc', description: 'err' }] })
+        .mockResolvedValue({ gate: 'deterministic', passed: true, findings: [] }),
+    };
+    const gate2: Gate = {
+      type: 'quality',
+      execute: vi.fn().mockImplementation(async () => {
+        gate2CallCount++;
+        return { gate: 'quality', passed: true, findings: [] };
+      }),
+    };
+
+    const fixHandler = vi.fn().mockResolvedValue(true);
+
+    const result = await runReview([gate1, gate2], '/workspace', { maxFixCycles: 3, fixHandler });
+
+    expect(result.passed).toBe(true);
+    // gate2 should have been called once (only on second full run after fix)
+    expect(gate2CallCount).toBe(1);
+    expect(gate1.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('escalates after max fix cycles exceeded', async () => {
+    const gate1 = makeGate('deterministic', {
+      gate: 'deterministic',
+      passed: false,
+      findings: [{ severity: 'critical', location: 'tsc', description: 'persistent error' }],
+    });
+    const fixHandler = vi.fn().mockResolvedValue(true);
+
+    const result = await runReview([gate1], '/workspace', { maxFixCycles: 2, fixHandler });
+
+    expect(result.passed).toBe(false);
+    expect(result.escalated).toBe(true);
+    expect(result.fixCycles).toBe(2);
+    // fixHandler called maxFixCycles times
+    expect(fixHandler).toHaveBeenCalledTimes(2);
+  });
+
+  it('escalates immediately when fixHandler returns false', async () => {
+    const gate1 = makeGate('deterministic', {
+      gate: 'deterministic',
+      passed: false,
+      findings: [{ severity: 'critical', location: 'tsc', description: 'error' }],
+    });
+    const fixHandler = vi.fn().mockResolvedValue(false);
+
+    const result = await runReview([gate1], '/workspace', { maxFixCycles: 3, fixHandler });
+
+    expect(result.passed).toBe(false);
+    expect(result.escalated).toBe(true);
+    expect(fixHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it('escalates immediately when no fixHandler provided on failure', async () => {
+    const gate1 = makeGate('deterministic', {
+      gate: 'deterministic',
+      passed: false,
+      findings: [{ severity: 'critical', location: 'tsc', description: 'error' }],
+    });
+
+    const result = await runReview([gate1], '/workspace', { maxFixCycles: 3 });
+
+    expect(result.passed).toBe(false);
+    expect(result.escalated).toBe(false);
+    expect(result.fixCycles).toBe(0);
+  });
+
+  it('passes findings from failed gate to fixHandler', async () => {
+    const findings: ReviewFinding[] = [{ severity: 'important', location: 'src/x.ts', description: 'missing check' }];
+    const gate1 = makeGate('deterministic', {
+      gate: 'deterministic',
+      passed: false,
+      findings,
+    });
+    const fixHandler = vi.fn().mockResolvedValue(false);
+
+    await runReview([gate1], '/workspace', { maxFixCycles: 1, fixHandler });
+
+    expect(fixHandler).toHaveBeenCalledWith(findings);
   });
 });

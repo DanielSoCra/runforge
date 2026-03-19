@@ -1,6 +1,7 @@
 // src/validation/gates.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createGate1 } from './gates.js';
+import { createGate1, selectGates } from './gates.js';
+import type { Gate, } from './gates.js';
 
 vi.mock('../lib/process.js', () => ({
   runCommand: vi.fn(),
@@ -90,5 +91,111 @@ describe('createGate1', () => {
   it('has gate type deterministic', () => {
     const gate = createGate1(['tsc --noEmit']);
     expect(gate.type).toBe('deterministic');
+  });
+});
+
+describe('selectGates', () => {
+  function makeGate(type: Gate['type']): Gate {
+    return { type, execute: vi.fn() };
+  }
+
+  it('simple complexity gets gate 1 and gate 2', () => {
+    const g1 = makeGate('deterministic');
+    const g2 = makeGate('spec-compliance');
+    const g3 = makeGate('quality');
+    const g4 = makeGate('security');
+
+    const result = selectGates('simple', false, g1, g2, g3, g4);
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toBe(g1);
+    expect(result[1]).toBe(g2);
+  });
+
+  it('standard complexity gets gates 1-3', () => {
+    const g1 = makeGate('deterministic');
+    const g2 = makeGate('spec-compliance');
+    const g3 = makeGate('quality');
+    const g4 = makeGate('security');
+
+    const result = selectGates('standard', false, g1, g2, g3, g4);
+
+    expect(result).toHaveLength(3);
+    expect(result[0]).toBe(g1);
+    expect(result[1]).toBe(g2);
+    expect(result[2]).toBe(g3);
+  });
+
+  it('complex complexity gets gates 1-4', () => {
+    const g1 = makeGate('deterministic');
+    const g2 = makeGate('spec-compliance');
+    const g3 = makeGate('quality');
+    const g4 = makeGate('security');
+
+    const result = selectGates('complex', false, g1, g2, g3, g4);
+
+    expect(result).toHaveLength(4);
+    expect(result[0]).toBe(g1);
+    expect(result[1]).toBe(g2);
+    expect(result[2]).toBe(g3);
+    expect(result[3]).toBe(g4);
+  });
+
+  it('risk-sensitive simple adds gate 4 even for simple', () => {
+    const g1 = makeGate('deterministic');
+    const g2 = makeGate('spec-compliance');
+    const g3 = makeGate('quality');
+    const g4 = makeGate('security');
+
+    const result = selectGates('simple', true, g1, g2, g3, g4);
+
+    expect(result).toHaveLength(3);
+    expect(result[0]).toBe(g1);
+    expect(result[1]).toBe(g2);
+    expect(result[2]).toBe(g4);
+  });
+
+  it('risk-sensitive standard adds gate 4 without duplication', () => {
+    const g1 = makeGate('deterministic');
+    const g2 = makeGate('spec-compliance');
+    const g3 = makeGate('quality');
+    const g4 = makeGate('security');
+
+    const result = selectGates('standard', true, g1, g2, g3, g4);
+
+    expect(result).toHaveLength(4);
+    expect(result).toContain(g4);
+    // g4 appears only once
+    expect(result.filter((g) => g === g4)).toHaveLength(1);
+  });
+
+  it('risk-sensitive complex does not duplicate gate 4', () => {
+    const g1 = makeGate('deterministic');
+    const g2 = makeGate('spec-compliance');
+    const g3 = makeGate('quality');
+    const g4 = makeGate('security');
+
+    const result = selectGates('complex', true, g1, g2, g3, g4);
+
+    expect(result).toHaveLength(4);
+    expect(result.filter((g) => g === g4)).toHaveLength(1);
+  });
+
+  it('works when optional gates are not provided', () => {
+    const g1 = makeGate('deterministic');
+
+    const result = selectGates('complex', true, g1);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toBe(g1);
+  });
+
+  it('simple with only gate 1 returns just gate 1', () => {
+    const g1 = makeGate('deterministic');
+
+    const result = selectGates('simple', false, g1);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toBe(g1);
   });
 });
