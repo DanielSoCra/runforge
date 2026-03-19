@@ -21,7 +21,7 @@ export default async function HomePage() {
 
   let daemonStatus: 'running' | 'paused' | 'offline' = 'offline';
   try {
-    const res = await fetch(`${process.env.DAEMON_URL}/status`, { next: { revalidate: 10 } });
+    const res = await fetch(`${process.env.DAEMON_URL}/status`, { next: { revalidate: 10 }, signal: AbortSignal.timeout(3000) });
     if (res.ok) {
       const json = await res.json();
       daemonStatus = json.state ?? 'running';

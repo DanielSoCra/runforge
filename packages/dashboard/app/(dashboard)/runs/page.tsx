@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { RunTable } from '@/components/run-table';
-import { RealtimeProvider } from '@/components/realtime-provider';
+import { Database } from '@/lib/types';
 
 export default async function RunsPage({
   searchParams,
@@ -16,13 +16,12 @@ export default async function RunsPage({
     .limit(100);
 
   if (repo) query = query.eq('repo_id', repo);
-  if (outcome) query = query.eq('outcome', outcome);
+  if (outcome) query = query.eq('outcome', outcome as Database['public']['Enums']['run_outcome']);
 
   const { data: runs } = await query;
 
   return (
     <div className="space-y-6">
-      <RealtimeProvider />
       <div>
         <h1 className="text-2xl font-semibold">Runs</h1>
         <p className="text-muted-foreground text-sm mt-1">Pipeline execution history</p>

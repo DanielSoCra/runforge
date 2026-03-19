@@ -23,6 +23,10 @@ variable "my_ipv6" {
   default = "2001:db8::/56"
 }
 
+variable "my_ipv4" {
+  default = "203.0.113.10"
+}
+
 # --- SSH Key ---
 
 resource "hcloud_ssh_key" "auto_claude" {
@@ -43,12 +47,12 @@ resource "hcloud_firewall" "auto_claude" {
     source_ips = ["0.0.0.0/0", "::/0"] # tighten later once stable
   }
 
-  # Dashboard (optional — remove for production)
+  # Dashboard (restricted to operator IPs)
   rule {
     direction  = "in"
     protocol   = "tcp"
     port       = "3847"
-    source_ips = [var.my_ipv6]
+    source_ips = [var.my_ipv6, "${var.my_ipv4}/32"]
   }
 
   # Allow all outbound

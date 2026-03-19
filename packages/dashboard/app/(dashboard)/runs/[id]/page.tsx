@@ -16,7 +16,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
   const { data: run } = await supabase.from('runs').select('*').eq('id', id).single();
   if (!run) notFound();
 
-  const phases = Array.isArray(run.phases) ? (run.phases as PhaseEvent[]) : [];
+  const phases = Array.isArray(run.phases) ? (run.phases as unknown as PhaseEvent[]) : [];
 
   return (
     <div className="max-w-3xl space-y-6">

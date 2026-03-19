@@ -235,7 +235,7 @@ BEGIN
 END;
 $$;
 REVOKE EXECUTE ON FUNCTION upsert_api_key_encrypted FROM PUBLIC;
-REVOKE EXECUTE ON FUNCTION upsert_api_key_encrypted FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION upsert_api_key_encrypted TO authenticated;
 
 -- Note: Seed the encryption key once after migration:
 -- SELECT vault.create_secret('<your-hex-key>', 'encryption_key', 'pgcrypto key for api_keys table');
@@ -248,3 +248,6 @@ CREATE INDEX idx_runs_repo_id ON runs (repo_id);
 CREATE INDEX idx_runs_started_at ON runs (started_at DESC);
 CREATE INDEX idx_cost_events_run_id ON cost_events (run_id);
 CREATE INDEX idx_cost_events_recorded_at ON cost_events (recorded_at DESC);
+
+-- Enable realtime for live run updates in the dashboard
+ALTER PUBLICATION supabase_realtime ADD TABLE runs;

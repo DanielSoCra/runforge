@@ -45,22 +45,13 @@ export async function changeRole(memberId: string, newRole: 'admin' | 'viewer') 
   const supabase = await createClient();
   await requireAdmin(supabase);
 
-  // Guard: cannot demote if last admin
-  if (newRole === 'viewer') {
-    const { data: otherAdmins } = await supabase
-      .from('team_members')
-      .select('id')
-      .eq('role', 'admin')
-      .neq('id', memberId);
-    if (!otherAdmins?.length) {
-      throw new Error('Cannot demote the last admin. Promote another member first.');
-    }
-  }
-
-  const { error } = await supabase.from('team_members')
-    .update({ role: newRole })
-    .eq('id', memberId);
+  const { data, error } = await supabase.rpc('change_member_role', {
+    p_member_id: memberId,
+    p_new_role: newRole,
+  });
   if (error) throw new Error(error.message);
+  if (data === 'last_admin') throw new Error('Cannot demote the last admin. Assign another admin first.');
+  if (data === 'not_found') throw new Error('Member not found.');
   revalidatePath('/team');
 }
 
@@ -68,21 +59,11 @@ export async function removeMember(memberId: string) {
   const supabase = await createClient();
   await requireAdmin(supabase);
 
-  // Guard: cannot remove if last admin
-  const { data: member } = await supabase.from('team_members').select('role').eq('id', memberId).single();
-  if (member?.role === 'admin') {
-    // Single-tenant app: RLS restricts team_members reads to this team's members.
-    // Exclude the member being removed to count remaining admins.
-    const { data: otherAdmins } = await supabase.from('team_members')
-      .select('id')
-      .eq('role', 'admin')
-      .neq('id', memberId);
-    if (!otherAdmins?.length) {
-      throw new Error('Cannot remove the last admin.');
-    }
-  }
-
-  const { error } = await supabase.from('team_members').delete().eq('id', memberId);
+  const { data, error } = await supabase.rpc('remove_team_member', {
+    p_member_id: memberId,
+  });
   if (error) throw new Error(error.message);
+  if (data === 'last_admin') throw new Error('Cannot remove the last admin. Assign another admin first.');
+  if (data === 'not_found') throw new Error('Member not found.');
   revalidatePath('/team');
 }
