@@ -182,3 +182,15 @@ STACK-AC-KNOWLEDGE:
   code_paths: [src/knowledge/]
   test_paths: [src/knowledge/**/*.test.ts]
   status: draft
+
+STACK-AC-HANDOFF-RUNTIME:
+  parent: ARCH-AC-HANDOFF
+  children: []
+  code_paths:
+    - src/session-runtime/timeout-hook.ts
+    - src/session-runtime/index.ts
+    - .claude/hooks/timeout-warning.sh
+  test_paths:
+    - src/session-runtime/timeout-hook.test.ts
+    - src/session-runtime/index.test.ts
+  status: draft
