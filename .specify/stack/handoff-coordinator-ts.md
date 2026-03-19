@@ -46,6 +46,11 @@ const prefix = state.handoffNote
 return prefix + unit.assembledContext;
 ```
 
+```typescript
+// src/implementation/coordinator.ts — clear stale handoff after success
+state.handoffNote = undefined;
+```
+
 ## Gotchas
 
 - `UnitState` is written to disk as part of crash-resumption checkpoints. Verify the Zod schema (or equivalent) for `UnitState` includes `handoffNote: z.string().optional()` — otherwise it is silently dropped on deserialization and the next attempt starts cold even when a handoff exists.
