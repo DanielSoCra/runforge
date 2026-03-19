@@ -1,0 +1,68 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+global.fetch = vi.fn();
+
+import { createGitHubRepo, commitFile } from './github-api';
+
+const mockFetch = vi.mocked(fetch);
+
+describe('createGitHubRepo', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('POSTs to GitHub API with correct body', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ id: 1, name: 'test-repo', html_url: 'https://github.com/acme/test-repo' }),
+    } as Response);
+
+    const result = await createGitHubRepo('ghp_token', {
+      org: 'acme',
+      name: 'test-repo',
+      description: 'A test repo',
+      private: true,
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://api.github.com/orgs/acme/repos',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer ghp_token' }),
+      })
+    );
+    expect(result.html_url).toBe('https://github.com/acme/test-repo');
+  });
+
+  it('throws on non-ok response', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 422,
+      json: async () => ({ message: 'Repository creation failed' }),
+    } as Response);
+
+    await expect(
+      createGitHubRepo('token', { org: 'acme', name: 'bad', description: '', private: false })
+    ).rejects.toThrow('GitHub API error 422');
+  });
+});
+
+describe('commitFile', () => {
+  it('PUTs file content to GitHub contents API', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ content: { sha: 'abc' } }),
+    } as Response);
+
+    await commitFile('ghp_token', {
+      owner: 'acme',
+      repo: 'web',
+      path: '.specify/L0-vision.md',
+      content: '# Vision',
+      message: 'chore: scaffold L0 vision',
+    });
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://api.github.com/repos/acme/web/contents/.specify/L0-vision.md',
+      expect.objectContaining({ method: 'PUT' })
+    );
+  });
+});
