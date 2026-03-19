@@ -27,32 +27,38 @@ export function createPhaseHandlers(
 
   return {
     detect: async (_run: RunState): Promise<PhaseEvent> => {
-      // detect phase: create feature branch from staging
+      console.log(`[detect] Creating branch ${featureBranch} from ${config.branches.staging}`);
+      await git(['checkout', config.branches.staging]);
       const branchResult = await git(['checkout', '-b', featureBranch, config.branches.staging]);
       if (!branchResult.ok) {
-        // Branch may already exist (crash recovery)
-        await git(['checkout', featureBranch]);
+        console.log(`[detect] Branch exists, checking out`);
+        const co = await git(['checkout', featureBranch]);
+        if (!co.ok) { console.error(`[detect] Checkout failed:`, co.error.message); return 'failure'; }
       }
       return 'success';
     },
 
     classify: async (_run: RunState): Promise<PhaseEvent> => {
-      // MVP: always classify as simple (skip decomposition)
+      console.log(`[classify] MVP: returning simple`);
       return 'success:simple';
     },
 
     implement: async (run: RunState): Promise<PhaseEvent> => {
+      console.log(`[implement] Starting for #${workRequest.issueNumber} on ${featureBranch}`);
       const result = await coordinator.implement(workRequest, featureBranch);
-      if (!result.ok) return 'failure';
-      if (!result.value.success) return 'failure';
+      if (!result.ok) { console.error(`[implement] Error:`, result.error.message); return 'failure'; }
+      if (!result.value.success) { console.error(`[implement] Failed:`, result.value.error); return 'failure'; }
       run.cost += result.value.totalCost;
+      console.log(`[implement] Done, cost: $${result.value.totalCost.toFixed(2)}`);
       return 'success';
     },
 
-    review: async (run: RunState): Promise<PhaseEvent> => {
+    review: async (_run: RunState): Promise<PhaseEvent> => {
+      console.log(`[review] Running gate 1 in ${process.cwd()}`);
       const gates: Gate[] = [createGate1(config.validation.gate1Commands)];
-      const result = await runReview(gates, featureBranch);
-      if (!result.passed) return 'failure';
+      const result = await runReview(gates, process.cwd());
+      if (!result.passed) { console.error(`[review] Failed:`, JSON.stringify(result.gateResults)); return 'failure'; }
+      console.log(`[review] Passed`);
       return 'success';
     },
 

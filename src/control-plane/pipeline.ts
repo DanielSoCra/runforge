@@ -74,6 +74,7 @@ export async function runPipeline(
     }
 
     // Execute the phase handler
+    console.log(`[pipeline] Phase: ${run.phase}`);
     let event: PhaseEvent;
     try {
       event = await handler(run);

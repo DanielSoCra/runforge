@@ -142,7 +142,9 @@ async function processWorkRequest(
   const handlers = createPhaseHandlers(config, runtime, coordinator, octokit, request, stateDir);
   const table = getPipeline('feature-simple');
 
+  console.log(`[daemon] Pipeline start for #${request.issueNumber}: ${request.title}`);
   const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+  console.log(`[daemon] Pipeline done for #${request.issueNumber}: ${result.outcome}${result.error ? ` — ${result.error}` : ''}`);
 
   if (result.outcome === 'stuck') {
     const detector = createWorkDetector(octokit, config.repo.owner, config.repo.name);
