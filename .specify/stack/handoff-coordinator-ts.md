@@ -40,7 +40,7 @@ interface UnitState {
 
 ```typescript
 // src/implementation/coordinator.ts — context assembly
-function assembleUnitContext(unit: Unit, state: UnitState): string {
+function assembleUnitContext(unit: Unit, state: UnitState) {
   const prefix = state.handoffNote
     ? `[PREVIOUS ATTEMPT]\n${state.handoffNote}\n\n`
     : '';

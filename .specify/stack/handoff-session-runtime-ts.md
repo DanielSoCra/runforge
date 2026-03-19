@@ -33,17 +33,12 @@ test_paths:
 ## Examples
 
 ```typescript
-// src/session-runtime/timeout-hook.ts
-export function makeTimeoutHook(startTime: number, timeoutMs: number) {
-  let warned = false;
-  return (_toolName: string): { block: boolean; message?: string } => {
-    if (!warned && Date.now() - startTime > timeoutMs - 120_000) {
-      warned = true;
-      return { block: true, message: TIMEOUT_WARNING_MESSAGE };
-    }
-    return { block: false };
-  };
+// timeout-hook.ts — one-shot threshold check inside the returned hook
+if (!warned && Date.now() - startTime > timeoutMs - 120_000) {
+  warned = true;
+  return { block: true, message: TIMEOUT_WARNING_MESSAGE };
 }
+return { block: false };
 ```
 
 ```typescript
