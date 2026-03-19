@@ -45,7 +45,7 @@
 - `packages/dashboard/app/api/daemon/status/route.ts` — already passes through daemon JSON; no change needed (daemon response now includes the new fields automatically)
 
 **Supabase:**
-- `supabase/migrations/002_command_center.sql` — add `webhook-secret` to `key_type` enum; add `matrix_status` column to `repos`
+- `supabase/migrations/003_command_center.sql` — add `webhook-secret` to `key_type` enum; add `matrix_status` column to `repos`
 
 ---
 
@@ -104,12 +104,12 @@ git commit -m "chore(dashboard): add test and typecheck scripts"
 ## Task 1: Supabase migration — extend schema
 
 **Files:**
-- Create: `supabase/migrations/002_command_center.sql`
+- Create: `supabase/migrations/003_command_center.sql`
 
 - [ ] **Step 1: Write the migration**
 
 ```sql
--- 002_command_center.sql
+-- 003_command_center.sql
 
 -- Add webhook-secret to key_type enum
 ALTER TYPE key_type ADD VALUE IF NOT EXISTS 'webhook-secret';
@@ -148,7 +148,7 @@ Expected: all existing tests pass
 - [ ] **Step 4: Commit**
 
 ```bash
-git add supabase/migrations/002_command_center.sql packages/dashboard/lib/types.ts
+git add supabase/migrations/003_command_center.sql packages/dashboard/lib/types.ts
 git commit -m "feat(schema): add webhook-secret key type and matrix_status to repos"
 ```
 

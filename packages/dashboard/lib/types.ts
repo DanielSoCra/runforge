@@ -140,7 +140,7 @@ export type Database = {
           deleted_at: string | null
           enabled: boolean
           id: string
-          matrix_status: "ok" | "degraded" | "failed"
+          matrix_status: Database["public"]["Enums"]["matrix_status"]
           name: string
           owner: string
           poll_interval_ms: number | null
@@ -155,7 +155,7 @@ export type Database = {
           deleted_at?: string | null
           enabled?: boolean
           id?: string
-          matrix_status?: "ok" | "degraded" | "failed"
+          matrix_status?: Database["public"]["Enums"]["matrix_status"]
           name: string
           owner: string
           poll_interval_ms?: number | null
@@ -170,7 +170,7 @@ export type Database = {
           deleted_at?: string | null
           enabled?: boolean
           id?: string
-          matrix_status?: "ok" | "degraded" | "failed"
+          matrix_status?: Database["public"]["Enums"]["matrix_status"]
           name?: string
           owner?: string
           poll_interval_ms?: number | null
@@ -287,6 +287,7 @@ export type Database = {
     Enums: {
       invite_status: "pending" | "accepted"
       key_type: "source-control" | "model-provider" | "webhook-secret"
+      matrix_status: "ok" | "degraded" | "failed"
       run_outcome: "in-progress" | "complete" | "stuck" | "escalated"
       session_type:
         | "planning"
@@ -424,6 +425,7 @@ export const Constants = {
     Enums: {
       invite_status: ["pending", "accepted"],
       key_type: ["source-control", "model-provider", "webhook-secret"],
+      matrix_status: ["ok", "degraded", "failed"],
       run_outcome: ["in-progress", "complete", "stuck", "escalated"],
       session_type: [
         "planning",
