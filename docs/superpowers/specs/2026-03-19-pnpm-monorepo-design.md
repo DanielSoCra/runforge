@@ -68,40 +68,140 @@ ignoredBuiltDependencies:
 
 The `ignoredBuiltDependencies` entries were previously in `dashboard/pnpm-workspace.yaml`; they move here. The dashboard's `pnpm-lock.yaml` and `pnpm-workspace.yaml` are deleted — one root lockfile covers both packages.
 
+## Docker Build Context
+
+**Critical constraint:** After monorepo conversion, `pnpm-lock.yaml` lives at the repo root. Docker `COPY` cannot reach outside the build context, so **both packages must use `context: .` (repo root)** with an explicit `dockerfile:` path pointing into `packages/`.
+
+Both Dockerfiles use selective COPY that works from the repo root context:
+
+1. Copy workspace root files (`package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`)
+2. Copy **both** package manifests — pnpm needs all workspace package.json files to resolve the unified lockfile
+3. Run `pnpm install --frozen-lockfile`
+4. Copy only the relevant package's source
+
+### Daemon Dockerfile (`packages/daemon/Dockerfile`)
+
+The daemon uses `process.cwd()` to resolve `state/`, `prompts/`, `fitness/`, and `auto-claude.config.json`. Setting `WORKDIR /app/packages/daemon` makes those relative paths resolve correctly, and volume mounts in the compose files target that same path.
+
+```dockerfile
+FROM node:22-slim
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
+RUN npm install -g @anthropic-ai/claude-code
+
+# Install phase — repo root as context, so pnpm-lock.yaml is accessible
+WORKDIR /app
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY packages/daemon/package.json ./packages/daemon/package.json
+COPY packages/dashboard/package.json ./packages/dashboard/package.json
+RUN pnpm install --frozen-lockfile
+
+# Copy daemon source
+COPY packages/daemon/src/ ./packages/daemon/src/
+COPY packages/daemon/tsconfig.json ./packages/daemon/
+
+# Run from daemon package dir so process.cwd() resolves state/, prompts/, etc.
+WORKDIR /app/packages/daemon
+RUN mkdir -p state/runs
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
+  CMD curl -f http://127.0.0.1:3847/health || exit 1
+
+EXPOSE 3847
+
+# CMD (not ENTRYPOINT) so docker-compose `command:` can fully override it in dev
+CMD ["pnpm", "start", "--", "-c", "/app/packages/daemon/auto-claude.config.json"]
+```
+
+### Dashboard Dockerfile (`packages/dashboard/Dockerfile`)
+
+```dockerfile
+FROM node:22-alpine AS base
+RUN npm install -g pnpm
+
+FROM base AS deps
+WORKDIR /app
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY packages/daemon/package.json ./packages/daemon/package.json
+COPY packages/dashboard/package.json ./packages/dashboard/package.json
+RUN pnpm install --frozen-lockfile
+
+FROM base AS builder
+WORKDIR /app
+# Workspace root files are required so pnpm recognises the workspace and
+# resolves node_modules from /app/node_modules during next build
+COPY package.json pnpm-workspace.yaml ./
+COPY packages/daemon/package.json ./packages/daemon/package.json
+COPY --from=deps /app/node_modules ./node_modules
+COPY packages/dashboard/ ./packages/dashboard/
+WORKDIR /app/packages/dashboard
+RUN pnpm build
+
+FROM base AS runner
+WORKDIR /app/packages/dashboard
+ENV NODE_ENV=production
+COPY --from=builder /app/packages/dashboard/.next/standalone ./
+COPY --from=builder /app/packages/dashboard/.next/static ./.next/static
+COPY --from=builder /app/packages/dashboard/public ./public
+EXPOSE 3000
+CMD ["node", "server.js"]
+```
+
 ## Docker Compose Changes
 
 ### `docker-compose.yml` (dev)
 
-Build context changes from `.` to `./packages/daemon`. Volume mounts for `prompts/`, `fitness/`, and `auto-claude.config.json` remain at root paths and still resolve correctly.
+Context changes to `.` (repo root) with explicit dockerfile path. Volume mounts updated to bind into `/app/packages/daemon/` to match the daemon's `WORKDIR`. Config path in the `command:` override is also updated.
 
 ```yaml
 services:
   daemon:
     build:
-      context: ./packages/daemon
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: packages/daemon/Dockerfile
     volumes:
-      - ./prompts:/app/prompts:ro
-      - ./fitness:/app/fitness:ro
-      - ./auto-claude.config.json:/app/auto-claude.config.json:ro
-      - daemon-state:/app/state
+      - ./prompts:/app/packages/daemon/prompts:ro
+      - ./fitness:/app/packages/daemon/fitness:ro
+      - ./auto-claude.config.json:/app/packages/daemon/auto-claude.config.json:ro
+      - daemon-state:/app/packages/daemon/state
+    command: >
+      sh -c "
+        git config --global user.name 'Auto-Claude' &&
+        git config --global user.email 'auto-claude@localhost' &&
+        pnpm start -- -c /app/packages/daemon/auto-claude.config.json
+      "
 ```
 
 ### `docker-compose.prod.yml` (production)
 
-Two context updates:
+Two context updates. Also fixes the `dockerfile: Dockerfile.daemon` reference (that file does not exist — the root `Dockerfile` is the daemon's Dockerfile, and it moves to `packages/daemon/Dockerfile`). Daemon volume mounts are added (they were missing from the prod compose).
 
 ```yaml
   dashboard:
     build:
-      context: ./packages/dashboard   # was: ./dashboard
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: packages/dashboard/Dockerfile   # was: context ./dashboard, dockerfile Dockerfile
 
   daemon:
     build:
-      context: ./packages/daemon      # was: implicit root
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: packages/daemon/Dockerfile      # was: Dockerfile.daemon (non-existent)
+    volumes:
+      - ./prompts:/app/packages/daemon/prompts:ro
+      - ./fitness:/app/packages/daemon/fitness:ro
+      - ./auto-claude.config.json:/app/packages/daemon/auto-claude.config.json:ro
+      - daemon-state:/app/packages/daemon/state
 ```
+
+## `traceability.yml` Path Updates
+
+After `git mv`, all `code_paths` and `test_paths` entries referencing `src/` (daemon) or `dashboard/` must be updated:
+
+- `src/` → `packages/daemon/src/`
+- `dashboard/` → `packages/dashboard/`
+
+This applies to `STACK-AC-DAEMON` and `STACK-AC-DASHBOARD` entries.
 
 ## Migration Path
 
@@ -114,16 +214,19 @@ All steps run in the `feature/dashboard` worktree. `git mv` is used throughout t
 5. Update `packages/daemon/package.json` — set `name: "@auto-claude/daemon"`
 6. Update `packages/dashboard/package.json` — set `name: "@auto-claude/dashboard"`
 7. Delete `packages/dashboard/pnpm-lock.yaml` and `packages/dashboard/pnpm-workspace.yaml`
-8. Update `docker-compose.yml` and `docker-compose.prod.yml` build contexts
-9. Run `pnpm install` from root to generate unified lockfile
-10. Run `pnpm test` — verify both packages pass
-11. Commit: `chore: convert to pnpm monorepo`
-12. Merge `feature/dashboard` to main
+8. Rewrite `packages/daemon/Dockerfile` — use repo-root context pattern with dual `WORKDIR` (see Daemon Dockerfile section)
+9. Rewrite `packages/dashboard/Dockerfile` — use repo-root context pattern (see Dashboard Dockerfile section)
+10. Update `docker-compose.yml` — new build context, dockerfile path, volume mounts, and command (see docker-compose.yml section)
+11. Update `docker-compose.prod.yml` — new contexts, dockerfile paths, add daemon volumes, fix Dockerfile.daemon reference (see docker-compose.prod.yml section)
+12. Update `.specify/traceability.yml` — update `code_paths` and `test_paths` for daemon and dashboard specs
+13. Run `pnpm install` from root to generate unified lockfile
+14. Run `pnpm test` — verify both packages pass
+15. Commit: `chore: convert to pnpm monorepo`
+16. Merge `feature/dashboard` to main
 
 ## What Does Not Change
 
 - Daemon `src/` code — no source edits
 - Dashboard `app/`, `actions/`, `components/` code — no source edits
 - TypeScript path aliases (`@/lib/...`) — resolved from `packages/dashboard/tsconfig.json`, unchanged
-- Daemon `Dockerfile` internals — `COPY . .` copies from the package context, so `src/`, `package.json`, `pnpm-lock.yaml` are still found correctly
-- `docker-compose.yml` volume mounts for `prompts/` and `fitness/`
+- Root `.gitignore` — `node_modules/` (no leading slash) already matches `packages/*/node_modules/` in git; no change needed
