@@ -124,6 +124,11 @@ ARCH-AC-HANDOFF:
   children: [STACK-AC-HANDOFF-RUNTIME, STACK-AC-HANDOFF-COORDINATOR]
   status: draft
 
+ARCH-AC-ENRICHED-COMMITS:
+  parent: FUNC-AC-ENRICHED-COMMITS
+  children: [STACK-AC-ENRICHED-COMMITS-WORKER, STACK-AC-ENRICHED-COMMITS-KNOWLEDGE]
+  status: draft
+
 # --- Auto-Claude L3 specs (stack-specific) ---
 
 # STACK-AC-CONVENTIONS is a cross-cutting spec — it references L0 directly
