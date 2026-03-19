@@ -13,6 +13,7 @@ import { getPipeline, getStartPhase } from './fsm.js';
 import { notify } from './notify.js';
 import type { RunState, WorkRequest } from '../types.js';
 import { ok, err, type Result } from '../lib/result.js';
+import { RemoteControlManager } from './remote-control.js';
 
 export async function startDaemon(configPath: string): Promise<Result<void>> {
   // 1. Load config
@@ -33,6 +34,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   const runtime = new SessionRuntime(config, costTracker);
   const coordinator = new ImplementationCoordinator(runtime, process.cwd());
 
+  // 3b. Start Remote Control
+  const remoteControl = new RemoteControlManager();
+  remoteControl.start();
+
   // 4. Initialize GitHub client
   const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
   const detector = createWorkDetector(octokit, config.repo.owner, config.repo.name);
@@ -49,6 +54,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       dailyCost: costTracker.getDailyCost(),
       paused,
       uptime: process.uptime(),
+      ...remoteControl.getState(),
     }),
     pause: () => { paused = true; },
     resume: () => { paused = false; },
@@ -101,6 +107,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     while (activeRuns > 0 && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 1000));
     }
+    await remoteControl.stop();
     server.close();
     console.log('Daemon stopped.');
   };

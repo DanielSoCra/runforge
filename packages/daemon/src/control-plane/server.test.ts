@@ -70,4 +70,26 @@ describe('ControlServer', () => {
     expect(result.ok).toBe(false);
     server2.close();
   });
+
+  it('GET /status includes remote_control fields', async () => {
+    const { server: s2, start: start2 } = createControlServer(PORT + 1, {
+      getStatus: () => ({
+        activeRuns: 0,
+        dailyCost: 0,
+        paused: false,
+        remote_control_url: 'https://claude.ai/remote/test',
+        remote_control_state: 'active',
+      }),
+      pause: () => {},
+      resume: () => {},
+      retry: () => ok(undefined),
+    });
+    serverRef = s2;
+    await start2();
+
+    const res = await fetch(`http://127.0.0.1:${PORT + 1}/status`);
+    const body = await res.json();
+    expect(body.remote_control_url).toBe('https://claude.ai/remote/test');
+    expect(body.remote_control_state).toBe('active');
+  });
 });
