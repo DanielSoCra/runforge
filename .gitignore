@@ -9,3 +9,6 @@ state/
 .env.*
 !.env*.example
 ~/.auto-claude/
+infra/terraform.tfvars
+infra/.terraform/
+infra/*.tfstate*

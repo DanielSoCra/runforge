@@ -1,0 +1,40 @@
+#cloud-config
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - git
+  - curl
+  - build-essential
+  - jq
+
+runcmd:
+  # Node.js 22 LTS
+  - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  - apt-get install -y nodejs
+
+  # pnpm
+  - corepack enable
+  - corepack prepare pnpm@latest --activate
+
+  # Claude CLI
+  - npm install -g @anthropic-ai/claude-code
+
+  # Create auto-claude user
+  - useradd -m -s /bin/bash autoclaud
+  - mkdir -p /home/autoclaud/.ssh
+  - cp /root/.ssh/authorized_keys /home/autoclaud/.ssh/authorized_keys
+  - chown -R autoclaud:autoclaud /home/autoclaud/.ssh
+  - chmod 700 /home/autoclaud/.ssh
+  - chmod 600 /home/autoclaud/.ssh/authorized_keys
+
+  # Clone the repo
+  - su - autoclaud -c "git clone https://github.com/DANIELSOCRAHANDLEZZ/auto-claude.git /home/autoclaud/auto-claude"
+  - su - autoclaud -c "cd /home/autoclaud/auto-claude && pnpm install"
+
+  # Create state directory
+  - su - autoclaud -c "mkdir -p /home/autoclaud/auto-claude/state/runs"
+
+  # Write a ready marker
+  - echo "auto-claude server ready" > /root/READY
