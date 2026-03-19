@@ -86,7 +86,7 @@ The daemon uses `process.cwd()` to resolve `state/`, `prompts/`, `fitness/`, and
 ```dockerfile
 FROM node:22-slim
 
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable   # reads packageManager field from package.json — pnpm version is pinned there
 RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
 RUN npm install -g @anthropic-ai/claude-code
 
@@ -118,7 +118,7 @@ CMD ["pnpm", "start", "--", "-c", "/app/packages/daemon/auto-claude.config.json"
 
 ```dockerfile
 FROM node:22-alpine AS base
-RUN npm install -g pnpm
+RUN corepack enable   # reads packageManager from root package.json — pnpm version is pinned there
 
 FROM base AS deps
 WORKDIR /app
@@ -196,12 +196,12 @@ Two context updates. Also fixes the `dockerfile: Dockerfile.daemon` reference (t
 
 ## `traceability.yml` Path Updates
 
-After `git mv`, all `code_paths` and `test_paths` entries referencing `src/` (daemon) or `dashboard/` must be updated:
+After `git mv`, **every** `code_paths` and `test_paths` entry in `.specify/traceability.yml` that references `src/` or `dashboard/` must be updated:
 
-- `src/` → `packages/daemon/src/`
-- `dashboard/` → `packages/dashboard/`
+- Any path starting with `src/` → `packages/daemon/src/`
+- Any path starting with `dashboard/` → `packages/dashboard/`
 
-This applies to `STACK-AC-DAEMON` and `STACK-AC-DASHBOARD` entries.
+This covers all daemon STACK specs (`STACK-AC-CONVENTIONS`, `STACK-AC-CONTROL-PLANE`, `STACK-AC-IMPLEMENTATION`, `STACK-AC-VALIDATION`, `STACK-AC-SESSION-RUNTIME`, `STACK-AC-DIAGNOSIS`, `STACK-AC-KNOWLEDGE`, `STACK-AC-HANDOFF-RUNTIME`, `STACK-AC-HANDOFF-COORDINATOR`, `STACK-AC-ENRICHED-COMMITS-WORKER`, `STACK-AC-ENRICHED-COMMITS-KNOWLEDGE`, `STACK-AC-PLUGINS-DAEMON`) and the dashboard spec (`STACK-AC-DASHBOARD`). Also update the `code_paths` and `test_paths` frontmatter in each affected `.specify/stack/*.md` file itself.
 
 ## Migration Path
 

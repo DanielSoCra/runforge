@@ -63,7 +63,7 @@ An autonomous system that processes work across multiple repositories needs a ce
 **Scenario: Remove a repository**
 - Given an admin viewing a disabled repository
 - When they remove it
-- Then its configuration is deleted but run history is preserved
+- Then it is logically removed — run history is preserved, and configuration is retained for audit purposes but the repository no longer appears in the UI or daemon sync
 
 ### Credential Management
 
@@ -120,7 +120,7 @@ An autonomous system that processes work across multiple repositories needs a ce
 - Given a repository has a budget limit
 - When the run cost reaches 80% of the limit, and again when it reaches 100%
 - Then the dashboard indicates the budget status visually with a distinct warning and exceeded state
-- Note: the 80% threshold is implementation-defined and may be made configurable in a later iteration
+- Note: budget limits are advisory in this version — the daemon does not abort runs that exceed the limit. The default warning threshold is 80%; making it configurable is deferred to a future iteration.
 
 ### Team Management
 
@@ -128,6 +128,7 @@ An autonomous system that processes work across multiple repositories needs a ce
 - Given an admin
 - When they create an invitation by specifying a provider username (e.g. GitHub handle) and a role
 - Then the invitation is stored pending, and when that user next signs in they are automatically granted access with the specified role
+- Note: matching on provider username is accepted for private deployments; provider usernames can change, which is a known tradeoff. Future hardening may match on immutable provider user ID instead.
 
 **Scenario: Change a member's role**
 - Given an admin viewing the team page

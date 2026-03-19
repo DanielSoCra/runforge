@@ -86,8 +86,9 @@ The Daemon fetches its configuration from the Database Service instead of a loca
 2. No session → redirect to auth provider's sign-in page.
 3. User authenticates with the provider → redirected back with an auth token.
 4. Dashboard creates or updates the User record in the Database Service.
-5. If no other users exist, assign admin role atomically (single transaction — see L3). Otherwise, check Invitation for a pending record matching the user's provider handle.
-6. If a matching pending Invitation exists, accept it (create TeamMember, mark invitation accepted). Otherwise deny access: "Access denied — ask an admin to invite you."
+5. Check TeamMember for an existing record matching the user's ID. If found → user is already a member, return their current role (re-login path — no further checks needed).
+6. If no TeamMember exists and no other users exist, assign admin role atomically (single transaction — see L3).
+7. Otherwise, check Invitation for a pending record matching the user's provider handle. If a matching pending Invitation exists, accept it (create TeamMember, mark invitation accepted). Otherwise deny access: "Access denied — ask an admin to invite you."
 
 **Add repository flow:**
 1. Admin fills in owner, name, branch config, budget, concurrency limit.

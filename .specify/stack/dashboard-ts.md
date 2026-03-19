@@ -75,11 +75,11 @@ export async function createClient() {
 ```
 
 ```typescript
-// Auth middleware — must call updateSession on every request
+// Next.js 16: entry file is proxy.ts, exported function is proxy (not middleware)
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 
-export async function middleware(request) {
+export async function proxy(request) {
   const { supabase, response } = createServerClient(/* ... */);
   await supabase.auth.getUser(); // refresh session
   return response;
@@ -143,11 +143,13 @@ BEGIN
     RETURN v_role::text;
   END IF;
 
-  -- Check for pending invitation
-  SELECT role INTO v_role FROM invitations
+  -- Check for pending invitation (deterministic: oldest first; update only that row)
+  DECLARE v_inv_id uuid;
+  SELECT id, role INTO v_inv_id, v_role FROM invitations
   WHERE provider_handle = p_provider_handle
     AND status = 'pending'
     AND expires_at > now()
+  ORDER BY created_at ASC
   LIMIT 1;
 
   IF v_role IS NULL THEN
@@ -155,33 +157,39 @@ BEGIN
   END IF;
 
   INSERT INTO team_members (user_id, role) VALUES (p_user_id, v_role);
-  UPDATE invitations SET status = 'accepted'
-    WHERE provider_handle = p_provider_handle AND status = 'pending';
+  UPDATE invitations SET status = 'accepted' WHERE id = v_inv_id;
   RETURN v_role::text;
 END;
 $$;
 ```
 
 ```sql
--- pgcrypto: write encrypted key (dashboard)
-INSERT INTO api_keys (repo_id, key_type, encrypted_value, updated_at)
-VALUES ($1, $2, pgp_sym_encrypt($3, current_setting('app.encryption_key')), now())
-ON CONFLICT (repo_id, key_type) DO UPDATE
-  SET encrypted_value = EXCLUDED.encrypted_value, updated_at = now();
+-- Dashboard WRITES via SECURITY DEFINER RPC (never direct table write)
+-- The Server Action calls supabase.rpc('upsert_api_key_encrypted', {...})
+CREATE OR REPLACE FUNCTION upsert_api_key_encrypted(
+  p_repo_id uuid, p_key_type text, p_plaintext text
+) RETURNS void LANGUAGE sql SECURITY DEFINER AS $$
+  INSERT INTO api_keys (repo_id, key_type, encrypted_value, updated_at)
+  VALUES (p_repo_id, p_key_type, pgp_sym_encrypt(p_plaintext, current_setting('app.encryption_key')), now())
+  ON CONFLICT (repo_id, key_type) DO UPDATE
+    SET encrypted_value = EXCLUDED.encrypted_value, updated_at = now();
+$$;
+-- Revoke from public; grant only to dashboard anon/service role
 
--- Daemon decryption via SECURITY DEFINER function (not raw pgp_sym_decrypt)
+-- Daemon READS via SECURITY DEFINER function (never raw pgp_sym_decrypt)
 CREATE OR REPLACE FUNCTION decrypt_api_key(p_repo_id uuid, p_key_type text)
-RETURNS text AS $$
+RETURNS text LANGUAGE sql SECURITY DEFINER AS $$
   SELECT pgp_sym_decrypt(encrypted_value, current_setting('app.encryption_key'))
   FROM api_keys WHERE repo_id = p_repo_id AND key_type = p_key_type;
-$$ LANGUAGE sql SECURITY DEFINER;
+$$;
 -- Daemon calls: SELECT decrypt_api_key($1, $2)
 -- The app.encryption_key setting is loaded by the DB at session start via ALTER DATABASE SET
 ```
 
 ## Gotchas
 
-- Supabase Auth cookies must be refreshed in middleware on every request. Use the `@supabase/ssr` `updateSession` pattern — stale cookies cause silent auth failures.
+- **Next.js 16 renamed Middleware to Proxy.** The file is `proxy.ts` (not `middleware.ts`) and the exported function is `proxy` (not `middleware`). The Supabase SSR helper in `lib/supabase/middleware.ts` keeps its name — only the Next.js entry file changed.
+- Supabase Auth cookies must be refreshed in the proxy on every request. Use the `@supabase/ssr` `updateSession` pattern — stale cookies cause silent auth failures.
 - The service-role key (used by the daemon) bypasses ALL RLS policies. Never expose it to the browser. Store it only as a server-side environment variable in `.env.prod` (excluded from version control). Never inline secrets in `docker-compose.prod.yml`.
 - `pgp_sym_encrypt` requires the `pgcrypto` extension: `CREATE EXTENSION IF NOT EXISTS pgcrypto` in the first migration.
 - The `decrypt_api_key` function must be `SECURITY DEFINER` so only the Postgres role can access it. Revoke `EXECUTE` from `public`; grant only to the service-role.
@@ -233,7 +241,7 @@ dashboard/                       # Next.js project (separate from daemon)
       client.ts                  # Browser-side Supabase client
       middleware.ts              # Auth middleware helper (updateSession)
     types.ts                     # Database types (generated from Supabase)
-  middleware.ts                  # Next.js middleware (auth check)
+  proxy.ts                       # Next.js proxy (auth check) — renamed from middleware.ts in Next.js 16
   next.config.ts
   tailwind.config.ts
   package.json
