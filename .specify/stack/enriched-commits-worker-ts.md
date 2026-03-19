@@ -38,8 +38,18 @@ Dead-ends: <approach tried that failed and why>
 Artifacts: src/services/auth/**/*.ts, src/models/user.ts
 ```
 
+Minimal valid commit (no discoveries or dead-ends):
+
+```
+feat: <what changed>
+
+Why: <spec decision>
+Artifacts: src/services/auth/**/*.ts
+```
+
 ## Gotchas
 
 - `Artifacts:` values must not contain commas within a single glob pattern — commas are the delimiter when splitting patterns. Standard glob patterns do not contain commas; this is a documentation concern, not a code concern.
+- Commits missing `Artifacts:` are skipped entirely — including `Why:` content. The `Why:` field documents rationale but is not extracted into the gotcha store. Skipping the commit on missing `Artifacts:` is intentional: without artifact patterns, extracted gotchas have no injection target.
 - If a unit produces no non-obvious discoveries and hits no dead ends, the worker should still write `Why:` and `Artifacts:`. An absent or empty `Discovered:` produces no gotcha but keeps the commit parseable. Do not omit `Artifacts:` — a commit without it is entirely skipped.
 - The prompt template should give a concrete example of each field, not just a description. Workers produce better output when they can see the target format directly.
