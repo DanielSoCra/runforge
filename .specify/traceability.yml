@@ -221,6 +221,9 @@ STACK-AC-DASHBOARD:
     - dashboard/actions/api-keys.ts
     - dashboard/components/cost-chart.tsx
     - dashboard/app/(dashboard)/cost/page.tsx
+    - dashboard/actions/team.ts
+    - dashboard/app/(dashboard)/team/page.tsx
+    - dashboard/actions/team.test.ts
   test_paths:
     - dashboard/**/*.test.ts
     - dashboard/**/*.test.tsx
