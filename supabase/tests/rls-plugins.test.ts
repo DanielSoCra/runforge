@@ -50,4 +50,24 @@ describe('repo_plugins RLS', () => {
     const { error } = await client.from('repo_plugins').insert({ repo_id: repoId, plugin_id: 'viewer-attempt' });
     expect(error).not.toBeNull();
   });
+
+  it('admin can update repo_plugins', async () => {
+    if (!ADMIN_JWT) return;
+    const client = createClient(URL, ANON, { global: { headers: { Authorization: `Bearer ${ADMIN_JWT}` } } });
+    const { error } = await client.from('repo_plugins')
+      .update({ active: true })
+      .eq('repo_id', repoId)
+      .eq('plugin_id', 'test-plugin');
+    expect(error).toBeNull();
+  });
+
+  it('viewer cannot update repo_plugins', async () => {
+    if (!VIEWER_JWT) return;
+    const client = createClient(URL, ANON, { global: { headers: { Authorization: `Bearer ${VIEWER_JWT}` } } });
+    const { error } = await client.from('repo_plugins')
+      .update({ active: false })
+      .eq('repo_id', repoId)
+      .eq('plugin_id', 'test-plugin');
+    expect(error).not.toBeNull();
+  });
 });
