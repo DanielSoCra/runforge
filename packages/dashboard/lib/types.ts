@@ -132,6 +132,47 @@ export type Database = {
         }
         Relationships: []
       }
+      repo_plugins: {
+        Row: {
+          activated_at: string | null
+          active: boolean
+          id: string
+          plugin_id: string
+          recommendation_reason: string | null
+          recommended: boolean
+          recommended_at: string | null
+          repo_id: string
+        }
+        Insert: {
+          activated_at?: string | null
+          active?: boolean
+          id?: string
+          plugin_id: string
+          recommendation_reason?: string | null
+          recommended?: boolean
+          recommended_at?: string | null
+          repo_id: string
+        }
+        Update: {
+          activated_at?: string | null
+          active?: boolean
+          id?: string
+          plugin_id?: string
+          recommendation_reason?: string | null
+          recommended?: boolean
+          recommended_at?: string | null
+          repo_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "repo_plugins_repo_id_fkey"
+            columns: ["repo_id"]
+            isOneToOne: false
+            referencedRelation: "repos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       repos: {
         Row: {
           budget_limit: number | null
@@ -179,6 +220,7 @@ export type Database = {
       }
       runs: {
         Row: {
+          active_plugins: string[]
           completed_at: string | null
           current_phase: string | null
           fix_attempts: number
@@ -196,6 +238,7 @@ export type Database = {
           total_cost: number
         }
         Insert: {
+          active_plugins?: string[]
           completed_at?: string | null
           current_phase?: string | null
           fix_attempts?: number
@@ -213,6 +256,7 @@ export type Database = {
           total_cost?: number
         }
         Update: {
+          active_plugins?: string[]
           completed_at?: string | null
           current_phase?: string | null
           fix_attempts?: number
@@ -269,6 +313,13 @@ export type Database = {
         Args: { p_provider_handle: string; p_user_id: string }
         Returns: string
       }
+      change_member_role: {
+        Args: {
+          p_member_id: string
+          p_new_role: Database["public"]["Enums"]["team_role"]
+        }
+        Returns: string
+      }
       decrypt_api_key: {
         Args: { p_key_type: string; p_repo_id: string }
         Returns: string
@@ -276,6 +327,7 @@ export type Database = {
       get_encryption_key: { Args: never; Returns: string }
       is_admin: { Args: never; Returns: boolean }
       is_member: { Args: never; Returns: boolean }
+      remove_team_member: { Args: { p_member_id: string }; Returns: string }
       upsert_api_key_encrypted: {
         Args: { p_key_type: string; p_plaintext: string; p_repo_id: string }
         Returns: undefined

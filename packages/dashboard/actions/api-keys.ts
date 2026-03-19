@@ -19,7 +19,7 @@ export async function upsertApiKey(formData: FormData) {
   if (!repoId || typeof repoId !== 'string' || repoId.trim() === '') {
     throw new Error('Invalid repo_id');
   }
-  if (!keyType || !VALID_KEY_TYPES.includes(keyType as KeyType)) {
+  if (!keyType || typeof keyType !== 'string' || !VALID_KEY_TYPES.includes(keyType as KeyType)) {
     throw new Error('Invalid key_type');
   }
   if (!keyValue || typeof keyValue !== 'string' || keyValue.trim() === '') {

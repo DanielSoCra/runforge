@@ -40,7 +40,7 @@ export async function createRepo(formData: FormData) {
   const budget_limit = budgetRaw === '' || budgetRaw === null ? null : Number(budgetRaw);
 
   const concurrencyRaw = formData.get('concurrency_limit');
-  const concurrency_limit = concurrencyRaw === '' || concurrencyRaw === null ? null : Number(concurrencyRaw);
+  const concurrency_limit = concurrencyRaw === '' || concurrencyRaw === null ? undefined : Number(concurrencyRaw);
 
   const { error, data } = await supabase.from('repos').insert({
     owner: owner.trim(),
@@ -65,7 +65,7 @@ export async function updateRepo(id: string, formData: FormData) {
   const budget_limit = budgetRaw === '' || budgetRaw === null ? null : Number(budgetRaw);
 
   const concurrencyRaw = formData.get('concurrency_limit');
-  const concurrency_limit = concurrencyRaw === '' || concurrencyRaw === null ? null : Number(concurrencyRaw);
+  const concurrency_limit = concurrencyRaw === '' || concurrencyRaw === null ? undefined : Number(concurrencyRaw);
 
   const { error } = await supabase.from('repos').update({
     staging_branch: (formData.get('staging_branch') as string) || 'staging',
