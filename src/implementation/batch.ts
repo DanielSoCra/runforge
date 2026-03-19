@@ -1,7 +1,8 @@
 // src/implementation/batch.ts
 import type { Unit, SessionResult, ExitStatus } from '../types.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
-import { createWorktree, removeWorktree, getWorktreeDiffSize } from './worktree.js';
+import { createWorktree, getWorktreeDiffSize } from './worktree.js';
+import { git } from '../lib/git.js';
 import { ok, err, type Result } from '../lib/result.js';
 
 export interface UnitResult {
@@ -126,6 +127,7 @@ async function executeUnit(
     };
   } finally {
     // 4. Always clean up worktree
-    await removeWorktree(unit.id, repoRoot).catch(() => {});
+    // Remove worktree directory but keep branch for merge by coordinator
+    await git(['worktree', 'remove', `workspaces/${unit.id}`, '--force'], repoRoot).catch(() => {});
   }
 }

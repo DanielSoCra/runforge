@@ -12,6 +12,10 @@ export async function createWorktree(
   const worktreePath = join(repoRoot ?? process.cwd(), WORKTREE_DIR, unitId);
   const branchName = `unit/${unitId}`;
 
+  // Clean up stale branch/worktree from previous run if it exists
+  await git(['worktree', 'remove', worktreePath, '--force'], repoRoot).catch(() => {});
+  await git(['branch', '-D', branchName], repoRoot).catch(() => {});
+
   const result = await git(
     ['worktree', 'add', worktreePath, '-b', branchName, baseBranch],
     repoRoot,
