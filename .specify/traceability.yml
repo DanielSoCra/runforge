@@ -219,6 +219,8 @@ STACK-AC-DASHBOARD:
     - dashboard/app/(dashboard)/repos/new/page.tsx
     - dashboard/app/(dashboard)/repos/[id]/page.tsx
     - dashboard/actions/api-keys.ts
+    - dashboard/components/cost-chart.tsx
+    - dashboard/app/(dashboard)/cost/page.tsx
   test_paths:
     - dashboard/**/*.test.ts
     - dashboard/**/*.test.tsx
