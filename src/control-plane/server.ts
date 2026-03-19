@@ -1,11 +1,14 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'http';
 import { ok, err, type Result } from '../lib/result.js';
+import { getDashboardHtml } from './dashboard.js';
+import { readResults } from './results.js';
 
 export interface ControlHandlers {
   getStatus: () => unknown;
   pause: () => void;
   resume: () => void;
   retry: (issueNumber: number) => Result<void>;
+  stateDir?: string;
 }
 
 export function createControlServer(
@@ -16,7 +19,16 @@ export function createControlServer(
     const url = new URL(req.url ?? '/', `http://localhost:${port}`);
     const method = req.method ?? 'GET';
 
-    if (method === 'GET' && url.pathname === '/health') {
+    if (method === 'GET' && url.pathname === '/dashboard') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(getDashboardHtml());
+    } else if (method === 'GET' && url.pathname === '/api/runs') {
+      readResults(handlers.stateDir).then((runs) => {
+        json(res, 200, runs);
+      }).catch(() => {
+        json(res, 200, []);
+      });
+    } else if (method === 'GET' && url.pathname === '/health') {
       json(res, 200, { ok: true });
     } else if (method === 'GET' && url.pathname === '/status') {
       json(res, 200, handlers.getStatus());
