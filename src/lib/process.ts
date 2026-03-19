@@ -13,7 +13,9 @@ export function buildSafeEnv(extra?: Record<string, string>): Record<string, str
     PATH: process.env.PATH ?? '/usr/bin:/bin',
     HOME: process.env.HOME ?? '/tmp',
     TERM: 'dumb',
+    LANG: process.env.LANG ?? 'en_US.UTF-8',
   };
+  if (process.env.TMPDIR) safe.TMPDIR = process.env.TMPDIR;
   if (extra) Object.assign(safe, extra);
   return safe;
 }

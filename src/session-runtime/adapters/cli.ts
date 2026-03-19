@@ -12,7 +12,7 @@ export class CliAdapter implements ProviderAdapter {
       '--max-turns', String(def.maxTurns),
     ];
     if (def.allowedTools.length > 0) {
-      args.push('--allowedTools', JSON.stringify(def.allowedTools));
+      args.push('--allowedTools', def.allowedTools.join(','));
     }
     if (jsonSchema) {
       args.push('--json-schema', jsonSchema);
@@ -25,7 +25,11 @@ export class CliAdapter implements ProviderAdapter {
       PATH: process.env.PATH ?? '/usr/bin:/bin',
       HOME: process.env.HOME ?? '/tmp',
       TERM: 'dumb',
+      LANG: process.env.LANG ?? 'en_US.UTF-8',
     };
+    // Claude CLI needs auth — pass through ANTHROPIC_API_KEY if set
+    if (process.env.ANTHROPIC_API_KEY) env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+    if (process.env.TMPDIR) env.TMPDIR = process.env.TMPDIR;
     if (extra) Object.assign(env, extra);
     return env;
   }

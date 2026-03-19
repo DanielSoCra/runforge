@@ -51,9 +51,10 @@ describe('buildSafeEnv', () => {
     expect(env.HOME).toBeDefined();
   });
 
-  it('includes TERM as dumb', () => {
+  it('includes TERM as dumb and LANG', () => {
     const env = buildSafeEnv();
     expect(env.TERM).toBe('dumb');
+    expect(env.LANG).toBeDefined();
   });
 
   it('merges extra vars', () => {

@@ -32,10 +32,11 @@ describe('CliAdapter', () => {
     expect(args).toContain('5');
   });
 
-  it('includes --allowedTools when provided', () => {
+  it('includes --allowedTools as comma-separated list', () => {
     const adapter = new CliAdapter();
     const args = adapter.buildArgs(mockDef, 'prompt');
     expect(args).toContain('--allowedTools');
+    expect(args).toContain('Read,Write,Bash');
   });
 
   it('includes --json-schema when schema is provided', () => {

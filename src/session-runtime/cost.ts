@@ -46,9 +46,27 @@ export class CostTracker {
     this.runCosts.set(issueNumber, this.getRunCost(issueNumber) + cost);
   }
 
+  maybeResetDaily(): boolean {
+    if (Date.now() >= this.resetAt.getTime()) {
+      this.dailyCost = 0;
+      this.resetAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      return true;
+    }
+    return false;
+  }
+
   resetDaily(): void {
     this.dailyCost = 0;
     this.resetAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  }
+
+  restoreFromSnapshot(snapshot: CostSnapshot): void {
+    this.dailyCost = snapshot.dailyCost;
+    this.resetAt = new Date(snapshot.resetAt);
+    this.runCosts.clear();
+    for (const [k, v] of Object.entries(snapshot.runCosts)) {
+      this.runCosts.set(Number(k), v);
+    }
   }
 
   clearRun(issueNumber: number): void {

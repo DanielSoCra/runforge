@@ -15,10 +15,10 @@ export interface PipelineResult {
 }
 
 export interface PipelineConfig {
-  maxRetries: Record<string, number>;
+  maxAttempts: Record<string, number>;
 }
 
-const DEFAULT_MAX_RETRIES: Record<string, number> = {
+const DEFAULT_MAX_ATTEMPTS: Record<string, number> = {
   implement: 3,
   review: 3,
   test: 3,
@@ -33,7 +33,7 @@ export async function runPipeline(
   costTracker: CostTracker,
   config?: Partial<PipelineConfig>,
 ): Promise<PipelineResult> {
-  const maxRetries = { ...DEFAULT_MAX_RETRIES, ...config?.maxRetries };
+  const maxAttempts = { ...DEFAULT_MAX_ATTEMPTS, ...config?.maxAttempts };
   const retryCounts: Record<string, number> = {};
 
   while (true) {
@@ -56,7 +56,7 @@ export async function runPipeline(
       // No handler = auto-success (for phases not yet implemented)
       const event: PhaseEvent = 'success';
       const currentPhase = run.phase;
-      const advanced = advancePhase(run, table, event, maxRetries, retryCounts);
+      const advanced = advancePhase(run, table, event, maxAttempts, retryCounts);
       if (!advanced) {
         return { outcome: 'error', run, error: `No transition for ${currentPhase}:${event}` };
       }
@@ -88,7 +88,7 @@ export async function runPipeline(
 
     // Advance the FSM
     const currentPhase = run.phase;
-    const advanced = advancePhase(run, table, event, maxRetries, retryCounts);
+    const advanced = advancePhase(run, table, event, maxAttempts, retryCounts);
     if (!advanced) {
       run.phase = 'stuck';
       await stateMgr.saveRunState(run);
@@ -104,7 +104,7 @@ function advancePhase(
   run: RunState,
   table: TransitionTable,
   event: PhaseEvent,
-  maxRetries: Record<string, number>,
+  maxAttempts: Record<string, number>,
   retryCounts: Record<string, number>,
 ): boolean {
   const t = transition(table, run.phase, event);
@@ -117,7 +117,7 @@ function advancePhase(
   if (nextPhase === prevPhase && event === 'failure') {
     const key = prevPhase;
     retryCounts[key] = (retryCounts[key] ?? 0) + 1;
-    const max = maxRetries[key] ?? 3;
+    const max = maxAttempts[key] ?? 3;
     if (retryCounts[key] >= max) {
       run.phase = 'stuck';
       return true;
