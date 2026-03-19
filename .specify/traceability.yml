@@ -194,3 +194,13 @@ STACK-AC-HANDOFF-RUNTIME:
     - src/session-runtime/timeout-hook.test.ts
     - src/session-runtime/index.test.ts
   status: draft
+
+STACK-AC-HANDOFF-COORDINATOR:
+  parent: ARCH-AC-HANDOFF
+  children: []
+  code_paths:
+    - src/implementation/types.ts
+    - src/implementation/coordinator.ts
+  test_paths:
+    - src/implementation/coordinator.test.ts
+  status: draft
