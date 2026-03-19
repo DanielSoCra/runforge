@@ -195,8 +195,11 @@ STACK-AC-KNOWLEDGE:
 STACK-AC-DASHBOARD:
   parent: ARCH-AC-DASHBOARD
   children: []
-  code_paths: [dashboard/]
-  test_paths: [dashboard/**/*.test.ts, dashboard/**/*.test.tsx]
+  code_paths: [dashboard/, supabase/]
+  test_paths:
+    - dashboard/**/*.test.ts
+    - dashboard/**/*.test.tsx
+    - supabase/tests/**/*.test.ts
   status: draft
 
 STACK-AC-HANDOFF-RUNTIME:

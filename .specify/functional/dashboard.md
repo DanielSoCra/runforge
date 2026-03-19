@@ -43,7 +43,12 @@ An autonomous system that processes work across multiple repositories needs a ce
 **Scenario: Add a repository**
 - Given an authenticated admin
 - When they add a repository by specifying the owner and name
-- Then the system begins monitoring that repository for work requests
+- Then the repository is created in a disabled state pending credential setup
+
+**Scenario: Enable a repository**
+- Given an admin has added a repository and provided its credentials
+- When they enable the repository
+- Then the system begins monitoring it for work requests on the next poll cycle
 
 **Scenario: Configure repository settings**
 - Given an admin viewing a repository
@@ -66,6 +71,11 @@ An autonomous system that processes work across multiple repositories needs a ce
 - Given an admin adding or editing a repository
 - When they provide access tokens
 - Then the credentials are stored encrypted and are never displayed again in the UI
+
+**Scenario: Rotate repository credentials**
+- Given credentials are already stored for a repository
+- When an admin provides new credentials for the same key type
+- Then the new credentials replace the old ones and the repository continues operating with the updated credentials
 
 **Scenario: Credential isolation**
 - Given credentials are stored for a repository
@@ -108,15 +118,16 @@ An autonomous system that processes work across multiple repositories needs a ce
 
 **Scenario: Budget enforcement visibility**
 - Given a repository has a budget limit
-- When cost approaches or exceeds the limit
-- Then the dashboard indicates the budget status visually
+- When the run cost reaches 80% of the limit, and again when it reaches 100%
+- Then the dashboard indicates the budget status visually with a distinct warning and exceeded state
+- Note: the 80% threshold is implementation-defined and may be made configurable in a later iteration
 
 ### Team Management
 
 **Scenario: Invite a team member**
 - Given an admin
-- When they invite a user by their identity provider username
-- Then the invited user can sign in and access the dashboard with the assigned role
+- When they create an invitation by specifying a provider username (e.g. GitHub handle) and a role
+- Then the invitation is stored pending, and when that user next signs in they are automatically granted access with the specified role
 
 **Scenario: Change a member's role**
 - Given an admin viewing the team page
@@ -127,6 +138,11 @@ An autonomous system that processes work across multiple repositories needs a ce
 - Given an admin viewing the team page
 - When they remove a member
 - Then that member can no longer access the dashboard
+
+**Scenario: Last admin protection**
+- Given only one admin exists
+- When that admin attempts to change their own role to viewer or remove themselves
+- Then the operation is rejected with an explanation that at least one admin must remain
 
 ### Daemon Control
 
