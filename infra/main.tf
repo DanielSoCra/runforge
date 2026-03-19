@@ -47,7 +47,23 @@ resource "hcloud_firewall" "auto_claude" {
     source_ips = ["0.0.0.0/0", "::/0"] # tighten later once stable
   }
 
-  # Dashboard (restricted to operator IPs)
+  # HTTP — required for Caddy ACME challenge (cert provisioning)
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "80"
+    source_ips = ["0.0.0.0/0", "::/0"]
+  }
+
+  # HTTPS — dashboard
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "443"
+    source_ips = ["0.0.0.0/0", "::/0"]
+  }
+
+  # Daemon API (restricted to operator IPs)
   rule {
     direction  = "in"
     protocol   = "tcp"
