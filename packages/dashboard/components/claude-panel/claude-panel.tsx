@@ -82,7 +82,11 @@ export function ClaudePanel() {
                     <button
                       className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-accent transition-colors"
                       onClick={() => {
-                        if (sessionUrl) window.open(sessionUrl, '_blank');
+                        if (action.buildClipboardText && sessionUrl) {
+                          navigator.clipboard.writeText(action.buildClipboardText(sessionUrl));
+                        } else if (sessionUrl) {
+                          window.open(sessionUrl, '_blank');
+                        }
                       }}
                     >
                       {action.label}

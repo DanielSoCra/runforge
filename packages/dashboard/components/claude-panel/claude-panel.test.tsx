@@ -2,6 +2,9 @@ vi.mock('./use-claude-panel', () => ({
   useClaudePanel: vi.fn(),
 }));
 vi.mock('next/navigation', () => ({ usePathname: () => '/' }));
+vi.mock('./context-actions', () => ({
+  getContextActions: vi.fn(() => []),
+}));
 
 import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
