@@ -38,6 +38,7 @@ const DEAD_ENDS_RE = /^Dead-ends:\s*(.+)$/m;
 
 ```typescript
 // src/knowledge/parse-commits.ts — return type per extracted entry
+// description = text from Discovered: (or Dead-ends:) — one ParsedGotcha per field
 type ParsedGotcha = { artifacts: string[]; description: string; originType: 'autonomous' };
 // parseCommits(messages: string[], workRequestId: string): ParsedGotcha[]
 ```
@@ -54,3 +55,4 @@ const messages = log.split('---COMMIT---').filter(s => s.trim().length > 0);
 - Merge commit bodies typically lack the structured fields and will be skipped silently — correct behavior, not a bug.
 - Split `Artifacts:` on `,` then trim each segment: `value.split(',').map(s => s.trim()).filter(Boolean)`. This handles trailing commas and extra whitespace from worker output without producing empty artifact patterns.
 - `parseCommits` failure must not affect run completion or operator notification. Wrap the call in a try/catch at the Control Plane callsite and log the error without re-throwing.
+- The `---COMMIT---` separator is not escaped in git output — a commit body containing that exact string will split into spurious extra entries. Mitigate by filtering: skip any split segment that contains none of the recognized field prefixes (`Discovered:`, `Dead-ends:`, `Artifacts:`) before passing to the parser.
