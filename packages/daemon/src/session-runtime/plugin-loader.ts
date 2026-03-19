@@ -1,11 +1,10 @@
-import { readFile } from 'fs/promises';
+import { readFile, readdir } from 'fs/promises';
 import { join } from 'path';
 import type { LoadedPlugin, SkillDoc } from './plugin-injection.js';
 
 const PLUGINS_DIR = process.env['PLUGINS_DIR'] ?? join(import.meta.dirname, '../../../../plugins');
 
 async function readMarkdownFiles(dir: string): Promise<SkillDoc[]> {
-  const { readdir } = await import('fs/promises');
   const files = await readdir(dir).catch(() => [] as string[]);
   return Promise.all(
     files.filter(f => f.endsWith('.md')).map(async f => ({

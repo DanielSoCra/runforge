@@ -186,6 +186,10 @@ export class SessionRuntime {
     // If no active plugins, return prompt as-is
     if (!context.activePlugins?.length) return prompt;
 
+    // TODO: pass real activated_at timestamps once config sync carries per-plugin timestamps.
+    // Currently all plugins get epoch-0, so activation order is non-deterministic when names collide.
+    // SessionContext.activePlugins needs to be extended to { id: string; activatedAt: string }[]
+    // for the buildCompositeContext sort to be meaningful.
     const activations = new Map(context.activePlugins.map(id => [id, new Date(0).toISOString()]));
     const loaded = await readPluginsForContext(context.activePlugins, activations);
     const composite = buildCompositeContext(loaded);
