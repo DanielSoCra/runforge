@@ -17,6 +17,8 @@ COPY package.json pnpm-workspace.yaml ./
 COPY packages/daemon/package.json ./packages/daemon/package.json
 COPY --from=deps /app/node_modules ./node_modules
 COPY packages/dashboard/ ./packages/dashboard/
+# Per-package node_modules must come AFTER copying source (not to be overwritten)
+COPY --from=deps /app/packages/dashboard/node_modules ./packages/dashboard/node_modules
 WORKDIR /app/packages/dashboard
 RUN pnpm build
 
