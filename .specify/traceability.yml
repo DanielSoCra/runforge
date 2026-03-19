@@ -81,3 +81,10 @@ CTRL-STATE-PERSISTENCE:
   test_paths:
     - src/control-plane/state.test.ts
   status: approved
+
+IMPL-COORDINATOR:
+  code_paths:
+    - src/implementation/coordinator.ts
+  test_paths:
+    - src/implementation/coordinator.test.ts
+  status: approved
