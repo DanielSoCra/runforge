@@ -6,10 +6,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 export default async function RunDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
-  const { data: run } = await supabase.from('runs').select('*, cost_events(*)').eq('id', id).single();
+  const { data: run } = await supabase.from('runs').select('*').eq('id', id).single();
   if (!run) notFound();
 
-  const phases = (run.phases as any[]) ?? [];
+  interface PhaseEvent {
+    name: string;
+    started_at?: string;
+    duration_ms?: number;
+    cost?: number;
+  }
+
+  const phases = (run.phases as PhaseEvent[]) ?? [];
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -27,7 +34,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
         <CardContent>
           <div className="space-y-2">
             {phases.length === 0 && <p className="text-muted-foreground text-sm">No phase data.</p>}
-            {phases.map((phase: any, i: number) => (
+            {phases.map((phase, i: number) => (
               <div key={i} className="flex items-center justify-between py-2 border-b border-border last:border-0">
                 <div className="font-medium text-sm">{phase.name}</div>
                 <div className="flex gap-6 text-sm text-muted-foreground">
