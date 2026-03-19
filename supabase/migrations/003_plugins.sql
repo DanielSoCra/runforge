@@ -22,7 +22,7 @@ CREATE POLICY "admins insert repo_plugins"
   ON repo_plugins FOR INSERT WITH CHECK (is_admin());
 
 CREATE POLICY "admins update repo_plugins"
-  ON repo_plugins FOR UPDATE USING (is_admin());
+  ON repo_plugins FOR UPDATE USING (is_admin()) WITH CHECK (is_admin());
 
 CREATE POLICY "admins delete repo_plugins"
   ON repo_plugins FOR DELETE USING (is_admin());
