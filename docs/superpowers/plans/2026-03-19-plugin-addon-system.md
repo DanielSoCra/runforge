@@ -28,41 +28,41 @@ plugins/                                    # repo root — plugin catalog
     agents/
       spec-reviewer.md
 
-src/control-plane/
+packages/daemon/src/control-plane/
   plugin-registry.ts                        # load + validate plugins/registry.json (NEW)
   plugin-registry.test.ts                   # (NEW)
   fixtures/plugins/                         # test fixtures (NEW)
     registry.json
     test-plugin/manifest.json
 
-src/session-runtime/
+packages/daemon/src/session-runtime/
   plugin-injection.ts                       # build CompositeContext from loaded plugins (NEW)
   plugin-injection.test.ts                  # (NEW)
 
-src/config.ts                               # add activePlugins?: string[] (MODIFY)
-src/types.ts                                # extend SessionContext with activePlugins (MODIFY)
-src/session-runtime/runtime.ts             # prepend CompositeContext in assemblePrompt (MODIFY)
+packages/daemon/src/config.ts                               # add activePlugins?: string[] (MODIFY)
+packages/daemon/src/types.ts                                # extend SessionContext with activePlugins (MODIFY)
+packages/daemon/src/session-runtime/runtime.ts             # prepend CompositeContext in assemblePrompt (MODIFY)
 
 supabase/migrations/
   002_plugins.sql                           # repo_plugins table + RLS + runs.active_plugins (NEW)
 supabase/tests/
   rls-plugins.test.ts                       # RLS tests for repo_plugins (NEW)
 
-dashboard/lib/plugins/
+packages/dashboard/lib/plugins/
   registry.ts                               # reads plugins/registry.json for dashboard use (NEW)
   registry.test.ts                          # (NEW)
 
-dashboard/actions/
+packages/dashboard/actions/
   plugins.ts                                # Server Actions: toggle, enableAll, recommend, export (NEW)
   plugins.test.ts                           # (NEW)
 
-dashboard/components/
+packages/dashboard/components/
   plugin-card.tsx                           # plugin card with toggle + badge + reason tooltip (NEW)
 
-dashboard/app/repos/[id]/plugins/
+packages/dashboard/app/repos/[id]/plugins/
   page.tsx                                  # Plugins tab page (NEW)
 
-dashboard/app/repos/[id]/
+packages/dashboard/app/repos/[id]/
   page.tsx                                  # add Plugins tab (MODIFY)
 ```
 
@@ -300,7 +300,7 @@ Expected: PASS (3 tests)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/control-plane/plugin-registry.ts src/control-plane/plugin-registry.test.ts src/control-plane/fixtures/
+git add packages/daemon/src/control-plane/plugin-registry.ts src/control-plane/plugin-registry.test.ts src/control-plane/fixtures/
 git commit -m "feat(plugins): add daemon plugin registry loader with startup validation"
 ```
 
@@ -478,7 +478,7 @@ Expected: PASS (4 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/session-runtime/plugin-injection.ts src/session-runtime/plugin-injection.test.ts
+git add packages/daemon/src/session-runtime/plugin-injection.ts src/session-runtime/plugin-injection.test.ts
 git commit -m "feat(plugins): add CompositeContext assembly with ordered merge and token budget"
 ```
 
@@ -519,7 +519,7 @@ Expected: No errors.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/config.ts src/types.ts
+git add packages/daemon/src/config.ts packages/daemon/src/types.ts
 git commit -m "feat(plugins): add activePlugins to config schema and SessionContext type"
 ```
 
@@ -668,7 +668,7 @@ Expected: No type errors, all tests pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/session-runtime/plugin-loader.ts src/session-runtime/runtime.ts
+git add packages/daemon/src/session-runtime/plugin-loader.ts src/session-runtime/runtime.ts
 git commit -m "feat(plugins): wire CompositeContext injection into session spawn prompt"
 ```
 
@@ -911,7 +911,7 @@ Expected: PASS (2 tests)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add dashboard/lib/plugins/registry.ts dashboard/lib/plugins/registry.test.ts
+git add packages/dashboard/lib/plugins/registry.ts dashboard/lib/plugins/registry.test.ts
 git commit -m "feat(plugins): add dashboard registry reader"
 ```
 
@@ -1101,7 +1101,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add dashboard/actions/plugins.ts dashboard/actions/plugins.test.ts
+git add packages/dashboard/actions/plugins.ts dashboard/actions/plugins.test.ts
 git commit -m "feat(plugins): add dashboard Server Actions for plugin management and recommendations"
 ```
 
@@ -1206,7 +1206,7 @@ Expected: No errors.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add dashboard/components/plugin-card.tsx
+git add packages/dashboard/components/plugin-card.tsx
 git commit -m "feat(plugins): add PluginCard component with optimistic toggle"
 ```
 
@@ -1365,7 +1365,7 @@ Expected: All tests pass, no type errors.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add dashboard/app/repos/
+git add packages/dashboard/app/repos/
 git commit -m "feat(plugins): add Plugins tab page with Realtime subscription"
 ```
 
@@ -1389,7 +1389,7 @@ Start the daemon locally and verify it loads the plugin registry at startup with
 
 ```bash
 node --experimental-specifier-resolution=node -e "
-import('./src/control-plane/plugin-registry.js').then(({ loadPluginRegistry }) =>
+import('./packages/daemon/src/control-plane/plugin-registry.js').then(({ loadPluginRegistry }) =>
   loadPluginRegistry('./plugins').then(r => console.log('Loaded plugins:', r.plugins.map(p => p.id)))
 );"
 ```
