@@ -1,0 +1,29 @@
+services:
+  daemon:
+    build: .
+    container_name: auto-claude-daemon
+    restart: unless-stopped
+    ports:
+      - "3847:3847"
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      # Persist state across restarts
+      - daemon-state:/app/state
+      # Mount config (edit auto-claude.config.json before starting)
+      - ./auto-claude.config.json:/app/auto-claude.config.json:ro
+      # Mount prompts (so you can edit without rebuilding)
+      - ./prompts:/app/prompts:ro
+      # Mount fitness scripts
+      - ./fitness:/app/fitness:ro
+    # Git needs a user identity for commits
+    command: >
+      sh -c "
+        git config --global user.name 'Auto-Claude' &&
+        git config --global user.email 'auto-claude@localhost' &&
+        pnpm start -- -c /app/auto-claude.config.json
+      "
+
+volumes:
+  daemon-state:

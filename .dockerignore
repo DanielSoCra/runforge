@@ -1,0 +1,10 @@
+node_modules
+dist
+state
+.git
+.claude
+.env
+.env.production
+*.tmp
+research
+docs
