@@ -37,11 +37,8 @@ const DEAD_ENDS_RE = /^Dead-ends:\s*(.+)$/m;
 ```
 
 ```typescript
-// src/knowledge/parse-commits.ts — one ParsedGotcha per recognized field line
-type ParsedGotcha = {
-  artifacts: string[]; description: string;
-  kind: 'discovered' | 'dead-end'; originType: 'autonomous';
-};
+// one ParsedGotcha per field line (Discovered: or Dead-ends:), kind tags the source
+type ParsedGotcha = { artifacts: string[]; description: string; kind: 'discovered' | 'dead-end'; originType: 'autonomous' };
 // parseCommits(messages: string[], workRequestId: string): ParsedGotcha[]
 ```
 
