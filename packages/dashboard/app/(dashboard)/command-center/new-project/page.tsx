@@ -39,24 +39,28 @@ export default function NewProjectPage() {
     setCreating(true);
     setError(null);
     setProgress(['Creating GitHub repository…']);
+    try {
+      const result = await createProject({
+        org: state.org,
+        name: state.name,
+        description: state.description,
+        private: state.visibility === 'private',
+        l0Vision: state.l0Vision,
+        baseProfile: state.baseProfile,
+      });
 
-    const result = await createProject({
-      org: state.org,
-      name: state.name,
-      description: state.description,
-      private: state.visibility === 'private',
-      l0Vision: state.l0Vision,
-      baseProfile: state.baseProfile,
-    });
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
 
-    if (result.error) {
-      setError(result.error);
+      setProgress((p) => [...p, 'Done!']);
+      router.push(`/repos/${result.repoId}/settings`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unexpected error');
+    } finally {
       setCreating(false);
-      return;
     }
-
-    setProgress((p) => [...p, 'Done!']);
-    router.push(`/repos/${result.repoId}/settings`);
   }
 
   return (

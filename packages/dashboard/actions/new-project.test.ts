@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn().mockResolvedValue({
@@ -34,8 +34,13 @@ describe('createProject', () => {
     baseProfile: 'default' as const,
   };
 
+  let originalToken: string | undefined;
   beforeEach(() => {
+    originalToken = process.env.GITHUB_TOKEN;
     process.env.GITHUB_TOKEN = 'ghp_test';
+  });
+  afterEach(() => {
+    process.env.GITHUB_TOKEN = originalToken;
   });
 
   it('creates GitHub repo using server-side GITHUB_TOKEN', async () => {
