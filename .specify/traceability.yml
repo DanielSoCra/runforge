@@ -50,7 +50,7 @@ ARCH-SDD-SPEC-LIFECYCLE:
 # --- Auto-Claude L0 spec (vision — root of all Auto-Claude specs) ---
 
 L0-AC-VISION:
-  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, STACK-AC-CONVENTIONS]
+  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-ENRICHED-COMMITS, STACK-AC-CONVENTIONS]
   status: draft
 
 # --- Auto-Claude L1 specs ---
@@ -77,6 +77,14 @@ FUNC-AC-BUG-TRIAGE:
 
 FUNC-AC-LEARNING:
   children: [ARCH-AC-KNOWLEDGE]
+  status: draft
+
+FUNC-AC-HANDOFF:
+  children: [ARCH-AC-HANDOFF]
+  status: draft
+
+FUNC-AC-ENRICHED-COMMITS:
+  children: [ARCH-AC-ENRICHED-COMMITS]
   status: draft
 
 # --- Auto-Claude L2 specs ---
@@ -109,6 +117,16 @@ ARCH-AC-DIAGNOSIS:
 ARCH-AC-KNOWLEDGE:
   parent: FUNC-AC-LEARNING
   children: [STACK-AC-KNOWLEDGE]
+  status: draft
+
+ARCH-AC-HANDOFF:
+  parent: FUNC-AC-HANDOFF
+  children: [STACK-AC-HANDOFF-RUNTIME, STACK-AC-HANDOFF-COORDINATOR]
+  status: draft
+
+ARCH-AC-ENRICHED-COMMITS:
+  parent: FUNC-AC-ENRICHED-COMMITS
+  children: [STACK-AC-ENRICHED-COMMITS-WORKER, STACK-AC-ENRICHED-COMMITS-KNOWLEDGE]
   status: draft
 
 # --- Auto-Claude L3 specs (stack-specific) ---
@@ -163,4 +181,46 @@ STACK-AC-KNOWLEDGE:
   children: []
   code_paths: [src/knowledge/]
   test_paths: [src/knowledge/**/*.test.ts]
+  status: draft
+
+STACK-AC-HANDOFF-RUNTIME:
+  parent: ARCH-AC-HANDOFF
+  children: []
+  code_paths:
+    - src/session-runtime/timeout-hook.ts
+    - src/session-runtime/index.ts
+    - .claude/hooks/timeout-warning.sh
+  test_paths:
+    - src/session-runtime/timeout-hook.test.ts
+    - src/session-runtime/index.test.ts
+  status: draft
+
+STACK-AC-HANDOFF-COORDINATOR:
+  parent: ARCH-AC-HANDOFF
+  children: []
+  code_paths:
+    - src/implementation/types.ts
+    - src/implementation/coordinator.ts
+  test_paths:
+    - src/implementation/coordinator.test.ts
+  status: draft
+
+STACK-AC-ENRICHED-COMMITS-WORKER:
+  parent: ARCH-AC-ENRICHED-COMMITS
+  children: []
+  code_paths:
+    - prompts/worker.md
+  test_paths:
+    - src/knowledge/parse-commits.test.ts
+  status: draft
+
+STACK-AC-ENRICHED-COMMITS-KNOWLEDGE:
+  parent: ARCH-AC-ENRICHED-COMMITS
+  children: []
+  code_paths:
+    - src/knowledge/parse-commits.ts
+    - src/control-plane/completion.ts
+  test_paths:
+    - src/knowledge/parse-commits.test.ts
+    - src/control-plane/completion.test.ts
   status: draft
