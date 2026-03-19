@@ -1,16 +1,18 @@
 import { describe, it, expect, vi } from 'vitest';
 
+const mockInsert = vi.fn().mockResolvedValue({ error: null });
+
 vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn().mockResolvedValue({
     from: vi.fn().mockReturnValue({
-      insert: vi.fn().mockResolvedValue({ error: null }),
+      insert: mockInsert,
       update: vi.fn().mockReturnValue({
         eq: vi.fn().mockResolvedValue({ error: null }),
       }),
       select: vi.fn().mockReturnValue({
         eq: vi.fn().mockReturnValue({
+          single: vi.fn().mockResolvedValue({ data: { role: 'admin' } }),
           neq: vi.fn().mockResolvedValue({ data: [{ id: 'other-admin' }] }),
-          single: vi.fn().mockResolvedValue({ data: { role: 'viewer' } }),
         }),
       }),
       delete: vi.fn().mockReturnValue({
@@ -28,6 +30,10 @@ describe('team actions', () => {
     const formData = new FormData();
     formData.append('provider_handle', 'octocat');
     formData.append('role', 'viewer');
-    await expect(createInvitation(formData)).resolves.not.toThrow();
+    await createInvitation(formData);
+
+    expect(mockInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ provider_handle: 'octocat', status: 'pending' })
+    );
   });
 });
