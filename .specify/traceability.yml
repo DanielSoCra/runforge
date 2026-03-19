@@ -60,3 +60,10 @@ INFRA-PROJECT-INIT:
     - src/main.ts
   test_paths: []
   status: approved
+
+INFRA-GIT-WRAPPER:
+  code_paths:
+    - src/lib/git.ts
+  test_paths:
+    - src/lib/git.test.ts
+  status: approved
