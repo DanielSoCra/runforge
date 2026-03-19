@@ -67,8 +67,10 @@ async function executeUnit(
   maxDiffLines: number,
 ): Promise<UnitResult> {
   // 1. Create worktree
+  console.log(`[batch] Creating worktree for ${unit.id} from ${featureBranch}`);
   const worktreeResult = await createWorktree(unit.id, featureBranch, repoRoot);
   if (!worktreeResult.ok) {
+    console.error(`[batch] Worktree failed for ${unit.id}:`, worktreeResult.error.message);
     return {
       unitId: unit.id,
       exitStatus: 'failed',
@@ -77,9 +79,11 @@ async function executeUnit(
       error: `Worktree creation failed: ${worktreeResult.error.message}`,
     };
   }
+  console.log(`[batch] Worktree created at ${worktreeResult.value}`);
 
   try {
     // 2. Spawn worker session
+    console.log(`[batch] Spawning worker session for ${unit.id}`);
     const sessionResult = await runtime.spawnSession(
       'worker',
       {
@@ -95,6 +99,7 @@ async function executeUnit(
     );
 
     if (!sessionResult.ok) {
+      console.error(`[batch] Session failed for ${unit.id}:`, sessionResult.error.message);
       return {
         unitId: unit.id,
         exitStatus: 'failed',
@@ -103,6 +108,7 @@ async function executeUnit(
         error: sessionResult.error.message,
       };
     }
+    console.log(`[batch] Session result for ${unit.id}: ${sessionResult.value.exitStatus}`);
 
     const result = sessionResult.value;
 

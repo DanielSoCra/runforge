@@ -27,9 +27,20 @@ export class CliAdapter implements ProviderAdapter {
       TERM: 'dumb',
       LANG: process.env.LANG ?? 'en_US.UTF-8',
     };
-    // Claude CLI needs auth — pass through ANTHROPIC_API_KEY if set
-    if (process.env.ANTHROPIC_API_KEY) env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-    if (process.env.TMPDIR) env.TMPDIR = process.env.TMPDIR;
+    // Claude CLI auth: API key mode OR subscription mode (needs ~/.claude/ access)
+    // Pass through auth-related vars. HOME gives access to ~/.claude/ for subscription auth.
+    const passthrough = [
+      'ANTHROPIC_API_KEY',  // API key auth
+      'TMPDIR',             // temp directory
+      'USER',               // needed by some CLI tools
+      'SHELL',              // needed by Bash tool
+      'XDG_CONFIG_HOME',    // alt config location
+      'XDG_DATA_HOME',      // alt data location
+      'NODE_EXTRA_CA_CERTS', // custom CA certs
+    ];
+    for (const key of passthrough) {
+      if (process.env[key]) env[key] = process.env[key];
+    }
     if (extra) Object.assign(env, extra);
     return env;
   }
