@@ -1,0 +1,45 @@
+'use client';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { cn } from '@/lib/utils';
+import { LayoutDashboard, GitFork, Activity, DollarSign, Users, Settings, Terminal } from 'lucide-react';
+
+const nav = [
+  { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/repos', label: 'Repositories', icon: GitFork },
+  { href: '/runs', label: 'Runs', icon: Activity },
+  { href: '/cost', label: 'Costs', icon: DollarSign },
+  { href: '/team', label: 'Team', icon: Users },
+  { href: '/settings', label: 'Settings', icon: Settings },
+];
+
+export function Sidebar() {
+  const pathname = usePathname();
+  return (
+    <aside className="w-56 min-h-screen border-r border-border bg-card flex flex-col">
+      <div className="px-6 py-5 border-b border-border">
+        <div className="flex items-center gap-2">
+          <Terminal className="h-5 w-5" />
+          <span className="font-semibold text-sm">Auto-Claude</span>
+        </div>
+      </div>
+      <nav className="flex-1 px-3 py-4 space-y-1">
+        {nav.map(({ href, label, icon: Icon }) => (
+          <Link
+            key={href}
+            href={href}
+            className={cn(
+              'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+              pathname === href
+                ? 'bg-accent text-accent-foreground font-medium'
+                : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+            )}
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+          </Link>
+        ))}
+      </nav>
+    </aside>
+  );
+}
