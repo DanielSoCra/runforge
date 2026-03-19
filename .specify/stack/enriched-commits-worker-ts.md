@@ -23,7 +23,7 @@ test_paths:
 
 **Single-line values for all fields.** Simplifies extraction regex and avoids ambiguity in multi-line commit bodies. Enforced in the prompt template: each field value must fit on one line.
 
-**`Artifacts:` is the required anchor field.** Without artifact patterns, an extracted gotcha has no injection target and cannot be matched to future work. Commits missing `Artifacts:` are skipped by `parse_commits`. The prompt template marks `Artifacts:` as mandatory and the knowledge fields as strongly expected.
+**`Artifacts:` is the required anchor field.** Without artifact patterns, an extracted gotcha has no injection target and cannot be matched to future work. Commits missing `Artifacts:` are skipped by `parseCommits`. The prompt template marks `Artifacts:` as mandatory and the knowledge fields as strongly expected.
 
 ## Examples
 
