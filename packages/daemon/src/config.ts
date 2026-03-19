@@ -38,6 +38,7 @@ export const ConfigSchema = z.object({
     minSamplingRate: z.number().min(0.01).max(1).default(0.01),
   }).default({}),
   gracePeriodMs: z.number().int().default(30000),
+  activePlugins: z.array(z.string()).default([]),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
