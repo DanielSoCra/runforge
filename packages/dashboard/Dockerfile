@@ -23,10 +23,12 @@ WORKDIR /app/packages/dashboard
 RUN pnpm build
 
 FROM base AS runner
-WORKDIR /app/packages/dashboard
+# outputFileTracingRoot points to repo root, so standalone mirrors:
+#   packages/dashboard/server.js (entry) + node_modules/ (at repo root level)
+WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=builder /app/packages/dashboard/.next/standalone ./
-COPY --from=builder /app/packages/dashboard/.next/static ./.next/static
-COPY --from=builder /app/packages/dashboard/public ./public
+COPY --from=builder /app/packages/dashboard/.next/static ./packages/dashboard/.next/static
+COPY --from=builder /app/packages/dashboard/public ./packages/dashboard/public
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["node", "packages/dashboard/server.js"]

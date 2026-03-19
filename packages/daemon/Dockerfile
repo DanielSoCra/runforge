@@ -28,4 +28,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
 EXPOSE 3847
 
 # CMD (not ENTRYPOINT) so docker-compose command: can override in dev
-CMD ["pnpm", "start", "--", "-c", "/app/packages/daemon/auto-claude.config.json"]
+# WORKDIR is /app/packages/daemon — default config path auto-claude.config.json resolves there
+CMD ["pnpm", "start"]
