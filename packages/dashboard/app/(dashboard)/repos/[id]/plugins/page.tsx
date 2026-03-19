@@ -4,6 +4,7 @@ import { PluginCard } from '@/components/plugin-card';
 import { enableAllSuggested, triggerRecommendation } from '@/actions/plugins';
 import { Button } from '@/components/ui/button';
 import { RealtimeRefresh } from './realtime-refresh';
+import { RepoTabNav } from '@/components/repo-tab-nav';
 
 type Confidence = 'high' | 'medium' | 'low';
 
@@ -35,8 +36,9 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
   const suggestedIds = suggested.map(p => p.id);
 
   return (
-    <div className="space-y-8">
+    <div className="max-w-2xl space-y-6">
       <RealtimeRefresh repoId={id} />
+      <RepoTabNav repoId={id} />
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">Plugins</h2>
         <form action={async () => {
