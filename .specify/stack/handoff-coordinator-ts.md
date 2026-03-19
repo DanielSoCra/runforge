@@ -39,13 +39,11 @@ interface UnitState {
 ```
 
 ```typescript
-// src/implementation/coordinator.ts — context assembly
-function assembleUnitContext(unit: Unit, state: UnitState) {
-  const prefix = state.handoffNote
-    ? `[PREVIOUS ATTEMPT]\n${state.handoffNote}\n\n`
-    : '';
-  return prefix + unit.assembledContext;
-}
+// src/implementation/coordinator.ts — prepend handoff as labeled block
+const prefix = state.handoffNote
+  ? `[PREVIOUS ATTEMPT]\n${state.handoffNote}\n\n`
+  : '';
+return prefix + unit.assembledContext;
 ```
 
 ## Gotchas
