@@ -111,6 +111,23 @@ Each new piece of implementation work starts with limited project memory. When a
 - When the system processes new work requests
 - Then patterns inform proposed updates to project-specific convention documentation, creating a feedback loop without changing permanent guidance automatically
 
+### Operator Corrections
+
+**Scenario: Operator correction capture**
+- Given the Operator reviews and corrects a completed work request (during warmup approval, random sampling, or manual review)
+- When the Operator provides corrections
+- Then the system captures the correction as a high-priority observation with elevated weight
+
+**Scenario: Operator correction priority**
+- Given a correction originates from the Operator (not from an autonomous session)
+- When the system evaluates it for promotion
+- Then it is eligible for fast-track promotion with a lower hit-count threshold than regular observations — Operator corrections carry more authority than autonomous observations
+
+**Scenario: Operator correction injection**
+- Given Operator corrections exist for relevant artifact locations
+- When the system prepares working context for a new unit
+- Then Operator corrections are injected with higher prominence than regular observations — ensuring they are not lost among lower-priority context
+
 ## Success Criteria
 
 - New implementation work receives relevant institutional knowledge before starting — it does not rediscover known pitfalls
@@ -124,3 +141,4 @@ Each new piece of implementation work starts with limited project memory. When a
 - Observations older than a configurable age with low hit counts are archived to prevent unbounded growth
 - The system may temporarily enrich future work context from approved knowledge stores, but permanent changes to instructions, documentation, or evaluation standards always require Operator approval
 - Learned patterns are structured data (key, description, confidence score, source), not unstructured prose
+- Operator corrections always carry more weight than autonomous observations — the human's judgment takes priority

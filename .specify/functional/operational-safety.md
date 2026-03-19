@@ -63,10 +63,15 @@ An autonomous system that runs 24/7, starts autonomous work with broad project a
 - When the access request is evaluated
 - Then it is blocked deterministically with an explicit denial, not a silent failure
 
+**Scenario: Specification integrity**
+- Given autonomous work is executing
+- When it encounters a specification gap, ambiguity, or disagreement
+- Then it never writes or modifies governing specifications — it escalates to the Spec Author or Operator instead
+
 **Scenario: Behavioral constraints**
 - Given autonomous work is started
 - When the instructions are loaded
-- Then they include explicit prohibitions against accessing holdout scenarios, modifying artifacts outside the assigned work, and modifying the system's own implementation
+- Then they include explicit prohibitions against accessing holdout scenarios, modifying artifacts outside the assigned work, modifying the system's own implementation, and modifying governing specifications
 
 **Scenario: Operation content inspection**
 - Given autonomous work executes a general-purpose operation (e.g., running a command or making a network request)

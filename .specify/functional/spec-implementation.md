@@ -95,6 +95,11 @@ Implementing specifications requires decomposing them into parallelizable units,
 - When the system detects capacity is nearing limits
 - Then it compacts older context while preserving the current task state, so the Worker can continue without losing critical working information
 
+**Scenario: Change size limit**
+- Given an implementation unit produces changes that exceed a configurable size threshold
+- When the system evaluates the unit's output
+- Then it flags the unit for re-decomposition into smaller sub-units — large changes receive lower-quality review and are more likely to contain defects
+
 ## Success Criteria
 
 - Multi-unit features are implemented in parallel without output conflicts
@@ -108,3 +113,4 @@ Implementing specifications requires decomposing them into parallelizable units,
 - Governing context is prepared before implementation begins
 - If a unit's scope cannot be handled reliably as one piece of work, it must be decomposed further
 - Each unit includes a clear verification method that confirms the intended outcome
+- Units whose output exceeds the configured size threshold must be decomposed further — large monolithic changes are not acceptable

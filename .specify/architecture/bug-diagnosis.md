@@ -22,7 +22,7 @@ The Bug Diagnosis Service classifies bug reports by root cause before any fix is
 
 **ConfidenceThreshold** is a configurable value (default: 0.7) below which any diagnosis is routed to a human rather than acted upon automatically.
 
-**BugPipelineVariant** defines the pipeline shape for Type A bug fixes. It differs from the feature pipeline in the following ways: classification is skipped (already done by the Diagnostician), decomposition is skipped (bugs are single-unit fixes), holdout validation is skipped (not applicable to targeted fixes), and the worker uses a regression-test-first protocol (write the failing test that reproduces the bug before applying the fix).
+**BugPipelineVariant** defines the pipeline shape for Type A bug fixes. It differs from the feature pipeline in the following ways: classification is skipped (already done by the Diagnostician), decomposition is skipped (bugs are single-unit fixes), holdout validation is skipped by default (not applicable to targeted fixes) — except when the bug was triggered by a holdout failure, in which case the failing holdout scenarios are re-run after the fix to confirm resolution — and the worker uses a regression-test-first protocol (write the failing test that reproduces the bug before applying the fix).
 
 ## API Contract
 
@@ -64,7 +64,7 @@ The diagnose operation proceeds:
 1. Diagnosis: Type A, confidence >= threshold.
 2. Return to Daemon Control Plane: classification details + bug pipeline variant recommendation.
 3. Daemon Control Plane creates a run using the bug pipeline variant.
-4. Bug pipeline: implement phase uses a regression-test-first Worker (write a test that reproduces the bug, verify it fails, fix the implementation, verify the test passes). Review, integrate, deploy, test, and report phases run normally.
+4. Bug pipeline: implement phase uses a regression-test-first Worker (write a test that reproduces the bug, verify it fails, fix the implementation, verify the test passes). Review, integrate, deploy, test, and report phases run normally. If the original diagnosis was triggered by a holdout failure, the failing holdout scenarios are re-run after the fix (before integration) to confirm the fix resolves the original failure.
 
 **Type B routing flow:**
 1. Diagnosis: Type B, confidence >= threshold.

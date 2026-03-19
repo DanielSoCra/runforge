@@ -78,7 +78,7 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 **Scenario: Holdout failure**
 - Given a holdout scenario fails
 - When the system processes the failure
-- Then it triggers diagnosis to determine whether the failure reflects a spec gap, an implementation defect, or a validation gap before further action is taken, and routes specification issues to the Spec Author
+- Then it triggers diagnosis to determine whether the failure reflects a spec gap (Type B), an implementation defect (Type A), or an expectation mismatch (Type C) before further action is taken, and routes specification issues to the Spec Author
 
 **Scenario: Integration review**
 - Given all review gates and holdout validation have passed
@@ -115,6 +115,50 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 - When the failure count crosses a threshold
 - Then the system escalates rather than continuing to spend resources on a structural problem
 
+### Static Analysis
+
+**Scenario: Static analysis as a hard gate**
+- Given an implementation is ready for review
+- When automated checks run
+- Then they enforce configurable thresholds for complexity (maximum per-function complexity, maximum function length, maximum artifact size), strict type safety (no untyped escape hatches), and formatting — violations fail the gate before any review begins
+
+**Scenario: Architecture fitness functions**
+- Given the system performs automated checks
+- When it evaluates structural rules
+- Then it verifies that no circular dependencies exist between modules, service boundaries are respected (no cross-boundary imports), and layer separation is maintained — structural drift is caught deterministically, not by review
+
+### Trust Calibration
+
+**Scenario: Warmup period**
+- Given the system has completed fewer than a configurable number of work requests (the warmup threshold)
+- When a work request passes all review gates
+- Then it still requires explicit Operator approval before promotion — the system earns autonomous promotion rights by demonstrating quality during warmup, not by default
+
+**Scenario: Warmup graduation**
+- Given the system has completed the warmup threshold of work requests with Operator approval
+- When the next work request passes all review gates
+- Then it proceeds without mandatory Operator approval — the warmup period is complete
+
+**Scenario: Periodic random sampling**
+- Given the system has graduated from warmup
+- When work requests complete all review gates
+- Then a configurable percentage of completed work is flagged for Operator review — catching systematic blind spots that all review gates may share
+
+**Scenario: Sampling feedback**
+- Given the Operator reviews a sampled work request and finds issues
+- When corrections are applied
+- Then the corrections feed back into the learning system with elevated priority (see FUNC-AC-LEARNING)
+
+**Scenario: Warmup regression**
+- Given the system has graduated from warmup
+- When a configurable number of consecutive sampled reviews reveal corrections from the Operator
+- Then the system reverts to warmup mode — requiring mandatory Operator approval again until quality is re-demonstrated
+
+**Scenario: Minimum sampling floor**
+- Given the Operator configures the sampling percentage
+- When the configured value is below a minimum floor
+- Then the system enforces the minimum floor — post-warmup human oversight cannot be fully disabled
+
 ## Success Criteria
 
 - Every implementation passes all applicable review gates before proceeding
@@ -129,3 +173,5 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 - Holdout scenarios remain inaccessible during implementation and review, not merely hidden by instruction
 - Escalation is graduated, not binary — repeated identical failures escalate faster than novel failures
 - Complexity classification determines the default review depth, but risk-sensitive work still receives the review gates needed for safe delivery
+- Static analysis thresholds are deterministic and cannot be overridden by implementation work
+- The system does not operate with full autonomy from day one — it must demonstrate quality during a warmup period before earning autonomous promotion rights

@@ -36,15 +36,24 @@ Any one signal is sufficient to flag the request as risk-sensitive. The Operator
 
 **EvaluationRubric** defines structured dimensions for intelligent review gates. Spec compliance uses dimensions: acceptance criteria coverage, behavioral correctness, constraint adherence. Quality uses dimensions: maintainability, pattern consistency, test quality, convention alignment. Security uses dimensions: injection resistance, authentication completeness, data validation, concurrency safety.
 
+**StaticAnalysisPolicy** defines deterministic code quality thresholds enforced during gate 1 (automated checks). It contains: maximum cyclomatic complexity per function, maximum function length (lines), maximum artifact size (lines), forbidden type-safety escape patterns (e.g., untyped casts, suppression comments), and required formatting rules. These thresholds are configurable by the Operator and enforced deterministically — no intelligent session can override them.
+
+**ArchitectureFitnessRule** defines a structural invariant verified during gate 1. It contains: a rule name, a description, a verification method (deterministic check or command), and the expected result. Built-in rules include: no circular dependencies between modules, no cross-boundary imports violating service ownership, and layer separation enforcement. The Operator can add project-specific rules.
+
+**WarmupState** tracks the system's trust calibration. It contains: the warmup threshold (configurable number of successful completions required), the current completion count, a graduated flag (true once the threshold is reached), a consecutive correction count (tracking how many consecutive sampled reviews required Operator corrections), and a regression threshold (configurable, default: 3 consecutive corrections triggers regression to warmup). During warmup, every work request that passes all review gates requires explicit Operator approval before promotion. After graduation, the system promotes autonomously (subject to random sampling). If the consecutive correction count reaches the regression threshold, the graduated flag is reset to false and the completion count is reset — the system must re-earn trust.
+
+**SamplingPolicy** defines post-warmup review sampling. It contains: a sampling rate (configurable percentage of completed work requests flagged for Operator review, default 10%), a minimum sampling floor (configurable, default: 1% — the sampling rate cannot be set below this value), and a sampling method (random selection). Sampled work requests are held until the Operator reviews and approves or provides corrections. When the Operator approves without corrections, the WarmupState's consecutive correction count is reset to zero. When corrections are provided, the consecutive correction count is incremented.
+
 ## API Contract
 
 **Review** — Called by the Daemon Control Plane. Request: feature branch reference, governing spec content, complexity classification, risk-sensitive flag, max fix cycles. Response: passed (all gates clear), failed-and-fixed (passed after fix cycles, with fix count), or escalated (max fix cycles exceeded).
 
 The review operation proceeds:
 1. Determine the gate sequence based on complexity classification and risk-sensitive flag (see GateSequence). If risk-sensitive, include gate 4 regardless of complexity.
-2. Execute gates in order. If any gate fails, stop the sequence.
+2. Execute gates in order. Gate 1 includes static analysis policy enforcement and architecture fitness rule verification. If any gate fails, stop the sequence.
 3. On gate failure: delegate fix creation to the Implementation Coordinator (which spawns a fix worker), then re-run all gates from gate 1.
 4. Repeat until all gates pass or max fix cycles is reached.
+5. If all gates pass: check WarmupState. If not graduated, hold for Operator approval. If graduated, check SamplingPolicy — if sampled, hold for Operator review. Otherwise, return passed.
 
 **Holdout** — Called by the Daemon Control Plane. Request: branch reference, scenario runner command (may be absent if no scenario runner is configured). Response: all-passed, skipped (no runner configured), or failed with an array of scenario identifiers that failed (never scenario content).
 
@@ -70,7 +79,7 @@ The test operation proceeds:
 
 ## System Boundaries
 
-- Validation Service OWNS: review gate definitions, gate sequencing logic, evaluation rubrics, holdout execution orchestration, deployment verification, test execution orchestration.
+- Validation Service OWNS: review gate definitions, gate sequencing logic, evaluation rubrics, static analysis policy, architecture fitness rules, warmup state, sampling policy, holdout execution orchestration, deployment verification, test execution orchestration.
 - Validation Service CALLS: Session Runtime (to spawn Reviewer sessions for gates 2, 3, and 4), Implementation Coordinator (to spawn fix workers when gates or tests fail).
 - Validation Service DOES NOT have access to holdout scenario content. It invokes the scenario runner as an opaque deterministic process and receives only identifiers and pass/fail results.
 - Validation Service DOES NOT own the test or deployment infrastructure — it invokes configured commands and interprets their output.
@@ -80,11 +89,12 @@ The test operation proceeds:
 
 **Review flow:**
 1. Receive the feature branch reference, spec content, and complexity classification.
-2. Gate 1 (deterministic): execute configured automated verification checks as a deterministic process. No intelligent session. Collect result signal and output. If fail: extract structured failure information, proceed to fix cycle.
+2. Gate 1 (deterministic): execute configured automated verification checks as a deterministic process. No intelligent session. This includes: test suite execution, static analysis policy enforcement (complexity thresholds, type safety, formatting), and architecture fitness rule verification (circular dependency detection, boundary enforcement, layer separation). Collect result signal and output. If fail: extract structured failure information, proceed to fix cycle.
 3. Gate 2 (spec compliance): spawn a fresh Reviewer session via Session Runtime. The reviewer receives: the implementation diff, the governing spec content (pre-loaded), and a structured rubric. The reviewer independently reads implementation artifacts and verifies every acceptance criterion. It produces structured findings. If fail: proceed to fix cycle.
 4. Gate 3 (quality, standard and complex only): spawn a fresh Reviewer session. The reviewer receives: the implementation diff, pattern expectations, and a quality rubric. It evaluates maintainability, pattern consistency, test quality, and convention alignment. If fail: proceed to fix cycle.
 5. Gate 4 (security, complex only): spawn a fresh Reviewer session. The reviewer receives: the implementation diff and a security rubric. It evaluates injection risks, authentication gaps, data validation, and concurrency safety. If fail: proceed to fix cycle.
-6. All gates pass: return success.
+6. All gates pass: check WarmupState. If not graduated (completion count below warmup threshold), hold the result and notify the Operator for approval. If graduated, apply SamplingPolicy: if the work request is selected for sampling, hold for Operator review; otherwise return success.
+7. After Operator approval (warmup or sampling): return success. If the Operator provides corrections, capture them via Knowledge Service as high-priority observations. Note: WarmupState completion count is incremented only after the full pipeline completes successfully (by the Daemon Control Plane during the report phase), not after review approval — a work request that passes review but fails holdout, integration, or deployment does not count toward graduation.
 
 **Fix cycle flow:**
 1. Collect findings from the failed gate.

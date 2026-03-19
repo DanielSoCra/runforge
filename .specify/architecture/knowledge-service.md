@@ -16,7 +16,7 @@ The Knowledge Service accumulates, structures, and distributes institutional kno
 
 ## Data Model
 
-**Gotcha** represents a captured pitfall observation. It contains: a unique identifier, an array of artifact patterns, a description (what the pitfall is and how to avoid it), the source work request identifier (where it was first observed), a confidence score (extracted from the session or defaulted), a creation timestamp, a hit count (incremented each time the gotcha is matched and injected into a session context), and a promoted flag (true once the gotcha has been merged into permanent documentation).
+**Gotcha** represents a captured pitfall observation. It contains: a unique identifier, an array of artifact patterns, a description (what the pitfall is and how to avoid it), the source work request identifier (where it was first observed), a confidence score (extracted from the session or defaulted), a creation timestamp, a hit count (incremented each time the gotcha is matched and injected into a session context), a promoted flag (true once the gotcha has been merged into permanent documentation), an origin type (autonomous or operator — operator-origin gotchas carry higher weight), and a priority tier (normal or elevated — elevated gotchas are injected with higher prominence and have a lower promotion threshold).
 
 **GotchaStore** is the persistent collection of all gotchas. It is an append-only structured log. Each entry is a self-contained record. The store supports: appending new entries, querying by artifact pattern match, incrementing hit counts, marking entries as promoted, and archiving entries that meet staleness criteria.
 
@@ -38,7 +38,9 @@ If the type cannot be determined automatically, the unit is not exemplar-eligibl
 
 ## API Contract
 
-**Store gotcha** — Called by Session Runtime after each session completes. Request: an array of extracted gotcha markers (each with artifact patterns and description), the source work request identifier. Response: acknowledgment with the number of new gotchas stored and the number of duplicates deduplicated (if a gotcha with the same artifact patterns and similar description already exists, the hit count is incremented instead of creating a duplicate).
+**Store gotcha** — Called by Session Runtime after each session completes. Request: an array of extracted gotcha markers (each with artifact patterns and description), the source work request identifier, and an origin type (autonomous by default). Response: acknowledgment with the number of new gotchas stored and the number of duplicates deduplicated (if a gotcha with the same artifact patterns and similar description already exists, the hit count is incremented instead of creating a duplicate).
+
+**Store operator correction** — Called by the Validation Service when the Operator provides corrections during warmup approval or random sampling review. Request: an array of correction observations (each with artifact patterns and description), the source work request identifier. Response: acknowledgment. Corrections are stored as gotchas with origin type "operator" and priority tier "elevated." Elevated gotchas have a lower promotion threshold (default: 2 hits instead of the standard 5) and are injected with higher prominence in session contexts (placed before normal-priority gotchas).
 
 **Match gotchas** — Called by Implementation Coordinator (and other services) before assembling session context. Request: an array of expected artifact locations. Response: an array of matching Gotchas, filtered to only those whose artifact patterns match the requested locations. Gotchas marked as promoted are excluded (their knowledge is already in permanent documentation). Each matched gotcha's hit count is incremented.
 
@@ -63,7 +65,7 @@ If the type cannot be determined automatically, the unit is not exemplar-eligibl
 ## System Boundaries
 
 - Knowledge Service OWNS: gotcha store, exemplar store, pattern store, prompt proposals, version history, promotion logic, archival logic.
-- Knowledge Service IS CALLED BY: Session Runtime (after each session, to store extracted gotcha markers), Implementation Coordinator (before session context assembly, to retrieve matching gotchas), Validation Service (to retrieve exemplars for consistency comparison), Daemon Control Plane (to trigger optimization on schedule, to expose promotion candidates and prompt proposals to the operator).
+- Knowledge Service IS CALLED BY: Session Runtime (after each session, to store extracted gotcha markers), Implementation Coordinator (before session context assembly, to retrieve matching gotchas), Validation Service (to retrieve exemplars for consistency comparison, and to store operator corrections from warmup/sampling reviews), Daemon Control Plane (to trigger optimization on schedule, to expose promotion candidates and prompt proposals to the operator).
 - Knowledge Service CALLS: Session Runtime (to spawn prompt optimizer sessions during the optimization flow).
 - Knowledge Service NEVER applies changes to permanent documentation or instructions automatically. All promotions and instruction changes require operator approval.
 
@@ -78,11 +80,11 @@ If the type cannot be determined automatically, the unit is not exemplar-eligibl
 **Gotcha injection flow:**
 1. Before a session starts, the calling service (typically Implementation Coordinator) requests matching gotchas from Knowledge Service, providing the expected artifact locations for the unit.
 2. Knowledge Service matches the artifact locations against gotcha patterns using glob matching. Promoted gotchas are excluded.
-3. Matching gotchas are returned. Each matched gotcha's hit count is incremented.
-4. The calling service includes the matching gotchas in the session's context as a dedicated section.
+3. Matching gotchas are returned, sorted by priority tier (elevated first, then normal) and within each tier by hit count (descending). Each matched gotcha's hit count is incremented.
+4. The calling service includes the matching gotchas in the session's context as a dedicated section. Elevated gotchas (operator corrections) are placed in a prominent position before normal-priority gotchas.
 
 **Promotion flow:**
-1. Periodically (or on operator request), Knowledge Service evaluates gotchas against promotion criteria: hit count at or above a configurable threshold (default: 5) and age below a configurable maximum (default: 90 days).
+1. Periodically (or on operator request), Knowledge Service evaluates gotchas against promotion criteria: hit count at or above a configurable threshold (default: 5 for normal priority, 2 for elevated/operator-origin) and age below a configurable maximum (default: 90 days).
 2. Eligible gotchas are surfaced as promotion candidates.
 3. The operator reviews candidates via the control interface.
 4. On approval: the gotcha's description is written to a proposal for permanent project documentation. Once the operator merges the proposal, the gotcha is marked promoted and stops being injected per-session — it is now available to all sessions automatically through the permanent documentation.

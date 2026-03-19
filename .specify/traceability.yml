@@ -47,7 +47,13 @@ ARCH-SDD-SPEC-LIFECYCLE:
   parent: FUNC-SDD-VALIDATION
   status: approved
 
-# --- Auto-Claude L1 specs (roots — no parent) ---
+# --- Auto-Claude L0 spec (vision — root of all Auto-Claude specs) ---
+
+L0-AC-VISION:
+  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, STACK-AC-CONVENTIONS]
+  status: draft
+
+# --- Auto-Claude L1 specs ---
 
 FUNC-AC-PIPELINE:
   children: [ARCH-AC-CONTROL-PLANE]
@@ -77,30 +83,84 @@ FUNC-AC-LEARNING:
 
 ARCH-AC-CONTROL-PLANE:
   parent: FUNC-AC-PIPELINE
-  children: []
+  children: [STACK-AC-CONTROL-PLANE]
   status: draft
 
 ARCH-AC-IMPLEMENTATION:
   parent: FUNC-AC-IMPLEMENTATION
-  children: []
+  children: [STACK-AC-IMPLEMENTATION]
   status: draft
 
 ARCH-AC-VALIDATION:
   parent: FUNC-AC-QUALITY
-  children: []
+  children: [STACK-AC-VALIDATION]
   status: draft
 
 ARCH-AC-SESSION-RUNTIME:
   parent: FUNC-AC-SAFETY
-  children: []
+  children: [STACK-AC-SESSION-RUNTIME]
   status: draft
 
 ARCH-AC-DIAGNOSIS:
   parent: FUNC-AC-BUG-TRIAGE
-  children: []
+  children: [STACK-AC-DIAGNOSIS]
   status: draft
 
 ARCH-AC-KNOWLEDGE:
   parent: FUNC-AC-LEARNING
+  children: [STACK-AC-KNOWLEDGE]
+  status: draft
+
+# --- Auto-Claude L3 specs (stack-specific) ---
+
+# STACK-AC-CONVENTIONS is a cross-cutting spec — it references L0 directly
+# because it defines project-level conventions, not a single service's patterns.
+# This is an intentional exception to the L3→L2 chain.
+STACK-AC-CONVENTIONS:
+  parent: L0-AC-VISION
   children: []
+  code_paths: [src/types.ts, src/main.ts, src/config.ts, src/lib/]
+  test_paths: [src/**/*.test.ts]
+  status: draft
+
+STACK-AC-CONTROL-PLANE:
+  parent: ARCH-AC-CONTROL-PLANE
+  children: []
+  code_paths: [src/control-plane/]
+  test_paths: [src/control-plane/**/*.test.ts]
+  status: draft
+
+STACK-AC-IMPLEMENTATION:
+  parent: ARCH-AC-IMPLEMENTATION
+  children: []
+  code_paths: [src/implementation/]
+  test_paths: [src/implementation/**/*.test.ts]
+  status: draft
+
+STACK-AC-VALIDATION:
+  parent: ARCH-AC-VALIDATION
+  children: []
+  code_paths: [src/validation/]
+  test_paths: [src/validation/**/*.test.ts]
+  status: draft
+
+STACK-AC-SESSION-RUNTIME:
+  parent: ARCH-AC-SESSION-RUNTIME
+  children: []
+  code_paths: [src/session-runtime/]
+  test_paths: [src/session-runtime/**/*.test.ts]
+  status: draft
+
+STACK-AC-DIAGNOSIS:
+  parent: ARCH-AC-DIAGNOSIS
+  children: []
+  code_paths: [src/diagnosis/]
+  test_paths: [src/diagnosis/**/*.test.ts]
+  status: draft
+
+STACK-AC-KNOWLEDGE:
+  parent: ARCH-AC-KNOWLEDGE
+  children: []
+  code_paths: [src/knowledge/]
+  test_paths: [src/knowledge/**/*.test.ts]
   status: draft

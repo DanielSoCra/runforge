@@ -18,7 +18,7 @@ The Implementation Coordinator decomposes work requests into parallel units, man
 
 **TaskGraph** represents the decomposition of a work request. It contains: the work request identifier (issue number), the feature branch name, and an ordered array of units.
 
-**Unit** represents a single parallelizable work assignment. It contains: a unique identifier, a human-readable title, an array of governing spec identifiers, pre-loaded spec content (the full text of each spec, assembled by the coordinator), an array of expected artifact locations, an array of dependency identifiers (other units that must complete first, used for batch ordering), a batch number (units in the same batch run concurrently), a verification command (used by the worker to confirm its implementation), and assembled context (a text block containing the unit description, spec content, and any additional context the worker needs).
+**Unit** represents a single parallelizable work assignment. It contains: a unique identifier, a human-readable title, an array of governing spec identifiers, pre-loaded spec content (the full text of each spec, assembled by the coordinator), an array of expected artifact locations, an array of dependency identifiers (other units that must complete first, used for batch ordering), a batch number (units in the same batch run concurrently), a verification command (used by the worker to confirm its implementation), assembled context (a text block containing the unit description, spec content, and any additional context the worker needs), and an estimated change size (used for pre-flight scope validation).
 
 **UnitState** tracks execution status for a single unit. It contains: the unit identifier, a status (pending, running, completed, completed-with-concerns, blocked, needs-context, failed), the workspace path, the current attempt number, and an error description if failed.
 
@@ -84,8 +84,8 @@ The fix operation proceeds:
    b. Query Knowledge Service for pitfalls matching the unit's expected artifact locations.
    c. Assemble the unit prompt: spec content in implementation order (patterns first, then architecture, then business context — the reverse of understanding order, so the Worker sees actionable patterns before abstract intent), unit context, pitfalls, verification command. All content is pre-loaded; Workers never reference spec artifacts by path.
    d. Spawn a worker session via Session Runtime.
-3. As each unit completes, record its exit status and cost.
-4. After all units in the batch finish: process exit statuses (route blocked/needs-context as needed).
+3. As each unit completes, record its exit status and cost. Measure the change size (lines changed) of the unit's workspace diff.
+4. After all units in the batch finish: process exit statuses (route blocked/needs-context as needed). For any unit whose change size exceeds the configured threshold (default: 300 lines changed): flag the unit for re-decomposition. The unit's workspace is not merged; instead, the unit is split into smaller sub-units and re-executed in a subsequent batch.
 5. For successful units: merge each workspace into the feature branch sequentially. If a merge conflict occurs, spawn a Conflict Resolver session.
 6. Run post-integration verification on the feature branch. If verification fails, retry the entire batch (up to max retries).
 7. Save checkpoint. Proceed to next batch.
