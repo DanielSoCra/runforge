@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { notFound } from 'next/navigation';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -55,6 +56,22 @@ export default async function RepoDetailPage({ params }: { params: Promise<{ id:
           </form>
         </div>
       </div>
+
+      {/* Tab navigation */}
+      <nav className="flex gap-1 border-b border-zinc-800 pb-0">
+        <Link
+          href={`/repos/${id}`}
+          className="px-4 py-2 text-sm font-medium text-zinc-300 border-b-2 border-zinc-300 -mb-px"
+        >
+          Settings
+        </Link>
+        <Link
+          href={`/repos/${id}/plugins`}
+          className="px-4 py-2 text-sm font-medium text-zinc-500 hover:text-zinc-300 border-b-2 border-transparent -mb-px"
+        >
+          Plugins
+        </Link>
+      </nav>
 
       {/* Credentials */}
       <Card>
