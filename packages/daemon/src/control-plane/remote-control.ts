@@ -75,22 +75,22 @@ export class RemoteControlManager {
       if (code === 0) {
         this.failureCount = 0;
       }
-      this.scheduleRestart();
+      this.scheduleRestart(code !== 0);
     });
   }
 
-  private scheduleRestart(): void {
+  private scheduleRestart(countAsFailure = true): void {
     if (this.stopped) return;
-    this.failureCount++;
-
-    if (this.failureCount >= MAX_FAILURES) {
-      this.state = 'failed';
-      console.error('[remote-control] Too many restart failures — manual intervention required');
-      return;
+    if (countAsFailure) {
+      this.failureCount++;
+      if (this.failureCount >= MAX_FAILURES) {
+        this.state = 'failed';
+        console.error('[remote-control] Too many restart failures — manual intervention required');
+        return;
+      }
+      console.warn(`[remote-control] Process exited (attempt ${this.failureCount}/${MAX_FAILURES}), restarting in ${BACKOFF_MS[Math.min(this.failureCount - 1, BACKOFF_MS.length - 1)]}ms`);
     }
-
-    const delay = BACKOFF_MS[Math.min(this.failureCount - 1, BACKOFF_MS.length - 1)];
-    console.warn(`[remote-control] Process exited (attempt ${this.failureCount}/${MAX_FAILURES}), restarting in ${delay}ms`);
+    const delay = BACKOFF_MS[Math.min(this.failureCount, BACKOFF_MS.length - 1)];
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null;
       this.spawn();

@@ -85,7 +85,8 @@ describe('ControlServer', () => {
       retry: () => ok(undefined),
     });
     serverRef = s2;
-    await start2();
+    const result2 = await start2();
+    expect(result2.ok).toBe(true);
 
     const res = await fetch(`http://127.0.0.1:${PORT + 1}/status`);
     const body = await res.json();
