@@ -8,9 +8,9 @@ layer: 3
 stack: typescript
 references: ARCH-AC-VALIDATION
 code_paths:
-  - src/validation/
+  - packages/daemon/src/validation/
 test_paths:
-  - src/validation/**/*.test.ts
+  - packages/daemon/src/validation/**/*.test.ts
 ---
 
 # STACK-AC-VALIDATION — Validation Service (TypeScript)

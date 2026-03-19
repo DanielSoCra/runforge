@@ -8,9 +8,9 @@ layer: 3
 stack: typescript
 references: ARCH-AC-DIAGNOSIS
 code_paths:
-  - src/diagnosis/
+  - packages/daemon/src/diagnosis/
 test_paths:
-  - src/diagnosis/**/*.test.ts
+  - packages/daemon/src/diagnosis/**/*.test.ts
 ---
 
 # STACK-AC-DIAGNOSIS — Bug Diagnosis Service (TypeScript)

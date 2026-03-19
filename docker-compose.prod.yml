@@ -1,0 +1,52 @@
+version: '3.9'
+
+networks:
+  app:
+    driver: bridge
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - app
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: packages/dashboard/Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      NODE_ENV: production
+    networks:
+      - app
+    depends_on:
+      - daemon
+
+  daemon:
+    build:
+      context: .
+      dockerfile: packages/daemon/Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    ports: []  # NOT exposed externally — internal network only
+    volumes:
+      - ./prompts:/app/packages/daemon/prompts:ro
+      - ./fitness:/app/packages/daemon/fitness:ro
+      - ./auto-claude.config.json:/app/packages/daemon/auto-claude.config.json:ro
+      - daemon-state:/app/packages/daemon/state
+    networks:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:
+  daemon-state:

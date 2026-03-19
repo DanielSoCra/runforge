@@ -8,9 +8,9 @@ layer: 3
 stack: typescript
 references: ARCH-AC-SESSION-RUNTIME
 code_paths:
-  - src/session-runtime/
+  - packages/daemon/src/session-runtime/
 test_paths:
-  - src/session-runtime/**/*.test.ts
+  - packages/daemon/src/session-runtime/**/*.test.ts
 ---
 
 # STACK-AC-SESSION-RUNTIME — Session Runtime (TypeScript)

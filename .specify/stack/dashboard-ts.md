@@ -8,11 +8,11 @@ layer: 3
 stack: typescript
 references: ARCH-AC-DASHBOARD
 code_paths:
-  - dashboard/
+  - packages/dashboard/
   - supabase/
 test_paths:
-  - dashboard/**/*.test.ts
-  - dashboard/**/*.test.tsx
+  - packages/dashboard/**/*.test.ts
+  - packages/dashboard/**/*.test.tsx
   - supabase/tests/**/*.test.ts
 ---
 

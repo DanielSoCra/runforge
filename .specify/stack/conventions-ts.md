@@ -8,12 +8,12 @@ layer: 3
 stack: typescript
 references: L0-AC-VISION
 code_paths:
-  - src/types.ts
-  - src/main.ts
-  - src/config.ts
-  - src/lib/
+  - packages/daemon/src/types.ts
+  - packages/daemon/src/main.ts
+  - packages/daemon/src/config.ts
+  - packages/daemon/src/lib/
 test_paths:
-  - src/**/*.test.ts
+  - packages/daemon/src/**/*.test.ts
 ---
 
 # STACK-AC-CONVENTIONS — Cross-Cutting TypeScript Patterns

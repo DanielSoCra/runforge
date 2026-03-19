@@ -8,10 +8,10 @@ layer: 3
 stack: typescript
 references: ARCH-AC-HANDOFF
 code_paths:
-  - src/implementation/types.ts
-  - src/implementation/coordinator.ts
+  - packages/daemon/src/implementation/types.ts
+  - packages/daemon/src/implementation/coordinator.ts
 test_paths:
-  - src/implementation/coordinator.test.ts
+  - packages/daemon/src/implementation/coordinator.test.ts
 ---
 
 # STACK-AC-HANDOFF-COORDINATOR — Graceful Handoff: Implementation Coordinator (TypeScript)
