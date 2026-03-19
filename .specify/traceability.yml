@@ -213,3 +213,14 @@ STACK-AC-ENRICHED-COMMITS-WORKER:
   test_paths:
     - src/knowledge/parse-commits.test.ts
   status: draft
+
+STACK-AC-ENRICHED-COMMITS-KNOWLEDGE:
+  parent: ARCH-AC-ENRICHED-COMMITS
+  children: []
+  code_paths:
+    - src/knowledge/parse-commits.ts
+    - src/control-plane/completion.ts
+  test_paths:
+    - src/knowledge/parse-commits.test.ts
+    - src/control-plane/completion.test.ts
+  status: draft
