@@ -218,10 +218,12 @@ STACK-AC-DASHBOARD:
     - dashboard/app/(dashboard)/repos/page.tsx
     - dashboard/app/(dashboard)/repos/new/page.tsx
     - dashboard/app/(dashboard)/repos/[id]/page.tsx
+    - dashboard/actions/api-keys.ts
   test_paths:
     - dashboard/**/*.test.ts
     - dashboard/**/*.test.tsx
     - supabase/tests/**/*.test.ts
+    - dashboard/actions/api-keys.test.ts
   status: draft
 
 STACK-AC-HANDOFF-RUNTIME:
