@@ -38,6 +38,15 @@ describe('RLS policies', () => {
     expect(data).toEqual([]);
   });
 
+  it('unauthenticated client cannot insert repos', async () => {
+    const anonClient = createClient(SUPABASE_URL, ANON_KEY);
+    const { error } = await anonClient.from('repos').insert({
+      owner: 'hacker', name: 'hacked', enabled: false,
+      staging_branch: 'main', production_branch: 'main',
+    });
+    expect(error).not.toBeNull();
+  });
+
   // --- Service role ---
   it('service role can insert and read repos', async () => {
     const { data } = await serviceClient.from('repos').select('*').eq('id', testRepoId);
@@ -50,8 +59,7 @@ describe('RLS policies', () => {
   });
 
   // --- Admin user ---
-  it('admin user can read repos', async () => {
-    if (!ADMIN_JWT) return;
+  it.skipIf(!ADMIN_JWT)('admin user can read repos', async () => {
     const adminClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: `Bearer ${ADMIN_JWT}` } },
     });
@@ -59,8 +67,7 @@ describe('RLS policies', () => {
     expect(data?.length).toBeGreaterThan(0);
   });
 
-  it('admin user can update repos', async () => {
-    if (!ADMIN_JWT) return;
+  it.skipIf(!ADMIN_JWT)('admin user can update repos', async () => {
     const adminClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: `Bearer ${ADMIN_JWT}` } },
     });
@@ -71,8 +78,7 @@ describe('RLS policies', () => {
   });
 
   // --- Viewer user ---
-  it('viewer user can read repos', async () => {
-    if (!VIEWER_JWT) return;
+  it.skipIf(!VIEWER_JWT)('viewer user can read repos', async () => {
     const viewerClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: `Bearer ${VIEWER_JWT}` } },
     });
@@ -80,8 +86,7 @@ describe('RLS policies', () => {
     expect(data?.length).toBeGreaterThan(0);
   });
 
-  it('viewer user cannot update repos', async () => {
-    if (!VIEWER_JWT) return;
+  it.skipIf(!VIEWER_JWT)('viewer user cannot update repos', async () => {
     const viewerClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: `Bearer ${VIEWER_JWT}` } },
     });
@@ -91,8 +96,7 @@ describe('RLS policies', () => {
     expect(error).not.toBeNull();
   });
 
-  it('viewer user cannot insert api_keys', async () => {
-    if (!VIEWER_JWT) return;
+  it.skipIf(!VIEWER_JWT)('viewer user cannot insert api_keys', async () => {
     const viewerClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: `Bearer ${VIEWER_JWT}` } },
     });

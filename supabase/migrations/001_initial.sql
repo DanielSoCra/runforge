@@ -17,12 +17,11 @@ CREATE TYPE invite_status AS ENUM ('pending', 'accepted');
 CREATE TABLE global_settings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   concurrency_limit integer NOT NULL DEFAULT 3,
-  poll_interval_ms integer NOT NULL DEFAULT 60000,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 -- Seed one row — this is a single-row settings table
-INSERT INTO global_settings (concurrency_limit, poll_interval_ms) VALUES (3, 60000);
+INSERT INTO global_settings (concurrency_limit) VALUES (3);
 
 CREATE TABLE repos (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
