@@ -311,6 +311,7 @@ STACK-AC-PLUGINS-DASHBOARD:
   test_paths:
     - supabase/tests/rls-plugins.test.ts
     - packages/dashboard/actions/plugins.test.ts
+    - packages/dashboard/lib/plugins/registry.test.ts
   status: draft
 
 STACK-AC-ENRICHED-COMMITS-KNOWLEDGE:
