@@ -202,6 +202,10 @@ STACK-AC-DASHBOARD:
     - dashboard/lib/supabase/client.ts
     - dashboard/lib/supabase/server.ts
     - dashboard/lib/supabase/middleware.ts
+    - dashboard/middleware.ts
+    - dashboard/app/login/page.tsx
+    - dashboard/app/auth/login/route.ts
+    - dashboard/app/auth/callback/route.ts
   test_paths:
     - dashboard/**/*.test.ts
     - dashboard/**/*.test.tsx
