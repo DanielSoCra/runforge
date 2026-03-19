@@ -67,3 +67,10 @@ INFRA-GIT-WRAPPER:
   test_paths:
     - src/lib/git.test.ts
   status: approved
+
+CTRL-FSM-ENGINE:
+  code_paths:
+    - src/control-plane/fsm.ts
+  test_paths:
+    - src/control-plane/fsm.test.ts
+  status: approved
