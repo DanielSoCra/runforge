@@ -33,7 +33,6 @@ test_paths:
 ## Examples
 
 ```typescript
-// timeout-hook.ts — one-shot threshold check inside the returned hook
 if (!warned && Date.now() - startTime > timeoutMs - 120_000) {
   warned = true;
   return { block: true, message: TIMEOUT_WARNING_MESSAGE };
