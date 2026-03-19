@@ -53,3 +53,4 @@ const handoffNote = match?.[1]?.trim() || undefined;
 - For the CLI adapter, pass `SESSION_START_TIME` as an environment variable in the session spawn options. Add it to the explicit `safeEnv` allowlist alongside `PATH` and `HOME` — do not pass `process.env` wholesale.
 - Empty handoff blocks (`[HANDOFF][/HANDOFF]`) match the regex but produce an empty string after `.trim()`. Treat as `undefined`, not as a valid handoff.
 - `UnitState` is serialized to disk for crash resumption. Ensure `handoffNote?: string` is included in the Zod schema (or equivalent validation schema) for `UnitState` — otherwise deserialization silently drops it on restart.
+- The tool call that triggers the warning is sacrificed — the hook returns `{ block: true }` which prevents it from executing. This is intentional: the warning takes the slot of one tool call, and the agent then uses subsequent calls (which pass through freely, since `warned` is now `true`) to write its handoff output.
