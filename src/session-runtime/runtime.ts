@@ -6,35 +6,117 @@ import { ok, err } from '../lib/result.js';
 import { CostTracker } from './cost.js';
 import { createAdapter, type ProviderAdapter } from './adapters/index.js';
 
-// Minimal agent registry — maps session types to definitions
-// In MVP, we use a simple record. Full registry in later chunks.
-const DEFAULT_AGENT_DEFS: Partial<Record<SessionType, AgentDefinition>> = {
-  worker: {
-    name: 'worker',
-    description: 'Implements a unit of work',
-    systemPrompt: 'You are an implementation worker.',
-    allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
-    maxTurns: 50,
-    timeoutMs: 600_000, // 10 min
-    budgetCap: 5,
+// Agent definition registry — maps session types to their operational parameters.
+// System prompts are placeholders here; the real content lives in prompts/*.md
+// and is loaded by the template renderer at runtime.
+const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
+  coordinator: {
+    name: 'coordinator',
+    description: 'Decomposes work requests into parallel task graphs',
+    systemPrompt: '', // loaded from prompts/coordinator.md
+    allowedTools: ['Read', 'Glob', 'Grep'],
+    maxTurns: 1,
+    timeoutMs: 120_000,
+    budgetCap: 1,
   },
   classifier: {
     name: 'classifier',
-    description: 'Classifies work request complexity',
-    systemPrompt: 'You classify work request complexity.',
+    description: 'Classifies work request complexity (simple/standard/complex)',
+    systemPrompt: '', // loaded from prompts/classifier.md
     allowedTools: ['Read', 'Glob', 'Grep'],
     maxTurns: 1,
     timeoutMs: 60_000,
     budgetCap: 0.5,
   },
+  worker: {
+    name: 'worker',
+    description: 'Implements a unit of work using TDD',
+    systemPrompt: '', // loaded from prompts/worker.md
+    allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
+    maxTurns: 50,
+    timeoutMs: 600_000,
+    budgetCap: 5,
+  },
+  'reviewer-spec': {
+    name: 'reviewer-spec',
+    description: 'Verifies implementation against spec acceptance criteria',
+    systemPrompt: '', // loaded from prompts/reviewer-spec.md
+    allowedTools: ['Read', 'Glob', 'Grep'],
+    maxTurns: 10,
+    timeoutMs: 180_000,
+    budgetCap: 2,
+  },
+  'reviewer-quality': {
+    name: 'reviewer-quality',
+    description: 'Evaluates code quality, patterns, and test quality',
+    systemPrompt: '', // loaded from prompts/reviewer-quality.md
+    allowedTools: ['Read', 'Glob', 'Grep'],
+    maxTurns: 10,
+    timeoutMs: 180_000,
+    budgetCap: 2,
+  },
+  'reviewer-security': {
+    name: 'reviewer-security',
+    description: 'Evaluates security: injection, auth, validation, concurrency',
+    systemPrompt: '', // loaded from prompts/reviewer-security.md
+    allowedTools: ['Read', 'Glob', 'Grep'],
+    maxTurns: 10,
+    timeoutMs: 180_000,
+    budgetCap: 2,
+  },
+  'conflict-resolver': {
+    name: 'conflict-resolver',
+    description: 'Resolves merge conflicts favoring spec intent',
+    systemPrompt: '', // loaded from prompts/conflict-resolver.md
+    allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep'],
+    maxTurns: 10,
+    timeoutMs: 120_000,
+    budgetCap: 1,
+  },
+  'bug-worker': {
+    name: 'bug-worker',
+    description: 'Fixes Type A bugs with regression-test-first protocol',
+    systemPrompt: '', // loaded from prompts/bug-worker.md
+    allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
+    maxTurns: 30,
+    timeoutMs: 600_000,
+    budgetCap: 5,
+  },
+  tester: {
+    name: 'tester',
+    description: 'Runs post-deployment tests and reports results',
+    systemPrompt: '', // loaded from prompts/tester.md
+    allowedTools: ['Read', 'Bash', 'Glob', 'Grep'],
+    maxTurns: 10,
+    timeoutMs: 300_000,
+    budgetCap: 1,
+  },
+  diagnostician: {
+    name: 'diagnostician',
+    description: 'Classifies bugs as Type A/B/C with confidence score',
+    systemPrompt: '', // loaded from prompts/diagnostician.md
+    allowedTools: ['Read', 'Glob', 'Grep'],
+    maxTurns: 1,
+    timeoutMs: 120_000,
+    budgetCap: 1,
+  },
   reporter: {
     name: 'reporter',
-    description: 'Generates completion reports',
-    systemPrompt: 'You generate structured reports.',
+    description: 'Generates structured completion reports',
+    systemPrompt: '', // loaded from prompts/reporter.md
     allowedTools: ['Read', 'Glob', 'Grep'],
     maxTurns: 1,
     timeoutMs: 60_000,
     budgetCap: 0.5,
+  },
+  'prompt-optimizer': {
+    name: 'prompt-optimizer',
+    description: 'Proposes improvements to mutable instruction templates',
+    systemPrompt: '', // loaded from prompts/prompt-optimizer.md
+    allowedTools: ['Read', 'Glob', 'Grep'],
+    maxTurns: 5,
+    timeoutMs: 300_000,
+    budgetCap: 3,
   },
 };
 
