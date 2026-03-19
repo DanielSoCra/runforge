@@ -9,6 +9,12 @@ const VIEWER_JWT = process.env.SUPABASE_TEST_VIEWER_JWT!;
 
 const serviceClient = createClient(SUPABASE_URL, SERVICE_KEY);
 
+// NOTE: Admin/viewer tests are skipped if JWT env vars are absent.
+// To run the full suite, set:
+//   SUPABASE_TEST_ADMIN_JWT  — JWT for a user with role=admin in team_members
+//   SUPABASE_TEST_VIEWER_JWT — JWT for a user with role=viewer in team_members
+// In CI, generate these via the Supabase admin API or signInWithPassword.
+
 describe('RLS policies', () => {
   let testRepoId: string;
 
@@ -90,10 +96,15 @@ describe('RLS policies', () => {
     const viewerClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: `Bearer ${VIEWER_JWT}` } },
     });
-    const { error } = await viewerClient.from('repos')
+    await viewerClient.from('repos')
       .update({ concurrency_limit: 99 })
       .eq('id', testRepoId);
-    expect(error).not.toBeNull();
+    // Verify the write was blocked — service client reads the ground truth
+    const { data } = await serviceClient.from('repos')
+      .select('concurrency_limit')
+      .eq('id', testRepoId)
+      .single();
+    expect(data?.concurrency_limit).not.toBe(99);
   });
 
   it.skipIf(!VIEWER_JWT)('viewer user cannot insert api_keys', async () => {

@@ -161,6 +161,9 @@ CREATE OR REPLACE FUNCTION bootstrap_user_access(
 DECLARE
   v_role team_role;
 BEGIN
+  IF p_user_id <> auth.uid() THEN
+    RAISE EXCEPTION 'permission denied: p_user_id must match caller identity';
+  END IF;
   LOCK TABLE team_members IN EXCLUSIVE MODE;
 
   -- First user: always admin
@@ -221,6 +224,9 @@ CREATE OR REPLACE FUNCTION upsert_api_key_encrypted(
 DECLARE
   v_enc_key text;
 BEGIN
+  IF NOT is_admin() THEN
+    RAISE EXCEPTION 'permission denied';
+  END IF;
   SELECT decrypted_secret INTO v_enc_key FROM vault.decrypted_secrets WHERE name = 'encryption_key' LIMIT 1;
   INSERT INTO api_keys (repo_id, key_type, encrypted_value, updated_at)
   VALUES (p_repo_id, p_key_type::key_type, pgp_sym_encrypt(p_plaintext, v_enc_key), now())
@@ -228,6 +234,8 @@ BEGIN
     SET encrypted_value = pgp_sym_encrypt(p_plaintext, v_enc_key), updated_at = now();
 END;
 $$;
+REVOKE EXECUTE ON FUNCTION upsert_api_key_encrypted FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION upsert_api_key_encrypted FROM anon, authenticated;
 
 -- Note: Seed the encryption key once after migration:
 -- SELECT vault.create_secret('<your-hex-key>', 'encryption_key', 'pgcrypto key for api_keys table');
