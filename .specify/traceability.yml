@@ -46,3 +46,17 @@ ARCH-SDD-FLAVOR-PACKS:
 ARCH-SDD-SPEC-LIFECYCLE:
   parent: FUNC-SDD-VALIDATION
   status: approved
+
+# --- Project scaffolding (no governing spec yet) ---
+
+INFRA-PROJECT-INIT:
+  code_paths:
+    - package.json
+    - tsconfig.json
+    - vitest.config.ts
+    - eslint.config.js
+    - .prettierrc
+    - .gitignore
+    - src/main.ts
+  test_paths: []
+  status: approved
