@@ -8,9 +8,9 @@ layer: 3
 stack: typescript
 references: ARCH-AC-KNOWLEDGE
 code_paths:
-  - src/knowledge/
+  - packages/daemon/src/knowledge/
 test_paths:
-  - src/knowledge/**/*.test.ts
+  - packages/daemon/src/knowledge/**/*.test.ts
 ---
 
 # STACK-AC-KNOWLEDGE — Knowledge Service (TypeScript)

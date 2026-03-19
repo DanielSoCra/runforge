@@ -8,3 +8,6 @@ state
 *.tmp
 research
 docs
+
+packages/dashboard/.next
+.worktrees

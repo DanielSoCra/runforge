@@ -8,11 +8,11 @@ layer: 3
 stack: typescript
 references: ARCH-AC-ENRICHED-COMMITS
 code_paths:
-  - src/knowledge/parse-commits.ts
-  - src/control-plane/completion.ts
+  - packages/daemon/src/knowledge/parse-commits.ts
+  - packages/daemon/src/control-plane/completion.ts
 test_paths:
-  - src/knowledge/parse-commits.test.ts
-  - src/control-plane/completion.test.ts
+  - packages/daemon/src/knowledge/parse-commits.test.ts
+  - packages/daemon/src/control-plane/completion.test.ts
 ---
 
 # STACK-AC-ENRICHED-COMMITS-KNOWLEDGE — Enriched Commits: Knowledge Service & Control Plane (TypeScript)

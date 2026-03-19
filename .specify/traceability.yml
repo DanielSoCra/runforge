@@ -146,120 +146,120 @@ ARCH-AC-ENRICHED-COMMITS:
 STACK-AC-CONVENTIONS:
   parent: L0-AC-VISION
   children: []
-  code_paths: [src/types.ts, src/main.ts, src/config.ts, src/lib/]
-  test_paths: [src/**/*.test.ts]
+  code_paths: [packages/daemon/src/types.ts, packages/daemon/src/main.ts, packages/daemon/src/config.ts, packages/daemon/src/lib/]
+  test_paths: [packages/daemon/src/**/*.test.ts]
   status: draft
 
 STACK-AC-CONTROL-PLANE:
   parent: ARCH-AC-CONTROL-PLANE
   children: []
-  code_paths: [src/control-plane/]
-  test_paths: [src/control-plane/**/*.test.ts]
+  code_paths: [packages/daemon/src/control-plane/]
+  test_paths: [packages/daemon/src/control-plane/**/*.test.ts]
   status: draft
 
 STACK-AC-IMPLEMENTATION:
   parent: ARCH-AC-IMPLEMENTATION
   children: []
-  code_paths: [src/implementation/]
-  test_paths: [src/implementation/**/*.test.ts]
+  code_paths: [packages/daemon/src/implementation/]
+  test_paths: [packages/daemon/src/implementation/**/*.test.ts]
   status: draft
 
 STACK-AC-VALIDATION:
   parent: ARCH-AC-VALIDATION
   children: []
-  code_paths: [src/validation/]
-  test_paths: [src/validation/**/*.test.ts]
+  code_paths: [packages/daemon/src/validation/]
+  test_paths: [packages/daemon/src/validation/**/*.test.ts]
   status: draft
 
 STACK-AC-SESSION-RUNTIME:
   parent: ARCH-AC-SESSION-RUNTIME
   children: []
-  code_paths: [src/session-runtime/]
-  test_paths: [src/session-runtime/**/*.test.ts]
+  code_paths: [packages/daemon/src/session-runtime/]
+  test_paths: [packages/daemon/src/session-runtime/**/*.test.ts]
   status: draft
 
 STACK-AC-DIAGNOSIS:
   parent: ARCH-AC-DIAGNOSIS
   children: []
-  code_paths: [src/diagnosis/]
-  test_paths: [src/diagnosis/**/*.test.ts]
+  code_paths: [packages/daemon/src/diagnosis/]
+  test_paths: [packages/daemon/src/diagnosis/**/*.test.ts]
   status: draft
 
 STACK-AC-KNOWLEDGE:
   parent: ARCH-AC-KNOWLEDGE
   children: []
-  code_paths: [src/knowledge/]
-  test_paths: [src/knowledge/**/*.test.ts]
+  code_paths: [packages/daemon/src/knowledge/]
+  test_paths: [packages/daemon/src/knowledge/**/*.test.ts]
   status: draft
 
 STACK-AC-DASHBOARD:
   parent: ARCH-AC-DASHBOARD
   children: []
   code_paths:
-    - dashboard/
+    - packages/dashboard/
     - supabase/
-    - dashboard/lib/types.ts
-    - dashboard/lib/supabase/client.ts
-    - dashboard/lib/supabase/server.ts
-    - dashboard/lib/supabase/middleware.ts
-    - dashboard/proxy.ts
-    - dashboard/app/layout.tsx
-    - dashboard/app/(dashboard)/layout.tsx
-    - dashboard/app/(dashboard)/page.tsx
-    - dashboard/app/login/page.tsx
-    - dashboard/app/auth/login/route.ts
-    - dashboard/app/auth/callback/route.ts
-    - dashboard/components/stats-cards.tsx
-    - dashboard/components/sidebar.tsx
-    - dashboard/components/run-table.tsx
-    - dashboard/components/realtime-provider.tsx
-    - dashboard/actions/repos.ts
-    - dashboard/actions/repos.test.ts
-    - dashboard/app/(dashboard)/repos/page.tsx
-    - dashboard/app/(dashboard)/repos/new/page.tsx
-    - dashboard/app/(dashboard)/repos/[id]/page.tsx
-    - dashboard/actions/api-keys.ts
-    - dashboard/components/cost-chart.tsx
-    - dashboard/app/(dashboard)/cost/page.tsx
-    - dashboard/actions/team.ts
-    - dashboard/app/(dashboard)/team/page.tsx
-    - dashboard/actions/team.test.ts
-    - dashboard/actions/settings.ts
-    - dashboard/app/(dashboard)/settings/page.tsx
-    - dashboard/app/api/daemon/pause/route.ts
-    - dashboard/app/api/daemon/resume/route.ts
-    - dashboard/app/api/daemon/status/route.ts
+    - packages/dashboard/lib/types.ts
+    - packages/dashboard/lib/supabase/client.ts
+    - packages/dashboard/lib/supabase/server.ts
+    - packages/dashboard/lib/supabase/middleware.ts
+    - packages/dashboard/proxy.ts
+    - packages/dashboard/app/layout.tsx
+    - packages/dashboard/app/(dashboard)/layout.tsx
+    - packages/dashboard/app/(dashboard)/page.tsx
+    - packages/dashboard/app/login/page.tsx
+    - packages/dashboard/app/auth/login/route.ts
+    - packages/dashboard/app/auth/callback/route.ts
+    - packages/dashboard/components/stats-cards.tsx
+    - packages/dashboard/components/sidebar.tsx
+    - packages/dashboard/components/run-table.tsx
+    - packages/dashboard/components/realtime-provider.tsx
+    - packages/dashboard/actions/repos.ts
+    - packages/dashboard/actions/repos.test.ts
+    - packages/dashboard/app/(dashboard)/repos/page.tsx
+    - packages/dashboard/app/(dashboard)/repos/new/page.tsx
+    - packages/dashboard/app/(dashboard)/repos/[id]/page.tsx
+    - packages/dashboard/actions/api-keys.ts
+    - packages/dashboard/components/cost-chart.tsx
+    - packages/dashboard/app/(dashboard)/cost/page.tsx
+    - packages/dashboard/actions/team.ts
+    - packages/dashboard/app/(dashboard)/team/page.tsx
+    - packages/dashboard/actions/team.test.ts
+    - packages/dashboard/actions/settings.ts
+    - packages/dashboard/app/(dashboard)/settings/page.tsx
+    - packages/dashboard/app/api/daemon/pause/route.ts
+    - packages/dashboard/app/api/daemon/resume/route.ts
+    - packages/dashboard/app/api/daemon/status/route.ts
     - docker-compose.prod.yml
     - Caddyfile
-    - dashboard/Dockerfile
+    - packages/dashboard/Dockerfile
     - .env.prod.example
   test_paths:
-    - dashboard/**/*.test.ts
-    - dashboard/**/*.test.tsx
+    - packages/dashboard/**/*.test.ts
+    - packages/dashboard/**/*.test.tsx
     - supabase/tests/**/*.test.ts
-    - dashboard/actions/api-keys.test.ts
+    - packages/dashboard/actions/api-keys.test.ts
   status: draft
 
 STACK-AC-HANDOFF-RUNTIME:
   parent: ARCH-AC-HANDOFF
   children: []
   code_paths:
-    - src/session-runtime/timeout-hook.ts
-    - src/session-runtime/index.ts
+    - packages/daemon/src/session-runtime/timeout-hook.ts
+    - packages/daemon/src/session-runtime/index.ts
     - .claude/hooks/timeout-warning.sh
   test_paths:
-    - src/session-runtime/timeout-hook.test.ts
-    - src/session-runtime/index.test.ts
+    - packages/daemon/src/session-runtime/timeout-hook.test.ts
+    - packages/daemon/src/session-runtime/index.test.ts
   status: draft
 
 STACK-AC-HANDOFF-COORDINATOR:
   parent: ARCH-AC-HANDOFF
   children: []
   code_paths:
-    - src/implementation/types.ts
-    - src/implementation/coordinator.ts
+    - packages/daemon/src/implementation/types.ts
+    - packages/daemon/src/implementation/coordinator.ts
   test_paths:
-    - src/implementation/coordinator.test.ts
+    - packages/daemon/src/implementation/coordinator.test.ts
   status: draft
 
 STACK-AC-ENRICHED-COMMITS-WORKER:
@@ -268,16 +268,16 @@ STACK-AC-ENRICHED-COMMITS-WORKER:
   code_paths:
     - prompts/worker.md
   test_paths:
-    - src/knowledge/parse-commits.test.ts
+    - packages/daemon/src/knowledge/parse-commits.test.ts
   status: draft
 
 STACK-AC-ENRICHED-COMMITS-KNOWLEDGE:
   parent: ARCH-AC-ENRICHED-COMMITS
   children: []
   code_paths:
-    - src/knowledge/parse-commits.ts
-    - src/control-plane/completion.ts
+    - packages/daemon/src/knowledge/parse-commits.ts
+    - packages/daemon/src/control-plane/completion.ts
   test_paths:
-    - src/knowledge/parse-commits.test.ts
-    - src/control-plane/completion.test.ts
+    - packages/daemon/src/knowledge/parse-commits.test.ts
+    - packages/daemon/src/control-plane/completion.test.ts
   status: draft

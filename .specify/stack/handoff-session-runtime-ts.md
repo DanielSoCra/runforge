@@ -8,12 +8,12 @@ layer: 3
 stack: typescript
 references: ARCH-AC-HANDOFF
 code_paths:
-  - src/session-runtime/timeout-hook.ts
-  - src/session-runtime/index.ts
+  - packages/daemon/src/session-runtime/timeout-hook.ts
+  - packages/daemon/src/session-runtime/index.ts
   - .claude/hooks/timeout-warning.sh
 test_paths:
-  - src/session-runtime/timeout-hook.test.ts
-  - src/session-runtime/index.test.ts
+  - packages/daemon/src/session-runtime/timeout-hook.test.ts
+  - packages/daemon/src/session-runtime/index.test.ts
 ---
 
 # STACK-AC-HANDOFF-RUNTIME — Graceful Handoff: Session Runtime (TypeScript)

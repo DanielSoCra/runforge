@@ -8,9 +8,9 @@ layer: 3
 stack: typescript
 references: ARCH-AC-CONTROL-PLANE
 code_paths:
-  - src/control-plane/
+  - packages/daemon/src/control-plane/
 test_paths:
-  - src/control-plane/**/*.test.ts
+  - packages/daemon/src/control-plane/**/*.test.ts
 ---
 
 # STACK-AC-CONTROL-PLANE — Daemon Control Plane (TypeScript)

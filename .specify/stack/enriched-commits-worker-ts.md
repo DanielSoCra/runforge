@@ -10,7 +10,7 @@ references: ARCH-AC-ENRICHED-COMMITS
 code_paths:
   - prompts/worker.md
 test_paths:
-  - src/knowledge/parse-commits.test.ts
+  - packages/daemon/src/knowledge/parse-commits.test.ts
 ---
 
 # STACK-AC-ENRICHED-COMMITS-WORKER — Enriched Commits: Worker Prompt Format

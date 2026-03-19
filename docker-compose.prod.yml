@@ -20,8 +20,8 @@ services:
 
   dashboard:
     build:
-      context: ./dashboard
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: packages/dashboard/Dockerfile
     restart: unless-stopped
     env_file: .env.prod
     environment:
@@ -34,13 +34,19 @@ services:
   daemon:
     build:
       context: .
-      dockerfile: Dockerfile.daemon
+      dockerfile: packages/daemon/Dockerfile
     restart: unless-stopped
     env_file: .env.prod
     ports: []  # NOT exposed externally — internal network only
+    volumes:
+      - ./prompts:/app/packages/daemon/prompts:ro
+      - ./fitness:/app/packages/daemon/fitness:ro
+      - ./auto-claude.config.json:/app/packages/daemon/auto-claude.config.json:ro
+      - daemon-state:/app/packages/daemon/state
     networks:
       - app
 
 volumes:
   caddy_data:
   caddy_config:
+  daemon-state:

@@ -8,9 +8,9 @@ layer: 3
 stack: typescript
 references: ARCH-AC-IMPLEMENTATION
 code_paths:
-  - src/implementation/
+  - packages/daemon/src/implementation/
 test_paths:
-  - src/implementation/**/*.test.ts
+  - packages/daemon/src/implementation/**/*.test.ts
 ---
 
 # STACK-AC-IMPLEMENTATION — Implementation Coordinator (TypeScript)
