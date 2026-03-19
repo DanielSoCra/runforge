@@ -46,3 +46,4 @@ When implementation work completes, the reasoning behind decisions, patterns dis
 - Knowledge extracted from implementation records supplements existing per-session knowledge capture — it does not replace it
 - Extracted knowledge requires operator approval before becoming permanent convention documentation
 - Only successfully completed runs contribute knowledge from their implementation records
+- This feature owns extraction and storage of knowledge from implementation records — not injection into future sessions. Injection follows the same lifecycle as all other institutional knowledge
