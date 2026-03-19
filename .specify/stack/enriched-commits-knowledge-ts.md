@@ -37,6 +37,16 @@ const DEAD_ENDS_RE = /^Dead-ends:\s*(.+)$/m;
 ```
 
 ```typescript
+// src/knowledge/parse-commits.ts — extracted gotcha shape
+interface ParsedGotcha {
+  artifacts: string[];
+  description: string;
+  originType: 'autonomous';
+}
+// parseCommits(messages: string[], workRequestId: string): ParsedGotcha[]
+```
+
+```typescript
 // src/control-plane/completion.ts — reading commit log
 const log = await git(['log', '--format=%B---COMMIT---', `${baseBranch}..${featureBranch}`]);
 const messages = log.split('---COMMIT---').filter(s => s.trim().length > 0);
@@ -44,7 +54,7 @@ const messages = log.split('---COMMIT---').filter(s => s.trim().length > 0);
 
 ## Gotchas
 
-- `git log A..B` returns empty output when A and B are the same commit (no new commits). Check for an empty `messages` array before calling `parse_commits` — this is expected after simple fast-forward merges, not an error.
+- `git log A..B` returns empty output when A and B are the same commit (no new commits). Check for an empty `messages` array before calling `parseCommits` — this is expected after simple fast-forward merges, not an error.
 - Merge commit bodies typically lack the structured fields and will be skipped silently — correct behavior, not a bug.
 - Split `Artifacts:` on `,` then trim each segment: `value.split(',').map(s => s.trim()).filter(Boolean)`. This handles trailing commas and extra whitespace from worker output without producing empty artifact patterns.
-- `parse_commits` failure must not affect run completion or operator notification. Wrap the call in a try/catch at the Control Plane callsite and log the error without re-throwing.
+- `parseCommits` failure must not affect run completion or operator notification. Wrap the call in a try/catch at the Control Plane callsite and log the error without re-throwing.
