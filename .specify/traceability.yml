@@ -204,3 +204,12 @@ STACK-AC-HANDOFF-COORDINATOR:
   test_paths:
     - src/implementation/coordinator.test.ts
   status: draft
+
+STACK-AC-ENRICHED-COMMITS-WORKER:
+  parent: ARCH-AC-ENRICHED-COMMITS
+  children: []
+  code_paths:
+    - prompts/worker.md
+  test_paths:
+    - src/knowledge/parse-commits.test.ts
+  status: draft
