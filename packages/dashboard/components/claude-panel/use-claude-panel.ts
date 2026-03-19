@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 const STORAGE_KEY = 'claude-panel-open';
 const POLL_INTERVAL = 5_000;
@@ -15,12 +15,17 @@ export function useClaudePanel() {
   const [sessionState, setSessionState] = useState<RemoteControlState>('offline');
 
   const toggle = useCallback(() => {
-    setIsOpen((prev) => {
-      const next = !prev;
-      localStorage.setItem(STORAGE_KEY, String(next));
-      return next;
-    });
+    setIsOpen((prev) => !prev);
   }, []);
+
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    localStorage.setItem(STORAGE_KEY, String(isOpen));
+  }, [isOpen]);
 
   useEffect(() => {
     let active = true;

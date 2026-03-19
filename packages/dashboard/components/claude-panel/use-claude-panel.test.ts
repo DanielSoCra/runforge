@@ -43,8 +43,7 @@ describe('useClaudePanel', () => {
   it('polls /api/daemon/status and exposes url and state', async () => {
     const { result } = renderHook(() => useClaudePanel());
     await act(async () => {
-      vi.advanceTimersByTime(100); // trigger initial fetch
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(100);
     });
     expect(result.current.sessionUrl).toBe('https://claude.ai/remote/test');
     expect(result.current.sessionState).toBe('active');
@@ -53,8 +52,7 @@ describe('useClaudePanel', () => {
   it('re-polls every 5 seconds', async () => {
     renderHook(() => useClaudePanel());
     await act(async () => {
-      vi.advanceTimersByTime(5100);
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(5100);
     });
     expect(fetch).toHaveBeenCalledTimes(2); // initial + one poll
   });
