@@ -45,7 +45,7 @@ export async function changeRole(memberId: string, newRole: 'admin' | 'viewer') 
   const supabase = await createClient();
   await requireAdmin(supabase);
 
-  const { data, error } = await supabase.rpc('change_member_role', {
+  const { data, error } = await (supabase as any).rpc('change_member_role', {
     p_member_id: memberId,
     p_new_role: newRole,
   });
@@ -59,7 +59,7 @@ export async function removeMember(memberId: string) {
   const supabase = await createClient();
   await requireAdmin(supabase);
 
-  const { data, error } = await supabase.rpc('remove_team_member', {
+  const { data, error } = await (supabase as any).rpc('remove_team_member', {
     p_member_id: memberId,
   });
   if (error) throw new Error(error.message);
