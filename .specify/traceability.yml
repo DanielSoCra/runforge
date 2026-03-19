@@ -303,7 +303,7 @@ STACK-AC-PLUGINS-DASHBOARD:
   parent: ARCH-AC-PLUGINS
   children: []
   code_paths:
-    - supabase/migrations/002_plugins.sql
+    - supabase/migrations/003_plugins.sql
     - packages/dashboard/actions/plugins.ts
     - packages/dashboard/app/repos/[id]/plugins/page.tsx
     - packages/dashboard/components/plugin-card.tsx
