@@ -46,6 +46,16 @@ describe('buildCompositeContext', () => {
     expect(ctx.mcpConfigs.find(m => m.name === 'figma')!.args).toContain('figma-a');
   });
 
+  it('first-activated plugin wins on agent filename collision', () => {
+    const plugins = [
+      makePlugin('a', '2024-01-01T00:00:00Z', { agents: [{ name: 'reviewer.md', content: 'a-agent', pluginId: 'a' }] }),
+      makePlugin('b', '2024-01-02T00:00:00Z', { agents: [{ name: 'reviewer.md', content: 'b-agent', pluginId: 'b' }] }),
+    ];
+    const ctx = buildCompositeContext(plugins);
+    expect(ctx.agents.filter(a => a.name === 'reviewer.md')).toHaveLength(1);
+    expect(ctx.agents.find(a => a.name === 'reviewer.md')!.content).toBe('a-agent');
+  });
+
   it('truncates skills before agents when budget exceeded, preserving promptInjection', () => {
     const longSkill = { name: 'big.md', content: 'x'.repeat(100000), pluginId: 'a' };
     const plugins = [makePlugin('a', '2024-01-01T00:00:00Z', { skills: [longSkill] })];
