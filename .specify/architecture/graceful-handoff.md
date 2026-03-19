@@ -28,7 +28,7 @@ No new external API operations. Changes to existing internal operations:
 
 ## System Boundaries
 
-- Session Runtime OWNS: handoff record extraction, two-phase termination signaling for worker and fix-worker session types.
+- Session Runtime OWNS: handoff record extraction from session output, two-phase termination signaling for worker and fix-worker session types. Session Runtime returns the extracted handoff record in the session result; it does not write to unit execution state.
 - Implementation Coordinator OWNS: handoff record injection into unit context, unit execution state (including the handoff record field).
 - The handoff record is transient per-unit state. It is not stored in the results ledger and does not affect knowledge accumulation in the Knowledge Service.
 
@@ -38,8 +38,8 @@ No new external API operations. Changes to existing internal operations:
 2. Session Runtime delivers a warning signal to the running session via a time-aware hook in the existing hook infrastructure.
 3. The session writes a structured handoff record to its output and stops making further tool calls.
 4. At session termination, Session Runtime extracts the handoff record from session output alongside existing pitfall marker extraction.
-5. Session Runtime stores the handoff record on the unit's execution state.
-6. Implementation Coordinator reads the unit's execution state when preparing the next attempt.
+5. Session Runtime returns the handoff record in the session result (alongside cost, pitfall markers, and exit status).
+6. Implementation Coordinator receives the session result, stores the handoff record on the unit's execution state, then reads it when preparing the next attempt.
 7. If a handoff record is present, Implementation Coordinator prepends it before spec content in the assembled context.
 8. If no handoff record is present (empty, malformed, or absent), the next attempt begins with the standard context — identical to behavior before this feature.
 

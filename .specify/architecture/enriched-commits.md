@@ -41,7 +41,7 @@ No new persistent entities. The structured commit message is ephemeral — its c
 
 1. Worker session completes an assignment and commits the work using the structured format.
 2. (Existing pipeline continues: review, holdout, integrate, deploy, test.)
-3. At run completion, Control Plane reads the commit history for the feature branch since the base branch.
+3. At successful run completion (not stuck or escalated), Control Plane reads the commit history for the feature branch since the base branch.
 4. Control Plane calls Knowledge Service `parse_commits` with the commit messages and work request identifier.
 5. Knowledge Service parses each commit: extracts `Discovered:`, `Dead-ends:`, and `Artifacts:` fields.
 6. For each extracted entry, Knowledge Service creates or updates a Gotcha using the artifact patterns from `Artifacts:`.
@@ -50,7 +50,7 @@ No new persistent entities. The structured commit message is ephemeral — its c
 
 ## Error Handling
 
-**Commit missing required fields:** Skip the commit silently. Log a count of skipped commits in the `parse_commits` response. Do not fail the run.
+**Commit missing `Artifacts:` or missing both `Discovered:` and `Dead-ends:`:** Skip the commit silently. Log a count of skipped commits in the `parse_commits` response. Do not fail the run.
 
 **`parse_commits` operation fails:** Log and continue. Knowledge extraction from commit history is non-critical. The run is already complete — the failure does not affect the run outcome or operator notification.
 
