@@ -13,8 +13,8 @@ describe('loadPluginRegistry', () => {
   });
 
   it('throws when a plugin directory is missing', async () => {
-    await expect(loadPluginRegistry(join(FIXTURES, 'plugins-no-dir'))).rejects.toThrow(
-      'Plugin registry not found',
+    await expect(loadPluginRegistry(join(FIXTURES, 'plugins-missing-dir'))).rejects.toThrow(
+      'Plugin directory not found',
     );
   });
 
