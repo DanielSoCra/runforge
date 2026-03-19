@@ -1,0 +1,46 @@
+// src/lib/json-store.ts
+import { writeFile, rename, readFile, appendFile } from 'fs/promises';
+import { ok, err, type Result } from './result.js';
+
+export async function writeJsonSafe<T>(path: string, data: T): Promise<void> {
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tmp, JSON.stringify(data, null, 2));
+  await rename(tmp, path);
+}
+
+export async function writeTextSafe(path: string, content: string): Promise<void> {
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tmp, content);
+  await rename(tmp, path);
+}
+
+export async function readJsonSafe<T>(path: string): Promise<Result<T>> {
+  try {
+    const raw = await readFile(path, 'utf-8');
+    return ok(JSON.parse(raw) as T);
+  } catch (e) {
+    return err(e instanceof Error ? e : new Error(String(e)));
+  }
+}
+
+export async function appendJsonl<T>(path: string, entry: T): Promise<void> {
+  await appendFile(path, JSON.stringify(entry) + '\n');
+}
+
+export async function readJsonl<T>(path: string): Promise<T[]> {
+  try {
+    const raw = await readFile(path, 'utf-8');
+    return raw
+      .split('\n')
+      .filter((line) => line.trim())
+      .flatMap((line) => {
+        try {
+          return [JSON.parse(line) as T];
+        } catch {
+          return [];
+        }
+      });
+  } catch {
+    return [];
+  }
+}
