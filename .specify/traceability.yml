@@ -91,6 +91,17 @@ FUNC-AC-ENRICHED-COMMITS:
   children: [ARCH-AC-ENRICHED-COMMITS]
   status: draft
 
+FUNC-AC-PLUGINS:
+  children: [ARCH-AC-PLUGINS]
+  status: draft
+
+# --- Auto-Claude Plugins L2 spec ---
+
+ARCH-AC-PLUGINS:
+  parent: FUNC-AC-PLUGINS
+  children: [STACK-AC-PLUGINS-DAEMON, STACK-AC-PLUGINS-DASHBOARD]
+  status: draft
+
 # --- Auto-Claude L2 specs ---
 
 ARCH-AC-CONTROL-PLANE:
@@ -239,6 +250,32 @@ STACK-AC-ENRICHED-COMMITS-WORKER:
     - prompts/worker.md
   test_paths:
     - src/knowledge/parse-commits.test.ts
+  status: draft
+
+STACK-AC-PLUGINS-DAEMON:
+  parent: ARCH-AC-PLUGINS
+  children: []
+  code_paths:
+    - auto-claude/plugins/
+    - src/control-plane/plugin-registry.ts
+    - src/session-runtime/plugin-injection.ts
+  test_paths:
+    - src/control-plane/plugin-registry.test.ts
+    - src/session-runtime/plugin-injection.test.ts
+  status: draft
+
+STACK-AC-PLUGINS-DASHBOARD:
+  parent: ARCH-AC-PLUGINS
+  children: []
+  code_paths:
+    - supabase/migrations/002_plugins.sql
+    - dashboard/actions/plugins.ts
+    - dashboard/app/repos/[id]/plugins/page.tsx
+    - dashboard/components/plugin-card.tsx
+    - dashboard/lib/plugins/registry.ts
+  test_paths:
+    - supabase/tests/rls.test.ts
+    - dashboard/actions/plugins.test.ts
   status: draft
 
 STACK-AC-ENRICHED-COMMITS-KNOWLEDGE:
