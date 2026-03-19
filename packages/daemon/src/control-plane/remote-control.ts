@@ -20,6 +20,8 @@ export class RemoteControlManager {
 
   start(): void {
     this.stopped = false;
+    this.failureCount = 0;
+    this.state = 'offline';
     this.spawn();
   }
 
@@ -65,11 +67,14 @@ export class RemoteControlManager {
       }
     });
 
-    proc.on('exit', () => {
+    proc.on('exit', (code: number | null) => {
       if (this.stopped) return;
       this.state = 'offline';
       this.url = null;
       this.proc = null;
+      if (code === 0) {
+        this.failureCount = 0;
+      }
       this.scheduleRestart();
     });
   }

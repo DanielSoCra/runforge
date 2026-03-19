@@ -64,24 +64,14 @@ describe('RemoteControlManager', () => {
   });
 
   it('transitions to failed after 3 consecutive restart failures', async () => {
-    // The spec says "after three consecutive failed restart attempts" — failureCount reaches
-    // MAX_FAILURES (3) on the third restart exit, triggering the failed state.
     vi.mocked(spawn).mockImplementation(() => {
       const proc = makeFakeProcess();
-      // Immediately exit without emitting URL — simulates launch failure
       setTimeout(() => proc.emit('exit', 1), 0);
       return proc;
     });
 
     manager.start();
-
-    // Each exit schedules a backoff timer. Advance through 3 exit cycles.
-    for (let i = 0; i < 3; i++) {
-      await Promise.resolve(); // let setTimeout(exit) fire
-      vi.runAllTimers();       // fire the backoff timer → triggers next spawn
-      await Promise.resolve();
-    }
-    await Promise.resolve();
+    await vi.runAllTimersAsync();
 
     expect(manager.getState().remote_control_state).toBe('failed');
   });
