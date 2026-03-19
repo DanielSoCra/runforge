@@ -11,7 +11,7 @@ export default async function CostPage() {
 
   const { data: events } = await supabase
     .from('cost_events')
-    .select('cost, recorded_at, run_id, session_type')
+    .select('cost, recorded_at, session_type')
     .gte('recorded_at', since.toISOString())
     .order('recorded_at');
 
@@ -22,10 +22,12 @@ export default async function CostPage() {
     byDay[day] = (byDay[day] ?? 0) + Number(e.cost);
   });
 
-  const chartData = Object.entries(byDay).map(([date, cost]) => ({
-    date: new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    cost,
-  }));
+  const chartData = Object.entries(byDay)
+    .sort(([a], [b]) => a.localeCompare(b)) // explicit YYYY-MM-DD lexicographic sort
+    .map(([date, cost]) => ({
+      date: new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      cost,
+    }));
 
   const totalCost = events?.reduce((s, e) => s + Number(e.cost), 0) ?? 0;
 
@@ -43,7 +45,11 @@ export default async function CostPage() {
       </div>
       <Card>
         <CardHeader><CardTitle>Daily Cost</CardTitle></CardHeader>
-        <CardContent><CostChart data={chartData} /></CardContent>
+        <CardContent>
+          {chartData.length === 0
+            ? <p className="text-muted-foreground text-sm py-4">No cost data for the last 30 days.</p>
+            : <CostChart data={chartData} />}
+        </CardContent>
       </Card>
       <Card>
         <CardHeader><CardTitle>By Session Type</CardTitle></CardHeader>

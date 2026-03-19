@@ -3,20 +3,20 @@ import { notFound } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
+interface PhaseEvent {
+  name: string;
+  started_at?: string;
+  duration_ms?: number;
+  cost?: number;
+}
+
 export default async function RunDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
   const { data: run } = await supabase.from('runs').select('*').eq('id', id).single();
   if (!run) notFound();
 
-  interface PhaseEvent {
-    name: string;
-    started_at?: string;
-    duration_ms?: number;
-    cost?: number;
-  }
-
-  const phases = (run.phases as PhaseEvent[]) ?? [];
+  const phases = Array.isArray(run.phases) ? (run.phases as PhaseEvent[]) : [];
 
   return (
     <div className="max-w-3xl space-y-6">

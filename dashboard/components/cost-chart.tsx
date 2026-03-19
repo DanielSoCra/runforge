@@ -15,7 +15,7 @@ export function CostChart({ data }: { data: DailyCost[] }) {
         <YAxis tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }}
           tickFormatter={(v) => `$${v.toFixed(2)}`} />
         <Tooltip
-          formatter={(v: number) => [`$${v.toFixed(4)}`, 'Cost']}
+          formatter={(v) => [`$${Number(v).toFixed(4)}`, 'Cost']}
           contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
         />
         <Bar dataKey="cost" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
