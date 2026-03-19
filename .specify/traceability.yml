@@ -224,6 +224,11 @@ STACK-AC-DASHBOARD:
     - dashboard/actions/team.ts
     - dashboard/app/(dashboard)/team/page.tsx
     - dashboard/actions/team.test.ts
+    - dashboard/actions/settings.ts
+    - dashboard/app/(dashboard)/settings/page.tsx
+    - dashboard/app/api/daemon/pause/route.ts
+    - dashboard/app/api/daemon/resume/route.ts
+    - dashboard/app/api/daemon/status/route.ts
   test_paths:
     - dashboard/**/*.test.ts
     - dashboard/**/*.test.tsx
