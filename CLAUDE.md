@@ -11,3 +11,5 @@ All rules in `AGENTS.md` apply. This file adds Claude Code-specific behavior.
 - Always run the affected spec's `test_paths` after making changes.
 - Always update `traceability.yml` when creating new files.
 - When creating or reviewing specs, use the appropriate skill: `l1-spec-guardian` (FUNC-*), `l2-spec-guardian` (ARCH-*), `l3-spec-guardian` (stack-specific).
+- Before implementing any new feature, verify that L1, L2, and L3 specs exist in `.specify/` and are linked in `traceability.yml`. If they are missing, write them first using the spec guardian skills before touching any code.
+- New features follow this sequence: brainstorm (`superpowers:brainstorming`) → write specs L1→L2→L3 (using guardian skills) → implementation plan (`superpowers:writing-plans`) → implementation. No implementation task is valid without a complete spec chain.
