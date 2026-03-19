@@ -40,7 +40,7 @@ export default async function ReposPage() {
             </CardContent>
           </Card>
         ))}
-        {repos?.length === 0 && (
+        {(!repos || repos.length === 0) && (
           <div className="text-center py-12 text-muted-foreground">
             No repositories yet. <Link href="/repos/new" className="underline">Add one</Link>.
           </div>

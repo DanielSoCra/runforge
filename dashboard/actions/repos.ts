@@ -17,14 +17,14 @@ export async function createRepo(formData: FormData) {
 
   if (error) throw new Error(error.message);
   revalidatePath('/repos');
-  redirect(`/repos/${data.id}`);
+  redirect(`/repos/${data!.id}`);
 }
 
 export async function updateRepo(id: string, formData: FormData) {
   const supabase = await createClient();
   const { error } = await supabase.from('repos').update({
-    staging_branch: formData.get('staging_branch') as string,
-    production_branch: formData.get('production_branch') as string,
+    staging_branch: (formData.get('staging_branch') as string) || 'staging',
+    production_branch: (formData.get('production_branch') as string) || 'main',
     budget_limit: Number(formData.get('budget_limit')) || null,
     concurrency_limit: Number(formData.get('concurrency_limit')) || 1,
     updated_at: new Date().toISOString(),
