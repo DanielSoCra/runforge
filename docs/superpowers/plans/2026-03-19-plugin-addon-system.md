@@ -136,7 +136,7 @@ L3: pattern guide — named pattern + rationale, 3–5 line snippet, one concern
 ```markdown
 # FSM Patterns
 
-The pipeline uses a generic FSM engine in `src/control-plane/fsm.ts`.
+The pipeline uses a generic FSM engine in `packages/daemon/src/control-plane/fsm.ts`.
 States are strings. Transitions are pure functions: `(state, event) → state`.
 Side effects happen in phase handlers, not in the FSM itself.
 Always write tests for every state transition before implementing the handler.
@@ -167,16 +167,16 @@ git commit -m "feat(plugins): add plugin directory structure and auto-claude-dev
 ## Task 2: Daemon — Plugin Registry Loader
 
 **Files:**
-- Create: `src/control-plane/plugin-registry.ts`
-- Create: `src/control-plane/plugin-registry.test.ts`
-- Create: `src/control-plane/fixtures/plugins/registry.json`
-- Create: `src/control-plane/fixtures/plugins/test-plugin/manifest.json`
-- Create: `src/control-plane/fixtures/plugins-bad-manifest/registry.json`
-- Create: `src/control-plane/fixtures/plugins-bad-manifest/bad-plugin/manifest.json`
+- Create: `packages/daemon/src/control-plane/plugin-registry.ts`
+- Create: `packages/daemon/src/control-plane/plugin-registry.test.ts`
+- Create: `packages/daemon/src/control-plane/fixtures/plugins/registry.json`
+- Create: `packages/daemon/src/control-plane/fixtures/plugins/test-plugin/manifest.json`
+- Create: `packages/daemon/src/control-plane/fixtures/plugins-bad-manifest/registry.json`
+- Create: `packages/daemon/src/control-plane/fixtures/plugins-bad-manifest/bad-plugin/manifest.json`
 
 - [ ] **Step 1: Create test fixtures**
 
-`src/control-plane/fixtures/plugins/registry.json`:
+`packages/daemon/src/control-plane/fixtures/plugins/registry.json`:
 ```json
 {
   "version": 1,
@@ -184,24 +184,24 @@ git commit -m "feat(plugins): add plugin directory structure and auto-claude-dev
 }
 ```
 
-`src/control-plane/fixtures/plugins/test-plugin/manifest.json`:
+`packages/daemon/src/control-plane/fixtures/plugins/test-plugin/manifest.json`:
 ```json
 { "id": "test-plugin", "name": "Test Plugin", "version": "1.0.0", "description": "Test" }
 ```
 
-`src/control-plane/fixtures/plugins-bad-manifest/registry.json`:
+`packages/daemon/src/control-plane/fixtures/plugins-bad-manifest/registry.json`:
 ```json
 { "version": 1, "plugins": [{ "id": "bad-plugin", "name": "Bad", "tags": [] }] }
 ```
 
-`src/control-plane/fixtures/plugins-bad-manifest/bad-plugin/manifest.json`:
+`packages/daemon/src/control-plane/fixtures/plugins-bad-manifest/bad-plugin/manifest.json`:
 ```json
 { "id": "bad-plugin" }
 ```
 
 - [ ] **Step 2: Write failing tests**
 
-Create `src/control-plane/plugin-registry.test.ts`:
+Create `packages/daemon/src/control-plane/plugin-registry.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -236,14 +236,14 @@ describe('loadPluginRegistry', () => {
 
 ```bash
 cd ~/code/auto-claude
-pnpm vitest run src/control-plane/plugin-registry.test.ts
+pnpm vitest run packages/daemon/src/control-plane/plugin-registry.test.ts
 ```
 
 Expected: FAIL — `Cannot find module './plugin-registry.js'`
 
 - [ ] **Step 4: Implement `plugin-registry.ts`**
 
-Create `src/control-plane/plugin-registry.ts`:
+Create `packages/daemon/src/control-plane/plugin-registry.ts`:
 
 ```typescript
 import { readFile, access } from 'fs/promises';
@@ -292,7 +292,7 @@ export async function loadPluginRegistry(pluginsDir: string): Promise<PluginRegi
 - [ ] **Step 5: Run tests — verify they pass**
 
 ```bash
-pnpm vitest run src/control-plane/plugin-registry.test.ts
+pnpm vitest run packages/daemon/src/control-plane/plugin-registry.test.ts
 ```
 
 Expected: PASS (3 tests)
@@ -309,12 +309,12 @@ git commit -m "feat(plugins): add daemon plugin registry loader with startup val
 ## Task 3: Daemon — CompositeContext Assembly
 
 **Files:**
-- Create: `src/session-runtime/plugin-injection.ts`
-- Create: `src/session-runtime/plugin-injection.test.ts`
+- Create: `packages/daemon/src/session-runtime/plugin-injection.ts`
+- Create: `packages/daemon/src/session-runtime/plugin-injection.test.ts`
 
 - [ ] **Step 1: Write failing tests**
 
-Create `src/session-runtime/plugin-injection.test.ts`:
+Create `packages/daemon/src/session-runtime/plugin-injection.test.ts`:
 
 ```typescript
 import { describe, it, expect } from 'vitest';
@@ -378,14 +378,14 @@ describe('buildCompositeContext', () => {
 - [ ] **Step 2: Run tests — verify they fail**
 
 ```bash
-pnpm vitest run src/session-runtime/plugin-injection.test.ts
+pnpm vitest run packages/daemon/src/session-runtime/plugin-injection.test.ts
 ```
 
 Expected: FAIL — `Cannot find module './plugin-injection.js'`
 
 - [ ] **Step 3: Implement `plugin-injection.ts`**
 
-Create `src/session-runtime/plugin-injection.ts`:
+Create `packages/daemon/src/session-runtime/plugin-injection.ts`:
 
 ```typescript
 export interface SkillDoc { name: string; content: string; pluginId: string; }
@@ -470,7 +470,7 @@ export function buildCompositeContext(
 - [ ] **Step 4: Run tests — verify they pass**
 
 ```bash
-pnpm vitest run src/session-runtime/plugin-injection.test.ts
+pnpm vitest run packages/daemon/src/session-runtime/plugin-injection.test.ts
 ```
 
 Expected: PASS (4 tests)
@@ -487,12 +487,12 @@ git commit -m "feat(plugins): add CompositeContext assembly with ordered merge a
 ## Task 4: Daemon — Config Schema + Types
 
 **Files:**
-- Modify: `src/config.ts`
-- Modify: `src/types.ts`
+- Modify: `packages/daemon/src/config.ts`
+- Modify: `packages/daemon/src/types.ts`
 
-- [ ] **Step 1: Add `activePlugins` to `ConfigSchema` in `src/config.ts`**
+- [ ] **Step 1: Add `activePlugins` to `ConfigSchema` in `packages/daemon/src/config.ts`**
 
-In `src/config.ts`, add to the `ConfigSchema` object (after `gracePeriodMs`):
+In `packages/daemon/src/config.ts`, add to the `ConfigSchema` object (after `gracePeriodMs`):
 
 ```typescript
 activePlugins: z.array(z.string()).default([]),
@@ -500,9 +500,9 @@ activePlugins: z.array(z.string()).default([]),
 
 This is the interim fallback for repos without Supabase config sync. When Supabase sync lands, it overwrites this value from the database.
 
-- [ ] **Step 2: Extend `SessionContext` in `src/types.ts`**
+- [ ] **Step 2: Extend `SessionContext` in `packages/daemon/src/types.ts`**
 
-Find the `SessionContext` type in `src/types.ts`. Add the `activePlugins` field:
+Find the `SessionContext` type in `packages/daemon/src/types.ts`. Add the `activePlugins` field:
 
 ```typescript
 activePlugins?: string[];  // plugin IDs active for this repo, from config or Supabase sync
@@ -528,15 +528,15 @@ git commit -m "feat(plugins): add activePlugins to config schema and SessionCont
 ## Task 5: Daemon — Session Injection Wiring
 
 **Files:**
-- Modify: `src/session-runtime/runtime.ts`
+- Modify: `packages/daemon/src/session-runtime/runtime.ts`
 
-- [ ] **Step 1: Read `src/session-runtime/runtime.ts` to understand `assemblePrompt`**
+- [ ] **Step 1: Read `packages/daemon/src/session-runtime/runtime.ts` to understand `assemblePrompt`**
 
 The `assemblePrompt` method (line 178) builds the session prompt. It currently prepends `def.systemPrompt` then appends context variables. Plugin injection goes at the top — before the system prompt.
 
 - [ ] **Step 2: Write a failing test**
 
-Add to `src/session-runtime/runtime.test.ts` (create if it doesn't exist):
+Add to `packages/daemon/src/session-runtime/runtime.test.ts` (create if it doesn't exist):
 
 ```typescript
 import { describe, it, expect, vi } from 'vitest';
@@ -560,12 +560,12 @@ it('composite context prompt injection appears before system prompt', () => {
 - [ ] **Step 3: Run test — verify it passes (it tests the composition pattern, not yet wired to runtime)**
 
 ```bash
-pnpm vitest run src/session-runtime/runtime.test.ts
+pnpm vitest run packages/daemon/src/session-runtime/runtime.test.ts
 ```
 
 - [ ] **Step 4: Wire into `SessionRuntime.assemblePrompt`**
 
-In `src/session-runtime/runtime.ts`:
+In `packages/daemon/src/session-runtime/runtime.ts`:
 
 1. Import at the top:
 ```typescript
@@ -573,14 +573,14 @@ import { buildCompositeContext, type LoadedPlugin } from './plugin-injection.js'
 import { readPluginsForContext } from './plugin-loader.js';
 ```
 
-2. Create `src/session-runtime/plugin-loader.ts` — reads plugin file content from disk for given IDs:
+2. Create `packages/daemon/src/session-runtime/plugin-loader.ts` — reads plugin file content from disk for given IDs:
 
 ```typescript
 import { readFile, access } from 'fs/promises';
 import { join } from 'path';
 import type { LoadedPlugin, SkillDoc } from './plugin-injection.js';
 
-const PLUGINS_DIR = process.env['PLUGINS_DIR'] ?? join(import.meta.dirname, '../../plugins');
+const PLUGINS_DIR = process.env['PLUGINS_DIR'] ?? join(import.meta.dirname, '../../../../plugins');
 
 async function readMarkdownFiles(dir: string): Promise<SkillDoc[]> {
   const { readdir } = await import('fs/promises');
@@ -660,7 +660,7 @@ private async assemblePrompt(def: AgentDefinition, context: SessionContext): Pro
 - [ ] **Step 5: Run type check and tests**
 
 ```bash
-pnpm tsc --noEmit && pnpm vitest run src/session-runtime/
+pnpm tsc --noEmit && pnpm vitest run packages/daemon/src/session-runtime/
 ```
 
 Expected: No type errors, all tests pass.
@@ -826,14 +826,14 @@ git commit -m "feat(plugins): add repo_plugins Supabase table with RLS and runs.
 ## Task 7: Dashboard — Registry Reader
 
 **Files:**
-- Create: `dashboard/lib/plugins/registry.ts`
-- Create: `dashboard/lib/plugins/registry.test.ts`
+- Create: `packages/dashboard/lib/plugins/registry.ts`
+- Create: `packages/dashboard/lib/plugins/registry.test.ts`
 
-> The dashboard reads `plugins/registry.json` from the repo root. The `PLUGINS_DIR` env var controls the path. Default: `path.join(process.cwd(), '../plugins')` when running from `dashboard/`.
+> The dashboard reads `plugins/registry.json` from the repo root. The `PLUGINS_DIR` env var controls the path. Default: `path.join(process.cwd(), '../../plugins')` when running from `packages/dashboard/`.
 
 - [ ] **Step 1: Write failing tests**
 
-Create `dashboard/lib/plugins/registry.test.ts`:
+Create `packages/dashboard/lib/plugins/registry.test.ts`:
 
 ```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -868,13 +868,13 @@ describe('loadDashboardRegistry', () => {
 - [ ] **Step 2: Run tests — verify they fail**
 
 ```bash
-cd ~/code/auto-claude/dashboard
+cd ~/code/auto-claude/packages/dashboard
 pnpm vitest run lib/plugins/registry.test.ts
 ```
 
 Expected: FAIL — module not found
 
-- [ ] **Step 3: Implement `dashboard/lib/plugins/registry.ts`**
+- [ ] **Step 3: Implement `packages/dashboard/lib/plugins/registry.ts`**
 
 ```typescript
 import { readFile } from 'fs/promises';
@@ -892,7 +892,7 @@ export interface DashboardRegistry {
   plugins: DashboardPlugin[];
 }
 
-const PLUGINS_DIR = process.env['PLUGINS_DIR'] ?? join(process.cwd(), '..', 'plugins');
+const PLUGINS_DIR = process.env['PLUGINS_DIR'] ?? join(process.cwd(), '../..', 'plugins');
 
 export async function loadDashboardRegistry(): Promise<DashboardRegistry> {
   const raw = await readFile(join(PLUGINS_DIR, 'registry.json'), 'utf-8');
@@ -920,21 +920,21 @@ git commit -m "feat(plugins): add dashboard registry reader"
 ## Task 8: Dashboard — Server Actions
 
 **Files:**
-- Create: `dashboard/actions/plugins.ts`
-- Create: `dashboard/actions/plugins.test.ts`
+- Create: `packages/dashboard/actions/plugins.ts`
+- Create: `packages/dashboard/actions/plugins.test.ts`
 
 > Install `@anthropic-ai/sdk` if not present: `cd dashboard && pnpm add @anthropic-ai/sdk`
 
 - [ ] **Step 1: Install dependency if needed**
 
 ```bash
-cd ~/code/auto-claude/dashboard
+cd ~/code/auto-claude/packages/dashboard
 pnpm list @anthropic-ai/sdk 2>/dev/null || pnpm add @anthropic-ai/sdk
 ```
 
 - [ ] **Step 2: Write failing tests**
 
-Create `dashboard/actions/plugins.test.ts`:
+Create `packages/dashboard/actions/plugins.test.ts`:
 
 ```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -983,13 +983,13 @@ describe('enableAllSuggested', () => {
 - [ ] **Step 3: Run tests — verify they fail**
 
 ```bash
-cd ~/code/auto-claude/dashboard
+cd ~/code/auto-claude/packages/dashboard
 pnpm vitest run actions/plugins.test.ts
 ```
 
 Expected: FAIL — module not found
 
-- [ ] **Step 4: Implement `dashboard/actions/plugins.ts`**
+- [ ] **Step 4: Implement `packages/dashboard/actions/plugins.ts`**
 
 ```typescript
 'use server';
@@ -1000,7 +1000,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { readdir } from 'fs/promises';
 import { join } from 'path';
 
-const PLUGINS_DIR = process.env['PLUGINS_DIR'] ?? join(process.cwd(), '..', 'plugins');
+const PLUGINS_DIR = process.env['PLUGINS_DIR'] ?? join(process.cwd(), '../..', 'plugins');
 
 export async function togglePlugin(
   repoId: string,
@@ -1110,9 +1110,9 @@ git commit -m "feat(plugins): add dashboard Server Actions for plugin management
 ## Task 9: Dashboard — Plugin Card Component
 
 **Files:**
-- Create: `dashboard/components/plugin-card.tsx`
+- Create: `packages/dashboard/components/plugin-card.tsx`
 
-- [ ] **Step 1: Create `dashboard/components/plugin-card.tsx`**
+- [ ] **Step 1: Create `packages/dashboard/components/plugin-card.tsx`**
 
 ```tsx
 'use client';
@@ -1191,7 +1191,7 @@ export function PluginCard({
 - [ ] **Step 2: Install any missing shadcn components**
 
 ```bash
-cd ~/code/auto-claude/dashboard
+cd ~/code/auto-claude/packages/dashboard
 pnpm dlx shadcn@latest add switch tooltip 2>/dev/null || true
 ```
 
@@ -1215,12 +1215,12 @@ git commit -m "feat(plugins): add PluginCard component with optimistic toggle"
 ## Task 10: Dashboard — Plugins Tab Page
 
 **Files:**
-- Create: `dashboard/app/repos/[id]/plugins/page.tsx`
-- Modify: `dashboard/app/repos/[id]/page.tsx` (add Plugins tab)
+- Create: `packages/dashboard/app/repos/[id]/plugins/page.tsx`
+- Modify: `packages/dashboard/app/repos/[id]/page.tsx` (add Plugins tab)
 
-- [ ] **Step 1: Read `dashboard/app/repos/[id]/page.tsx`** to understand the current tab structure before modifying it.
+- [ ] **Step 1: Read `packages/dashboard/app/repos/[id]/page.tsx`** to understand the current tab structure before modifying it.
 
-- [ ] **Step 2: Create `dashboard/app/repos/[id]/plugins/page.tsx`**
+- [ ] **Step 2: Create `packages/dashboard/app/repos/[id]/plugins/page.tsx`**
 
 ```tsx
 import { createServerClient } from '@/lib/supabase/server';
@@ -1312,7 +1312,7 @@ export default async function PluginsPage({ params }: { params: { id: string } }
 }
 ```
 
-- [ ] **Step 3: Add Plugins tab to `dashboard/app/repos/[id]/page.tsx`**
+- [ ] **Step 3: Add Plugins tab to `packages/dashboard/app/repos/[id]/page.tsx`**
 
 Read the file first, then add a "Plugins" tab alongside the existing Settings and API Keys tabs. The exact implementation depends on the current tab structure — add a link to `/repos/${id}/plugins` following the same pattern as existing tabs.
 
@@ -1320,7 +1320,7 @@ Read the file first, then add a "Plugins" tab alongside the existing Settings an
 
 Wrap the Plugins page in a client component that subscribes to `repo_plugins` changes and calls `router.refresh()` when rows update. This delivers recommendation results without a page reload.
 
-Create `dashboard/app/repos/[id]/plugins/realtime-refresh.tsx`:
+Create `packages/dashboard/app/repos/[id]/plugins/realtime-refresh.tsx`:
 
 ```tsx
 'use client';
@@ -1347,7 +1347,7 @@ Add `<RealtimeRefresh repoId={params.id} />` at the top of the PluginsPage serve
 - [ ] **Step 5: Run type check**
 
 ```bash
-cd ~/code/auto-claude/dashboard
+cd ~/code/auto-claude/packages/dashboard
 pnpm tsc --noEmit
 ```
 

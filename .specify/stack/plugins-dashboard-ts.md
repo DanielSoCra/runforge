@@ -9,13 +9,13 @@ stack: typescript
 references: ARCH-AC-PLUGINS
 code_paths:
   - supabase/migrations/002_plugins.sql
-  - dashboard/actions/plugins.ts
-  - dashboard/app/repos/[id]/plugins/page.tsx
-  - dashboard/components/plugin-card.tsx
-  - dashboard/lib/plugins/registry.ts
+  - packages/dashboard/actions/plugins.ts
+  - packages/dashboard/app/repos/[id]/plugins/page.tsx
+  - packages/dashboard/components/plugin-card.tsx
+  - packages/dashboard/lib/plugins/registry.ts
 test_paths:
-  - supabase/tests/rls.test.ts
-  - dashboard/actions/plugins.test.ts
+  - supabase/tests/rls-plugins.test.ts
+  - packages/dashboard/actions/plugins.test.ts
 ---
 
 # STACK-AC-PLUGINS-DASHBOARD — Plugin Management Dashboard (TypeScript)

@@ -8,12 +8,13 @@ layer: 3
 stack: typescript
 references: ARCH-AC-PLUGINS
 code_paths:
-  - auto-claude/plugins/
-  - src/control-plane/plugin-registry.ts
-  - src/session-runtime/plugin-injection.ts
+  - plugins/
+  - packages/daemon/src/control-plane/plugin-registry.ts
+  - packages/daemon/src/session-runtime/plugin-injection.ts
+  - packages/daemon/src/session-runtime/plugin-loader.ts
 test_paths:
-  - src/control-plane/plugin-registry.test.ts
-  - src/session-runtime/plugin-injection.test.ts
+  - packages/daemon/src/control-plane/plugin-registry.test.ts
+  - packages/daemon/src/session-runtime/plugin-injection.test.ts
 ---
 
 # STACK-AC-PLUGINS-DAEMON — Plugin Registry & Session Injection (TypeScript)

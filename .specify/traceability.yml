@@ -290,12 +290,13 @@ STACK-AC-PLUGINS-DAEMON:
   parent: ARCH-AC-PLUGINS
   children: []
   code_paths:
-    - auto-claude/plugins/
-    - src/control-plane/plugin-registry.ts
-    - src/session-runtime/plugin-injection.ts
+    - plugins/
+    - packages/daemon/src/control-plane/plugin-registry.ts
+    - packages/daemon/src/session-runtime/plugin-injection.ts
+    - packages/daemon/src/session-runtime/plugin-loader.ts
   test_paths:
-    - src/control-plane/plugin-registry.test.ts
-    - src/session-runtime/plugin-injection.test.ts
+    - packages/daemon/src/control-plane/plugin-registry.test.ts
+    - packages/daemon/src/session-runtime/plugin-injection.test.ts
   status: draft
 
 STACK-AC-PLUGINS-DASHBOARD:
@@ -303,13 +304,13 @@ STACK-AC-PLUGINS-DASHBOARD:
   children: []
   code_paths:
     - supabase/migrations/002_plugins.sql
-    - dashboard/actions/plugins.ts
-    - dashboard/app/repos/[id]/plugins/page.tsx
-    - dashboard/components/plugin-card.tsx
-    - dashboard/lib/plugins/registry.ts
+    - packages/dashboard/actions/plugins.ts
+    - packages/dashboard/app/repos/[id]/plugins/page.tsx
+    - packages/dashboard/components/plugin-card.tsx
+    - packages/dashboard/lib/plugins/registry.ts
   test_paths:
-    - supabase/tests/rls.test.ts
-    - dashboard/actions/plugins.test.ts
+    - supabase/tests/rls-plugins.test.ts
+    - packages/dashboard/actions/plugins.test.ts
   status: draft
 
 STACK-AC-ENRICHED-COMMITS-KNOWLEDGE:
