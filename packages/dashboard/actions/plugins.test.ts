@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/lib/supabase/server', () => ({ createServerClient: vi.fn() }));
+vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }));
 vi.mock('@/lib/plugins/registry', () => ({ loadDashboardRegistry: vi.fn() }));
 
 import { togglePlugin, enableAllSuggested } from './plugins.js';
-import { createServerClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
 import { loadDashboardRegistry } from '@/lib/plugins/registry';
 
 const mockRegistry = { version: 1, plugins: [{ id: 'web-stack', name: 'Web Stack', description: '', tags: [] }] };
@@ -21,7 +21,7 @@ describe('togglePlugin', () => {
   it('upserts repo_plugins on valid plugin id', async () => {
     vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
     const upsert = vi.fn().mockResolvedValue({ error: null });
-    vi.mocked(createServerClient).mockReturnValue({ from: () => ({ upsert }) } as never);
+    vi.mocked(createClient).mockReturnValue({ from: () => ({ upsert }) } as never);
     const result = await togglePlugin('repo-id', 'web-stack', true);
     expect(upsert).toHaveBeenCalledOnce();
     expect(result.ok).toBe(true);
@@ -36,7 +36,7 @@ describe('enableAllSuggested', () => {
     const upsert = vi.fn()
       .mockResolvedValueOnce({ error: null })
       .mockResolvedValueOnce({ error: { message: 'db error' } });
-    vi.mocked(createServerClient).mockReturnValue({ from: () => ({ upsert }) } as never);
+    vi.mocked(createClient).mockReturnValue({ from: () => ({ upsert }) } as never);
     const result = await enableAllSuggested('repo-id', ['web-stack', 'unknown']);
     expect(result.failed).toContain('unknown');
   });
@@ -44,7 +44,7 @@ describe('enableAllSuggested', () => {
   it('tracks failed ids when a valid plugin upsert returns a db error', async () => {
     vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
     const upsert = vi.fn().mockResolvedValueOnce({ error: { message: 'db error' } });
-    vi.mocked(createServerClient).mockReturnValue({ from: () => ({ upsert }) } as never);
+    vi.mocked(createClient).mockReturnValue({ from: () => ({ upsert }) } as never);
     const result = await enableAllSuggested('repo-id', ['web-stack']);
     expect(result.failed).toContain('web-stack');
     expect(result.succeeded).toHaveLength(0);

@@ -132,6 +132,47 @@ export type Database = {
         }
         Relationships: []
       }
+      repo_plugins: {
+        Row: {
+          id: string
+          repo_id: string
+          plugin_id: string
+          active: boolean
+          recommended: boolean
+          recommendation_reason: string | null
+          recommended_at: string | null
+          activated_at: string | null
+        }
+        Insert: {
+          id?: string
+          repo_id: string
+          plugin_id: string
+          active?: boolean
+          recommended?: boolean
+          recommendation_reason?: string | null
+          recommended_at?: string | null
+          activated_at?: string | null
+        }
+        Update: {
+          id?: string
+          repo_id?: string
+          plugin_id?: string
+          active?: boolean
+          recommended?: boolean
+          recommendation_reason?: string | null
+          recommended_at?: string | null
+          activated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "repo_plugins_repo_id_fkey"
+            columns: ["repo_id"]
+            isOneToOne: false
+            referencedRelation: "repos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       repos: {
         Row: {
           budget_limit: number | null

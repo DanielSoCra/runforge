@@ -1,6 +1,6 @@
 'use server';
 
-import { createServerClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/server';
 import { loadDashboardRegistry } from '@/lib/plugins/registry';
 import Anthropic from '@anthropic-ai/sdk';
 import { readdir } from 'fs/promises';
@@ -17,7 +17,7 @@ export async function togglePlugin(
   if (!registry.plugins.find(p => p.id === pluginId)) {
     return { error: `Unknown plugin: ${pluginId}` };
   }
-  const supabase = createServerClient();
+  const supabase = await createClient();
   // Only update active + activated_at on conflict — never overwrite recommendation fields.
   const { error } = await supabase.from('repo_plugins').upsert(
     {
@@ -65,7 +65,7 @@ export async function triggerRecommendation(repoId: string, repoOwner: string, r
 
       const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
       const parsed = JSON.parse(text) as { recommendations: Array<{ pluginId: string; confidence: string; reason: string }> };
-      const supabase = createServerClient();
+      const supabase = await createClient();
 
       for (const rec of parsed.recommendations) {
         if (!registry.plugins.find(p => p.id === rec.pluginId)) continue;
