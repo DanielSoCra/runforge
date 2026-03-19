@@ -305,7 +305,8 @@ STACK-AC-PLUGINS-DASHBOARD:
   code_paths:
     - supabase/migrations/003_plugins.sql
     - packages/dashboard/actions/plugins.ts
-    - packages/dashboard/app/repos/[id]/plugins/page.tsx
+    - packages/dashboard/app/(dashboard)/repos/[id]/plugins/page.tsx
+    - packages/dashboard/app/(dashboard)/repos/[id]/plugins/realtime-refresh.tsx
     - packages/dashboard/components/plugin-card.tsx
     - packages/dashboard/lib/plugins/registry.ts
   test_paths:

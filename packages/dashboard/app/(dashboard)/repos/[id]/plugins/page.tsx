@@ -5,6 +5,14 @@ import { enableAllSuggested, triggerRecommendation } from '@/actions/plugins';
 import { Button } from '@/components/ui/button';
 import { RealtimeRefresh } from './realtime-refresh';
 
+type Confidence = 'high' | 'medium' | 'low';
+
+function extractConfidence(reason: string | null | undefined): Confidence | null {
+  if (!reason) return null;
+  const match = reason.match(/^\[(high|medium|low)\]/);
+  return match ? (match[1] as Confidence) : null;
+}
+
 export default async function PluginsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
@@ -55,7 +63,8 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
               const rp = activeMap.get(p.id);
               return <PluginCard key={p.id} repoId={id} pluginId={p.id} name={p.name}
                 description={p.description} tags={p.tags} active={false}
-                recommended recommendationReason={rp?.recommendation_reason} />;
+                recommended recommendationReason={rp?.recommendation_reason}
+                confidence={extractConfidence(rp?.recommendation_reason ?? null)} />;
             })}
           </div>
         </section>
