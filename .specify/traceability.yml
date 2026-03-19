@@ -245,6 +245,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/app/api/daemon/resume/route.ts
     - packages/dashboard/app/api/daemon/status/route.ts
     - packages/dashboard/components/claude-panel/use-claude-panel.ts
+    - packages/dashboard/components/claude-panel/context-actions.ts
     - supabase/migrations/003_command_center.sql
     - docker-compose.prod.yml
     - Caddyfile
@@ -255,6 +256,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/**/*.test.tsx
     - supabase/tests/**/*.test.ts
     - packages/dashboard/actions/api-keys.test.ts
+    - packages/dashboard/components/claude-panel/context-actions.test.ts
   status: draft
 
 STACK-AC-HANDOFF-RUNTIME:
