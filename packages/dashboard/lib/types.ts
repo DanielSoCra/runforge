@@ -313,6 +313,10 @@ export type Database = {
         Args: { p_provider_handle: string; p_user_id: string }
         Returns: string
       }
+      change_member_role: {
+        Args: { p_member_id: string; p_new_role: string }
+        Returns: string
+      }
       decrypt_api_key: {
         Args: { p_key_type: string; p_repo_id: string }
         Returns: string
@@ -320,6 +324,10 @@ export type Database = {
       get_encryption_key: { Args: never; Returns: string }
       is_admin: { Args: never; Returns: boolean }
       is_member: { Args: never; Returns: boolean }
+      remove_team_member: {
+        Args: { p_member_id: string }
+        Returns: string
+      }
       upsert_api_key_encrypted: {
         Args: { p_key_type: string; p_plaintext: string; p_repo_id: string }
         Returns: undefined
