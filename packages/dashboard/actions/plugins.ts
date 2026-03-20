@@ -5,6 +5,8 @@ import { requireAdmin } from '@/lib/auth';
 import { loadDashboardRegistry } from '@/lib/plugins/registry';
 import Anthropic from '@anthropic-ai/sdk';
 
+// SAFE_PATTERN prevents prompt injection by blocking shell metacharacters, spaces, and control
+// characters. It is not a strict GitHub identifier validator — use for LLM prompt safety only.
 const SAFE_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
 export async function togglePlugin(

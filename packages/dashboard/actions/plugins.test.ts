@@ -3,8 +3,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }));
 vi.mock('@/lib/plugins/registry', () => ({ loadDashboardRegistry: vi.fn() }));
 vi.mock('@/lib/auth', () => ({ requireAdmin: vi.fn() }));
+vi.mock('@anthropic-ai/sdk', () => ({
+  default: vi.fn().mockImplementation(() => ({
+    messages: { create: vi.fn().mockResolvedValue({ content: [] }) },
+  })),
+}));
 
-import { togglePlugin, enableAllSuggested } from './plugins.js';
+import { togglePlugin, enableAllSuggested, triggerRecommendation } from './plugins.js';
 import { createClient } from '@/lib/supabase/server';
 import { loadDashboardRegistry } from '@/lib/plugins/registry';
 import { requireAdmin } from '@/lib/auth';
@@ -116,5 +121,33 @@ describe('enableAllSuggested', () => {
     const result = await enableAllSuggested('repo-id');
     expect(result.succeeded).toHaveLength(0);
     expect(result.failed).toHaveLength(0);
+  });
+});
+
+describe('triggerRecommendation', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns early without calling Anthropic when unauthenticated', async () => {
+    vi.mocked(requireAdmin).mockRejectedValue(new Error('Unauthorized'));
+    vi.mocked(createClient).mockResolvedValue({} as never);
+    // Should return without throwing
+    await expect(triggerRecommendation('repo-id', 'owner', 'repo')).resolves.toBeUndefined();
+    expect(vi.mocked(loadDashboardRegistry)).not.toHaveBeenCalled();
+  });
+
+  it('returns early when repoOwner fails SAFE_PATTERN', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(createClient).mockResolvedValue({} as never);
+    // repoOwner with spaces fails the pattern
+    await expect(triggerRecommendation('repo-id', 'owner with spaces', 'repo')).resolves.toBeUndefined();
+    expect(vi.mocked(loadDashboardRegistry)).not.toHaveBeenCalled();
+  });
+
+  it('returns early when repoName fails SAFE_PATTERN', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(createClient).mockResolvedValue({} as never);
+    // repoName with semicolon fails the pattern
+    await expect(triggerRecommendation('repo-id', 'owner', 'repo;evil')).resolves.toBeUndefined();
+    expect(vi.mocked(loadDashboardRegistry)).not.toHaveBeenCalled();
   });
 });
