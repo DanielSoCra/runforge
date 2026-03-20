@@ -57,18 +57,32 @@ const bugTransitions: TransitionTable = {
   report: { success: { next: 'report' } },
 };
 
+const websiteTransitions: TransitionTable = {
+  init:         { success: { next: 'intelligence' }, failure: { next: 'stuck' } },
+  intelligence: { success: { next: 'brand' },        failure: { next: 'stuck' } },
+  brand:        { success: { next: 'design' },        failure: { next: 'stuck' } },
+  design:       { success: { next: 'seo' },           failure: { next: 'stuck' } },
+  seo:          { success: { next: 'content' },       failure: { next: 'stuck' } },
+  content:      { success: { next: 'assets' },        failure: { next: 'stuck' } },
+  assets:       { success: { next: 'build' },         failure: { next: 'stuck' } },
+  build:        { success: { next: 'qa' },            failure: { next: 'stuck' } },
+  qa:           { success: { next: 'launch' },        failure: { next: 'stuck' } },
+  // launch has no outbound transition — isComplete() handles it directly
+};
+
 const PIPELINES: Record<PipelineVariant, TransitionTable> = {
   feature: featureTransitions,
   'feature-simple': featureSimpleTransitions,
   bug: bugTransitions,
+  website: websiteTransitions,
 };
 
 export function getPipeline(variant: PipelineVariant): TransitionTable {
   return PIPELINES[variant];
 }
 
-export function getStartPhase(_variant: PipelineVariant): Phase {
-  return 'detect';
+export function getStartPhase(variant: PipelineVariant): Phase {
+  return variant === 'website' ? 'init' : 'detect';
 }
 
 export function isTerminal(phase: Phase): boolean {
@@ -76,7 +90,9 @@ export function isTerminal(phase: Phase): boolean {
 }
 
 export function isComplete(phase: Phase, event: PhaseEvent): boolean {
-  return phase === 'report' && event === 'success';
+  if (phase === 'report' && event === 'success') return true;
+  if (phase === 'launch' && event === 'success') return true;
+  return false;
 }
 
 // Global transitions that apply regardless of pipeline variant

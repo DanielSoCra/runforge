@@ -1,6 +1,6 @@
 import { readFile, readdir, stat } from 'fs/promises';
 import { join } from 'path';
-import type { LoadedPlugin, SkillDoc } from './plugin-injection.js';
+import type { LoadedPlugin, McpConfig, SkillDoc } from './plugin-injection.js';
 import type { PluginRegistry } from '../control-plane/plugin-registry.js';
 
 const MAX_FILE_BYTES = 100_000;    // 100KB per markdown skill/agent file
@@ -32,6 +32,32 @@ async function readMarkdownFiles(dir: string): Promise<SkillDoc[]> {
       content: await readFile(filePath, 'utf-8'),
       pluginId: '',
     });
+  }
+  return results;
+}
+
+async function readMcpConfigs(dir: string): Promise<McpConfig[]> {
+  const files = await readdir(dir).catch(() => [] as string[]);
+  const results: McpConfig[] = [];
+  for (const f of files.filter(f => f.endsWith('.json'))) {
+    const filePath = join(dir, f);
+    try {
+      const raw = await readFile(filePath, 'utf-8');
+      const parsed: unknown = JSON.parse(raw);
+      if (
+        typeof parsed !== 'object' ||
+        parsed === null ||
+        typeof (parsed as Record<string, unknown>)['name'] !== 'string' ||
+        typeof (parsed as Record<string, unknown>)['command'] !== 'string' ||
+        !Array.isArray((parsed as Record<string, unknown>)['args'])
+      ) {
+        console.warn(`[plugins] Skipping MCP config with missing required fields: ${filePath}`);
+        continue;
+      }
+      results.push(parsed as McpConfig);
+    } catch {
+      console.warn(`[plugins] Skipping malformed MCP config JSON: ${filePath}`);
+    }
   }
   return results;
 }
@@ -88,7 +114,7 @@ export async function readPluginsForContext(
       promptInjection: injection,
       skills,
       agents,
-      mcpConfigs: [],
+      mcpConfigs: await readMcpConfigs(join(dir, 'mcps')),
       gates: [],
     });
   }

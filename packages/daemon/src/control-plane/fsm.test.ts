@@ -90,4 +90,72 @@ describe('FSM', () => {
       expect(applyGlobalTransition('success')).toBeUndefined();
     });
   });
+
+  describe('website pipeline', () => {
+    const table = getPipeline('website');
+
+    it('getStartPhase returns init for website', () => {
+      expect(getStartPhase('website')).toBe('init');
+    });
+
+    it('init → success → intelligence', () => {
+      expect(transition(table, 'init', 'success')?.next).toBe('intelligence');
+    });
+
+    it('init → failure → stuck', () => {
+      expect(transition(table, 'init', 'failure')?.next).toBe('stuck');
+    });
+
+    it('intelligence → success → brand', () => {
+      expect(transition(table, 'intelligence', 'success')?.next).toBe('brand');
+    });
+
+    it('brand → success → design', () => {
+      expect(transition(table, 'brand', 'success')?.next).toBe('design');
+    });
+
+    it('design → success → seo', () => {
+      expect(transition(table, 'design', 'success')?.next).toBe('seo');
+    });
+
+    it('seo → success → content', () => {
+      expect(transition(table, 'seo', 'success')?.next).toBe('content');
+    });
+
+    it('content → success → assets', () => {
+      expect(transition(table, 'content', 'success')?.next).toBe('assets');
+    });
+
+    it('assets → success → build', () => {
+      expect(transition(table, 'assets', 'success')?.next).toBe('build');
+    });
+
+    it('build → success → qa', () => {
+      expect(transition(table, 'build', 'success')?.next).toBe('qa');
+    });
+
+    it('qa → success → launch', () => {
+      expect(transition(table, 'qa', 'success')?.next).toBe('launch');
+    });
+
+    it('isComplete returns true for launch + success', () => {
+      expect(isComplete('launch', 'success')).toBe(true);
+    });
+
+    it('launch has no outbound transition', () => {
+      expect(transition(table, 'launch', 'success')).toBeUndefined();
+    });
+
+    it('intelligence → failure → stuck', () => {
+      expect(transition(table, 'intelligence', 'failure')?.next).toBe('stuck');
+    });
+
+    it('build → failure → stuck', () => {
+      expect(transition(table, 'build', 'failure')?.next).toBe('stuck');
+    });
+
+    it('qa → failure → stuck', () => {
+      expect(transition(table, 'qa', 'failure')?.next).toBe('stuck');
+    });
+  });
 });

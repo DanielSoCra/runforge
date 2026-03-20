@@ -1,0 +1,5 @@
+{
+  "name": "playwright",
+  "command": "npx",
+  "args": ["-y", "@playwright/mcp"]
+}

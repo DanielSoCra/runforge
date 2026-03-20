@@ -8,6 +8,7 @@ import { createWorkDetector } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
 import { runPipeline } from './pipeline.js';
 import { getPipeline, getStartPhase } from './fsm.js';
+import { selectVariant } from './variants.js';
 import { notify } from './notify.js';
 import type { RunState } from '../types.js';
 import { ok, err, type Result } from '../lib/result.js';
@@ -50,9 +51,10 @@ export async function processSingleIssue(issueNumber: number, configPath: string
   console.log(`[process] Claiming issue #${issueNumber}`);
   await detector.claimWork(issueNumber);
 
+  const variant = selectVariant(request);
   const run: RunState = {
     issueNumber, title: request.title,
-    phase: getStartPhase('feature-simple'), variant: 'feature-simple',
+    phase: getStartPhase(variant), variant,
     phaseCompletions: {}, checkpoints: [], cost: 0,
     perRunBudget: config.perRunBudget, fixAttempts: [], errorHashes: {},
     startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
@@ -61,7 +63,7 @@ export async function processSingleIssue(issueNumber: number, configPath: string
 
   console.log(`[process] Running pipeline for #${issueNumber}: ${request.title}`);
   const handlers = createPhaseHandlers(config, owner, repo, runtime, coordinator, octokit, request, stateDir);
-  const table = getPipeline('feature-simple');
+  const table = getPipeline(variant);
   const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
   console.log(`[process] Result: ${result.outcome}${result.error ? ` — ${result.error}` : ''}`);
 

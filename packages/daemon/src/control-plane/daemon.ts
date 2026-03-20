@@ -10,8 +10,11 @@ import { createControlServer } from './server.js';
 import { RepoManager } from './repo-manager.js';
 import { createWorkDetector, type WorkDetector } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
+import { createWebsitePhaseHandlers } from './phases-website.js';
+import { readAgencyConfig } from './agency-config.js';
 import { runPipeline } from './pipeline.js';
 import { getPipeline, getStartPhase } from './fsm.js';
+import { selectVariant } from './variants.js';
 import { notify } from './notify.js';
 import type { RunState, WorkRequest } from '../types.js';
 import { ok, err, type Result } from '../lib/result.js';
@@ -193,11 +196,12 @@ async function processWorkRequest(
   detector: WorkDetector,
   stateDir: string,
 ): Promise<void> {
+  const variant = selectVariant(request);
   const run: RunState = {
     issueNumber: request.issueNumber,
     title: request.title,
-    phase: getStartPhase('feature-simple'),
-    variant: 'feature-simple',
+    phase: getStartPhase(variant),
+    variant,
     phaseCompletions: {},
     checkpoints: [],
     cost: 0,
@@ -212,8 +216,20 @@ async function processWorkRequest(
 
   // Build a notifyOctokit from env for phase handlers
   const notifyOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-  const handlers = createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir);
-  const table = getPipeline('feature-simple');
+  const agencyConfig = await readAgencyConfig(null, '');
+  // TODO: pass real supabase client and repoId once available from daemon context
+  const handlers = variant === 'website'
+    ? createWebsitePhaseHandlers(
+        agencyConfig,
+        null,          // supabase — wired in follow-on
+        notifyOctokit,
+        owner,
+        repoName,
+        request.issueNumber,
+        null,          // repoId — wired in follow-on
+      )
+    : createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir);
+  const table = getPipeline(variant);
 
   console.log(`[daemon] Pipeline start for #${request.issueNumber}: ${request.title}`);
   const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
