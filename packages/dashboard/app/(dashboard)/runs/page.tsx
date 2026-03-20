@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { RunTable } from '@/components/run-table';
+import { PageError } from '@/components/page-error';
 
 const VALID_OUTCOMES = ['in-progress', 'complete', 'stuck', 'escalated'] as const;
 type RunOutcome = typeof VALID_OUTCOMES[number];
@@ -24,7 +25,11 @@ export default async function RunsPage({
   if (repo) query = query.eq('repo_id', repo);
   if (outcome && isValidOutcome(outcome)) query = query.eq('outcome', outcome);
 
-  const { data: runs } = await query;
+  const { data: runs, error: runsError } = await query;
+  if (runsError) {
+    console.error('[runs] failed to load runs:', runsError);
+    return <PageError />;
+  }
 
   return (
     <div className="space-y-6">
