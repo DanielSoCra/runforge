@@ -1,170 +1,190 @@
-# Hetzner Cloud Self-Hosted Runner Setup
+# Hetzner Deployment Guide
 
-This guide covers deploying Auto-Claude on a Hetzner Cloud server with a GitHub Actions self-hosted runner.
+Auto-Claude runs on Hetzner via Docker Compose. Three containers — **daemon**, **dashboard**, and **Caddy** — communicate over a private Docker network. Caddy handles TLS termination and proxies HTTPS traffic to the dashboard.
+
+## Prerequisites
+
+- A [Supabase](https://supabase.com) project (free tier works)
+- A domain with DNS control (current: `app.example.com`)
+- An SSH key added to the Hetzner server
 
 ## 1. Server Provisioning
 
-Recommended server type: **CPX21** (3 vCPUs, 4 GB RAM, 80 GB SSD).
+Recommended: **CPX21** (3 vCPUs, 4 GB RAM, 80 GB SSD), Ubuntu 24.04 LTS.
 
 1. Log into [Hetzner Cloud Console](https://console.hetzner.cloud/).
-2. Create a new project (e.g., `auto-claude`).
-3. Add a new server:
-   - Location: choose the region closest to you.
-   - Image: Ubuntu 24.04 LTS.
-   - Type: CPX21.
-   - SSH key: add your public key.
-4. Note the server's public IP.
+2. Create a server, add your SSH key, note the public IP.
+3. Point your domain's A record at the server IP.
 
-## 2. Initial System Setup
+## 2. Install Docker
 
-SSH into the server and run:
+SSH into the server as root:
 
 ```bash
 apt-get update && apt-get upgrade -y
-apt-get install -y git curl build-essential
+curl -fsSL https://get.docker.com | sh
 ```
 
-## 3. Install Node.js 22
+Verify:
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-apt-get install -y nodejs
-node --version   # should print v22.x.x
+docker --version
+docker compose version
 ```
 
-## 4. Install pnpm
+## 3. Create the Deploy User
 
 ```bash
-npm install -g pnpm
-pnpm --version
+useradd -m -s /bin/bash autoclaud
+usermod -aG docker autoclaud
 ```
 
-## 5. Install Claude CLI
+> **Note:** All `docker compose` commands below are run as **root** (or via `sudo`). Even with the `docker` group, some volume-mount permission issues require root on this server.
+
+## 4. Clone the Repository
 
 ```bash
-npm install -g @anthropic-ai/claude-code
-claude --version
+git clone https://github.com/DANIELSOCRAHANDLEZZ/auto-claude.git /home/autoclaud/auto-claude
+chown -R autoclaud:autoclaud /home/autoclaud/auto-claude
+cd /home/autoclaud/auto-claude
 ```
 
-Authenticate once interactively:
+## 5. Create the Environment File
 
 ```bash
-claude auth login
+cp .env.prod.example .env.prod
+nano .env.prod
 ```
 
-The credentials are stored in `~/.config/anthropic/`. For non-interactive environments set `ANTHROPIC_API_KEY` instead.
+Fill in all values:
 
-## 6. Clone the Repository
+| Variable | Where to get it |
+|----------|----------------|
+| `GITHUB_TOKEN` | GitHub → Settings → Developer settings → Fine-grained PAT with `repo` scope |
+| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com/settings/keys) |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project → Settings → API → Project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase project → Settings → API → `anon` key |
+| `SUPABASE_URL` | Same as `NEXT_PUBLIC_SUPABASE_URL` |
+| `SUPABASE_SERVICE_KEY` | Supabase project → Settings → API → `service_role` key |
+| `NEXT_PUBLIC_SITE_URL` | `https://app.example.com` (your domain) |
+| `DAEMON_URL` | `http://daemon:3847` (Docker service name — do not change) |
+| `ENCRYPTION_KEY` | Any 32+ character random string |
+| `GITHUB_REPO_OAUTH_APP_CLIENT_ID` | GitHub OAuth App client ID |
+| `GITHUB_REPO_OAUTH_APP_CLIENT_SECRET` | GitHub OAuth App client secret |
+
+## 6. Configure the Daemon
 
 ```bash
-git clone https://github.com/<owner>/<repo>.git /opt/auto-claude
-cd /opt/auto-claude
-pnpm install
 cp auto-claude.config.example.json auto-claude.config.json
-# Edit auto-claude.config.json with your repo details
+nano auto-claude.config.json
 ```
 
-## 7. Install the GitHub Actions Self-Hosted Runner
+Set at minimum:
 
-In your GitHub repository: **Settings → Actions → Runners → New self-hosted runner**.
+```json
+{
+  "repo": {
+    "owner": "your-github-username",
+    "name": "your-repo-name"
+  }
+}
+```
 
-Select **Linux / x64** and follow the generated commands, e.g.:
+## 7. Configure Caddy
+
+The `Caddyfile` in the repo root is pre-configured:
+
+```
+app.example.com {
+  reverse_proxy dashboard:3000
+}
+```
+
+Change the domain if needed before first deploy.
+
+## 8. Apply Supabase Migrations
+
+Migrations live in `packages/daemon/migrations/`. Run them in the Supabase SQL editor or via the Supabase CLI before starting the stack.
+
+## 9. Deploy
 
 ```bash
-mkdir /opt/actions-runner && cd /opt/actions-runner
-curl -o actions-runner-linux-x64-2.x.x.tar.gz -L https://github.com/actions/runner/releases/download/v2.x.x/actions-runner-linux-x64-2.x.x.tar.gz
-tar xzf ./actions-runner-linux-x64-2.x.x.tar.gz
-./config.sh --url https://github.com/<owner>/<repo> --token <REGISTRATION_TOKEN>
+cd /home/autoclaud/auto-claude
+docker compose -f docker-compose.prod.yml up --build -d
 ```
 
-## 8. systemd Service for the Runner
-
-Create `/etc/systemd/system/github-runner.service`:
-
-```ini
-[Unit]
-Description=GitHub Actions Self-Hosted Runner
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/actions-runner
-ExecStart=/opt/actions-runner/run.sh
-Restart=always
-RestartSec=5
-Environment=GITHUB_TOKEN=<your-github-token>
-Environment=ANTHROPIC_API_KEY=<your-anthropic-key>
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
+Verify all three containers are running:
 
 ```bash
-systemctl daemon-reload
-systemctl enable github-runner
-systemctl start github-runner
-systemctl status github-runner
+docker compose -f docker-compose.prod.yml ps
 ```
 
-## 9. Configuring Secrets
+The dashboard is available at `https://app.example.com` once Caddy has obtained a TLS certificate (usually within 30 seconds on first start).
 
-Set secrets in your GitHub repository under **Settings → Secrets and variables → Actions**:
+## 10. Firewall
 
-- `GITHUB_TOKEN` — A fine-grained PAT with `issues: write` and `contents: write` permissions (or use the default `GITHUB_TOKEN` provided by Actions).
-- `ANTHROPIC_API_KEY` — Your Anthropic API key.
-
-For the systemd daemon mode (non-Actions), you can also set these in `/etc/environment` or in the service's `EnvironmentFile`.
-
-## 10. Optional: Auto-Claude Daemon for the Dashboard
-
-To run the control-plane daemon (which exposes the dashboard at `http://localhost:3847/dashboard`):
-
-Create `/etc/systemd/system/auto-claude.service`:
-
-```ini
-[Unit]
-Description=Auto-Claude Daemon
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/auto-claude
-ExecStart=/usr/bin/npx tsx src/main.ts start -c auto-claude.config.json
-Restart=always
-RestartSec=10
-EnvironmentFile=/etc/auto-claude.env
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Create `/etc/auto-claude.env`:
-
-```
-GITHUB_TOKEN=<your-github-token>
-ANTHROPIC_API_KEY=<your-anthropic-key>
-```
-
-Enable and start:
-
-```bash
-systemctl daemon-reload
-systemctl enable auto-claude
-systemctl start auto-claude
-```
-
-The dashboard will be accessible at `http://<server-ip>:3847/dashboard`. Consider placing nginx in front to restrict access.
-
-## 11. Firewall
-
-Allow only necessary ports:
+Allow only HTTP, HTTPS, and SSH:
 
 ```bash
 ufw allow ssh
-ufw allow 3847/tcp   # only if exposing the dashboard externally (optional)
+ufw allow 80/tcp
+ufw allow 443/tcp
 ufw enable
+```
+
+The daemon's control port (3847) is **not** exposed externally — it is internal to the Docker network only.
+
+## Routine Operations
+
+### Update to latest
+
+```bash
+cd /home/autoclaud/auto-claude
+git pull
+docker compose -f docker-compose.prod.yml up --build -d
+```
+
+### View logs
+
+```bash
+# All services
+docker compose -f docker-compose.prod.yml logs -f
+
+# Single service
+docker compose -f docker-compose.prod.yml logs -f dashboard
+docker compose -f docker-compose.prod.yml logs -f daemon
+```
+
+### Restart a service
+
+```bash
+docker compose -f docker-compose.prod.yml restart dashboard
+```
+
+### Stop everything
+
+```bash
+docker compose -f docker-compose.prod.yml down
+```
+
+## Troubleshooting
+
+**`git pull` fails with "unsafe directory"**
+
+```bash
+chown -R autoclaud:autoclaud /home/autoclaud/auto-claude
+```
+
+**`git pull` blocked by untracked files**
+
+```bash
+git stash  # or git reset --hard origin/main if no local changes to keep
+```
+
+**Dashboard shows 502**
+
+Caddy is up but dashboard container is not. Check:
+
+```bash
+docker compose -f docker-compose.prod.yml logs dashboard
 ```

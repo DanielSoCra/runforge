@@ -1,134 +1,134 @@
 # Running Auto-Claude
 
+## Architecture
+
+Auto-Claude consists of two packages:
+
+- **daemon** (`packages/daemon`) — polls GitHub for issues, spawns Claude workers, manages state
+- **dashboard** (`packages/dashboard`) — Next.js web UI backed by Supabase
+
+Both share a Supabase database. The daemon writes run state; the dashboard reads and displays it.
+
 ## Prerequisites
 
-- Node.js 22+
-- pnpm
-- `claude` CLI installed and authenticated
+- Docker and Docker Compose
+- A [Supabase](https://supabase.com) project (free tier works)
 - GitHub personal access token with `repo` scope
-- Anthropic API key (for Docker) or Claude Max subscription (for local)
-
-## Quick Start (Local)
-
-```bash
-# 1. Install dependencies
-pnpm install
-
-# 2. Create config
-cp auto-claude.config.example.json auto-claude.config.json
-# Edit auto-claude.config.json with your repo details
-
-# 3. Start the daemon (uses your local Claude Max session)
-GITHUB_TOKEN=ghp_your_token pnpm start -- -c auto-claude.config.json
-```
-
-## Docker Compose (Isolated)
-
-```bash
-# 1. Set your secrets
-cp .env.example .env
-# Edit .env:
-#   GITHUB_TOKEN=ghp_...
-#   ANTHROPIC_API_KEY=sk-ant-...
-
-# 2. Build and start
-docker compose up --build
-
-# 3. Verify
-curl http://localhost:3847/health
-# {"ok":true}
-
-curl http://localhost:3847/status
-# {"activeRuns":0,"dailyCost":0,"paused":false,...}
-```
-
-## Creating a Test Issue
-
-Go to your repo on GitHub and create an issue:
-
-- **Title:** `Add /hello endpoint to control server`
-- **Body:**
-  ```
-  Add a GET /hello endpoint to the HTTP control server that returns:
-  {"message": "hello from auto-claude"}
-
-  Specs: STACK-AC-CONTROL-PLANE
-
-  Acceptance criteria:
-  - GET /hello returns HTTP 200
-  - Response body is JSON with a "message" field
-  ```
-- **Label:** `ready`
-
-The daemon will:
-1. Detect the issue (polls every 30s by default)
-2. Claim it (swap label to `in-progress`)
-3. Create a feature branch
-4. Spawn a Claude worker session to implement it
-5. Run deterministic checks (vitest, tsc)
-6. Post a report comment and close the issue
-
-## Operator Commands
-
-```bash
-# Check status
-curl http://localhost:3847/status
-
-# Pause (stops claiming new work, active runs finish)
-curl -X POST http://localhost:3847/pause
-
-# Resume
-curl -X POST http://localhost:3847/resume
-
-# Retry a stuck issue
-curl -X POST http://localhost:3847/retry/42
-
-# Health check
-curl http://localhost:3847/health
-```
-
-Or via the CLI (when running locally):
-```bash
-pnpm start -- status -p 3847
-pnpm start -- pause -p 3847
-pnpm start -- resume -p 3847
-pnpm start -- retry 42 -p 3847
-```
+- Anthropic API key
 
 ## Configuration
 
-See `auto-claude.config.example.json` for all options. Key settings:
+### Environment
+
+Copy the example and fill in your values:
+
+```bash
+cp .env.prod.example .env.prod
+```
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GITHUB_TOKEN` | Yes | GitHub PAT with `repo` scope |
+| `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
+| `NEXT_PUBLIC_SUPABASE_URL` | Yes | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase `anon` key (public) |
+| `SUPABASE_URL` | Yes | Same as above (daemon-side) |
+| `SUPABASE_SERVICE_KEY` | Yes | Supabase `service_role` key (server-only) |
+| `NEXT_PUBLIC_SITE_URL` | Yes | Full URL of the dashboard (for OAuth redirects) |
+| `DAEMON_URL` | Yes | Internal URL to reach the daemon (`http://daemon:3847` in Docker) |
+| `ENCRYPTION_KEY` | Yes | 32+ character secret for encrypting stored credentials |
+| `GITHUB_REPO_OAUTH_APP_CLIENT_ID` | Yes | GitHub OAuth App client ID |
+| `GITHUB_REPO_OAUTH_APP_CLIENT_SECRET` | Yes | GitHub OAuth App client secret |
+
+### Daemon config
+
+```bash
+cp auto-claude.config.example.json auto-claude.config.json
+# Edit: set repo.owner and repo.name at minimum
+```
+
+Key fields in `auto-claude.config.json`:
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `repo.owner` | — | GitHub repo owner (required) |
 | `repo.name` | — | GitHub repo name (required) |
-| `controlPort` | 3847 | HTTP control API port |
-| `pollIntervalMs` | 30000 | How often to check for new issues (ms) |
-| `maxConcurrentRuns` | 1 | Max parallel work requests |
+| `controlPort` | 3847 | HTTP control API port (internal only) |
+| `pollIntervalMs` | 30000 | Issue polling interval (ms) |
+| `maxConcurrentRuns` | 1 | Max parallel Claude workers |
 | `dailyBudget` | 50 | Daily spending limit (USD) |
 | `perRunBudget` | 10 | Per-issue spending limit (USD) |
-| `adapter` | cli | Execution substrate: `cli` or `sdk` |
-| `branches.staging` | staging | Staging branch name |
-| `branches.production` | main | Production branch name |
 
-## Environment Variables
+## Running Locally (Development)
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `GITHUB_TOKEN` | Yes | GitHub PAT with `repo` scope |
-| `ANTHROPIC_API_KEY` | Docker only | API key for Claude CLI in Docker |
+For local development, the dashboard has its own dev server and the daemon runs in Docker.
 
-When running locally with Claude Max subscription, `ANTHROPIC_API_KEY` is not needed — the CLI uses your authenticated session.
+**Dashboard:**
+
+```bash
+cd packages/dashboard
+cp .env.example .env.local
+# Fill in Supabase credentials and DAEMON_URL=http://localhost:3847
+pnpm dev
+```
+
+Dashboard runs at `http://localhost:3000`.
+
+**Daemon:**
+
+```bash
+# From repo root
+cp .env.prod.example .env
+# Fill in GITHUB_TOKEN, ANTHROPIC_API_KEY, Supabase vars
+
+docker compose up --build
+```
+
+Daemon control API is available at `http://localhost:3847` (internal only; use the dashboard to interact).
+
+## Running in Production
+
+See [hetzner-setup.md](./hetzner-setup.md) for full server provisioning. Once configured:
+
+```bash
+docker compose -f docker-compose.prod.yml up --build -d
+```
+
+Three containers start:
+
+| Container | Role |
+|-----------|------|
+| `daemon` | Claude worker orchestrator |
+| `dashboard` | Next.js web UI |
+| `caddy` | Reverse proxy + automatic TLS |
+
+Dashboard is available at `https://app.example.com` (or your configured domain).
+
+## Supabase Migrations
+
+Apply migrations from `packages/daemon/migrations/` to your Supabase project before first run. Run them in order via the Supabase SQL editor or:
+
+```bash
+# Via Supabase CLI (if configured)
+supabase db push
+```
+
+## How It Works
+
+1. The daemon polls the configured GitHub repo for issues labelled `ready`.
+2. On finding one, it swaps the label to `in-progress` and spawns a Claude worker.
+3. The worker implements the issue on a feature branch, runs validation checks, then opens a PR.
+4. Run state (status, cost, logs) syncs to Supabase in real time.
+5. The dashboard displays active runs, repo status, and operator controls.
 
 ## Stopping
 
 ```bash
-# Docker
-docker compose down
+# Production
+docker compose -f docker-compose.prod.yml down
 
-# Local (sends SIGINT, daemon shuts down gracefully)
-Ctrl+C
+# Development daemon
+docker compose down
 ```
 
-The daemon handles `SIGTERM` and `SIGINT` gracefully: stops accepting new work, waits for active runs to finish (up to 30s grace period), flushes state, and exits.
+The daemon handles `SIGTERM` and `SIGINT` gracefully: stops accepting new work, waits for active runs to finish (up to 30 s), then exits.
