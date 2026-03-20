@@ -66,3 +66,115 @@ describe('readPluginsForContext file size cap', () => {
     }
   });
 });
+
+describe('readPluginsForContext mcpConfigs loading', () => {
+  let pluginsDir: string;
+  let pluginDir: string;
+  const PLUGIN_ID = 'mcp-plugin';
+
+  beforeEach(async () => {
+    clearRegistryCache();
+    pluginsDir = join(tmpdir(), `plugin-loader-mcp-test-${Date.now()}`);
+    pluginDir = join(pluginsDir, PLUGIN_ID);
+    await mkdir(join(pluginDir, 'skills'), { recursive: true });
+    await mkdir(join(pluginDir, 'agents'), { recursive: true });
+    await writeFile(join(pluginsDir, 'registry.json'), JSON.stringify({
+      version: 1,
+      plugins: [{ id: PLUGIN_ID, name: 'MCP Plugin', tags: [] }],
+    }));
+    await writeFile(join(pluginDir, 'manifest.json'), JSON.stringify({
+      id: PLUGIN_ID, name: 'MCP Plugin', version: '1.0.0', description: 'Test',
+    }));
+  });
+
+  afterEach(async () => {
+    await rm(pluginsDir, { recursive: true, force: true });
+    clearRegistryCache();
+  });
+
+  it('returns empty array when no mcps/ directory exists', async () => {
+    const orig = process.env['PLUGINS_DIR'];
+    process.env['PLUGINS_DIR'] = pluginsDir;
+    try {
+      const result = await readPluginsForContext([PLUGIN_ID], new Map());
+      expect(result[0]?.mcpConfigs).toEqual([]);
+    } finally {
+      if (orig === undefined) delete process.env['PLUGINS_DIR'];
+      else process.env['PLUGINS_DIR'] = orig;
+    }
+  });
+
+  it('loads mcpConfigs from mcps/*.json files', async () => {
+    await mkdir(join(pluginDir, 'mcps'), { recursive: true });
+    await writeFile(join(pluginDir, 'mcps', 'firecrawl.json'), JSON.stringify({
+      name: 'firecrawl',
+      command: 'npx',
+      args: ['-y', 'firecrawl-mcp'],
+      env: { FIRECRAWL_API_KEY: 'test-key' },
+    }));
+
+    const orig = process.env['PLUGINS_DIR'];
+    process.env['PLUGINS_DIR'] = pluginsDir;
+    try {
+      const result = await readPluginsForContext([PLUGIN_ID], new Map());
+      expect(result[0]?.mcpConfigs).toHaveLength(1);
+      expect(result[0]?.mcpConfigs[0]).toMatchObject({
+        name: 'firecrawl',
+        command: 'npx',
+        args: ['-y', 'firecrawl-mcp'],
+        env: { FIRECRAWL_API_KEY: 'test-key' },
+      });
+    } finally {
+      if (orig === undefined) delete process.env['PLUGINS_DIR'];
+      else process.env['PLUGINS_DIR'] = orig;
+    }
+  });
+
+  it('loads multiple mcpConfigs', async () => {
+    await mkdir(join(pluginDir, 'mcps'), { recursive: true });
+    await writeFile(join(pluginDir, 'mcps', 'firecrawl.json'), JSON.stringify({
+      name: 'firecrawl',
+      command: 'npx',
+      args: ['-y', 'firecrawl-mcp'],
+    }));
+    await writeFile(join(pluginDir, 'mcps', 'playwright.json'), JSON.stringify({
+      name: 'playwright',
+      command: 'npx',
+      args: ['-y', '@playwright/mcp'],
+    }));
+
+    const orig = process.env['PLUGINS_DIR'];
+    process.env['PLUGINS_DIR'] = pluginsDir;
+    try {
+      const result = await readPluginsForContext([PLUGIN_ID], new Map());
+      expect(result[0]?.mcpConfigs).toHaveLength(2);
+      const names = result[0]?.mcpConfigs.map(c => c.name);
+      expect(names).toContain('firecrawl');
+      expect(names).toContain('playwright');
+    } finally {
+      if (orig === undefined) delete process.env['PLUGINS_DIR'];
+      else process.env['PLUGINS_DIR'] = orig;
+    }
+  });
+
+  it('skips malformed JSON files in mcps/', async () => {
+    await mkdir(join(pluginDir, 'mcps'), { recursive: true });
+    await writeFile(join(pluginDir, 'mcps', 'bad.json'), 'this is not valid json {{{');
+    await writeFile(join(pluginDir, 'mcps', 'good.json'), JSON.stringify({
+      name: 'good-mcp',
+      command: 'node',
+      args: ['server.js'],
+    }));
+
+    const orig = process.env['PLUGINS_DIR'];
+    process.env['PLUGINS_DIR'] = pluginsDir;
+    try {
+      const result = await readPluginsForContext([PLUGIN_ID], new Map());
+      expect(result[0]?.mcpConfigs).toHaveLength(1);
+      expect(result[0]?.mcpConfigs[0]?.name).toBe('good-mcp');
+    } finally {
+      if (orig === undefined) delete process.env['PLUGINS_DIR'];
+      else process.env['PLUGINS_DIR'] = orig;
+    }
+  });
+});
