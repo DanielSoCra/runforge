@@ -32,3 +32,5 @@ ALTER TABLE runs ADD COLUMN active_plugins text[] NOT NULL DEFAULT '{}';
 
 CREATE INDEX idx_repo_plugins_repo_id ON repo_plugins (repo_id);
 CREATE INDEX idx_repo_plugins_active ON repo_plugins (repo_id, active) WHERE active = true;
+
+ALTER PUBLICATION supabase_realtime ADD TABLE repo_plugins;
