@@ -5,11 +5,13 @@
 export type Phase =
   | 'detect' | 'classify' | 'decompose' | 'implement'
   | 'review' | 'holdout' | 'integrate' | 'deploy'
-  | 'test' | 'report' | 'stuck' | 'paused';
+  | 'test' | 'report' | 'stuck' | 'paused'
+  | 'init' | 'intelligence' | 'brand' | 'design'
+  | 'seo' | 'content' | 'assets' | 'build' | 'qa' | 'launch';
 
 export type PhaseEvent = 'success' | 'success:simple' | 'failure' | 'budget-exceeded' | 'rate-limited';
 
-export type PipelineVariant = 'feature' | 'feature-simple' | 'bug';
+export type PipelineVariant = 'feature' | 'feature-simple' | 'bug' | 'website';
 
 export type Outcome = 'complete' | 'stuck' | 'escalated';
 

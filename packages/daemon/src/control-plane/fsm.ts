@@ -57,10 +57,24 @@ const bugTransitions: TransitionTable = {
   report: { success: { next: 'report' } },
 };
 
+const websiteTransitions: TransitionTable = {
+  init:         { success: { next: 'intelligence' }, failure: { next: 'stuck' } },
+  intelligence: { success: { next: 'brand' },        failure: { next: 'stuck' } },
+  brand:        { success: { next: 'design' },        failure: { next: 'stuck' } },
+  design:       { success: { next: 'seo' },           failure: { next: 'stuck' } },
+  seo:          { success: { next: 'content' },       failure: { next: 'stuck' } },
+  content:      { success: { next: 'assets' },        failure: { next: 'stuck' } },
+  assets:       { success: { next: 'build' },         failure: { next: 'stuck' } },
+  build:        { success: { next: 'qa' },            failure: { next: 'stuck' } },
+  qa:           { success: { next: 'launch' },        failure: { next: 'build' } },
+  launch:       { success: { next: 'report' } },
+};
+
 const PIPELINES: Record<PipelineVariant, TransitionTable> = {
   feature: featureTransitions,
   'feature-simple': featureSimpleTransitions,
   bug: bugTransitions,
+  website: websiteTransitions,
 };
 
 export function getPipeline(variant: PipelineVariant): TransitionTable {
