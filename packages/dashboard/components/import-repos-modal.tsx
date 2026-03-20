@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -77,11 +77,19 @@ export function ImportReposModal({
   const [orgsError, setOrgsError] = useState<string | null>(null);
   const [reposError, setReposError] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
-  const [removeError, setRemoveError] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<{ fullName: string } | null>(null);
+  const [resyncing, setResyncing] = useState<string | null>(null);
+  const [resyncError, setResyncError] = useState<string | null>(null);
   const router = useRouter();
 
-  const importedSet = new Set(importedRepos.map((r) => `${r.owner}/${r.name}`));
-  const importedById = new Map(importedRepos.map((r) => [`${r.owner}/${r.name}`, r]));
+  const importedSet = useMemo(
+    () => new Set(importedRepos.map((r) => `${r.owner}/${r.name}`)),
+    [importedRepos],
+  );
+  const importedById = useMemo(
+    () => new Map(importedRepos.map((r) => [`${r.owner}/${r.name}`, r])),
+    [importedRepos],
+  );
 
   async function handleOpen() {
     setLoadingOrgs(true);
@@ -97,6 +105,7 @@ export function ImportReposModal({
     setReposError(null);
     setImportError(null);
     setRemoveError(null);
+    setResyncError(null);
     const res = await fetch(`/api/github/connections/${connectionId}/orgs`);
     if (!res.ok) {
       setOrgsError('Could not load accounts.');
@@ -113,9 +122,10 @@ export function ImportReposModal({
     setSelectedOrg(login);
     setConfirmRemove(null);
     setReposError(null);
-    if (orgRepos.has(login)) return;
     setLoadingRepos(true);
-    const res = await fetch(`/api/github/connections/${connectionId}/repos?org=${login}`);
+    const res = await fetch(
+      `/api/github/connections/${connectionId}/repos?org=${encodeURIComponent(login)}`,
+    );
     if (!res.ok) {
       setReposError('Could not load repositories.');
       setLoadingRepos(false);
@@ -162,8 +172,16 @@ export function ImportReposModal({
   }
 
   async function handleResync(repo: GhRepo) {
-    await importRepos(connectionId, [{ owner: repo.owner, name: repo.name }]);
-    router.refresh();
+    setResyncing(repo.full_name);
+    setResyncError(null);
+    try {
+      await importRepos(connectionId, [{ owner: repo.owner, name: repo.name }]);
+      router.refresh();
+    } catch {
+      setResyncError(repo.full_name);
+    } finally {
+      setResyncing(null);
+    }
   }
 
   async function handleRemove(fullName: string) {
@@ -176,7 +194,7 @@ export function ImportReposModal({
       setConfirmRemove(null);
       router.refresh();
     } catch {
-      setRemoveError(fullName);
+      setRemoveError({ fullName });
     } finally {
       setRemoving(false);
     }
@@ -318,14 +336,21 @@ export function ImportReposModal({
                             <span className="text-[11px] text-muted-foreground">
                               {repo.private ? 'Private' : 'Public'}
                             </span>
-                            <div className="flex gap-1 justify-end">
+                            <div className="flex gap-1 justify-end flex-col items-end">
+                              {resyncError === repo.full_name && (
+                                <span className="text-[10px] text-destructive">Resync failed</span>
+                              )}
+                              <div className="flex gap-1">
                               <Button
                                 variant="outline"
                                 size="sm"
                                 className="h-6 px-2 text-xs"
+                                disabled={resyncing === repo.full_name}
                                 onClick={() => handleResync(repo)}
                               >
-                                Resync
+                                {resyncing === repo.full_name ? (
+                                  <><Loader2 className="h-3 w-3 animate-spin mr-1" />Syncing…</>
+                                ) : 'Resync'}
                               </Button>
                               <Button
                                 variant="ghost"
@@ -335,11 +360,12 @@ export function ImportReposModal({
                               >
                                 Remove
                               </Button>
+                              </div>
                             </div>
                           </div>
                           {isConfirming && (
                             <div className="px-4 py-2 bg-destructive/5 border-t border-destructive/20 flex items-center justify-between text-xs">
-                              {removeError === repo.full_name ? (
+                              {removeError?.fullName === repo.full_name ? (
                                 <span className="text-destructive">Remove failed. Please try again.</span>
                               ) : (
                                 <span className="text-muted-foreground">
@@ -379,11 +405,9 @@ export function ImportReposModal({
                         className="grid grid-cols-[32px_1fr_80px_120px] px-4 py-2.5 items-center text-sm border-b border-border/60 last:border-0 hover:bg-muted/30 cursor-pointer"
                         onClick={() => toggleRepo(repo.full_name, !selected.has(repo.full_name))}
                       >
-                        <Checkbox
-                          checked={selected.has(repo.full_name)}
-                          onCheckedChange={(v) => toggleRepo(repo.full_name, !!v)}
-                          onClick={(e) => e.stopPropagation()}
-                        />
+                        <span className="pointer-events-none">
+                          <Checkbox checked={selected.has(repo.full_name)} />
+                        </span>
                         <span className="font-mono text-xs font-medium">{repo.name}</span>
                         <span className="text-[11px] text-muted-foreground">
                           {repo.private ? 'Private' : 'Public'}
