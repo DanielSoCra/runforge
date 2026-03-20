@@ -15,13 +15,15 @@ import { git } from '../lib/git.js';
 
 export function createPhaseHandlers(
   config: Config,
+  owner: string,
+  repoName: string,
   runtime: SessionRuntime,
   coordinator: ImplementationCoordinator,
   octokit: Octokit,
   workRequest: WorkRequest,
   stateDir: string,
 ): PhaseHandlerMap {
-  const { owner, name: repo } = config.repo;
+  const repo = repoName;
   const detector = createWorkDetector(octokit, owner, repo);
   const featureBranch = `feature/${workRequest.issueNumber}`;
 

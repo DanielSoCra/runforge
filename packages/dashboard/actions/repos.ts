@@ -6,6 +6,13 @@ import { requireAdmin } from '@/lib/auth';
 
 const SAFE_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
+function notifyDaemonReload() {
+  fetch(`${process.env.DAEMON_URL}/repos/reload`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(3000),
+  }).catch(() => {});
+}
+
 export async function createRepo(formData: FormData) {
   const supabase = await createClient();
   await requireAdmin(supabase);
@@ -86,6 +93,7 @@ export async function enableRepo(id: string) {
     console.error('[repos] enableRepo failed:', error);
     throw new Error('Failed to enable repository');
   }
+  notifyDaemonReload();
   revalidatePath(`/repos/${id}`);
   revalidatePath('/repos');
 }
@@ -101,6 +109,7 @@ export async function disableRepo(id: string) {
     console.error('[repos] disableRepo failed:', error);
     throw new Error('Failed to disable repository');
   }
+  notifyDaemonReload();
   revalidatePath(`/repos/${id}`);
   revalidatePath('/repos');
 }

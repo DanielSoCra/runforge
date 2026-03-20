@@ -8,6 +8,7 @@ export interface ControlHandlers {
   pause: () => void;
   resume: () => void;
   retry: (issueNumber: number) => Result<void>;
+  reloadRepos?: () => Promise<{ active: number }>;
   stateDir?: string;
 }
 
@@ -38,6 +39,16 @@ export function createControlServer(
     } else if (method === 'POST' && url.pathname === '/resume') {
       handlers.resume();
       json(res, 200, { paused: false });
+    } else if (method === 'POST' && url.pathname === '/repos/reload') {
+      if (handlers.reloadRepos) {
+        handlers.reloadRepos().then((result) => {
+          json(res, 200, { reloaded: true, active: result.active });
+        }).catch(() => {
+          json(res, 500, { error: 'reload failed' });
+        });
+      } else {
+        json(res, 200, { reloaded: false, active: 0 });
+      }
     } else if (method === 'POST' && url.pathname.startsWith('/retry/')) {
       const issue = Number(url.pathname.split('/')[2]);
       if (isNaN(issue)) {

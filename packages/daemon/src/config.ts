@@ -6,7 +6,7 @@ export const ConfigSchema = z.object({
   repo: z.object({
     owner: z.string().min(1),
     name: z.string().min(1),
-  }),
+  }).optional(),
   controlPort: z.number().int().min(1024).max(65535).default(3847),
   pollIntervalMs: z.number().int().min(5000).default(30000),
   maxConcurrentRuns: z.number().int().min(1).default(1),

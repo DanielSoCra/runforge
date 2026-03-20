@@ -26,10 +26,10 @@ describe('ConfigSchema', () => {
     expect(result.success).toBe(true);
   });
 
-  it('rejects missing repo', () => {
+  it('accepts config without repo (DB-mode)', () => {
     const { repo, ...rest } = validConfig;
     const result = ConfigSchema.safeParse(rest);
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   it('applies defaults for optional fields', () => {
@@ -53,7 +53,7 @@ describe('loadConfig', () => {
     const result = await loadConfig(path);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.repo.owner).toBe('test-owner');
+      expect(result.value.repo?.owner).toBe('test-owner');
       expect(result.value.controlPort).toBe(3847);
     }
   });
@@ -66,7 +66,7 @@ describe('loadConfig', () => {
   it('returns err for invalid config', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'config-'));
     const path = join(dir, 'config.json');
-    await writeFile(path, JSON.stringify({ invalid: true }));
+    await writeFile(path, JSON.stringify({ adapter: 'invalid' }));
     const result = await loadConfig(path);
     expect(result.ok).toBe(false);
   });
