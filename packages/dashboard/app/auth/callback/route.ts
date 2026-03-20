@@ -2,7 +2,11 @@ import { createClient } from '@/lib/supabase/server';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url);
+  const { searchParams } = new URL(request.url);
+  // request.url inside Docker uses the container's internal hostname.
+  // Use SITE_URL (runtime env) or forwarded headers from Caddy instead.
+  const origin = process.env.SITE_URL
+    ?? `${request.headers.get('x-forwarded-proto') ?? 'https'}://${request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? ''}`;
   const code = searchParams.get('code');
   if (!code) return NextResponse.redirect(`${origin}/login?error=no_code`);
 
