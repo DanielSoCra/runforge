@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { importRepos, removeRepo } from '@/actions/github-connections';
 import { useRouter } from 'next/navigation';
+import { Loader2 } from 'lucide-react';
 
 interface Org {
   id: string;
@@ -40,13 +41,15 @@ export function filterRepos(
   visibility: VisibilityFilter,
   status: StatusFilter,
 ): GhRepo[] {
-  return repos.filter((r) => {
-    if (search && !r.name.toLowerCase().includes(search.toLowerCase())) return false;
-    if (visibility === 'public' && r.private) return false;
-    if (visibility === 'private' && !r.private) return false;
-    if (status === 'not_imported' && importedSet.has(r.full_name)) return false;
-    return true;
-  });
+  return repos
+    .filter((r) => {
+      if (search && !r.name.toLowerCase().includes(search.toLowerCase())) return false;
+      if (visibility === 'public' && r.private) return false;
+      if (visibility === 'private' && !r.private) return false;
+      if (status === 'not_imported' && importedSet.has(r.full_name)) return false;
+      return true;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export function ImportReposModal({
@@ -191,7 +194,7 @@ export function ImportReposModal({
           </DialogHeader>
           <div className="flex h-[480px]">
             {/* Left: org list */}
-            <div className="w-48 flex-shrink-0 border-r border-border bg-muted/30 flex flex-col">
+            <div className="w-[188px] flex-shrink-0 border-r border-border bg-muted/30 flex flex-col">
               <p className="px-4 pt-3 pb-2 text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
                 Accounts
               </p>
@@ -410,9 +413,14 @@ export function ImportReposModal({
                     disabled={selected.size === 0 || importing}
                     onClick={handleImport}
                   >
-                    {importing
-                      ? 'Importing…'
-                      : `Import${selected.size > 0 ? ` ${selected.size} repo${selected.size !== 1 ? 's' : ''}` : ''}`}
+                    {importing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Importing…
+                      </>
+                    ) : (
+                      `Import${selected.size > 0 ? ` ${selected.size} repo${selected.size !== 1 ? 's' : ''}` : ''}`
+                    )}
                   </Button>
                 </div>
               </div>
