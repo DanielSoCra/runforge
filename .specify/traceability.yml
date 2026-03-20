@@ -258,6 +258,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/lib/github-api.ts
     - packages/dashboard/lib/scaffold-templates.ts
     - supabase/migrations/003_command_center.sql
+    - supabase/migrations/005_github_connections.sql
     - docker-compose.prod.yml
     - Caddyfile
     - packages/dashboard/Dockerfile
