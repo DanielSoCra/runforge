@@ -4,14 +4,19 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import Link from 'next/link';
 import { Plus } from 'lucide-react';
+import { PageError } from '@/components/page-error';
 
 export default async function ReposPage() {
   const supabase = await createClient();
-  const { data: repos } = await supabase
+  const { data: repos, error: reposError } = await supabase
     .from('repos')
     .select('*')
     .is('deleted_at', null)
     .order('created_at', { ascending: false });
+  if (reposError) {
+    console.error('[repos] failed to load repos:', reposError);
+    return <PageError />;
+  }
 
   return (
     <div className="space-y-6">

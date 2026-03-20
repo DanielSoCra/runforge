@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CostChart } from '@/components/cost-chart';
+import { PageError } from '@/components/page-error';
 
 export default async function CostPage() {
   const supabase = await createClient();
@@ -9,11 +10,15 @@ export default async function CostPage() {
   const since = new Date();
   since.setDate(since.getDate() - 30);
 
-  const { data: events } = await supabase
+  const { data: events, error: eventsError } = await supabase
     .from('cost_events')
     .select('cost, recorded_at, session_type')
     .gte('recorded_at', since.toISOString())
     .order('recorded_at');
+  if (eventsError) {
+    console.error('[cost] failed to load cost events:', eventsError);
+    return <PageError />;
+  }
 
   // Aggregate by day
   const byDay: Record<string, number> = {};

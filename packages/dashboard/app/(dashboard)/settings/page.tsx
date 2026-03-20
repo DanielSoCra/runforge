@@ -4,10 +4,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { updateGlobalSettings } from '@/actions/settings';
+import { PageError } from '@/components/page-error';
 
 export default async function SettingsPage() {
   const supabase = await createClient();
-  const { data: settings } = await supabase.from('global_settings').select('*').single();
+  const { data: settings, error: settingsError } = await supabase.from('global_settings').select('*').single();
+  if (settingsError && settingsError.code !== 'PGRST116') {
+    // PGRST116 = no rows — acceptable for first-run (defaults apply)
+    console.error('[settings] failed to load settings:', settingsError);
+    return <PageError />;
+  }
 
   return (
     <div className="max-w-lg space-y-6">

@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { notFound } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { PageError } from '@/components/page-error';
 
 interface PhaseEvent {
   name: string;
@@ -13,7 +14,11 @@ interface PhaseEvent {
 export default async function RunDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
-  const { data: run } = await supabase.from('runs').select('*').eq('id', id).single();
+  const { data: run, error: runError } = await supabase.from('runs').select('*').eq('id', id).single();
+  if (runError && runError.code !== 'PGRST116') {
+    console.error('[run-detail] failed to load run:', runError);
+    return <PageError />;
+  }
   if (!run) notFound();
 
   const phases = Array.isArray(run.phases) ? (run.phases as unknown as PhaseEvent[]) : [];
