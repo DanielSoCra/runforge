@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
   const { data: connectionId, error: connErr } = await supabase.rpc('store_github_connection', {
     p_display_name: `${ghUser.login} (personal)`,
     p_github_login: ghUser.login,
-    p_avatar_url: ghUser.avatar_url ?? null,
+    p_avatar_url: ghUser.avatar_url ?? '',
     p_connection_type: 'oauth_token',
     p_plaintext_token: token,
     p_scopes: scope ?? '',
