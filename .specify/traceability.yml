@@ -248,6 +248,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/app/api/daemon/pause/route.ts
     - packages/dashboard/app/api/daemon/resume/route.ts
     - packages/dashboard/app/api/daemon/status/route.ts
+    - packages/dashboard/app/api/daemon/remote-control/restart/route.ts
     - packages/dashboard/components/claude-panel/use-claude-panel.ts
     - packages/dashboard/components/claude-panel/context-actions.ts
     - packages/dashboard/components/claude-panel/claude-panel.tsx

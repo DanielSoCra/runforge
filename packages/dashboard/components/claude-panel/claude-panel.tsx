@@ -5,7 +5,7 @@ import { useClaudePanel } from './use-claude-panel';
 import { getContextActions } from './context-actions';
 
 export function ClaudePanel() {
-  const { isOpen, toggle, sessionUrl, sessionState } = useClaudePanel();
+  const { isOpen, toggle, sessionUrl, sessionState, sessionError, restarting, restart } = useClaudePanel();
   const pathname = usePathname();
   const actions = getContextActions(pathname);
 
@@ -40,9 +40,19 @@ export function ClaudePanel() {
           {sessionState === 'failed' && (
             <div
               role="alert"
-              className="rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
+              className="rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive space-y-2"
             >
-              Remote Control failed to start. Please restart the daemon.
+              <p>Remote Control failed to start.</p>
+              {sessionError && (
+                <p className="text-xs font-mono break-all opacity-80">{sessionError}</p>
+              )}
+              <button
+                onClick={restart}
+                disabled={restarting}
+                className="text-xs underline hover:no-underline disabled:opacity-50"
+              >
+                {restarting ? 'Restarting…' : 'Retry'}
+              </button>
             </div>
           )}
 
@@ -65,9 +75,20 @@ export function ClaudePanel() {
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground italic">
-                {sessionState === 'offline' ? 'Waiting for session…' : 'No session URL'}
-              </p>
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground italic">
+                  {sessionState === 'offline' ? 'Waiting for session…' : 'No session URL'}
+                </p>
+                {sessionState === 'offline' && (
+                  <button
+                    onClick={restart}
+                    disabled={restarting}
+                    className="text-xs text-primary hover:underline disabled:opacity-50"
+                  >
+                    {restarting ? 'Starting…' : 'Start session'}
+                  </button>
+                )}
+              </div>
             )}
           </div>
 

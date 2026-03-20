@@ -5,6 +5,7 @@ export type RemoteControlState = 'offline' | 'active' | 'failed';
 export interface RemoteControlStatus {
   remote_control_state: RemoteControlState;
   remote_control_url: string | null;
+  remote_control_error: string | null;
 }
 
 const MAX_FAILURES = 3;
@@ -13,6 +14,7 @@ const BACKOFF_MS = [5_000, 15_000, 30_000]; // indexed by attempt (0-based)
 export class RemoteControlManager {
   private state: RemoteControlState = 'offline';
   private url: string | null = null;
+  private lastError: string | null = null;
   private proc: ChildProcess | null = null;
   private failureCount = 0;
   private restartTimer: ReturnType<typeof setTimeout> | null = null;
@@ -30,7 +32,13 @@ export class RemoteControlManager {
     this.stopped = false;
     this.failureCount = 0;
     this.state = 'offline';
+    this.lastError = null;
     this.spawn();
+  }
+
+  async restart(): Promise<void> {
+    await this.stop();
+    this.start();
   }
 
   async stop(): Promise<void> {
@@ -54,6 +62,7 @@ export class RemoteControlManager {
     return {
       remote_control_state: this.state,
       remote_control_url: this.url,
+      remote_control_error: this.lastError,
     };
   }
 
@@ -81,7 +90,11 @@ export class RemoteControlManager {
       }
     });
 
-    proc.stderr?.pipe(process.stderr);
+    let stderrBuffer = '';
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      stderrBuffer += chunk.toString();
+      process.stderr.write(chunk);
+    });
 
     proc.on('exit', (code: number | null) => {
       this.proc = null; // Always clear, even when stopped — prevents stale reference
@@ -89,6 +102,9 @@ export class RemoteControlManager {
       const wasActive = this.state === 'active';
       this.state = 'offline';
       this.url = null;
+      if (code !== 0 && stderrBuffer.trim()) {
+        this.lastError = stderrBuffer.trim().split('\n').pop() ?? stderrBuffer.trim();
+      }
       // Count as failure unless the session exited cleanly after becoming active.
       // Repeated clean exits without ever producing a URL still count toward the limit.
       this.scheduleRestart(code !== 0 || !wasActive);
@@ -99,6 +115,7 @@ export class RemoteControlManager {
       if (this.stopped) return;
       this.state = 'offline';
       this.url = null;
+      this.lastError = err.message;
       console.error('[remote-control] Spawn error:', err.message);
       this.scheduleRestart(true);
     });

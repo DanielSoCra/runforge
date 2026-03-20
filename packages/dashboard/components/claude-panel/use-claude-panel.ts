@@ -10,6 +10,8 @@ export function useClaudePanel() {
   const [isOpen, setIsOpen] = useState(false);
   const [sessionUrl, setSessionUrl] = useState<string | null>(null);
   const [sessionState, setSessionState] = useState<RemoteControlState>('offline');
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [restarting, setRestarting] = useState(false);
 
   const toggle = useCallback(() => {
     setIsOpen((prev) => !prev);
@@ -35,6 +37,7 @@ export function useClaudePanel() {
         const data = await res.json();
         setSessionUrl(data.remote_control_url ?? null);
         setSessionState(data.remote_control_state ?? 'offline');
+        setSessionError(data.remote_control_error ?? null);
       } catch {
         // ignore — panel stays in last known state
       }
@@ -48,5 +51,14 @@ export function useClaudePanel() {
     };
   }, []);
 
-  return { isOpen, toggle, sessionUrl, sessionState };
+  const restart = useCallback(async () => {
+    setRestarting(true);
+    try {
+      await fetch('/api/daemon/remote-control/restart', { method: 'POST' });
+    } finally {
+      setRestarting(false);
+    }
+  }, []);
+
+  return { isOpen, toggle, sessionUrl, sessionState, sessionError, restarting, restart };
 }

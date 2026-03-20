@@ -13,14 +13,19 @@ import { useClaudePanel } from './use-claude-panel';
 
 const mockHook = vi.mocked(useClaudePanel);
 
+const baseHook = {
+  isOpen: false,
+  toggle: vi.fn(),
+  sessionUrl: null,
+  sessionState: 'offline' as const,
+  sessionError: null,
+  restarting: false,
+  restart: vi.fn(),
+};
+
 describe('ClaudePanel', () => {
   beforeEach(() => {
-    mockHook.mockReturnValue({
-      isOpen: false,
-      toggle: vi.fn(),
-      sessionUrl: null,
-      sessionState: 'offline',
-    });
+    mockHook.mockReturnValue({ ...baseHook });
   });
 
   it('renders collapsed tab with status dot', () => {
@@ -32,7 +37,7 @@ describe('ClaudePanel', () => {
 
   it('calls toggle when tab is clicked', () => {
     const toggle = vi.fn();
-    mockHook.mockReturnValue({ isOpen: false, toggle, sessionUrl: null, sessionState: 'offline' });
+    mockHook.mockReturnValue({ ...baseHook, toggle });
     render(<ClaudePanel />);
     fireEvent.click(screen.getByRole('button', { name: /claude/i }));
     expect(toggle).toHaveBeenCalledOnce();
@@ -40,8 +45,8 @@ describe('ClaudePanel', () => {
 
   it('shows session URL when open and active', () => {
     mockHook.mockReturnValue({
+      ...baseHook,
       isOpen: true,
-      toggle: vi.fn(),
       sessionUrl: 'https://claude.ai/remote/test',
       sessionState: 'active',
     });
@@ -50,13 +55,33 @@ describe('ClaudePanel', () => {
   });
 
   it('shows failed alert when state is failed', () => {
-    mockHook.mockReturnValue({
-      isOpen: true,
-      toggle: vi.fn(),
-      sessionUrl: null,
-      sessionState: 'failed',
-    });
+    mockHook.mockReturnValue({ ...baseHook, isOpen: true, sessionState: 'failed' });
     render(<ClaudePanel />);
     expect(screen.getByText(/remote control failed/i)).toBeInTheDocument();
+  });
+
+  it('shows error detail in failed alert', () => {
+    mockHook.mockReturnValue({
+      ...baseHook,
+      isOpen: true,
+      sessionState: 'failed',
+      sessionError: 'Not authenticated',
+    });
+    render(<ClaudePanel />);
+    expect(screen.getByText('Not authenticated')).toBeInTheDocument();
+  });
+
+  it('shows Start session button when offline', () => {
+    mockHook.mockReturnValue({ ...baseHook, isOpen: true, sessionState: 'offline' });
+    render(<ClaudePanel />);
+    expect(screen.getByRole('button', { name: /start session/i })).toBeInTheDocument();
+  });
+
+  it('calls restart when Start session is clicked', () => {
+    const restart = vi.fn();
+    mockHook.mockReturnValue({ ...baseHook, isOpen: true, sessionState: 'offline', restart });
+    render(<ClaudePanel />);
+    fireEvent.click(screen.getByRole('button', { name: /start session/i }));
+    expect(restart).toHaveBeenCalledOnce();
   });
 });
