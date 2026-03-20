@@ -53,6 +53,7 @@ export async function processSingleIssue(issueNumber: number, configPath: string
 
   const variant = selectVariant(request);
   const run: RunState = {
+    id: crypto.randomUUID(),
     issueNumber, title: request.title,
     phase: getStartPhase(variant), variant,
     phaseCompletions: {}, checkpoints: [], cost: 0,

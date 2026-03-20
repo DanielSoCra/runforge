@@ -5,6 +5,7 @@ import type { RunState } from '../types.js';
 
 function makeRunState(overrides?: Partial<RunState>): RunState {
   return {
+    id: 'test-run-id',
     issueNumber: 42,
     title: 'Add dark mode support',
     phase: 'report',

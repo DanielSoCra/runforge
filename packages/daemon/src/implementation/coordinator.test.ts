@@ -109,6 +109,9 @@ describe('ImplementationCoordinator', () => {
         }),
       }),
       42,
+      undefined,
+      undefined,
+      undefined,
     );
   });
 
@@ -169,7 +172,7 @@ describe('ImplementationCoordinator — multi-unit', () => {
     } as any;
 
     const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
-    const result = await coord.implement(mockWorkRequest, 'feature/42', {
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
       complexity: 'standard',
       specContent: 'spec',
     });
@@ -213,7 +216,7 @@ describe('ImplementationCoordinator — multi-unit', () => {
 
     const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
     // checkpoint: 1 means batch 0 is already done, start from batch 1
-    const result = await coord.implement(mockWorkRequest, 'feature/42', {
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
       complexity: 'standard',
       specContent: 'spec',
       checkpoint: 1,
@@ -261,7 +264,7 @@ describe('ImplementationCoordinator — multi-unit', () => {
     } as any;
 
     const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
-    const result = await coord.implement(mockWorkRequest, 'feature/42', {
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
       complexity: 'standard',
       specContent: 'spec',
     });
@@ -300,7 +303,7 @@ describe('ImplementationCoordinator — multi-unit', () => {
     } as any;
 
     const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
-    const result = await coord.implement(mockWorkRequest, 'feature/42', {
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
       complexity: 'standard',
       specContent: 'spec',
     });
@@ -320,7 +323,7 @@ describe('ImplementationCoordinator — multi-unit', () => {
     } as any;
 
     const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
-    const result = await coord.implement(mockWorkRequest, 'feature/42', {
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
       complexity: 'complex',
       specContent: 'spec',
     });

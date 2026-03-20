@@ -159,6 +159,9 @@ describe('decompose', () => {
         }),
       }),
       7,
+      undefined,
+      undefined,
+      undefined,
     );
   });
 

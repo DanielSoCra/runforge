@@ -1,6 +1,7 @@
 // src/implementation/batch.ts
 import type { Unit, SessionResult, ExitStatus } from '../types.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
+import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import { createWorktree, getWorktreeDiffSize } from './worktree.js';
 import { git } from '../lib/git.js';
 import { ok, err, type Result } from '../lib/result.js';
@@ -29,6 +30,8 @@ export async function executeBatch(
   runtime: SessionRuntime,
   repoRoot: string,
   options?: { staggerMs?: number; maxDiffLines?: number },
+  runWriter?: SupabaseRunWriter,
+  runId?: string,
 ): Promise<BatchResult> {
   const staggerMs = options?.staggerMs ?? 2000;
   const maxDiffLines = options?.maxDiffLines ?? 300;
@@ -36,7 +39,7 @@ export async function executeBatch(
   const promises = units.map(async (unit, index) => {
     // Stagger delay between starts
     if (index > 0) await delay(index * staggerMs);
-    return executeUnit(unit, featureBranch, issueNumber, runtime, repoRoot, maxDiffLines);
+    return executeUnit(unit, featureBranch, issueNumber, runtime, repoRoot, maxDiffLines, runWriter, runId);
   });
 
   const settled = await Promise.allSettled(promises);
@@ -66,6 +69,8 @@ async function executeUnit(
   runtime: SessionRuntime,
   repoRoot: string,
   maxDiffLines: number,
+  runWriter?: SupabaseRunWriter,
+  runId?: string,
 ): Promise<UnitResult> {
   // 1. Create worktree
   console.log(`[batch] Creating worktree for ${unit.id} from ${featureBranch}`);
@@ -97,6 +102,9 @@ async function executeUnit(
         baseBranch: featureBranch,
       },
       issueNumber,
+      undefined,
+      runWriter,
+      runId,
     );
 
     if (!sessionResult.ok) {

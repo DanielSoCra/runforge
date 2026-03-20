@@ -43,6 +43,21 @@ export const ConfigSchema = z.object({
 
 export type Config = z.infer<typeof ConfigSchema>;
 
+export interface RepoConfig {
+  id: string;
+  owner: string;
+  name: string;
+  budgetLimit: number | null;
+  concurrencyLimit: number;
+  activePlugins: Array<{ id: string; activatedAt: string }>;
+}
+
+export interface GlobalConfig {
+  concurrencyLimit: number;
+  dailyBudgetLimit: number | null;
+  defaultModel: string;
+}
+
 export async function loadConfig(path: string): Promise<Result<Config>> {
   try {
     const raw = await readFile(path, 'utf-8');

@@ -17,6 +17,12 @@ vi.mock('./plugin-loader.js', () => ({
   }]),
 }));
 
+vi.mock('./adapters/index.js', () => ({
+  createAdapter: vi.fn(() => ({
+    spawn: vi.fn().mockResolvedValue({ ok: true, value: { output: '', cost: 0.05 } }),
+  })),
+}));
+
 // Minimal config for testing
 const testConfig = {
   adapter: 'cli' as const,
@@ -92,5 +98,23 @@ describe('SessionRuntime', () => {
     const systemPrompt = 'SYSTEM PROMPT';
     const assembled = [ctx.promptInjection, systemPrompt].filter(Boolean).join('\n\n---\n\n');
     expect(assembled.indexOf('PLUGIN INJECTION')).toBeLessThan(assembled.indexOf('SYSTEM PROMPT'));
+  });
+
+  it('calls runWriter.writeCostEvent after a successful session', async () => {
+    const writeCostEvent = vi.fn().mockResolvedValue(undefined);
+    const runWriter = { writeCostEvent, upsertRun: vi.fn() } as any;
+
+    const result = await runtime.spawnSession(
+      'worker',
+      { variables: { task: 'do it' }, workspacePath: '/tmp', activePlugins: [] },
+      42,
+      undefined,
+      runWriter,
+      'my-run-id',
+    );
+
+    if (result.ok) {
+      expect(writeCostEvent).toHaveBeenCalledWith('my-run-id', 'worker', expect.any(Number));
+    }
   });
 });

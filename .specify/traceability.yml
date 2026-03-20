@@ -360,3 +360,15 @@ STACK-AC-ENRICHED-COMMITS-KNOWLEDGE:
     - packages/daemon/src/knowledge/parse-commits.test.ts
     - packages/daemon/src/control-plane/completion.test.ts
   status: draft
+
+STACK-AC-SUPABASE-SYNC:
+  parent: ARCH-AC-CONTROL-PLANE
+  children: []
+  spec: docs/superpowers/specs/2026-03-20-supabase-sync-design.md
+  code_paths:
+    - packages/daemon/src/supabase/config-reader.ts
+    - packages/daemon/src/supabase/run-writer.ts
+  test_paths:
+    - packages/daemon/src/supabase/config-reader.test.ts
+    - packages/daemon/src/supabase/run-writer.test.ts
+  status: draft

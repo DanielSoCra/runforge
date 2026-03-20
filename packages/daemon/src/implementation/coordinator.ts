@@ -1,6 +1,7 @@
 import { ok, err, type Result } from '../lib/result.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { WorkRequest, TaskGraph } from '../types.js';
+import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import { createSingleUnitGraph, getUnitsByBatch } from './task-graph.js';
 import { executeBatch, type UnitResult } from './batch.js';
 import { mergeWorktree } from './worktree.js';
@@ -30,6 +31,8 @@ export class ImplementationCoordinator {
   async implement(
     request: WorkRequest,
     featureBranch: string,
+    runWriter?: SupabaseRunWriter,
+    runId?: string,
     options?: { complexity?: 'simple' | 'standard' | 'complex'; specContent?: string; checkpoint?: number },
   ): Promise<Result<ImplementResult>> {
     // 1. Get task graph
@@ -47,6 +50,8 @@ export class ImplementationCoordinator {
         featureBranch,
         this.runtime,
         options.specContent ?? '',
+        runWriter,
+        runId,
       );
       if (!decomposeResult.ok) {
         return err(new Error(`Decomposition failed: ${decomposeResult.error.message}`));
@@ -71,6 +76,8 @@ export class ImplementationCoordinator {
         this.runtime,
         this.repoRoot,
         { staggerMs: this.staggerMs, maxDiffLines: this.maxDiffLines },
+        runWriter,
+        runId,
       );
 
       allResults.push(...batchResult.results);

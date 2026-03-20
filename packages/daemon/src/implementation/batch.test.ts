@@ -78,6 +78,9 @@ describe('executeBatch', () => {
         }),
       }),
       1,
+      undefined,
+      undefined,
+      undefined,
     );
   });
 

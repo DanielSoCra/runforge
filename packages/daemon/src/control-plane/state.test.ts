@@ -7,6 +7,7 @@ import { StateManager } from './state.js';
 import type { RunState } from '../types.js';
 
 const makeRun = (issueNumber: number, phase: string = 'implement'): RunState => ({
+  id: 'test-run-id',
   issueNumber,
   title: `Test issue ${issueNumber}`,
   phase: phase as any,

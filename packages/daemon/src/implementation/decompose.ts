@@ -1,6 +1,7 @@
 // src/implementation/decompose.ts
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { WorkRequest, TaskGraph } from '../types.js';
+import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import { validateTaskGraph } from './task-graph.js';
 import { createSingleUnitGraph } from './task-graph.js';
 import { ok, err, type Result } from '../lib/result.js';
@@ -10,6 +11,8 @@ export async function decompose(
   featureBranch: string,
   runtime: SessionRuntime,
   specContent: string,
+  runWriter?: SupabaseRunWriter,
+  runId?: string,
 ): Promise<Result<TaskGraph>> {
   // Spawn coordinator session to produce a task graph
   const result = await runtime.spawnSession(
@@ -22,6 +25,9 @@ export async function decompose(
       },
     },
     request.issueNumber,
+    undefined,
+    runWriter,
+    runId,
   );
 
   if (!result.ok) return result;
@@ -34,6 +40,9 @@ export async function decompose(
       'coordinator',
       { variables: { workRequest: `Title: ${request.title}\n\n${request.body}`, specs: specContent, specRefs: request.specRefs.join(', ') } },
       request.issueNumber,
+      undefined,
+      runWriter,
+      runId,
     );
     if (!retry.ok) return retry;
     return parseTaskGraph(retry.value.structuredData, request.issueNumber, featureBranch);

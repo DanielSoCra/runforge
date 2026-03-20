@@ -3,6 +3,7 @@ import type { PhaseHandlerMap } from './pipeline.js';
 import type { RunState, PhaseEvent, WorkRequest } from '../types.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { ImplementationCoordinator } from '../implementation/coordinator.js';
+import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import type { Config } from '../config.js';
 import { createGate1, type Gate } from '../validation/gates.js';
 import { runReview } from '../validation/review.js';
@@ -22,6 +23,8 @@ export function createPhaseHandlers(
   octokit: Octokit,
   workRequest: WorkRequest,
   stateDir: string,
+  runWriter?: SupabaseRunWriter,
+  runId?: string,
 ): PhaseHandlerMap {
   const repo = repoName;
   const detector = createWorkDetector(octokit, owner, repo);
@@ -47,7 +50,7 @@ export function createPhaseHandlers(
 
     implement: async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[implement] Starting for #${workRequest.issueNumber} on ${featureBranch}`);
-      const result = await coordinator.implement(workRequest, featureBranch);
+      const result = await coordinator.implement(workRequest, featureBranch, runWriter, runId);
       if (!result.ok) { console.error(`[implement] Error:`, result.error.message); return 'failure'; }
       if (!result.value.success) { console.error(`[implement] Failed:`, result.value.error); return 'failure'; }
       run.cost += result.value.totalCost;
@@ -67,6 +70,7 @@ export function createPhaseHandlers(
     report: async (run: RunState): Promise<PhaseEvent> => {
       const outcome = 'complete';
       const reportBody = formatReport(run, outcome);
+      run.report = reportBody;
 
       // Post report as comment
       await postReport(octokit, owner, repo, workRequest.issueNumber, reportBody);

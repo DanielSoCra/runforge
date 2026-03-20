@@ -195,6 +195,8 @@ describe('createReviewerGate', () => {
       }),
       99,
       expect.objectContaining({ jsonSchema: expect.any(String) }),
+      undefined,
+      undefined,
     );
   });
 });

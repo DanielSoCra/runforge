@@ -72,6 +72,7 @@ export interface WorkRequest {
 // --- Run State ---
 
 export interface RunState {
+  id: string;
   issueNumber: number;
   title: string;
   phase: Phase;
@@ -84,6 +85,7 @@ export interface RunState {
   errorHashes: Record<string, number>;
   startedAt: string;
   updatedAt: string;
+  report?: string;
 }
 
 // --- Daemon State ---

@@ -3,6 +3,7 @@ import type { Config } from '../config.js';
 import type { SessionType, AgentDefinition, SessionContext, SessionResult } from '../types.js';
 import type { Result } from '../lib/result.js';
 import { ok, err } from '../lib/result.js';
+import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import { CostTracker } from './cost.js';
 import { createAdapter, type ProviderAdapter } from './adapters/index.js';
 import { buildCompositeContext } from './plugin-injection.js';
@@ -139,6 +140,8 @@ export class SessionRuntime {
     context: SessionContext,
     issueNumber: number,
     options?: { jsonSchema?: string; agentDef?: AgentDefinition },
+    runWriter?: SupabaseRunWriter,
+    runId?: string,
   ): Promise<Result<SessionResult>> {
     // 1. Look up agent definition
     const def = options?.agentDef ?? DEFAULT_AGENT_DEFS[type];
@@ -172,6 +175,9 @@ export class SessionRuntime {
     // 6. Record cost
     if (result.ok) {
       this.costTracker.recordCost(issueNumber, result.value.cost);
+      if (runWriter && runId) {
+        void runWriter.writeCostEvent(runId, type, result.value.cost);
+      }
     }
 
     return result;
