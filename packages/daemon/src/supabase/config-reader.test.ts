@@ -93,4 +93,38 @@ describe('SupabaseConfigReader', () => {
     const callsAfterTimer = (client.from as ReturnType<typeof vi.fn>).mock.calls.length;
     expect(callsAfterTimer).toBe(callsAfterStop);
   });
+
+  it('start() throws if initial fetch fails', async () => {
+    const client = {
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue({ data: null, error: { message: 'connection refused' } }),
+        }),
+      }),
+    };
+    const reader = new SupabaseConfigReader(client as any);
+    await expect(reader.start()).rejects.toThrow('[config-reader] global_settings fetch failed');
+  });
+
+  it('poll failure keeps cached values and does not throw', async () => {
+    const client = makeClient();
+    const reader = new SupabaseConfigReader(client as any);
+    await reader.start();
+
+    // Simulate a poll failure by making the next fetch fail
+    (client.from as ReturnType<typeof vi.fn>).mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        limit: vi.fn().mockResolvedValue({ data: null, error: { message: 'db down' } }),
+      }),
+    });
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await vi.advanceTimersByTimeAsync(60_000);
+    // Cache should still have the original values
+    const global = reader.getGlobalConfig();
+    expect(global.concurrencyLimit).toBe(3);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[config-reader] Poll failed'), expect.any(String));
+    warn.mockRestore();
+    reader.stop();
+  });
 });
