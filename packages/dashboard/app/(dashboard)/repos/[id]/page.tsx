@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { upsertApiKey } from '@/actions/api-keys';
 import { enableRepo, disableRepo, deleteRepo } from '@/actions/repos';
+import { RepoTabNav } from '@/components/repo-tab-nav';
 
 export default async function RepoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -55,6 +56,9 @@ export default async function RepoDetailPage({ params }: { params: Promise<{ id:
           </form>
         </div>
       </div>
+
+      {/* Tab navigation */}
+      <RepoTabNav repoId={id} />
 
       {/* Credentials */}
       <Card>

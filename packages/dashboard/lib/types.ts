@@ -134,34 +134,34 @@ export type Database = {
       }
       repo_plugins: {
         Row: {
-          activated_at: string | null
-          active: boolean
           id: string
-          plugin_id: string
-          recommendation_reason: string | null
-          recommended: boolean
-          recommended_at: string | null
           repo_id: string
+          plugin_id: string
+          active: boolean
+          recommended: boolean
+          recommendation_reason: string | null
+          recommended_at: string | null
+          activated_at: string | null
         }
         Insert: {
-          activated_at?: string | null
-          active?: boolean
           id?: string
-          plugin_id: string
-          recommendation_reason?: string | null
-          recommended?: boolean
-          recommended_at?: string | null
           repo_id: string
+          plugin_id: string
+          active?: boolean
+          recommended?: boolean
+          recommendation_reason?: string | null
+          recommended_at?: string | null
+          activated_at?: string | null
         }
         Update: {
-          activated_at?: string | null
-          active?: boolean
           id?: string
-          plugin_id?: string
-          recommendation_reason?: string | null
-          recommended?: boolean
-          recommended_at?: string | null
           repo_id?: string
+          plugin_id?: string
+          active?: boolean
+          recommended?: boolean
+          recommendation_reason?: string | null
+          recommended_at?: string | null
+          activated_at?: string | null
         }
         Relationships: [
           {

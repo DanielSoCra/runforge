@@ -5,6 +5,8 @@ import type { Result } from '../lib/result.js';
 import { ok, err } from '../lib/result.js';
 import { CostTracker } from './cost.js';
 import { createAdapter, type ProviderAdapter } from './adapters/index.js';
+import { buildCompositeContext } from './plugin-injection.js';
+import { readPluginsForContext } from './plugin-loader.js';
 
 // Agent definition registry — maps session types to their operational parameters.
 // System prompts are placeholders here; the real content lives in prompts/*.md
@@ -159,7 +161,7 @@ export class SessionRuntime {
     this.lastSpawnTime = Date.now();
 
     // 4. Assemble prompt
-    const prompt = this.assemblePrompt(def, context);
+    const prompt = await this.assemblePrompt(def, context);
 
     // 5. Delegate to adapter
     const result = await this.adapter.spawn(def, prompt, {
@@ -175,12 +177,30 @@ export class SessionRuntime {
     return result;
   }
 
-  private assemblePrompt(def: AgentDefinition, context: SessionContext): string {
+  private async assemblePrompt(def: AgentDefinition, context: SessionContext): Promise<string> {
     let prompt = def.systemPrompt;
     for (const [key, value] of Object.entries(context.variables)) {
       prompt += `\n\n## ${key}\n${value}`;
     }
-    return prompt;
+
+    // If no active plugins, return prompt as-is
+    if (!context.activePlugins?.length) return prompt;
+
+    const pluginIds = context.activePlugins.map(e => e.id);
+    const activations = new Map(context.activePlugins.map(e => [e.id, e.activatedAt]));
+    const loaded = await readPluginsForContext(pluginIds, activations);
+    const composite = buildCompositeContext(loaded);
+
+    const parts: string[] = [];
+    if (composite.promptInjection) parts.push(composite.promptInjection);
+    for (const skill of composite.skills) {
+      if (skill.content) parts.push(skill.content);
+    }
+    for (const agent of composite.agents) {
+      if (agent.content) parts.push(agent.content);
+    }
+    if (parts.length === 0) return prompt;
+    return `${parts.join('\n\n---\n\n')}\n\n---\n\n${prompt}`;
   }
 
   getCostTracker(): CostTracker {

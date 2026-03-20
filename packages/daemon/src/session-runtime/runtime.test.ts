@@ -3,6 +3,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SessionRuntime } from './runtime.js';
 import { CostTracker } from './cost.js';
 import type { Config } from '../config.js';
+import { buildCompositeContext } from './plugin-injection.js';
+
+vi.mock('./plugin-loader.js', () => ({
+  readPluginsForContext: vi.fn().mockResolvedValue([{
+    id: 'test',
+    activatedAt: '2024-01-01T00:00:00Z',
+    promptInjection: 'PLUGIN INJECTION',
+    skills: [{ name: 'skill.md', content: 'SKILL CONTENT', pluginId: 'test' }],
+    agents: [{ name: 'agent.md', content: 'AGENT CONTENT', pluginId: 'test' }],
+    mcpConfigs: [],
+    gates: [],
+  }]),
+}));
 
 // Minimal config for testing
 const testConfig = {
@@ -44,9 +57,9 @@ describe('SessionRuntime', () => {
     if (!result.ok) expect(result.error.message).toContain('Budget exceeded');
   });
 
-  it('assembles prompt with context variables', () => {
+  it('assembles prompt with context variables', async () => {
     // Access private method via any for testing
-    const assembled = (runtime as any).assemblePrompt(
+    const assembled = await (runtime as any).assemblePrompt(
       { systemPrompt: 'Base prompt' },
       { variables: { task: 'do something', specs: 'spec content' } },
     );
@@ -55,5 +68,29 @@ describe('SessionRuntime', () => {
     expect(assembled).toContain('do something');
     expect(assembled).toContain('## specs');
     expect(assembled).toContain('spec content');
+  });
+
+  it('includes plugin skills and agents before system prompt', async () => {
+    const assembled = await (runtime as any).assemblePrompt(
+      { systemPrompt: 'SYSTEM PROMPT' },
+      { variables: {}, activePlugins: [{ id: 'test', activatedAt: '2024-01-01T00:00:00Z' }] },
+    );
+    expect(assembled).toContain('SKILL CONTENT');
+    expect(assembled).toContain('AGENT CONTENT');
+    expect(assembled).toContain('PLUGIN INJECTION');
+    expect(assembled.indexOf('PLUGIN INJECTION')).toBeLessThan(assembled.indexOf('SYSTEM PROMPT'));
+    expect(assembled.indexOf('SKILL CONTENT')).toBeLessThan(assembled.indexOf('SYSTEM PROMPT'));
+    expect(assembled.indexOf('AGENT CONTENT')).toBeLessThan(assembled.indexOf('SYSTEM PROMPT'));
+  });
+
+  it('composite context prompt injection appears before system prompt', () => {
+    const ctx = buildCompositeContext([{
+      id: 'test', activatedAt: '2024-01-01T00:00:00Z',
+      promptInjection: 'PLUGIN INJECTION',
+      skills: [], agents: [], mcpConfigs: [], gates: [],
+    }]);
+    const systemPrompt = 'SYSTEM PROMPT';
+    const assembled = [ctx.promptInjection, systemPrompt].filter(Boolean).join('\n\n---\n\n');
+    expect(assembled.indexOf('PLUGIN INJECTION')).toBeLessThan(assembled.indexOf('SYSTEM PROMPT'));
   });
 });

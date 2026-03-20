@@ -40,6 +40,7 @@ export interface SessionContext {
   variables: Record<string, string>;
   workspacePath?: string;
   baseBranch?: string;
+  activePlugins?: Array<{ id: string; activatedAt: string }>;  // plugins active for this repo, from Supabase sync
 }
 
 export interface SessionResult {
