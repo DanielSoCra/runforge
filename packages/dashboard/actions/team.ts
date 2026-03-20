@@ -1,17 +1,7 @@
 'use server';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
-
-async function requireAdmin(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Unauthorized');
-  const { data: member } = await supabase.from('team_members')
-    .select('role')
-    .eq('user_id', user.id)
-    .single();
-  if (member?.role !== 'admin') throw new Error('Admin access required');
-  return user;
-}
+import { requireAdmin } from '@/lib/auth';
 
 export async function createInvitation(formData: FormData) {
   const supabase = await createClient();
@@ -45,7 +35,7 @@ export async function changeRole(memberId: string, newRole: 'admin' | 'viewer') 
   const supabase = await createClient();
   await requireAdmin(supabase);
 
-  const { data, error } = await supabase.rpc('change_member_role', {
+  const { data, error } = await (supabase as any).rpc('change_member_role', {
     p_member_id: memberId,
     p_new_role: newRole,
   });
@@ -59,7 +49,7 @@ export async function removeMember(memberId: string) {
   const supabase = await createClient();
   await requireAdmin(supabase);
 
-  const { data, error } = await supabase.rpc('remove_team_member', {
+  const { data, error } = await (supabase as any).rpc('remove_team_member', {
     p_member_id: memberId,
   });
   if (error) throw new Error(error.message);

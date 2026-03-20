@@ -181,6 +181,7 @@ export type Database = {
           deleted_at: string | null
           enabled: boolean
           id: string
+          matrix_status: Database["public"]["Enums"]["matrix_status"]
           name: string
           owner: string
           poll_interval_ms: number | null
@@ -195,6 +196,7 @@ export type Database = {
           deleted_at?: string | null
           enabled?: boolean
           id?: string
+          matrix_status?: Database["public"]["Enums"]["matrix_status"]
           name: string
           owner: string
           poll_interval_ms?: number | null
@@ -209,6 +211,7 @@ export type Database = {
           deleted_at?: string | null
           enabled?: boolean
           id?: string
+          matrix_status?: Database["public"]["Enums"]["matrix_status"]
           name?: string
           owner?: string
           poll_interval_ms?: number | null
@@ -220,7 +223,6 @@ export type Database = {
       }
       runs: {
         Row: {
-          active_plugins: string[]
           completed_at: string | null
           current_phase: string | null
           fix_attempts: number
@@ -238,7 +240,6 @@ export type Database = {
           total_cost: number
         }
         Insert: {
-          active_plugins?: string[]
           completed_at?: string | null
           current_phase?: string | null
           fix_attempts?: number
@@ -256,7 +257,6 @@ export type Database = {
           total_cost?: number
         }
         Update: {
-          active_plugins?: string[]
           completed_at?: string | null
           current_phase?: string | null
           fix_attempts?: number
@@ -313,13 +313,6 @@ export type Database = {
         Args: { p_provider_handle: string; p_user_id: string }
         Returns: string
       }
-      change_member_role: {
-        Args: {
-          p_member_id: string
-          p_new_role: Database["public"]["Enums"]["team_role"]
-        }
-        Returns: string
-      }
       decrypt_api_key: {
         Args: { p_key_type: string; p_repo_id: string }
         Returns: string
@@ -327,7 +320,6 @@ export type Database = {
       get_encryption_key: { Args: never; Returns: string }
       is_admin: { Args: never; Returns: boolean }
       is_member: { Args: never; Returns: boolean }
-      remove_team_member: { Args: { p_member_id: string }; Returns: string }
       upsert_api_key_encrypted: {
         Args: { p_key_type: string; p_plaintext: string; p_repo_id: string }
         Returns: undefined
@@ -335,7 +327,8 @@ export type Database = {
     }
     Enums: {
       invite_status: "pending" | "accepted"
-      key_type: "source-control" | "model-provider"
+      key_type: "source-control" | "model-provider" | "webhook-secret"
+      matrix_status: "ok" | "degraded" | "failed"
       run_outcome: "in-progress" | "complete" | "stuck" | "escalated"
       session_type:
         | "planning"
@@ -472,7 +465,8 @@ export const Constants = {
   public: {
     Enums: {
       invite_status: ["pending", "accepted"],
-      key_type: ["source-control", "model-provider"],
+      key_type: ["source-control", "model-provider", "webhook-secret"],
+      matrix_status: ["ok", "degraded", "failed"],
       run_outcome: ["in-progress", "complete", "stuck", "escalated"],
       session_type: [
         "planning",
