@@ -43,6 +43,24 @@ describe('createGitHubRepo', () => {
       createGitHubRepo('token', { org: 'acme', name: 'bad', description: '', private: false })
     ).rejects.toThrow('GitHub API error 422');
   });
+
+  it('falls back to user repos endpoint when org endpoint returns 404', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: async () => ({ message: 'Not Found' }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: 2, name: 'my-repo', html_url: 'https://github.com/me/my-repo', full_name: 'me/my-repo' }),
+      } as Response);
+
+    const result = await createGitHubRepo('token', { org: 'me', name: 'my-repo', description: '', private: false });
+    expect(result.html_url).toBe('https://github.com/me/my-repo');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch.mock.calls[1][0]).toBe('https://api.github.com/user/repos');
+  });
 });
 
 describe('commitFile', () => {

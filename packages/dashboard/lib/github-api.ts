@@ -33,15 +33,31 @@ export interface GitHubRepo {
 }
 
 export async function createGitHubRepo(token: string, opts: CreateRepoOptions): Promise<GitHubRepo> {
-  return ghFetch(token, `${GH_API}/orgs/${opts.org}/repos`, {
-    method: 'POST',
-    body: JSON.stringify({
-      name: opts.name,
-      description: opts.description,
-      private: opts.private,
-      auto_init: false,
-    }),
-  }) as Promise<GitHubRepo>;
+  try {
+    return await ghFetch(token, `${GH_API}/orgs/${opts.org}/repos`, {
+      method: 'POST',
+      body: JSON.stringify({
+        name: opts.name,
+        description: opts.description,
+        private: opts.private,
+        auto_init: false,
+      }),
+    }) as GitHubRepo;
+  } catch (err) {
+    // Org endpoint returns 404 for personal accounts — fall back to user repos endpoint
+    if (err instanceof Error && err.message.includes('404')) {
+      return await ghFetch(token, `${GH_API}/user/repos`, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: opts.name,
+          description: opts.description,
+          private: opts.private,
+          auto_init: false,
+        }),
+      }) as GitHubRepo;
+    }
+    throw err;
+  }
 }
 
 export interface CommitFileOptions {

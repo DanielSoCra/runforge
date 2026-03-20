@@ -77,22 +77,28 @@ export function ClaudePanel() {
                 Quick actions
               </p>
               <ul className="space-y-1">
-                {actions.map((action) => (
-                  <li key={action.label}>
-                    <button
-                      className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-accent transition-colors"
-                      onClick={() => {
-                        if (action.buildClipboardText && sessionUrl) {
-                          navigator.clipboard.writeText(action.buildClipboardText(sessionUrl));
-                        } else if (sessionUrl) {
-                          window.open(sessionUrl, '_blank');
-                        }
-                      }}
-                    >
-                      {action.label}
-                    </button>
-                  </li>
-                ))}
+                {actions.map((action) => {
+                  const isOpenTab = action.label === 'Open in new tab';
+                  const isActionable = action.buildClipboardText !== null || isOpenTab;
+                  return (
+                    <li key={action.label}>
+                      <button
+                        className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        disabled={!isActionable}
+                        title={!isActionable ? 'Coming soon' : undefined}
+                        onClick={isActionable ? () => {
+                          if (action.buildClipboardText && sessionUrl) {
+                            navigator.clipboard.writeText(action.buildClipboardText(sessionUrl));
+                          } else if (sessionUrl) {
+                            window.open(sessionUrl, '_blank', 'noopener,noreferrer');
+                          }
+                        } : undefined}
+                      >
+                        {action.label}
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}

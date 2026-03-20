@@ -19,6 +19,10 @@ export class RemoteControlManager {
   private stopped = false;
 
   start(): void {
+    if (this.proc) {
+      console.warn('[remote-control] start() called while already running — ignoring');
+      return;
+    }
     this.stopped = false;
     this.failureCount = 0;
     this.state = 'offline';
@@ -54,18 +58,22 @@ export class RemoteControlManager {
     });
     this.proc = proc;
 
+    let stdoutBuffer = '';
     proc.stdout?.on('data', (chunk: Buffer) => {
-      const text = chunk.toString();
-      // Match https:// URLs, stopping at whitespace or common trailing punctuation.
-      // claude remote-control prints the session URL in its startup output.
-      const match = text.match(/https:\/\/[^\s,;)'"]+/);
-      if (match && this.state !== 'active') {
-        // Strip any trailing punctuation that leaked past the character class
-        this.url = match[0].replace(/[.,;)'"]+$/, '');
-        this.state = 'active';
-        this.failureCount = 0;
+      stdoutBuffer += chunk.toString();
+      const lines = stdoutBuffer.split('\n');
+      stdoutBuffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const match = line.match(/https:\/\/[^\s,;)'"]+/);
+        if (match && this.state !== 'active') {
+          this.url = match[0].replace(/[.,;)'"]+$/, '');
+          this.state = 'active';
+          this.failureCount = 0;
+        }
       }
     });
+
+    proc.stderr?.pipe(process.stderr);
 
     proc.on('exit', (code: number | null) => {
       if (this.stopped) return;
@@ -76,6 +84,15 @@ export class RemoteControlManager {
         this.failureCount = 0;
       }
       this.scheduleRestart(code !== 0);
+    });
+
+    proc.on('error', (err: Error) => {
+      if (this.stopped) return;
+      this.proc = null;
+      this.state = 'offline';
+      this.url = null;
+      console.error('[remote-control] Spawn error:', err.message);
+      this.scheduleRestart(true);
     });
   }
 
@@ -88,9 +105,11 @@ export class RemoteControlManager {
         console.error('[remote-control] Too many restart failures — manual intervention required');
         return;
       }
-      console.warn(`[remote-control] Process exited (attempt ${this.failureCount}/${MAX_FAILURES}), restarting in ${BACKOFF_MS[Math.min(this.failureCount - 1, BACKOFF_MS.length - 1)]}ms`);
     }
     const delay = BACKOFF_MS[Math.min(this.failureCount, BACKOFF_MS.length - 1)];
+    if (countAsFailure) {
+      console.warn(`[remote-control] Process exited (attempt ${this.failureCount}/${MAX_FAILURES}), restarting in ${delay}ms`);
+    }
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null;
       this.spawn();

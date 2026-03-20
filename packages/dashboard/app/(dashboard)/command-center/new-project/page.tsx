@@ -38,7 +38,7 @@ export default function NewProjectPage() {
   async function handleCreate() {
     setCreating(true);
     setError(null);
-    setProgress(['Creating GitHub repository…']);
+    setProgress(['Creating repository and scaffolding files…']);
     try {
       const result = await createProject({
         org: state.org,
@@ -54,8 +54,8 @@ export default function NewProjectPage() {
         return;
       }
 
-      setProgress((p) => [...p, 'Done!']);
-      router.push(`/repos/${result.repoId}/settings`);
+      setProgress((p) => [...p, 'Project created successfully!']);
+      router.push(`/repos/${result.repoId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unexpected error');
     } finally {

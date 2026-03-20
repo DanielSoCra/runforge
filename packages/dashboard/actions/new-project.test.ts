@@ -1,13 +1,30 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+const reposInsertMock = vi.fn().mockReturnValue({
+  select: vi.fn().mockReturnValue({
+    single: vi.fn().mockResolvedValue({ error: null, data: { id: 'new-repo-id' } }),
+  }),
+});
+
 vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn().mockResolvedValue({
-    from: vi.fn().mockReturnValue({
-      insert: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          single: vi.fn().mockResolvedValue({ error: null, data: { id: 'new-repo-id' } }),
-        }),
-      }),
+    auth: {
+      getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }),
+    },
+    from: vi.fn().mockImplementation((table: string) => {
+      if (table === 'team_members') {
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockReturnValue({
+              single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
+            }),
+          }),
+        };
+      }
+      // repos table
+      return {
+        insert: reposInsertMock,
+      };
     }),
   }),
 }));
@@ -54,10 +71,8 @@ describe('createProject', () => {
   });
 
   it('inserts Supabase repo record with enabled=false', async () => {
-    const { createClient } = await import('@/lib/supabase/server');
     await createProject(baseInput);
-    const client = await (createClient as any)();
-    expect(client.from().insert).toHaveBeenCalledWith(
+    expect(reposInsertMock).toHaveBeenCalledWith(
       expect.objectContaining({ owner: 'acme', name: 'test', enabled: false })
     );
   });

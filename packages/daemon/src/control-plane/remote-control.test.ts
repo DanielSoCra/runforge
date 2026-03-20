@@ -13,7 +13,7 @@ import { RemoteControlManager } from './remote-control.js';
 function makeFakeProcess() {
   const proc = new EventEmitter() as any;
   proc.stdout = new EventEmitter();
-  proc.stderr = new EventEmitter();
+  proc.stderr = Object.assign(new EventEmitter(), { pipe: vi.fn() });
   proc.kill = vi.fn();
   return proc;
 }
@@ -67,6 +67,19 @@ describe('RemoteControlManager', () => {
     vi.mocked(spawn).mockImplementation(() => {
       const proc = makeFakeProcess();
       setTimeout(() => proc.emit('exit', 1), 0);
+      return proc;
+    });
+
+    manager.start();
+    await vi.runAllTimersAsync();
+
+    expect(manager.getState().remote_control_state).toBe('failed');
+  });
+
+  it('transitions to failed state when process emits error events', async () => {
+    vi.mocked(spawn).mockImplementation(() => {
+      const proc = makeFakeProcess();
+      setTimeout(() => proc.emit('error', new Error('spawn ENOENT')), 0);
       return proc;
     });
 

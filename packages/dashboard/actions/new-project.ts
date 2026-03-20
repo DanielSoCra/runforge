@@ -27,9 +27,23 @@ export interface CreateProjectResult {
 }
 
 export async function createProject(input: CreateProjectInput): Promise<CreateProjectResult> {
+  const supabase = await createClient();
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { error: 'Unauthorized' };
+    const { data: member } = await supabase.from('team_members')
+      .select('role')
+      .eq('user_id', user.id)
+      .single();
+    if (member?.role !== 'admin') return { error: 'Admin access required' };
+  } catch {
+    return { error: 'Authorization check failed' };
+  }
+
   const token = process.env.GITHUB_TOKEN ?? '';
   if (!token) return { error: 'GITHUB_TOKEN is not configured on the server' };
 
+  let githubRepoCreated = false;
   try {
     const repo = await createGitHubRepo(token, {
       org: input.org,
@@ -37,6 +51,7 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
       description: input.description,
       private: input.private,
     });
+    githubRepoCreated = true;
 
     const owner = input.org;
     const repoName = input.name;
@@ -76,7 +91,6 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
       message: 'chore: scaffold CLAUDE.md',
     });
 
-    const supabase = await createClient();
     const { data, error } = await supabase
       .from('repos')
       .insert({
@@ -90,10 +104,15 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
       .single();
 
     if (error) throw new Error(`Supabase error: ${error.message}`);
+    if (!data) throw new Error('Supabase insert returned no data — check RLS policies');
 
     revalidatePath('/repos');
     return { repoId: data.id };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
+    const message = err instanceof Error ? err.message : String(err);
+    if (githubRepoCreated) {
+      return { error: `GitHub repo was created but registration failed — add it manually via Repositories instead of retrying. (${message})` };
+    }
+    return { error: message };
   }
 }
