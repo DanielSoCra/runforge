@@ -11,6 +11,7 @@ import { RepoManager } from './repo-manager.js';
 import { createWorkDetector, type WorkDetector } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
 import { createWebsitePhaseHandlers } from './phases-website.js';
+import { readAgencyConfig } from './agency-config.js';
 import { runPipeline } from './pipeline.js';
 import { getPipeline, getStartPhase } from './fsm.js';
 import { selectVariant } from './variants.js';
@@ -215,8 +216,18 @@ async function processWorkRequest(
 
   // Build a notifyOctokit from env for phase handlers
   const notifyOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+  const agencyConfig = await readAgencyConfig(null, '');
+  // TODO: pass real supabase client and repoId once available from daemon context
   const handlers = variant === 'website'
-    ? createWebsitePhaseHandlers()
+    ? createWebsitePhaseHandlers(
+        agencyConfig,
+        null,          // supabase — wired in follow-on
+        notifyOctokit,
+        owner,
+        repoName,
+        request.issueNumber,
+        null,          // repoId — wired in follow-on
+      )
     : createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir);
   const table = getPipeline(variant);
 
