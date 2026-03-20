@@ -75,7 +75,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       config.pollIntervalMs,
       async (repoId, owner, name, detector) => {
         if (paused || shuttingDown) return;
-        if (activeRuns >= config.maxConcurrentRuns) return;
+        if (activeRuns >= (globalConfig?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
         costTracker.maybeResetDaily();
         const workResult = await detector.detectReadyWork();
         if (!workResult.ok) {
@@ -83,7 +83,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           return;
         }
         for (const request of workResult.value) {
-          if (activeRuns >= config.maxConcurrentRuns) break;
+          if (activeRuns >= (globalConfig?.concurrencyLimit ?? config.maxConcurrentRuns)) break;
           if (paused || shuttingDown) break;
           const claimResult = await detector.claimWork(request.issueNumber);
           if (!claimResult.ok) continue;
@@ -159,12 +159,12 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     const detector = legacyDetector;
     legacyPoller = setInterval(async () => {
       if (paused || shuttingDown) return;
-      if (activeRuns >= config.maxConcurrentRuns) return;
+      if (activeRuns >= (globalConfig?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
       costTracker.maybeResetDaily();
       const workResult = await detector.detectReadyWork();
       if (!workResult.ok) return;
       for (const request of workResult.value) {
-        if (activeRuns >= config.maxConcurrentRuns) break;
+        if (activeRuns >= (globalConfig?.concurrencyLimit ?? config.maxConcurrentRuns)) break;
         if (paused || shuttingDown) break;
         const claimResult = await detector.claimWork(request.issueNumber);
         if (!claimResult.ok) continue;
