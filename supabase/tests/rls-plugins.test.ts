@@ -30,29 +30,25 @@ describe('repo_plugins RLS', () => {
     expect(data).toEqual([]);
   });
 
-  it('admin can read repo_plugins', async () => {
-    if (!ADMIN_JWT) return;
+  it.skipIf(!ADMIN_JWT)('admin can read repo_plugins', async () => {
     const client = createClient(URL, ANON, { global: { headers: { Authorization: `Bearer ${ADMIN_JWT}` } } });
     const { data } = await client.from('repo_plugins').select('*').eq('repo_id', repoId);
     expect(data?.length).toBeGreaterThan(0);
   });
 
-  it('viewer can read repo_plugins', async () => {
-    if (!VIEWER_JWT) return;
+  it.skipIf(!VIEWER_JWT)('viewer can read repo_plugins', async () => {
     const client = createClient(URL, ANON, { global: { headers: { Authorization: `Bearer ${VIEWER_JWT}` } } });
     const { data } = await client.from('repo_plugins').select('*').eq('repo_id', repoId);
     expect(data?.length).toBeGreaterThan(0);
   });
 
-  it('viewer cannot insert into repo_plugins', async () => {
-    if (!VIEWER_JWT) return;
+  it.skipIf(!VIEWER_JWT)('viewer cannot insert into repo_plugins', async () => {
     const client = createClient(URL, ANON, { global: { headers: { Authorization: `Bearer ${VIEWER_JWT}` } } });
     const { error } = await client.from('repo_plugins').insert({ repo_id: repoId, plugin_id: 'viewer-attempt' });
     expect(error).not.toBeNull();
   });
 
-  it('admin can update repo_plugins', async () => {
-    if (!ADMIN_JWT) return;
+  it.skipIf(!ADMIN_JWT)('admin can update repo_plugins', async () => {
     const client = createClient(URL, ANON, { global: { headers: { Authorization: `Bearer ${ADMIN_JWT}` } } });
     const { error } = await client.from('repo_plugins')
       .update({ active: true })
@@ -61,8 +57,7 @@ describe('repo_plugins RLS', () => {
     expect(error).toBeNull();
   });
 
-  it('viewer cannot update repo_plugins', async () => {
-    if (!VIEWER_JWT) return;
+  it.skipIf(!VIEWER_JWT)('viewer cannot update repo_plugins', async () => {
     const client = createClient(URL, ANON, { global: { headers: { Authorization: `Bearer ${VIEWER_JWT}` } } });
     const { error } = await client.from('repo_plugins')
       .update({ active: false })

@@ -309,6 +309,8 @@ STACK-AC-PLUGINS-DASHBOARD:
     - packages/dashboard/app/(dashboard)/repos/[id]/plugins/realtime-refresh.tsx
     - packages/dashboard/components/plugin-card.tsx
     - packages/dashboard/lib/plugins/registry.ts
+    - packages/dashboard/components/repo-tab-nav.tsx
+    - packages/dashboard/vitest.lib.config.ts
   test_paths:
     - supabase/tests/rls-plugins.test.ts
     - packages/dashboard/actions/plugins.test.ts

@@ -8,7 +8,7 @@ layer: 3
 stack: typescript
 references: ARCH-AC-PLUGINS
 code_paths:
-  - supabase/migrations/002_plugins.sql
+  - supabase/migrations/003_plugins.sql
   - packages/dashboard/actions/plugins.ts
   - packages/dashboard/app/repos/[id]/plugins/page.tsx
   - packages/dashboard/components/plugin-card.tsx
@@ -34,7 +34,7 @@ test_paths:
 
 **Best-effort batch for "Enable All Suggested".** Each plugin in the batch is activated via an independent upsert. There is no transaction wrapping the batch. This matches the L2 contract (partial failure returns a list) and avoids a long-held transaction that could block other writes. The UI shows which plugins succeeded and which failed; the admin can retry failed ones individually.
 
-**`002_plugins.sql` as a separate migration.** The `repo_plugins` table and the `active_plugins` column on `runs` land in a separate migration from `001_initial.sql`. This keeps the initial migration stable (it is the basis for the RLS test suite) and makes the plugins feature independently deployable and rollback-safe.
+**`003_plugins.sql` as a separate migration.** The `repo_plugins` table and the `active_plugins` column on `runs` land in a separate migration from `001_initial.sql`. This keeps the initial migration stable (it is the basis for the RLS test suite) and makes the plugins feature independently deployable and rollback-safe.
 
 ## Examples
 
