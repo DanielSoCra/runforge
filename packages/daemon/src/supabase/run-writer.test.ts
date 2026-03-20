@@ -17,7 +17,7 @@ describe('toDbSessionType', () => {
 });
 
 describe('SupabaseRunWriter', () => {
-  const makeClient = (upsertResult = { error: null }, insertResult = { error: null }) => ({
+  const makeClient = (upsertResult: { error: { message: string } | null } = { error: null }, insertResult: { error: { message: string } | null } = { error: null }) => ({
     from: vi.fn().mockImplementation((table: string) => {
       if (table === 'runs') {
         return { upsert: vi.fn().mockResolvedValue(upsertResult) };
