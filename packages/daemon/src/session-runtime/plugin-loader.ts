@@ -1,19 +1,37 @@
-import { readFile, readdir } from 'fs/promises';
+import { readFile, readdir, stat } from 'fs/promises';
 import { join } from 'path';
 import type { LoadedPlugin, SkillDoc } from './plugin-injection.js';
 import type { PluginRegistry } from '../control-plane/plugin-registry.js';
 
-const PLUGINS_DIR = process.env['PLUGINS_DIR'] ?? join(import.meta.dirname, '../../../../plugins');
+const MAX_FILE_BYTES = 100_000;    // 100KB per markdown skill/agent file
+const MAX_INJECTION_BYTES = 20_000; // 20KB per prompt-injection.md
+
+// Read env at call time so tests can override process.env['PLUGINS_DIR'] after module load
+function getPluginsDir(): string {
+  return process.env['PLUGINS_DIR'] ?? join(import.meta.dirname, '../../../../plugins');
+}
 
 async function readMarkdownFiles(dir: string): Promise<SkillDoc[]> {
   const files = await readdir(dir).catch(() => [] as string[]);
-  return Promise.all(
-    files.filter(f => f.endsWith('.md')).map(async f => ({
+  const results: SkillDoc[] = [];
+  for (const f of files.filter(f => f.endsWith('.md'))) {
+    const filePath = join(dir, f);
+    const fileStat = await stat(filePath).catch(() => null);
+    if (!fileStat || fileStat.size > MAX_FILE_BYTES) {
+      if (fileStat) {
+        console.warn(
+          `[plugins] Skipping oversized file: ${filePath} (${fileStat.size} bytes > ${MAX_FILE_BYTES} limit)`,
+        );
+      }
+      continue;
+    }
+    results.push({
       name: f,
-      content: await readFile(join(dir, f), 'utf-8'),
+      content: await readFile(filePath, 'utf-8'),
       pluginId: '',
-    })),
-  );
+    });
+  }
+  return results;
 }
 
 // Cached registry loaded once at startup — avoids per-session disk reads.
@@ -24,13 +42,18 @@ let _registryCachePromise: Promise<PluginRegistry> | null = null;
 function getRegistry(): Promise<PluginRegistry> {
   if (!_registryCachePromise) {
     _registryCachePromise = import('../control-plane/plugin-registry.js')
-      .then(({ loadPluginRegistry }) => loadPluginRegistry(PLUGINS_DIR))
+      .then(({ loadPluginRegistry }) => loadPluginRegistry(getPluginsDir()))
       .catch((err: unknown) => {
         _registryCachePromise = null;
         throw err;
       });
   }
   return _registryCachePromise;
+}
+
+/** For testing only — clears the cached registry Promise so the next call reloads from disk. */
+export function clearRegistryCache(): void {
+  _registryCachePromise = null;
 }
 
 export async function readPluginsForContext(
@@ -47,10 +70,16 @@ export async function readPluginsForContext(
       console.warn(`[plugins] Skipping unknown plugin id at spawn time: ${id}`);
       continue;
     }
-    const dir = join(PLUGINS_DIR, id);
+    const dir = join(getPluginsDir(), id);
     const skills = (await readMarkdownFiles(join(dir, 'skills'))).map(s => ({ ...s, pluginId: id }));
     const agents = (await readMarkdownFiles(join(dir, 'agents'))).map(a => ({ ...a, pluginId: id }));
-    const injection = await readFile(join(dir, 'prompt-injection.md'), 'utf-8').catch(() => '');
+    const injectionRaw = await readFile(join(dir, 'prompt-injection.md'), 'utf-8').catch(() => '');
+    const injection = injectionRaw.length > MAX_INJECTION_BYTES
+      ? (() => {
+          console.warn(`[plugins] prompt-injection.md for ${id} truncated (${injectionRaw.length} chars > ${MAX_INJECTION_BYTES} limit)`);
+          return injectionRaw.slice(0, MAX_INJECTION_BYTES);
+        })()
+      : injectionRaw;
     results.push({
       id,
       activatedAt: pluginActivations.get(id) ?? new Date(0).toISOString(),
