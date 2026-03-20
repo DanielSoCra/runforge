@@ -22,7 +22,7 @@ Stores each connected GitHub account or machine account.
 | `github_login` | text | GitHub username or org slug |
 | `avatar_url` | text | |
 | `connection_type` | text | `oauth_token` \| `github_app_installation` (future) |
-| `encrypted_token` | text | pgcrypto, same pattern as `api_keys` |
+| `encrypted_token` | bytea NOT NULL | `pgp_sym_encrypt` output, same pattern as `api_keys.encrypted_value` |
 | `token_expires_at` | timestamptz | null for non-expiring tokens |
 | `scopes` | text | comma-separated granted scopes |
 | `status` | text | `active` \| `token_invalid` |
@@ -45,7 +45,25 @@ Orgs and personal accounts accessible via a connection. The system populates thi
 
 ### Change to `repos`
 
-Add `connection_id uuid FK github_connections` (nullable). Existing manually-added repos have `connection_id = null` and continue to work without change.
+Add two nullable columns:
+- `connection_id uuid FK github_connections` — links the repo to its GitHub connection. Null for manually-added repos.
+- `github_status text` — allowed values: `ok` (default), `not_found`. Set to `not_found` when the daemon receives a 404 from GitHub for this repo.
+
+### RLS policies
+
+Both new tables require RLS enabled from creation.
+
+**`github_connections`:**
+- Authenticated users (`member` role): row-level `SELECT` policy (all rows visible to team members).
+- Admins: `INSERT`, `UPDATE`, `DELETE`.
+- `encrypted_token` is excluded at the column level via `REVOKE SELECT (encrypted_token) ON github_connections FROM authenticated;` in the migration. RLS row policies alone do not restrict columns. Verify with a test query confirming the column is absent from results for the `authenticated` role.
+- Token reads go through `decrypt_github_token` only (see Section 4).
+
+**`github_orgs`:**
+- Authenticated users: `SELECT`.
+- Admins: `INSERT`, `UPDATE`, `DELETE`.
+
+The migration runs `REVOKE EXECUTE ON FUNCTION decrypt_github_token FROM PUBLIC`, matching the `decrypt_api_key` pattern in `001_initial.sql`. No explicit grant to `service_role` is needed — `service_role` bypasses RLS and holds execute by default.
 
 ---
 
@@ -62,7 +80,7 @@ Two environment variables: `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SEC
 ### Flow
 
 1. Admin navigates to **Settings → GitHub Connections** and clicks "Add GitHub Account."
-2. Dashboard redirects to GitHub OAuth with a `state` param (CSRF token stored in the session).
+2. Dashboard redirects to GitHub OAuth with a `state` param (CSRF token stored in a signed, HttpOnly cookie with a 10-minute expiry).
 3. GitHub prompts the user to authorize. The user can restrict access to specific orgs at this step.
 4. GitHub redirects to `/api/auth/github-connection/callback?code=…&state=…`.
 5. The callback route validates the state, exchanges the code for a token, fetches `/user` and `/user/orgs`, and stores the connection and orgs in the database. The token is encrypted with pgcrypto.
@@ -113,7 +131,7 @@ A "Sync repos" button per connection re-fetches the org's repo list from GitHub 
 
 ### Architecture change
 
-The daemon maintains a live map of `repoId → RepoPoller` instances. `RepoPoller` is a thin wrapper around the existing `work-detection.ts` logic, scoped to one repo. It decrypts the token from the repo's linked `github_connection` via `decrypt_api_key` and polls at the repo's `poll_interval_ms` (default 30s).
+The daemon maintains a live map of `repoId → RepoPoller` instances. `RepoPoller` is a thin wrapper around the existing `work-detection.ts` logic, scoped to one repo. It decrypts the GitHub token via a new `decrypt_github_token(p_connection_id uuid)` Postgres function (separate from the existing `decrypt_api_key`, which operates on `api_keys` — not `github_connections`). The daemon calls `decrypt_github_token` using the service-role client and caches the result in memory for the lifetime of the poller. It polls at the repo's `poll_interval_ms` (default 30s).
 
 ### Startup
 
@@ -129,9 +147,19 @@ On startup, the daemon reads all `enabled = true` repos from the database and st
 
 When a repo is disabled, its `RepoPoller` stops picking up new issues. In-flight runs for that repo complete normally. The daemon removes the poller from the map only after its active run count reaches zero; if already at zero, it removes the poller immediately.
 
+### Wiring — control server & dashboard proxy
+
+Add `POST /repos/reload` to the daemon's `ControlHandlers` interface in `server.ts` alongside the existing `/pause`, `/resume`, `/retry/:id` routes. The handler calls the poller-map diff function and returns `{ reloaded: true, active: number }`.
+
+Add a new dashboard API proxy route at `packages/dashboard/app/api/daemon/repos-reload/route.ts`, matching the pattern of the existing `pause/route.ts` and `resume/route.ts` proxies.
+
 ### Backwards compatibility
 
-If `auto-claude.config.json` contains a `repo` key, the daemon upserts that repo into the database on startup (enabled, `connection_id = null`) and starts a poller for it. Existing single-repo deployments require no configuration change.
+`ConfigSchema.repo` in the daemon's `config.ts` must become optional (`.optional()`). On startup, the daemon branches:
+- If `config.repo` is present: upsert that repo into the `repos` table (`enabled = true`, `connection_id = null`) and start its poller.
+- Otherwise: load all `enabled = true` repos directly from the database.
+
+Existing single-repo deployments that keep `repo` in their config require no other change.
 
 ---
 
@@ -146,6 +174,7 @@ If `auto-claude.config.json` contains a `repo` key, the daemon upserts that repo
 | Repo not found on GitHub (404) | Repo flagged `github_status = 'not_found'`; poller backs off; warning badge in dashboard; running tasks unaffected |
 | Connection removed with active repos | Linked repos set to `enabled = false`, `connection_id = null`; shown as "disconnected" |
 | `POST /repos/reload` times out (daemon down) | Dashboard ignores failure silently; 60s fallback handles it when daemon restarts |
+| No `config.repo` and DB unreachable on startup | Daemon exits immediately with a clear error message; does not start with zero pollers silently |
 
 ---
 
