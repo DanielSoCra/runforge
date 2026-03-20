@@ -5,7 +5,7 @@ import { useClaudePanel } from './use-claude-panel';
 import { getContextActions } from './context-actions';
 
 export function ClaudePanel() {
-  const { isOpen, toggle, sessionUrl, sessionState, startSession, isStarting } = useClaudePanel();
+  const { isOpen, toggle, sessionUrl, sessionState, startSession, isStarting, startError } = useClaudePanel();
   const pathname = usePathname();
   const actions = getContextActions(pathname);
 
@@ -72,28 +72,33 @@ export function ClaudePanel() {
           </div>
 
           {sessionState !== 'active' && (
-            <button
-              onClick={startSession}
-              disabled={isStarting}
-              aria-label={
-                isStarting
-                  ? 'Starting session'
+            <div>
+              <button
+                onClick={startSession}
+                disabled={isStarting}
+                aria-label={
+                  isStarting
+                    ? 'Starting session'
+                    : sessionState === 'failed'
+                      ? 'Restart Session'
+                      : 'Start Session'
+                }
+                className="w-full text-left text-xs px-2 py-1.5 rounded border transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5
+                  data-[state=failed]:border-destructive data-[state=failed]:text-destructive
+                  data-[state=offline]:border-border data-[state=offline]:text-foreground
+                  hover:bg-accent"
+                data-state={sessionState}
+              >
+                {isStarting
+                  ? 'Starting…'
                   : sessionState === 'failed'
-                    ? 'Restart Session'
-                    : 'Start Session'
-              }
-              className="w-full text-left text-xs px-2 py-1.5 rounded border transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5
-                data-[state=failed]:border-destructive data-[state=failed]:text-destructive
-                data-[state=offline]:border-border data-[state=offline]:text-foreground
-                hover:bg-accent"
-              data-state={sessionState}
-            >
-              {isStarting
-                ? 'Starting…'
-                : sessionState === 'failed'
-                  ? '↺ Restart Session'
-                  : '▶ Start Session'}
-            </button>
+                    ? '↺ Restart Session'
+                    : '▶ Start Session'}
+              </button>
+              {startError && (
+                <p className="text-xs text-destructive mt-1">{startError}</p>
+              )}
+            </div>
           )}
 
           {actions.length > 0 && (

@@ -109,7 +109,7 @@ export function IssuesBoard({ cards }: IssuesBoardProps) {
       {/* Scan Now header action */}
       <div className="flex items-center justify-end gap-3">
         {scanResult && <span className="text-xs text-muted-foreground">{scanResult}</span>}
-        <Button variant="outline" size="sm" onClick={scanNow} disabled={scanning}>
+        <Button variant="outline" size="sm" onClick={scanNow} disabled={scanning} aria-label="Scan Now">
           {scanning ? 'Scanning…' : '⟳ Scan Now'}
         </Button>
       </div>

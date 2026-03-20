@@ -160,6 +160,37 @@ describe('RepoManager', () => {
     mgr.stop();
   });
 
+  it('scanNow() skips pollers marked pendingDisable with active runs', async () => {
+    const onPoll = vi.fn();
+    const supabase = {
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        is: vi.fn().mockResolvedValue({
+          data: [
+            { id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: null },
+            { id: 'r2', owner: 'acme', name: 'api', poll_interval_ms: null, connection_id: null },
+          ],
+          error: null,
+        }),
+      }),
+      rpc: vi.fn().mockResolvedValue({ data: 'token', error: null }),
+    } as any;
+
+    const mgr = new RepoManager(supabase, 60_000, onPoll);
+    await mgr.initialize();
+
+    // Mark r1 as having an active run so disablePoller defers removal
+    mgr.notifyRunStart('r1');
+    mgr.disablePoller('r1'); // pendingDisable=true, stays in map
+
+    const result = await mgr.scanNow();
+    expect(result.scanned).toBe(1); // only r2
+    expect(onPoll).not.toHaveBeenCalledWith('r1', expect.anything(), expect.anything(), expect.anything());
+    expect(onPoll).toHaveBeenCalledWith('r2', 'acme', 'api', expect.any(Object));
+    mgr.stop();
+  });
+
   it('upsertRepo inserts a repo and returns its id', async () => {
     const onPoll = vi.fn();
     const supabase = {

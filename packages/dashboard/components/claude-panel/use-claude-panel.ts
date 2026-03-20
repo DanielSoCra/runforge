@@ -11,6 +11,7 @@ export function useClaudePanel() {
   const [sessionUrl, setSessionUrl] = useState<string | null>(null);
   const [sessionState, setSessionState] = useState<RemoteControlState>('offline');
   const [isStarting, setIsStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   const toggle = useCallback(() => {
     setIsOpen((prev) => !prev);
@@ -18,8 +19,17 @@ export function useClaudePanel() {
 
   const startSession = useCallback(async () => {
     setIsStarting(true);
+    setStartError(null);
     try {
-      await fetch('/api/daemon/remote-control/restart', { method: 'POST' });
+      const res = await fetch('/api/daemon/remote-control/restart', { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        setStartError(data.error ?? 'Failed to start session');
+        setTimeout(() => setStartError(null), 4000);
+      }
+    } catch {
+      setStartError('Daemon unreachable');
+      setTimeout(() => setStartError(null), 4000);
     } finally {
       setIsStarting(false);
     }
@@ -58,5 +68,5 @@ export function useClaudePanel() {
     };
   }, []);
 
-  return { isOpen, toggle, sessionUrl, sessionState, startSession, isStarting };
+  return { isOpen, toggle, sessionUrl, sessionState, startSession, isStarting, startError };
 }

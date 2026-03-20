@@ -88,4 +88,17 @@ describe('useClaudePanel', () => {
     await act(async () => { resolveRestart(); await startPromise; });
     expect(result.current.isStarting).toBe(false);
   });
+
+  it('startSession() sets startError when fetch fails', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ remote_control_state: 'offline', remote_control_url: null }) } as Response)
+      .mockRejectedValueOnce(new Error('Network error'));
+
+    const { result } = renderHook(() => useClaudePanel());
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+
+    await act(async () => { await result.current.startSession(); });
+
+    expect(result.current.startError).toBe('Daemon unreachable');
+  });
 });
