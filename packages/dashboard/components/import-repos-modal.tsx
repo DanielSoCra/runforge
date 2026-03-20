@@ -78,8 +78,8 @@ export function ImportReposModal({
   const [reposError, setReposError] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<{ fullName: string } | null>(null);
-  const [resyncing, setResyncing] = useState<string | null>(null);
-  const [resyncError, setResyncError] = useState<string | null>(null);
+  const [resyncing, setResyncing] = useState<Set<string>>(new Set());
+  const [resyncError, setResyncError] = useState<Set<string>>(new Set());
   const router = useRouter();
 
   const importedSet = useMemo(
@@ -105,7 +105,7 @@ export function ImportReposModal({
     setReposError(null);
     setImportError(null);
     setRemoveError(null);
-    setResyncError(null);
+    setResyncError(new Set());
     const res = await fetch(`/api/github/connections/${connectionId}/orgs`);
     if (!res.ok) {
       setOrgsError('Could not load accounts.');
@@ -172,15 +172,15 @@ export function ImportReposModal({
   }
 
   async function handleResync(repo: GhRepo) {
-    setResyncing(repo.full_name);
-    setResyncError(null);
+    setResyncing((prev) => new Set(prev).add(repo.full_name));
+    setResyncError((prev) => { const next = new Set(prev); next.delete(repo.full_name); return next; });
     try {
       await importRepos(connectionId, [{ owner: repo.owner, name: repo.name }]);
       router.refresh();
     } catch {
-      setResyncError(repo.full_name);
+      setResyncError((prev) => new Set(prev).add(repo.full_name));
     } finally {
-      setResyncing(null);
+      setResyncing((prev) => { const next = new Set(prev); next.delete(repo.full_name); return next; });
     }
   }
 
@@ -337,7 +337,7 @@ export function ImportReposModal({
                               {repo.private ? 'Private' : 'Public'}
                             </span>
                             <div className="flex gap-1 justify-end flex-col items-end">
-                              {resyncError === repo.full_name && (
+                              {resyncError.has(repo.full_name) && (
                                 <span className="text-[10px] text-destructive">Resync failed</span>
                               )}
                               <div className="flex gap-1">
@@ -345,10 +345,10 @@ export function ImportReposModal({
                                 variant="outline"
                                 size="sm"
                                 className="h-6 px-2 text-xs"
-                                disabled={resyncing === repo.full_name}
+                                disabled={resyncing.has(repo.full_name)}
                                 onClick={() => handleResync(repo)}
                               >
-                                {resyncing === repo.full_name ? (
+                                {resyncing.has(repo.full_name) ? (
                                   <><Loader2 className="h-3 w-3 animate-spin mr-1" />Syncing…</>
                                 ) : 'Resync'}
                               </Button>
