@@ -25,7 +25,7 @@ export function StatsCards({ activeRuns, todayCost, totalRepos, daemonStatus }: 
       </Card>
       <Card>
         <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">Today's Cost</CardTitle>
+          <CardTitle className="text-sm font-medium text-muted-foreground">Today's Cost (UTC)</CardTitle>
           <DollarSign className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>
