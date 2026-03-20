@@ -14,6 +14,8 @@ interface WizardState {
 
 const STEPS = ['Basics', 'Inherit', 'Matrix', 'Vision', 'Create'] as const;
 
+const SAFE_PATTERN = /^[a-zA-Z0-9._-]+$/;
+
 export default function NewProjectPage() {
   const router = useRouter();
   const [step, setStep] = useState(0);
@@ -30,7 +32,14 @@ export default function NewProjectPage() {
   }
 
   const canAdvance = (): boolean => {
-    if (step === 0) return !!(state.org && state.name);
+    if (step === 0) {
+      return !!(
+        state.org.trim() &&
+        state.name.trim() &&
+        SAFE_PATTERN.test(state.org) &&
+        SAFE_PATTERN.test(state.name)
+      );
+    }
     if (step === 3) return !!state.l0Vision.trim();
     return true;
   };
@@ -91,6 +100,9 @@ export default function NewProjectPage() {
               onChange={(e) => update('org', e.target.value)}
               placeholder="my-org"
             />
+            {state.org && !SAFE_PATTERN.test(state.org) && (
+              <p className="text-xs text-destructive">Only alphanumeric, dots, underscores, and hyphens allowed</p>
+            )}
           </div>
           <div className="space-y-1">
             <label className="text-sm font-medium">Repository name</label>
@@ -100,6 +112,9 @@ export default function NewProjectPage() {
               onChange={(e) => update('name', e.target.value)}
               placeholder="my-project"
             />
+            {state.name && !SAFE_PATTERN.test(state.name) && (
+              <p className="text-xs text-destructive">Only alphanumeric, dots, underscores, and hyphens allowed</p>
+            )}
           </div>
           <div className="space-y-1">
             <label className="text-sm font-medium">Description (optional)</label>
