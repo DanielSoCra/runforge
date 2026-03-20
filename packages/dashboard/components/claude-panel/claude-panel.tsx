@@ -5,7 +5,7 @@ import { useClaudePanel } from './use-claude-panel';
 import { getContextActions } from './context-actions';
 
 export function ClaudePanel() {
-  const { isOpen, toggle, sessionUrl, sessionState } = useClaudePanel();
+  const { isOpen, toggle, sessionUrl, sessionState, startSession, isStarting } = useClaudePanel();
   const pathname = usePathname();
   const actions = getContextActions(pathname);
 
@@ -70,6 +70,24 @@ export function ClaudePanel() {
               </p>
             )}
           </div>
+
+          {sessionState !== 'active' && (
+            <button
+              onClick={startSession}
+              disabled={isStarting}
+              className="w-full text-left text-xs px-2 py-1.5 rounded border transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5
+                data-[state=failed]:border-destructive data-[state=failed]:text-destructive
+                data-[state=offline]:border-border data-[state=offline]:text-foreground
+                hover:bg-accent"
+              data-state={sessionState}
+            >
+              {isStarting
+                ? 'Starting…'
+                : sessionState === 'failed'
+                  ? '↺ Restart Session'
+                  : '▶ Start Session'}
+            </button>
+          )}
 
           {actions.length > 0 && (
             <div className="space-y-1">

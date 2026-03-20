@@ -10,9 +10,19 @@ export function useClaudePanel() {
   const [isOpen, setIsOpen] = useState(false);
   const [sessionUrl, setSessionUrl] = useState<string | null>(null);
   const [sessionState, setSessionState] = useState<RemoteControlState>('offline');
+  const [isStarting, setIsStarting] = useState(false);
 
   const toggle = useCallback(() => {
     setIsOpen((prev) => !prev);
+  }, []);
+
+  const startSession = useCallback(async () => {
+    setIsStarting(true);
+    try {
+      await fetch('/api/daemon/remote-control/restart', { method: 'POST' });
+    } finally {
+      setIsStarting(false);
+    }
   }, []);
 
   // Mount: restore persisted panel state (SSR-safe — localStorage is client-only)
@@ -48,5 +58,5 @@ export function useClaudePanel() {
     };
   }, []);
 
-  return { isOpen, toggle, sessionUrl, sessionState };
+  return { isOpen, toggle, sessionUrl, sessionState, startSession, isStarting };
 }
