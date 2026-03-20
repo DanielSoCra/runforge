@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { updateGlobalSettings } from '@/actions/settings';
+import { GitHubConnectionsSection } from '@/components/github-connections-section';
 
 export default async function SettingsPage() {
   const supabase = await createClient();
@@ -34,6 +35,7 @@ export default async function SettingsPage() {
           </form>
         </CardContent>
       </Card>
+      <GitHubConnectionsSection />
     </div>
   );
 }
