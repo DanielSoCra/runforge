@@ -1,6 +1,7 @@
 import { readFile, readdir } from 'fs/promises';
 import { join } from 'path';
 import type { LoadedPlugin, SkillDoc } from './plugin-injection.js';
+import type { PluginRegistry } from '../control-plane/plugin-registry.js';
 
 const PLUGINS_DIR = process.env['PLUGINS_DIR'] ?? join(import.meta.dirname, '../../../../plugins');
 
@@ -17,13 +18,17 @@ async function readMarkdownFiles(dir: string): Promise<SkillDoc[]> {
 
 // Cached registry loaded once at startup — avoids per-session disk reads.
 // The Promise itself is cached so concurrent callers await the same operation
-// rather than each triggering a separate load.
-type PluginRegistry = Awaited<ReturnType<typeof import('../control-plane/plugin-registry.js').loadPluginRegistry>>;
+// rather than each triggering a separate load. If loading fails, the cache is
+// cleared so the next caller can retry.
 let _registryCachePromise: Promise<PluginRegistry> | null = null;
 function getRegistry(): Promise<PluginRegistry> {
   if (!_registryCachePromise) {
     _registryCachePromise = import('../control-plane/plugin-registry.js')
-      .then(({ loadPluginRegistry }) => loadPluginRegistry(PLUGINS_DIR));
+      .then(({ loadPluginRegistry }) => loadPluginRegistry(PLUGINS_DIR))
+      .catch((err: unknown) => {
+        _registryCachePromise = null;
+        throw err;
+      });
   }
   return _registryCachePromise;
 }
