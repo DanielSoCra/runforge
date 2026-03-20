@@ -4,9 +4,11 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { changeRole, removeMember } from '@/actions/team';
 import { InviteForm } from '@/components/invite-form';
+import { isAdmin } from '@/lib/auth';
 
 export default async function TeamPage() {
   const supabase = await createClient();
+  const admin = await isAdmin(supabase);
   const { data: members } = await supabase
     .from('team_members')
     .select('*, user:user_id(email, raw_user_meta_data)')
@@ -36,16 +38,18 @@ export default async function TeamPage() {
                     {member.role}
                   </Badge>
                 </div>
-                <div className="flex gap-2">
-                  <form action={changeRole.bind(null, member.id, member.role === 'admin' ? 'viewer' : 'admin')}>
-                    <Button type="submit" variant="ghost" size="sm">
-                      Make {member.role === 'admin' ? 'viewer' : 'admin'}
-                    </Button>
-                  </form>
-                  <form action={removeMember.bind(null, member.id)}>
-                    <Button type="submit" variant="ghost" size="sm" className="text-destructive">Remove</Button>
-                  </form>
-                </div>
+                {admin && (
+                  <div className="flex gap-2">
+                    <form action={changeRole.bind(null, member.id, member.role === 'admin' ? 'viewer' : 'admin')}>
+                      <Button type="submit" variant="ghost" size="sm">
+                        Make {member.role === 'admin' ? 'viewer' : 'admin'}
+                      </Button>
+                    </form>
+                    <form action={removeMember.bind(null, member.id)}>
+                      <Button type="submit" variant="ghost" size="sm" className="text-destructive">Remove</Button>
+                    </form>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -68,12 +72,14 @@ export default async function TeamPage() {
       )}
 
       {/* Invite form */}
-      <Card>
-        <CardHeader><CardTitle>Invite Member</CardTitle></CardHeader>
-        <CardContent>
-          <InviteForm />
-        </CardContent>
-      </Card>
+      {admin && (
+        <Card>
+          <CardHeader><CardTitle>Invite Member</CardTitle></CardHeader>
+          <CardContent>
+            <InviteForm />
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

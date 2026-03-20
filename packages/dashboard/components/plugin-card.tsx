@@ -17,6 +17,7 @@ interface PluginCardProps {
   recommended?: boolean;
   recommendationReason?: string | null;
   confidence?: 'high' | 'medium' | 'low' | null;
+  readOnly?: boolean;
 }
 
 const CONFIDENCE_COLORS = {
@@ -27,7 +28,7 @@ const CONFIDENCE_COLORS = {
 
 export function PluginCard({
   repoId, pluginId, name, description, tags,
-  active: initialActive, recommended, recommendationReason, confidence,
+  active: initialActive, recommended, recommendationReason, confidence, readOnly,
 }: PluginCardProps) {
   const [active, setActive] = useState(initialActive);
   const [loading, setLoading] = useState(false);
@@ -47,7 +48,7 @@ export function PluginCard({
           <CardTitle className="text-sm font-medium text-zinc-100">{name}</CardTitle>
           <p className="mt-1 text-xs text-zinc-400">{description}</p>
         </div>
-        <Switch checked={active} onCheckedChange={handleToggle} disabled={loading} />
+        <Switch checked={active} onCheckedChange={handleToggle} disabled={loading || readOnly} />
       </CardHeader>
       <CardContent className="pt-0">
         <div className="flex flex-wrap gap-1">
