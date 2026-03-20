@@ -47,6 +47,11 @@ export function createWebsitePhaseHandlers(
   const withCheckpointGate = (currentPhase: Phase) => async (_run: RunState): Promise<PhaseEvent> => {
     // TODO(Plan 2): replace stub with real Claude session for this phase
 
+    // Remove checkpoint-paused label if present (cleanup from previous pause)
+    await octokit.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: 'checkpoint-paused' }).catch(() => {
+      // Ignore 404 — label wasn't present
+    });
+
     // 'website-init' label persists on the issue throughout the lifecycle so
     // selectVariant() returns 'website' on every poll — including resume runs.
 
