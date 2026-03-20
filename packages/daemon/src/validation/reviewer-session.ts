@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { GateType, GateResult, ReviewFinding } from '../types.js';
+import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 
 export const ReviewFindingsSchema = z.object({
   findings: z.array(z.object({
@@ -24,6 +25,8 @@ export function createReviewerGate(
   rubric: string,
   runtime: SessionRuntime,
   issueNumber: number,
+  runWriter?: SupabaseRunWriter,
+  runId?: string,
 ): { type: GateType; execute: (cwd: string) => Promise<GateResult> } {
   return {
     type,
@@ -36,6 +39,8 @@ export function createReviewerGate(
         },
         issueNumber,
         { jsonSchema },
+        runWriter,
+        runId,
       );
 
       if (!result.ok) {

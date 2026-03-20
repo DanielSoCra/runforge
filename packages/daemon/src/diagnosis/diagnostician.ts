@@ -1,5 +1,6 @@
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { BugDiagnosis } from '../types.js';
+import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import { BugDiagnosisSchema, bugDiagnosisJsonSchema } from './schema.js';
 import { ok, err, type Result } from '../lib/result.js';
 
@@ -9,6 +10,8 @@ export async function diagnose(
   bugReport: string,
   implementationContent: string,
   specContent: string,
+  runWriter?: SupabaseRunWriter,
+  runId?: string,
 ): Promise<Result<BugDiagnosis>> {
   const context = {
     variables: {
@@ -21,7 +24,7 @@ export async function diagnose(
   // First attempt
   const result = await runtime.spawnSession('diagnostician', context, issueNumber, {
     jsonSchema: bugDiagnosisJsonSchema,
-  });
+  }, runWriter, runId);
 
   if (!result.ok) return result;
 
@@ -31,7 +34,7 @@ export async function diagnose(
   // Retry once on invalid output
   const retry = await runtime.spawnSession('diagnostician', context, issueNumber, {
     jsonSchema: bugDiagnosisJsonSchema,
-  });
+  }, runWriter, runId);
 
   if (!retry.ok) return retry;
 
