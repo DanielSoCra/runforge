@@ -1,6 +1,6 @@
 // packages/dashboard/components/issues-board.tsx
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import type { BoardCard, BoardColumn } from '@/lib/classify-issues';
@@ -75,26 +75,33 @@ interface IssuesBoardProps {
 export function IssuesBoard({ cards }: IssuesBoardProps) {
   const [scanning, setScanning] = useState(false);
   const [scanResult, setScanResult] = useState<string | null>(null);
+  const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scanNow = useCallback(async () => {
     setScanning(true);
     setScanResult(null);
+    if (clearTimer.current) clearTimeout(clearTimer.current);
     try {
       const res = await fetch('/api/daemon/issues/scan', { method: 'POST' });
       const data = await res.json() as { scanned?: number; error?: string };
       if (res.ok) {
         setScanResult(`Scanned ${data.scanned ?? 0} repos`);
-        setTimeout(() => setScanResult(null), 3000);
       } else {
         setScanResult(data.error ?? 'Error');
-        setTimeout(() => setScanResult(null), 3000);
       }
     } catch {
       setScanResult('Daemon unreachable');
-      setTimeout(() => setScanResult(null), 3000);
     } finally {
       setScanning(false);
+      clearTimer.current = setTimeout(() => setScanResult(null), 3000);
     }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (clearTimer.current) clearTimeout(clearTimer.current);
+    };
   }, []);
 
   return (

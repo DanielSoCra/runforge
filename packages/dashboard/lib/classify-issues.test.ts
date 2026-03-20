@@ -71,6 +71,18 @@ describe('classifyIssues', () => {
     expect(cards[0]?.column).toBe('stuck');
   });
 
+  it('most recent run takes priority over older runs for the same issue', () => {
+    const cards = classifyIssues(
+      [{ ...REPO, issues: [issue(3, ['ready'])] }],
+      [
+        run(3, 'in-progress', 'planning'), // newer (first in array = newest)
+        run(3, 'complete'),                // older
+      ],
+    );
+    expect(cards[0]?.column).toBe('running');
+    expect(cards[0]?.currentPhase).toBe('planning');
+  });
+
   it('aggregates issues from multiple repos', () => {
     const cards = classifyIssues(
       [

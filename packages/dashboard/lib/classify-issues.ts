@@ -36,9 +36,13 @@ export function classifyIssues(
   const cards: BoardCard[] = [];
 
   // Index runs by "owner/name#number" for O(1) lookup
+  // runs are newest-first (ORDER BY started_at DESC), so first-write-wins = newest run wins
   const runIndex = new Map<string, RunRecord>();
   for (const run of runs) {
-    runIndex.set(`${run.repo_owner}/${run.repo_name}#${run.issue_number}`, run);
+    const key = `${run.repo_owner}/${run.repo_name}#${run.issue_number}`;
+    if (!runIndex.has(key)) {  // first-write-wins: runs are newest-first
+      runIndex.set(key, run);
+    }
   }
 
   // Track emitted keys from the first loop to prevent double-counting complete runs
