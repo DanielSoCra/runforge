@@ -3,10 +3,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { loadDashboardRegistry } from '@/lib/plugins/registry';
 import Anthropic from '@anthropic-ai/sdk';
-import { readdir } from 'fs/promises';
-import { join } from 'path';
-
-const PLUGINS_DIR = process.env['PLUGINS_DIR'] ?? join(process.cwd(), '../..', 'plugins');
 
 export async function togglePlugin(
   repoId: string,
@@ -79,18 +75,4 @@ export async function triggerRecommendation(repoId: string, repoOwner: string, r
       // Fail silently — user can re-trigger via dashboard
     }
   })();
-}
-
-export async function exportPlugin(repoId: string, pluginId: string, targetRepoPath: string): Promise<{ ok?: true; error?: string }> {
-  const registry = await loadDashboardRegistry();
-  if (!registry.plugins.find(p => p.id === pluginId)) {
-    return { error: `Unknown plugin: ${pluginId}` };
-  }
-  const { mkdir, copyFile } = await import('fs/promises');
-  const pluginDir = join(PLUGINS_DIR, pluginId, 'skills');
-  const destDir = join(targetRepoPath, '.claude', 'plugins', pluginId, 'skills');
-  await mkdir(destDir, { recursive: true });
-  const files = await readdir(pluginDir).catch(() => [] as string[]);
-  for (const f of files) await copyFile(join(pluginDir, f), join(destDir, f));
-  return { ok: true };
 }
