@@ -67,6 +67,7 @@ export function createPhaseHandlers(
     report: async (run: RunState): Promise<PhaseEvent> => {
       const outcome = 'complete';
       const reportBody = formatReport(run, outcome);
+      run.report = reportBody;
 
       // Post report as comment
       await postReport(octokit, owner, repo, workRequest.issueNumber, reportBody);
