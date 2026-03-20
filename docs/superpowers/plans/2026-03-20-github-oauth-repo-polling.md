@@ -10,6 +10,24 @@
 
 ---
 
+## Risk Notes
+
+Four areas that deserve extra attention during implementation:
+
+**1. `notifyRunEnd` must fire on every code path.**
+`RepoManager.notifyRunEnd(repoId)` is the only mechanism that releases a disabled poller after its last run completes. If any error path in `daemon.ts` throws before reaching `.finally()`, the poller hangs indefinitely in `pendingDisable` state and is never removed. In Task 4 Step 5, confirm that `processWorkRequest(...)` is always wrapped in `.finally(() => { activeRuns--; repoManager.notifyRunEnd(repoId); })` — not just `.catch()`.
+
+**2. The import-repos modal has no automated tests.**
+`import-repos-modal.tsx` is a client component with complex interactive state (fetch-per-org, multi-level selection). The dashboard doesn't currently use `@testing-library/react`, so no unit tests are written for it. The Verification Checklist at the bottom of this plan includes a manual walkthrough — treat it as required before merge, not optional.
+
+**3. Dual-mode daemon branching must be tested as both paths before merge.**
+`daemon.ts` now has a legacy path (no `SUPABASE_URL`) and a DB path. It's easy to break one while fixing the other. Task 4 Step 6 asks to run the full daemon test suite — also manually verify: (a) daemon starts with `SUPABASE_URL` set and no `config.repo`, and (b) daemon starts with `config.repo` set and no `SUPABASE_URL`. Both must work.
+
+**4. GitHub token revocation is silent — no active health check.**
+When a GitHub OAuth token is revoked externally, the system learns only on the next API call that returns 401. There is no proactive monitoring. The `token_invalid` status flag and dashboard warning banner are the only signals. This is acceptable for the current scope but creates a silent failure window. A future cron job or periodic ping to `/user` would close this gap — not needed now, but worth noting in the code with a `// TODO: proactive token health check`.
+
+---
+
 ## File Map
 
 ### Created
@@ -770,6 +788,8 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           repoManager!.notifyRunStart(repoId);
           processWorkRequest(config, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir)
             .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
+            // CRITICAL: notifyRunEnd must be in .finally(), never only in .catch() or .then().
+            // If it is missing here, a disabled repo's poller hangs in pendingDisable forever.
             .finally(() => {
               activeRuns--;
               repoManager!.notifyRunEnd(repoId);
@@ -928,6 +948,11 @@ cd packages/daemon && npx vitest run
 ```
 
 Expected: all tests PASS. Fix any type errors from the `processWorkRequest` signature change before committing.
+
+> **Risk check (dual-mode):** Before committing, manually verify both startup paths:
+> - With `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` set and no `config.repo` → daemon starts, loads repos from DB.
+> - With `config.repo` set and no Supabase env vars → daemon starts in legacy mode, polls that single repo.
+> - With neither → daemon exits with a clear error message.
 
 - [ ] **Step 7: Commit**
 
@@ -1818,6 +1843,19 @@ Expected: all tests PASS. If the `repos.test.ts` mock setup fails due to the new
 vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
 ```
 
+- [ ] **Step 6b: Manual modal verification (no automated tests exist for this component)**
+
+The modal has interactive async state that vitest cannot cover without `@testing-library/react` (not currently in the project). Before committing, manually verify:
+
+1. Open `/repos` — "Import repositories" button appears for each connection.
+2. Click button — modal opens, orgs load within 2s.
+3. Check an org — its repo list loads and appears beneath it.
+4. "Select all" toggle for an org checks/unchecks all repos in that org.
+5. Global "Select all" at org level applies correctly.
+6. Import button is disabled until at least one repo is checked.
+7. Click Import — modal closes, repos appear on `/repos` with connection badge, polling disabled.
+8. Re-open modal — previously imported repos still show as checkable (re-import is idempotent).
+
 - [ ] **Step 7: Commit**
 
 ```bash
@@ -1839,6 +1877,12 @@ After all tasks complete, run the full test suite:
 cd packages/daemon && npx vitest run
 cd packages/dashboard && npx vitest run
 ```
+
+**Risk checks (must pass before merge):**
+- Grep the daemon codebase for every `processWorkRequest` call — confirm each is followed by `.finally(() => { activeRuns--; repoManager!.notifyRunEnd(repoId); })`, not just `.catch()`.
+- Confirm the import modal manual checklist in Task 7 Step 6b is completed.
+- Confirm both daemon startup modes work (dual-mode check in Task 4 Step 6).
+- Confirm `// TODO: proactive token health check` comment exists near the 401-handling code in `daemon.ts`.
 
 Manual smoke test:
 1. Set `GITHUB_OAUTH_CLIENT_ID` + `GITHUB_OAUTH_CLIENT_SECRET` in `.env.local`
