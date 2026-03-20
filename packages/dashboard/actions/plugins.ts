@@ -26,7 +26,10 @@ export async function togglePlugin(
     },
     { onConflict: 'repo_id,plugin_id', ignoreDuplicates: false },
   );
-  if (error) return { error: error.message };
+  if (error) {
+    console.error('[plugins] togglePlugin upsert failed:', error);
+    return { error: 'Failed to update plugin' };
+  }
   return { ok: true };
 }
 

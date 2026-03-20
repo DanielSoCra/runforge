@@ -42,7 +42,10 @@ export async function createRepo(formData: FormData) {
     enabled: false, // always starts disabled
   }).select('id').single();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error('[repos] createRepo failed:', error);
+    throw new Error('Failed to create repository');
+  }
   revalidatePath('/repos');
   redirect(`/repos/${data!.id}`);
 }
@@ -65,7 +68,10 @@ export async function updateRepo(id: string, formData: FormData) {
     updated_at: new Date().toISOString(),
   }).eq('id', id);
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error('[repos] updateRepo failed:', error);
+    throw new Error('Failed to update repository');
+  }
   revalidatePath(`/repos/${id}`);
 }
 
@@ -76,7 +82,10 @@ export async function enableRepo(id: string) {
   const { error } = await supabase.from('repos')
     .update({ enabled: true, updated_at: new Date().toISOString() })
     .eq('id', id);
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error('[repos] enableRepo failed:', error);
+    throw new Error('Failed to enable repository');
+  }
   revalidatePath(`/repos/${id}`);
   revalidatePath('/repos');
 }
@@ -88,7 +97,10 @@ export async function disableRepo(id: string) {
   const { error } = await supabase.from('repos')
     .update({ enabled: false, updated_at: new Date().toISOString() })
     .eq('id', id);
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error('[repos] disableRepo failed:', error);
+    throw new Error('Failed to disable repository');
+  }
   revalidatePath(`/repos/${id}`);
   revalidatePath('/repos');
 }
@@ -101,7 +113,10 @@ export async function deleteRepo(id: string) {
   const { error } = await supabase.from('repos')
     .update({ deleted_at: new Date().toISOString(), enabled: false })
     .eq('id', id);
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error('[repos] deleteRepo failed:', error);
+    throw new Error('Failed to delete repository');
+  }
   revalidatePath('/repos');
   redirect('/repos');
 }
