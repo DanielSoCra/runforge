@@ -40,6 +40,12 @@ export function buildCompositeContext(
   const mcpMap = new Map<string, McpConfig>();
   const gates: string[] = [];
 
+  // De-duplication uses a Map to preserve insertion order (guaranteed by ECMAScript spec).
+  // `sorted` is ordered ascending by activatedAt, so Map insertion order == activation order.
+  // First plugin to provide a skill/agent name wins (earliest activation wins on conflict).
+  // [...skillMap.values()] produces an array in that same order — earliest first, latest last.
+  // Under token budget pressure, pop() drops the last element (latest-activated plugin's
+  // unique skill/agent) — intentionally shedding the most recently added content first.
   for (const plugin of sorted) {
     if (plugin.promptInjection) promptParts.push(plugin.promptInjection);
     for (const skill of plugin.skills) {
