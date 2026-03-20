@@ -50,6 +50,15 @@ export class RemoteControlManager {
     this.url = null;
   }
 
+  restart(): void {
+    // stop() sets this.stopped = true and kills any running process.
+    // We must reset stopped before calling start() or start() will return early.
+    void this.stop();
+    this.stopped = false;
+    this.failureCount = 0;
+    this.spawn();
+  }
+
   getState(): RemoteControlStatus {
     return {
       remote_control_state: this.state,
@@ -84,7 +93,8 @@ export class RemoteControlManager {
     proc.stderr?.pipe(process.stderr);
 
     proc.on('exit', (code: number | null) => {
-      this.proc = null; // Always clear, even when stopped — prevents stale reference
+      if (this.proc !== proc) return; // Stale exit — a newer process has already been spawned
+      this.proc = null;
       if (this.stopped) return;
       const wasActive = this.state === 'active';
       this.state = 'offline';
@@ -95,7 +105,8 @@ export class RemoteControlManager {
     });
 
     proc.on('error', (err: Error) => {
-      this.proc = null; // Null first — before the stopped guard
+      if (this.proc !== proc) return; // Stale error — a newer process has already been spawned
+      this.proc = null;
       if (this.stopped) return;
       this.state = 'offline';
       this.url = null;
