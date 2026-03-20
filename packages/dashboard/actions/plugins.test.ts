@@ -18,6 +18,7 @@ describe('togglePlugin', () => {
     } as never);
     const result = await togglePlugin('repo-id', 'web-stack', true);
     expect(result.error).toContain('Unauthorized');
+    expect(vi.mocked(loadDashboardRegistry)).not.toHaveBeenCalled();
   });
 
   it('rejects unknown plugin ids', async () => {
@@ -51,8 +52,7 @@ describe('enableAllSuggested', () => {
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null } }) },
       from: fromSpy,
     } as never);
-    // @ts-expect-error forward-compatible: Task 4 will remove the second arg
-    const result = await enableAllSuggested('repo-id');
+    const result = await enableAllSuggested('repo-id', []);
     expect(result.failed.length).toBe(0);
     expect(result.succeeded.length).toBe(0);
     expect(fromSpy).not.toHaveBeenCalled();
