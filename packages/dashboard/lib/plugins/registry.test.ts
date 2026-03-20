@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { loadDashboardRegistry } from './registry.js';
 
-vi.mock('fs/promises', () => ({
-  readFile: vi.fn(),
-}));
+vi.mock('fs/promises', () => {
+  const readFile = vi.fn();
+  return { default: { readFile }, readFile };
+});
 
 import { readFile } from 'fs/promises';
 
