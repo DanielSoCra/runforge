@@ -96,6 +96,46 @@ describe('RemoteControlManager', () => {
     expect(manager.getState().remote_control_state).toBe('failed');
   });
 
+  it('stop() then immediate start() is blocked while old process is still alive; old exit never causes restart', async () => {
+    // Uses fake timers (set in beforeEach). We advance past all backoff delays
+    // to prove no extra spawn is triggered by proc1's delayed exit event.
+    //
+    // The fix: stop() no longer nulls this.proc immediately. This means:
+    //   1. A start() call while the old process is alive is correctly blocked
+    //      by the this.proc guard (instead of seeing null and re-spawning).
+    //   2. When the old process's exit event fires, this.stopped is still true
+    //      (the second start() returned early, so it never reset stopped),
+    //      so no spurious restart is scheduled.
+    const proc1 = makeFakeProcess();
+    vi.mocked(spawn).mockReturnValueOnce(proc1);
+
+    const mgr = new RemoteControlManager();
+    mgr.start();
+    expect(vi.mocked(spawn)).toHaveBeenCalledTimes(1);
+
+    // stop() sends SIGTERM but does NOT null this.proc (the fix).
+    await mgr.stop();
+    expect(vi.mocked(spawn)).toHaveBeenCalledTimes(1);
+
+    // start() while proc1 is still alive — should be blocked by the this.proc guard.
+    mgr.start();
+    expect(vi.mocked(spawn)).toHaveBeenCalledTimes(1);
+
+    // proc1's exit fires after start() was attempted.
+    // With the old buggy code: stop() nulled this.proc, so start() spawned proc2,
+    // and proc1's exit fired with this.stopped=false → spurious scheduleRestart.
+    // With the fix: this.proc is still proc1 when start() is called, so start()
+    // returns early; when proc1 exits, this.stopped is still true → no restart.
+    proc1.emit('exit', 0);
+
+    // Advance past all backoff delays — no restart should fire.
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    // spawn was called exactly once — no spurious extra spawns.
+    expect(vi.mocked(spawn)).toHaveBeenCalledTimes(1);
+    expect(mgr.getState().remote_control_state).toBe('offline');
+  });
+
   it('transitions to failed state when process emits error events', async () => {
     let spawnCount = 0;
     vi.mocked(spawn).mockImplementation(() => {
