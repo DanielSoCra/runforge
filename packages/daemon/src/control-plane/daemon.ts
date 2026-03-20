@@ -10,6 +10,7 @@ import { createControlServer } from './server.js';
 import { RepoManager } from './repo-manager.js';
 import { createWorkDetector, type WorkDetector } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
+import { createWebsitePhaseHandlers } from './phases-website.js';
 import { runPipeline } from './pipeline.js';
 import { getPipeline, getStartPhase } from './fsm.js';
 import { selectVariant } from './variants.js';
@@ -214,7 +215,9 @@ async function processWorkRequest(
 
   // Build a notifyOctokit from env for phase handlers
   const notifyOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-  const handlers = createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir);
+  const handlers = variant === 'website'
+    ? createWebsitePhaseHandlers()
+    : createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir);
   const table = getPipeline(variant);
 
   console.log(`[daemon] Pipeline start for #${request.issueNumber}: ${request.title}`);
