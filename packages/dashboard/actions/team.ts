@@ -24,6 +24,7 @@ export async function createInvitation(formData: FormData) {
     status: 'pending',
   });
   if (error) {
+    console.error('[team] createInvitation failed:', error);
     // Handle duplicate pending invitation gracefully
     if (error.code === '23505') throw new Error('A pending invitation for this user already exists');
     throw new Error('Failed to create invitation');

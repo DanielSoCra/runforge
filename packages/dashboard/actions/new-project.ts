@@ -116,7 +116,10 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
       .select('id')
       .single();
 
-    if (error) throw new Error(`Supabase error: ${error.message}`);
+    if (error) {
+      console.error('[new-project] createProject supabase insert failed:', error);
+      throw new Error('Failed to register repository');
+    }
     if (!data) throw new Error('Supabase insert returned no data — check RLS policies');
 
     revalidatePath('/repos');
