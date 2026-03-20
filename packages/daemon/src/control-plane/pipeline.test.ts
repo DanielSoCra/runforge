@@ -124,4 +124,23 @@ describe('runPipeline', () => {
     expect(result.outcome).toBe('stuck');
     expect(attempts).toBe(3);
   });
+
+  it('calls runWriter.upsertRun on phase transitions', async () => {
+    const upsertRun = vi.fn().mockResolvedValue(undefined);
+    const runWriter = { upsertRun, writeCostEvent: vi.fn() } as any;
+
+    const run = makeRun();
+    const handlers: PhaseHandlerMap = {
+      detect: async () => 'success' as PhaseEvent,
+      classify: async () => 'success:simple' as PhaseEvent,
+      implement: async () => 'success' as PhaseEvent,
+      review: async () => 'success' as PhaseEvent,
+      report: async () => 'success' as PhaseEvent,
+    };
+    await runPipeline(run, getPipeline('feature-simple'), handlers, stateMgr, costTracker, undefined, runWriter);
+    expect(upsertRun).toHaveBeenCalled();
+    const firstCall = upsertRun.mock.calls[0]!;
+    expect(firstCall[0]).toBe('test-run-id');
+    expect(firstCall[1]).toHaveProperty('current_phase');
+  });
 });

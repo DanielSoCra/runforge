@@ -3,6 +3,7 @@ import type { Phase, PhaseEvent, RunState } from '../types.js';
 import { transition, isTerminal, isComplete, applyGlobalTransition, type TransitionTable } from './fsm.js';
 import type { StateManager } from './state.js';
 import type { CostTracker } from '../session-runtime/cost.js';
+import type { SupabaseRunWriter, PhaseRecord } from '../supabase/run-writer.js';
 
 export type PhaseHandler = (run: RunState) => Promise<PhaseEvent>;
 
@@ -25,6 +26,16 @@ const DEFAULT_MAX_ATTEMPTS: Record<string, number> = {
   deploy: 2,
 };
 
+function buildPhaseRecords(run: RunState): PhaseRecord[] {
+  return Object.entries(run.phaseCompletions)
+    .filter(([, completed]) => completed)
+    .map(([phase]) => ({
+      phase,
+      outcome: 'success' as const,
+      completedAt: new Date().toISOString(),
+    }));
+}
+
 export async function runPipeline(
   run: RunState,
   table: TransitionTable,
@@ -32,6 +43,7 @@ export async function runPipeline(
   stateMgr: StateManager,
   costTracker: CostTracker,
   config?: Partial<PipelineConfig>,
+  runWriter?: SupabaseRunWriter,
 ): Promise<PipelineResult> {
   const maxAttempts = { ...DEFAULT_MAX_ATTEMPTS, ...config?.maxAttempts };
   const retryCounts: Record<string, number> = {};
@@ -47,6 +59,10 @@ export async function runPipeline(
     if (!budget.available) {
       run.phase = 'paused';
       await stateMgr.saveRunState(run);
+      void runWriter?.upsertRun(run.id, {
+        current_phase: run.phase,
+        phases: buildPhaseRecords(run),
+      });
       return { outcome: 'paused', run };
     }
 
@@ -61,6 +77,10 @@ export async function runPipeline(
       if (isComplete(currentPhase, event)) {
         run.phaseCompletions[currentPhase] = true;
         await stateMgr.saveRunState(run);
+        void runWriter?.upsertRun(run.id, {
+          current_phase: run.phase,
+          phases: buildPhaseRecords(run),
+        });
         return { outcome: 'complete', run };
       }
 
@@ -70,6 +90,10 @@ export async function runPipeline(
       }
       // Persist auto-advanced phases (crash recovery)
       await stateMgr.saveRunState(run);
+      void runWriter?.upsertRun(run.id, {
+        current_phase: run.phase,
+        phases: buildPhaseRecords(run),
+      });
       continue;
     }
 
@@ -87,6 +111,10 @@ export async function runPipeline(
     if (globalNext) {
       run.phase = globalNext;
       await stateMgr.saveRunState(run);
+      void runWriter?.upsertRun(run.id, {
+        current_phase: run.phase,
+        phases: buildPhaseRecords(run),
+      });
       return { outcome: 'paused', run };
     }
 
@@ -94,6 +122,10 @@ export async function runPipeline(
     if (isComplete(run.phase, event)) {
       run.phaseCompletions[run.phase] = true;
       await stateMgr.saveRunState(run);
+      void runWriter?.upsertRun(run.id, {
+        current_phase: run.phase,
+        phases: buildPhaseRecords(run),
+      });
       return { outcome: 'complete', run };
     }
 
@@ -103,11 +135,19 @@ export async function runPipeline(
     if (!advanced) {
       run.phase = 'stuck';
       await stateMgr.saveRunState(run);
+      void runWriter?.upsertRun(run.id, {
+        current_phase: run.phase,
+        phases: buildPhaseRecords(run),
+      });
       return { outcome: 'stuck', run, error: `No transition for ${currentPhase}:${event}` };
     }
 
     // Save state after each phase transition
     await stateMgr.saveRunState(run);
+    void runWriter?.upsertRun(run.id, {
+      current_phase: run.phase,
+      phases: buildPhaseRecords(run),
+    });
   }
 }
 
