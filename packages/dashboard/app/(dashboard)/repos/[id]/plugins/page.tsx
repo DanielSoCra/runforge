@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { RealtimeRefresh } from './realtime-refresh';
 import { RepoTabNav } from '@/components/repo-tab-nav';
 import { isAdmin } from '@/lib/auth';
+import { TriggerRecommendationForm } from '@/components/trigger-recommendation-button';
 
 type Confidence = 'high' | 'medium' | 'low';
 
@@ -42,12 +43,10 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">Plugins</h2>
         {admin && (
-          <form action={async () => {
+          <TriggerRecommendationForm action={async () => {
             'use server';
             await triggerRecommendation(id, repo.owner, repo.name);
-          }}>
-            <Button variant="outline" size="sm" type="submit">Re-analyze repo</Button>
-          </form>
+          }} />
         )}
       </div>
 
