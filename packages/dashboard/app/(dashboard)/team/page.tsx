@@ -56,8 +56,8 @@ export default async function TeamPage() {
         </CardContent>
       </Card>
 
-      {/* Pending invitations */}
-      {(invitations?.length ?? 0) > 0 && (
+      {/* Pending invitations — admin-only */}
+      {admin && (invitations?.length ?? 0) > 0 && (
         <Card>
           <CardHeader><CardTitle>Pending Invitations</CardTitle></CardHeader>
           <CardContent className="space-y-2">
