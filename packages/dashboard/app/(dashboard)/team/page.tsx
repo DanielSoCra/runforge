@@ -2,13 +2,13 @@ import { createClient } from '@/lib/supabase/server';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { createInvitation, changeRole, removeMember } from '@/actions/team';
+import { changeRole, removeMember } from '@/actions/team';
+import { InviteForm } from '@/components/invite-form';
+import { isAdmin } from '@/lib/auth';
 
 export default async function TeamPage() {
   const supabase = await createClient();
+  const admin = await isAdmin(supabase);
   const { data: members } = await supabase
     .from('team_members')
     .select('*, user:user_id(email, raw_user_meta_data)')
@@ -38,24 +38,26 @@ export default async function TeamPage() {
                     {member.role}
                   </Badge>
                 </div>
-                <div className="flex gap-2">
-                  <form action={changeRole.bind(null, member.id, member.role === 'admin' ? 'viewer' : 'admin')}>
-                    <Button type="submit" variant="ghost" size="sm">
-                      Make {member.role === 'admin' ? 'viewer' : 'admin'}
-                    </Button>
-                  </form>
-                  <form action={removeMember.bind(null, member.id)}>
-                    <Button type="submit" variant="ghost" size="sm" className="text-destructive">Remove</Button>
-                  </form>
-                </div>
+                {admin && (
+                  <div className="flex gap-2">
+                    <form action={changeRole.bind(null, member.id, member.role === 'admin' ? 'viewer' : 'admin')}>
+                      <Button type="submit" variant="ghost" size="sm">
+                        Make {member.role === 'admin' ? 'viewer' : 'admin'}
+                      </Button>
+                    </form>
+                    <form action={removeMember.bind(null, member.id)}>
+                      <Button type="submit" variant="ghost" size="sm" className="text-destructive">Remove</Button>
+                    </form>
+                  </div>
+                )}
               </div>
             );
           })}
         </CardContent>
       </Card>
 
-      {/* Pending invitations */}
-      {(invitations?.length ?? 0) > 0 && (
+      {/* Pending invitations — admin-only */}
+      {admin && (invitations?.length ?? 0) > 0 && (
         <Card>
           <CardHeader><CardTitle>Pending Invitations</CardTitle></CardHeader>
           <CardContent className="space-y-2">
@@ -70,28 +72,14 @@ export default async function TeamPage() {
       )}
 
       {/* Invite form */}
-      <Card>
-        <CardHeader><CardTitle>Invite Member</CardTitle></CardHeader>
-        <CardContent>
-          <form action={createInvitation} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="provider_handle">GitHub Username</Label>
-              <Input id="provider_handle" name="provider_handle" placeholder="octocat" required />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="role">Role</Label>
-              <Select name="role" defaultValue="viewer">
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="viewer">Viewer — can view, cannot change config</SelectItem>
-                  <SelectItem value="admin">Admin — full access</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Button type="submit" className="w-full">Send Invitation</Button>
-          </form>
-        </CardContent>
-      </Card>
+      {admin && (
+        <Card>
+          <CardHeader><CardTitle>Invite Member</CardTitle></CardHeader>
+          <CardContent>
+            <InviteForm />
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

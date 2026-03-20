@@ -85,7 +85,7 @@ describe('createProject', () => {
   it('returns error object when GitHub API fails', async () => {
     vi.mocked(createGitHubRepo).mockRejectedValueOnce(new Error('GitHub API error 422: name exists'));
     const result = await createProject(baseInput);
-    expect(result.error).toContain('GitHub API error');
+    expect(result.error).toBe('Failed to create project');
   });
 
   it('returns error when GITHUB_TOKEN is not configured', async () => {

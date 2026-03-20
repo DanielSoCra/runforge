@@ -41,7 +41,10 @@ export class RemoteControlManager {
     }
     if (this.proc) {
       this.proc.kill('SIGTERM');
-      this.proc = null;
+      // Do NOT null this.proc here — the exit event will do it.
+      // Nulling before the exit fires creates a window where start() can
+      // spawn a new process; the old process's exit then calls scheduleRestart
+      // with this.stopped=false (reset by start()), causing a spurious restart.
     }
     this.state = 'offline';
     this.url = null;
@@ -81,19 +84,19 @@ export class RemoteControlManager {
     proc.stderr?.pipe(process.stderr);
 
     proc.on('exit', (code: number | null) => {
+      this.proc = null; // Always clear, even when stopped — prevents stale reference
       if (this.stopped) return;
       const wasActive = this.state === 'active';
       this.state = 'offline';
       this.url = null;
-      this.proc = null;
       // Count as failure unless the session exited cleanly after becoming active.
       // Repeated clean exits without ever producing a URL still count toward the limit.
       this.scheduleRestart(code !== 0 || !wasActive);
     });
 
     proc.on('error', (err: Error) => {
+      this.proc = null; // Null first — before the stopped guard
       if (this.stopped) return;
-      this.proc = null;
       this.state = 'offline';
       this.url = null;
       console.error('[remote-control] Spawn error:', err.message);

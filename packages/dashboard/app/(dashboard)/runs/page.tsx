@@ -1,6 +1,13 @@
 import { createClient } from '@/lib/supabase/server';
 import { RunTable } from '@/components/run-table';
-import { Database } from '@/lib/types';
+import { PageError } from '@/components/page-error';
+
+const VALID_OUTCOMES = ['in-progress', 'complete', 'stuck', 'escalated'] as const;
+type RunOutcome = typeof VALID_OUTCOMES[number];
+
+function isValidOutcome(value: string): value is RunOutcome {
+  return (VALID_OUTCOMES as readonly string[]).includes(value);
+}
 
 export default async function RunsPage({
   searchParams,
@@ -16,9 +23,13 @@ export default async function RunsPage({
     .limit(100);
 
   if (repo) query = query.eq('repo_id', repo);
-  if (outcome) query = query.eq('outcome', outcome as Database['public']['Enums']['run_outcome']);
+  if (outcome && isValidOutcome(outcome)) query = query.eq('outcome', outcome);
 
-  const { data: runs } = await query;
+  const { data: runs, error: runsError } = await query;
+  if (runsError) {
+    console.error('[runs] failed to load runs:', runsError);
+    return <PageError />;
+  }
 
   return (
     <div className="space-y-6">
