@@ -28,9 +28,9 @@ All Dashboard mutations use Server Actions. No new daemon proxy routes are requi
 
 **`togglePlugin(repoId, pluginId, active)`** — Admin only. Validates the plugin identifier against the Plugin Registry. Upserts the RepoPlugin record: sets active and activated-at (when enabling) or clears activated-at (when disabling). Returns an error if the plugin identifier is not found in the Plugin Registry.
 
-**`enableAllSuggested(repoId)`** — Admin only. Calls `togglePlugin` independently for each RepoPlugin where recommended is true and active is false. Best-effort: each activation is attempted independently. Failures are collected and returned as a list; successful activations are not rolled back.
+**`enableAllSuggested(repoId)`** — Admin only. Independently upserts each RepoPlugin record where recommended is true and active is false. Best-effort: each activation is attempted independently. Failures are collected and returned as a list; successful activations are not rolled back.
 
-**`triggerRecommendation(repoId)`** — Admin only. Dispatches a background recommendation task and returns immediately. The caller receives no result from the task; results arrive via Realtime when the Database is updated.
+**`triggerRecommendation(repoId, repoOwner, repoName)`** — Admin only. Dispatches a background recommendation task and returns immediately. `repoOwner` and `repoName` are passed to the Model Provider prompt to identify the repository. The caller receives no result from the task; results arrive via Realtime when the Database is updated.
 
 **`exportPlugin(repoId, pluginId)`** — Admin only. Reads plugin content from the Plugin Registry and writes the plugin's skill documents to the repository's local context store, making them available for interactive developer use outside of the automated system.
 

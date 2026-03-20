@@ -31,16 +31,33 @@ test_paths:
 
 **In-memory cache for registry and config.** The plugin registry is small (tens of entries) and static for the lifetime of a process. Reading it from disk on every session spawn would add file I/O per session. Caching at startup costs nothing and eliminates the I/O. Active plugin identifiers per repo are cached as part of the existing config sync result — no separate cache is needed.
 
+**File size caps on plugin content.** Skill and agent documents are capped at 100KB per file; files exceeding this limit are skipped with a warning. `prompt-injection.md` is capped at 20KB and truncated (not skipped) if larger. This prevents a large or malicious plugin file from consuming unbounded memory before the token-budget guard runs. The caps are defined as `MAX_FILE_BYTES = 100_000` and `MAX_INJECTION_BYTES = 20_000` in `plugin-loader.ts`.
+
 **`activated_at` order for deterministic merge.** Multiple active plugins may contribute skills with the same filename. Rather than failing or logging ambiguity, the daemon resolves collisions by choosing the plugin activated first. This is predictable and admin-controllable: the admin can deactivate and reactivate a plugin to change its priority.
 
 ## Examples
 
-Registry validation at startup — reject any entry that lacks a directory or required manifest fields:
+Registry validation at startup — reject any entry that lacks a directory or required manifest fields. Both `JSON.parse` calls are wrapped in try/catch to produce actionable error messages rather than raw V8 parse errors:
 
 ```typescript
-for (const entry of registry.plugins) {
-  const dir = path.join(PLUGINS_DIR, entry.id);
-  const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+const raw = await readFile(registryPath, 'utf-8').catch(() => {
+  throw new Error(`Plugin registry not found at ${registryPath}`);
+});
+let json: { version: number; plugins: Array<{ id: string; name: string; tags: string[] }> };
+try {
+  json = JSON.parse(raw) as typeof json;
+} catch {
+  throw new Error(`Plugin registry at ${registryPath} is not valid JSON`);
+}
+
+for (const entry of json.plugins) {
+  const manifestRaw = await readFile(manifestPath, 'utf-8');
+  let manifest: Record<string, unknown>;
+  try {
+    manifest = JSON.parse(manifestRaw) as Record<string, unknown>;
+  } catch {
+    throw new Error(`Plugin ${entry.id}: manifest.json is not valid JSON`);
+  }
   if (!manifest.id || !manifest.name || !manifest.version || !manifest.description) {
     throw new Error(`Plugin ${entry.id}: manifest missing required fields`);
   }

@@ -10,7 +10,7 @@ references: ARCH-AC-PLUGINS
 code_paths:
   - supabase/migrations/003_plugins.sql
   - packages/dashboard/actions/plugins.ts
-  - packages/dashboard/app/repos/[id]/plugins/page.tsx
+  - packages/dashboard/app/(dashboard)/repos/[id]/plugins/page.tsx
   - packages/dashboard/components/plugin-card.tsx
   - packages/dashboard/components/repo-tab-nav.tsx
   - packages/dashboard/lib/plugins/registry.ts
