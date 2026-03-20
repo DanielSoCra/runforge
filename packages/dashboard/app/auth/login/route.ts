@@ -4,13 +4,11 @@ import { redirect } from 'next/navigation';
 
 export async function POST() {
   const supabase = await createClient();
-  // Build the callback URL from forwarded headers set by Caddy.
-  // NEXT_PUBLIC_* vars are inlined at build time (no env file in Docker build),
-  // so we derive the origin from the live request instead.
+  // SITE_URL is a plain (non-NEXT_PUBLIC_) env var read at runtime.
+  // Fall back to X-Forwarded-* headers set by Caddy if SITE_URL is not set.
   const h = await headers();
-  const proto = h.get('x-forwarded-proto') ?? 'https';
-  const host = h.get('x-forwarded-host') ?? h.get('host') ?? '';
-  const origin = `${proto}://${host}`;
+  const origin = process.env.SITE_URL
+    ?? `${h.get('x-forwarded-proto') ?? 'https'}://${h.get('x-forwarded-host') ?? h.get('host') ?? ''}`;
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'github',
