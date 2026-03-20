@@ -11,6 +11,11 @@ RUN pnpm install --frozen-lockfile
 
 FROM base AS builder
 WORKDIR /app
+# NEXT_PUBLIC_* vars must be inlined at build time (not available at runtime in client bundles)
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
 # Workspace root files required: pnpm must see workspace context to resolve
 # node_modules from /app/node_modules during next build
 COPY package.json pnpm-workspace.yaml ./

@@ -20,6 +20,9 @@ services:
     build:
       context: .
       dockerfile: packages/dashboard/Dockerfile
+      args:
+        - NEXT_PUBLIC_SUPABASE_URL
+        - NEXT_PUBLIC_SUPABASE_ANON_KEY
     restart: unless-stopped
     env_file: .env.prod
     environment:
