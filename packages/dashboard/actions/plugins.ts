@@ -9,11 +9,13 @@ export async function togglePlugin(
   pluginId: string,
   active: boolean,
 ): Promise<{ ok?: true; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: 'Unauthorized' };
   const registry = await loadDashboardRegistry();
   if (!registry.plugins.find(p => p.id === pluginId)) {
     return { error: `Unknown plugin: ${pluginId}` };
   }
-  const supabase = await createClient();
   // Only update active + activated_at on conflict — never overwrite recommendation fields.
   const { error } = await supabase.from('repo_plugins').upsert(
     {
@@ -32,6 +34,9 @@ export async function enableAllSuggested(
   repoId: string,
   pluginIds: string[],
 ): Promise<{ succeeded: string[]; failed: string[] }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { succeeded: [], failed: [] };
   const succeeded: string[] = [];
   const failed: string[] = [];
   for (const pluginId of pluginIds) {
@@ -43,6 +48,9 @@ export async function enableAllSuggested(
 }
 
 export async function triggerRecommendation(repoId: string, repoOwner: string, repoName: string): Promise<void> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return;
   // Fire-and-forget: returns immediately, writes to DB asynchronously
   void (async () => {
     try {
@@ -61,7 +69,6 @@ export async function triggerRecommendation(repoId: string, repoOwner: string, r
 
       const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
       const parsed = JSON.parse(text) as { recommendations: Array<{ pluginId: string; confidence: string; reason: string }> };
-      const supabase = await createClient();
 
       for (const rec of parsed.recommendations) {
         if (!registry.plugins.find(p => p.id === rec.pluginId)) continue;
