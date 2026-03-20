@@ -12,6 +12,7 @@ describe('readPluginsForContext file size cap', () => {
   const PLUGIN_ID = 'big-plugin';
 
   beforeEach(async () => {
+    clearRegistryCache(); // Ensure no cached registry from previous tests
     pluginsDir = join(tmpdir(), `plugin-loader-test-${Date.now()}`);
     pluginDir = join(pluginsDir, PLUGIN_ID);
     await mkdir(join(pluginDir, 'skills'), { recursive: true });

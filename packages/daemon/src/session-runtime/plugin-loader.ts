@@ -18,7 +18,9 @@ async function readMarkdownFiles(dir: string): Promise<SkillDoc[]> {
     const filePath = join(dir, f);
     const fileStat = await stat(filePath).catch(() => null);
     if (!fileStat || fileStat.size > MAX_FILE_BYTES) {
-      if (fileStat) {
+      if (!fileStat) {
+        console.warn(`[plugins] Skipping unreadable file: ${filePath} (stat failed)`);
+      } else {
         console.warn(
           `[plugins] Skipping oversized file: ${filePath} (${fileStat.size} bytes > ${MAX_FILE_BYTES} limit)`,
         );

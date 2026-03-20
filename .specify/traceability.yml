@@ -316,6 +316,7 @@ STACK-AC-PLUGINS-DAEMON:
   test_paths:
     - packages/daemon/src/control-plane/plugin-registry.test.ts
     - packages/daemon/src/session-runtime/plugin-injection.test.ts
+    - packages/daemon/src/session-runtime/plugin-loader.test.ts
   status: draft
 
 STACK-AC-PLUGINS-DASHBOARD:
