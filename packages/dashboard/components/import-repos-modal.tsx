@@ -271,8 +271,8 @@ export function ImportReposModal({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="not_imported">Not imported</SelectItem>
                     <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="not_imported">Not imported</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
