@@ -10,6 +10,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 const makeRun = (variant: 'feature' | 'feature-simple' | 'bug' = 'feature-simple'): RunState => ({
+  id: 'test-run-id',
   issueNumber: 1,
   title: 'Test',
   phase: 'detect',

@@ -198,6 +198,7 @@ async function processWorkRequest(
 ): Promise<void> {
   const variant = selectVariant(request);
   const run: RunState = {
+    id: '',
     issueNumber: request.issueNumber,
     title: request.title,
     phase: getStartPhase(variant),
