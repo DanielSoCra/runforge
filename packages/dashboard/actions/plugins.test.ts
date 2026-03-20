@@ -73,7 +73,40 @@ describe('enableAllSuggested', () => {
       from: (table: string) => (table === 'repo_plugins' ? { select, upsert } : { upsert }),
     } as never);
     const result = await enableAllSuggested('repo-id');
+    expect(eqRecommended).toHaveBeenCalledWith('recommended', true);
+    expect(eqActive).toHaveBeenCalledWith('active', false);
     expect(result.succeeded).toContain('web-stack');
+    expect(result.failed).toHaveLength(0);
+  });
+
+  it('tracks plugins whose toggle failed in failed array', async () => {
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
+    // First call to togglePlugin will fail (upsert returns error)
+    const upsert = vi.fn().mockResolvedValue({ error: { message: 'db error' } });
+    const eqActive = vi.fn().mockResolvedValue({ data: [{ plugin_id: 'web-stack' }], error: null });
+    const eqRecommended = vi.fn().mockReturnValue({ eq: eqActive });
+    const eqRepoId = vi.fn().mockReturnValue({ eq: eqRecommended });
+    const select = vi.fn().mockReturnValue({ eq: eqRepoId });
+    vi.mocked(createClient).mockResolvedValue({
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'u1' } } }) },
+      from: (table: string) => (table === 'repo_plugins' ? { select, upsert } : { upsert }),
+    } as never);
+    const result = await enableAllSuggested('repo-id');
+    expect(result.failed).toContain('web-stack');
+    expect(result.succeeded).toHaveLength(0);
+  });
+
+  it('returns empty arrays when the DB query errors', async () => {
+    const eqActive = vi.fn().mockResolvedValue({ data: null, error: { message: 'rls violation' } });
+    const eqRecommended = vi.fn().mockReturnValue({ eq: eqActive });
+    const eqRepoId = vi.fn().mockReturnValue({ eq: eqRecommended });
+    const select = vi.fn().mockReturnValue({ eq: eqRepoId });
+    vi.mocked(createClient).mockResolvedValue({
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'u1' } } }) },
+      from: () => ({ select }),
+    } as never);
+    const result = await enableAllSuggested('repo-id');
+    expect(result.succeeded).toHaveLength(0);
     expect(result.failed).toHaveLength(0);
   });
 

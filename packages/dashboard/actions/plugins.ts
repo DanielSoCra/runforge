@@ -36,12 +36,13 @@ export async function enableAllSuggested(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { succeeded: [], failed: [] };
-  const { data: suggested } = await supabase
+  const { data: suggested, error: selectError } = await supabase
     .from('repo_plugins')
     .select('plugin_id')
     .eq('repo_id', repoId)
     .eq('recommended', true)
     .eq('active', false);
+  if (selectError) return { succeeded: [], failed: [] };
   const pluginIds = (suggested ?? []).map((r: { plugin_id: string }) => r.plugin_id);
   const succeeded: string[] = [];
   const failed: string[] = [];
