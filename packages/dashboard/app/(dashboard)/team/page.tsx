@@ -2,10 +2,8 @@ import { createClient } from '@/lib/supabase/server';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { createInvitation, changeRole, removeMember } from '@/actions/team';
+import { changeRole, removeMember } from '@/actions/team';
+import { InviteForm } from '@/components/invite-form';
 
 export default async function TeamPage() {
   const supabase = await createClient();
@@ -73,23 +71,7 @@ export default async function TeamPage() {
       <Card>
         <CardHeader><CardTitle>Invite Member</CardTitle></CardHeader>
         <CardContent>
-          <form action={createInvitation} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="provider_handle">GitHub Username</Label>
-              <Input id="provider_handle" name="provider_handle" placeholder="octocat" required />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="role">Role</Label>
-              <Select name="role" defaultValue="viewer">
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="viewer">Viewer — can view, cannot change config</SelectItem>
-                  <SelectItem value="admin">Admin — full access</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <Button type="submit" className="w-full">Send Invitation</Button>
-          </form>
+          <InviteForm />
         </CardContent>
       </Card>
     </div>
