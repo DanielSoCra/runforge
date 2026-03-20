@@ -1,138 +1,472 @@
 'use client';
-import { useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { useMemo, useRef, useState } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { importRepos } from '@/actions/github-connections';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { importRepos, removeRepo } from '@/actions/github-connections';
 import { useRouter } from 'next/navigation';
+import { Loader2 } from 'lucide-react';
 
-interface Org { id: string; login: string; name: string | null; avatar_url: string | null }
-interface Repo { owner: string; name: string; full_name: string; private: boolean }
+interface Org {
+  id: string;
+  login: string;
+  name: string | null;
+  avatar_url: string | null;
+}
+
+interface GhRepo {
+  owner: string;
+  name: string;
+  full_name: string;
+  private: boolean;
+}
+
+interface ImportedRepo {
+  id: string;
+  owner: string;
+  name: string;
+  enabled: boolean;
+}
+
+type VisibilityFilter = 'all' | 'public' | 'private';
+type StatusFilter = 'all' | 'not_imported';
+
+export function filterRepos(
+  repos: GhRepo[],
+  importedSet: Set<string>,
+  search: string,
+  visibility: VisibilityFilter,
+  status: StatusFilter,
+): GhRepo[] {
+  return repos
+    .filter((r) => {
+      if (search && !r.full_name.toLowerCase().includes(search.toLowerCase())) return false;
+      if (visibility === 'public' && r.private) return false;
+      if (visibility === 'private' && !r.private) return false;
+      if (status === 'not_imported' && importedSet.has(r.full_name)) return false;
+      return true;
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
 
 export function ImportReposModal({
   connectionId,
   connectionName,
+  importedRepos,
 }: {
   connectionId: string;
   connectionName: string;
+  importedRepos: ImportedRepo[];
 }) {
   const [open, setOpen] = useState(false);
   const [orgs, setOrgs] = useState<Org[]>([]);
-  const [selectedOrgs, setSelectedOrgs] = useState<Set<string>>(new Set());
-  const [repos, setRepos] = useState<Map<string, Repo[]>>(new Map());
-  const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(false);
+  const [selectedOrg, setSelectedOrg] = useState<string | null>(null);
+  const [orgRepos, setOrgRepos] = useState<Map<string, GhRepo[]>>(new Map());
+  const [loadingOrgs, setLoadingOrgs] = useState(false);
+  const [loadingRepos, setLoadingRepos] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState('');
+  const [visibility, setVisibility] = useState<VisibilityFilter>('all');
+  const [status, setStatus] = useState<StatusFilter>('not_imported');
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<Set<string>>(new Set());
+  const [importing, setImporting] = useState(false);
+  const [orgsError, setOrgsError] = useState<string | null>(null);
+  const [reposError, setReposError] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<{ fullName: string } | null>(null);
+  const [resyncing, setResyncing] = useState<Set<string>>(new Set());
+  const [resyncError, setResyncError] = useState<Set<string>>(new Set());
   const router = useRouter();
+  const abortRef = useRef<AbortController | null>(null);
 
-  async function openModal() {
-    setLoading(true);
+  const importedSet = useMemo(
+    () => new Set(importedRepos.map((r) => `${r.owner}/${r.name}`)),
+    [importedRepos],
+  );
+  const importedById = useMemo(
+    () => new Map(importedRepos.map((r) => [`${r.owner}/${r.name}`, r])),
+    [importedRepos],
+  );
+
+  async function handleOpen() {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setLoadingOrgs(true);
     setOpen(true);
-    const res = await fetch(`/api/github/connections/${connectionId}/orgs`);
-    const data: Org[] = await res.json();
-    setOrgs(data);
-    setLoading(false);
+    setSelected(new Set());
+    setSearch('');
+    setVisibility('all');
+    setStatus('not_imported');
+    setSelectedOrg(null);
+    setOrgRepos(new Map());
+    setConfirmRemove(null);
+    setOrgsError(null);
+    setReposError(null);
+    setImportError(null);
+    setRemoveError(null);
+    setResyncError(new Set());
+    try {
+      const res = await fetch(`/api/github/connections/${connectionId}/orgs`, { signal: controller.signal });
+      if (!res.ok) {
+        setOrgsError('Could not load accounts.');
+        setLoadingOrgs(false);
+        return;
+      }
+      const data: Org[] = await res.json();
+      setOrgs(data);
+      setLoadingOrgs(false);
+      if (data.length > 0) await loadOrgRepos(data[0].login);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      setOrgsError('Could not load accounts.');
+      setLoadingOrgs(false);
+    }
   }
 
-  async function toggleOrg(login: string, checked: boolean) {
-    const next = new Set(selectedOrgs);
-    if (checked) {
-      next.add(login);
-      if (!repos.has(login)) {
-        const res = await fetch(`/api/github/connections/${connectionId}/repos?org=${login}`);
-        const data: Repo[] = await res.json();
-        setRepos((prev) => new Map(prev).set(login, data));
+  async function loadOrgRepos(login: string) {
+    setSelectedOrg(login);
+    setConfirmRemove(null);
+    setReposError(null);
+    setLoadingRepos(true);
+    try {
+      const res = await fetch(
+        `/api/github/connections/${connectionId}/repos?org=${encodeURIComponent(login)}`,
+        { signal: abortRef.current?.signal },
+      );
+      if (!res.ok) {
+        setReposError('Could not load repositories.');
+        setLoadingRepos(false);
+        return;
       }
-    } else {
-      next.delete(login);
+      const data: GhRepo[] = await res.json();
+      setOrgRepos((prev) => new Map(prev).set(login, data));
+      setLoadingRepos(false);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return;
+      setReposError('Could not load repositories.');
+      setLoadingRepos(false);
     }
-    setSelectedOrgs(next);
+  }
+
+  const currentRepos = selectedOrg ? (orgRepos.get(selectedOrg) ?? []) : [];
+  const filtered = filterRepos(currentRepos, importedSet, search, visibility, status);
+  const newRepos = filtered.filter((r) => !importedSet.has(r.full_name));
+  const allNewSelected = newRepos.length > 0 && newRepos.every((r) => selected.has(r.full_name));
+
+  function toggleSelectAll(checked: boolean) {
+    const next = new Set(selected);
+    newRepos.forEach((r) => (checked ? next.add(r.full_name) : next.delete(r.full_name)));
+    setSelected(next);
   }
 
   function toggleRepo(fullName: string, checked: boolean) {
-    const next = new Set(selectedRepos);
+    const next = new Set(selected);
     checked ? next.add(fullName) : next.delete(fullName);
-    setSelectedRepos(next);
-  }
-
-  function selectAllRepos(orgLogin: string, checked: boolean) {
-    const orgRepos = repos.get(orgLogin) ?? [];
-    const next = new Set(selectedRepos);
-    orgRepos.forEach((r) => checked ? next.add(r.full_name) : next.delete(r.full_name));
-    setSelectedRepos(next);
+    setSelected(next);
   }
 
   async function handleImport() {
-    setLoading(true);
-    const toImport: Array<{ owner: string; name: string }> = [];
-    for (const [org, orgRepos] of repos) {
-      if (!selectedOrgs.has(org)) continue;
-      for (const r of orgRepos) {
-        if (selectedRepos.has(r.full_name)) toImport.push({ owner: r.owner, name: r.name });
-      }
+    setImporting(true);
+    setImportError(null);
+    const toImport = [...selected].map((fn) => {
+      const slash = fn.indexOf('/');
+      return { owner: fn.slice(0, slash), name: fn.slice(slash + 1) };
+    });
+    try {
+      await importRepos(connectionId, toImport);
+      setOpen(false);
+      router.refresh();
+    } catch {
+      setImportError('Import failed. Please try again.');
+    } finally {
+      setImporting(false);
     }
-    await importRepos(connectionId, toImport);
-    setOpen(false);
-    router.refresh();
-    setLoading(false);
   }
 
-  const totalSelected = selectedRepos.size;
+  async function handleResync(repo: GhRepo) {
+    setResyncing((prev) => new Set(prev).add(repo.full_name));
+    setResyncError((prev) => { const next = new Set(prev); next.delete(repo.full_name); return next; });
+    try {
+      await importRepos(connectionId, [{ owner: repo.owner, name: repo.name }]);
+      router.refresh();
+    } catch {
+      setResyncError((prev) => new Set(prev).add(repo.full_name));
+    } finally {
+      setResyncing((prev) => { const next = new Set(prev); next.delete(repo.full_name); return next; });
+    }
+  }
+
+  async function handleRemove(fullName: string) {
+    const imported = importedById.get(fullName);
+    if (!imported) return;
+    setRemoving((prev) => new Set(prev).add(fullName));
+    setRemoveError(null);
+    try {
+      await removeRepo(imported.id, connectionId);
+      setConfirmRemove(null);
+      router.refresh();
+    } catch {
+      setRemoveError({ fullName });
+    } finally {
+      setRemoving((prev) => { const next = new Set(prev); next.delete(fullName); return next; });
+    }
+  }
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={openModal}>Import repositories</Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Import from {connectionName}</DialogTitle>
+      <Button variant="outline" size="sm" onClick={handleOpen}>
+        Import repositories
+      </Button>
+      <Dialog open={open} onOpenChange={(v) => { if (!v) abortRef.current?.abort(); setOpen(v); }}>
+        <DialogContent className="max-w-3xl p-0 gap-0">
+          <DialogHeader className="px-5 py-4 border-b border-border">
+            <DialogTitle>Import Repositories</DialogTitle>
           </DialogHeader>
-          {loading && orgs.length === 0 && <p className="text-sm text-muted-foreground">Loading...</p>}
-          <div className="space-y-4">
-            {orgs.map((org) => (
-              <div key={org.login} className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id={`org-${org.login}`}
-                    checked={selectedOrgs.has(org.login)}
-                    onCheckedChange={(v) => toggleOrg(org.login, !!v)}
-                  />
-                  <label htmlFor={`org-${org.login}`} className="font-medium text-sm cursor-pointer">
-                    {org.name ?? org.login}
-                  </label>
+          <div className="flex h-[480px]">
+            {/* Left: org list */}
+            <div className="w-[188px] flex-shrink-0 border-r border-border bg-muted/30 flex flex-col">
+              <p className="px-4 pt-3 pb-2 text-[10px] font-bold tracking-widest text-muted-foreground uppercase">
+                Accounts
+              </p>
+              {loadingOrgs ? (
+                <div className="px-3 space-y-1.5">
+                  {[1, 2, 3].map((i) => <Skeleton key={i} className="h-8 w-full rounded-md" />)}
                 </div>
-                {selectedOrgs.has(org.login) && (repos.get(org.login)?.length ?? 0) > 0 && (
-                  <div className="ml-6 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        id={`all-${org.login}`}
-                        checked={(repos.get(org.login) ?? []).every((r) => selectedRepos.has(r.full_name))}
-                        onCheckedChange={(v) => selectAllRepos(org.login, !!v)}
-                      />
-                      <label htmlFor={`all-${org.login}`} className="text-xs text-muted-foreground cursor-pointer">Select all</label>
-                    </div>
-                    {(repos.get(org.login) ?? []).map((r) => (
-                      <div key={r.full_name} className="flex items-center gap-2">
-                        <Checkbox
-                          id={`repo-${r.full_name}`}
-                          checked={selectedRepos.has(r.full_name)}
-                          onCheckedChange={(v) => toggleRepo(r.full_name, !!v)}
+              ) : orgsError ? (
+                <p className="px-4 text-sm text-destructive">{orgsError}</p>
+              ) : (
+                <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
+                  {orgs.map((org) => (
+                    <button
+                      key={org.login}
+                      onClick={() => loadOrgRepos(org.login)}
+                      className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm text-left transition-colors ${
+                        selectedOrg === org.login
+                          ? 'bg-background shadow-sm border border-border font-medium'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
+                      }`}
+                    >
+                      {org.avatar_url ? (
+                        <img
+                          src={org.avatar_url}
+                          alt={org.login}
+                          className="w-5 h-5 rounded-full flex-shrink-0"
                         />
-                        <label htmlFor={`repo-${r.full_name}`} className="text-sm cursor-pointer font-mono">
-                          {r.name}
-                        </label>
-                      </div>
-                    ))}
+                      ) : (
+                        <span className="w-5 h-5 rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">
+                          {org.login?.[0]?.toUpperCase() ?? '?'}
+                        </span>
+                      )}
+                      <span className="truncate">{org.name ?? org.login}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Right: repo table */}
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Toolbar */}
+              <div className="flex gap-2 p-3 border-b border-border">
+                <div className="relative flex-1">
+                  <svg
+                    className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <circle cx="11" cy="11" r="8" />
+                    <path d="m21 21-4.35-4.35" />
+                  </svg>
+                  <Input
+                    placeholder="Search repositories…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="pl-8 h-8 text-sm"
+                  />
+                </div>
+                <Select value={visibility} onValueChange={(v) => setVisibility(v as VisibilityFilter)}>
+                  <SelectTrigger className="h-8 w-28 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="public">Public</SelectItem>
+                    <SelectItem value="private">Private</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
+                  <SelectTrigger className="h-8 w-36 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="not_imported">Not imported</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Table header */}
+              <div className="grid grid-cols-[32px_1fr_80px_120px] px-4 py-2 bg-muted/50 border-b border-border text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                <Checkbox
+                  checked={allNewSelected}
+                  onCheckedChange={toggleSelectAll}
+                  disabled={newRepos.length === 0}
+                  aria-label="Select all"
+                />
+                <span>Repository</span>
+                <span>Visibility</span>
+                <span />
+              </div>
+
+              {/* Table body */}
+              <div className="flex-1 overflow-y-auto">
+                {loadingRepos ? (
+                  <div className="px-4 py-2 space-y-2">
+                    {[1, 2, 3, 4, 5].map((i) => <Skeleton key={i} className="h-9 w-full" />)}
                   </div>
+                ) : reposError ? (
+                  <p className="text-center text-sm text-destructive py-12">{reposError}</p>
+                ) : filtered.length === 0 ? (
+                  <p className="text-center text-sm text-muted-foreground py-12">
+                    {selectedOrg
+                      ? 'No repositories match your filters.'
+                      : 'Select an account to load repositories.'}
+                  </p>
+                ) : (
+                  filtered.map((repo) => {
+                    const isImported = importedSet.has(repo.full_name);
+                    const isConfirming = confirmRemove === repo.full_name;
+
+                    if (isImported) {
+                      return (
+                        <div key={repo.full_name} className="border-b border-border/60 last:border-0">
+                          <div className="grid grid-cols-[32px_1fr_80px_120px] px-4 py-2.5 items-center text-sm bg-muted/20">
+                            <span className="text-muted-foreground/40 text-base leading-none">·</span>
+                            <span className="font-mono text-muted-foreground text-xs">{repo.name}</span>
+                            <span className="text-[11px] text-muted-foreground">
+                              {repo.private ? 'Private' : 'Public'}
+                            </span>
+                            <div className="flex gap-1 justify-end flex-col items-end">
+                              {resyncError.has(repo.full_name) && (
+                                <span className="text-[10px] text-destructive">Resync failed</span>
+                              )}
+                              <div className="flex gap-1">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-6 px-2 text-xs"
+                                disabled={resyncing.has(repo.full_name)}
+                                onClick={() => handleResync(repo)}
+                              >
+                                {resyncing.has(repo.full_name) ? (
+                                  <><Loader2 className="h-3 w-3 animate-spin mr-1" />Syncing…</>
+                                ) : 'Resync'}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                                onClick={() => setConfirmRemove(repo.full_name)}
+                              >
+                                Remove
+                              </Button>
+                              </div>
+                            </div>
+                          </div>
+                          {isConfirming && (
+                            <div className="px-4 py-2 bg-destructive/5 border-t border-destructive/20 flex items-center justify-between text-xs">
+                              {removeError?.fullName === repo.full_name ? (
+                                <span className="text-destructive">Remove failed. Please try again.</span>
+                              ) : (
+                                <span className="text-muted-foreground">
+                                  Remove{' '}
+                                  <span className="font-mono font-medium text-foreground">{repo.name}</span>{' '}
+                                  from Auto-Claude?
+                                </span>
+                              )}
+                              <div className="flex gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 px-2 text-xs"
+                                  onClick={() => setConfirmRemove(null)}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  className="h-6 px-2 text-xs"
+                                  disabled={removing.has(repo.full_name)}
+                                  onClick={() => handleRemove(repo.full_name)}
+                                >
+                                  {removing.has(repo.full_name) ? 'Removing…' : 'Confirm remove'}
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div
+                        key={repo.full_name}
+                        className="grid grid-cols-[32px_1fr_80px_120px] px-4 py-2.5 items-center text-sm border-b border-border/60 last:border-0 hover:bg-muted/30 cursor-pointer"
+                        onClick={() => toggleRepo(repo.full_name, !selected.has(repo.full_name))}
+                      >
+                        <span className="pointer-events-none">
+                          <Checkbox checked={selected.has(repo.full_name)} />
+                        </span>
+                        <span className="font-mono text-xs font-medium">{repo.name}</span>
+                        <span className="text-[11px] text-muted-foreground">
+                          {repo.private ? 'Private' : 'Public'}
+                        </span>
+                        <span />
+                      </div>
+                    );
+                  })
                 )}
               </div>
-            ))}
+
+              {/* Footer */}
+              <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-muted/20">
+                <span className="text-xs text-muted-foreground">
+                  {importError
+                    ? <span className="text-destructive">{importError}</span>
+                    : selected.size > 0
+                    ? `${selected.size} repo${selected.size !== 1 ? 's' : ''} selected`
+                    : 'No repos selected'}
+                </span>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    disabled={selected.size === 0 || importing}
+                    onClick={handleImport}
+                  >
+                    {importing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Importing…
+                      </>
+                    ) : (
+                      `Import${selected.size > 0 ? ` ${selected.size} repo${selected.size !== 1 ? 's' : ''}` : ''}`
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
           </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button onClick={handleImport} disabled={totalSelected === 0 || loading}>
-              Import {totalSelected > 0 ? `${totalSelected} repo${totalSelected !== 1 ? 's' : ''}` : ''}
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

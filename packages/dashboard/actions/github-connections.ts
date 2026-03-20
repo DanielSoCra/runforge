@@ -30,15 +30,37 @@ export async function importRepos(
 
   // Upsert by owner+name — for new repos insert disabled; for existing only update connection_id
   for (const { owner, name } of repos) {
-    await supabase.from('repos').upsert(
-      { owner, name, connection_id: connectionId },
+    const { error: upsertErr } = await supabase.from('repos').upsert(
+      { owner, name, connection_id: connectionId, deleted_at: null, enabled: true },
       { onConflict: 'owner,name', ignoreDuplicates: false },
     );
+    if (upsertErr) {
+      console.error('[github-connections] importRepos upsert failed:', upsertErr);
+      throw new Error('Failed to import repository');
+    }
   }
 
   // Notify daemon best-effort
   fetch(`${process.env.DAEMON_URL}/repos/reload`, { method: 'POST', signal: AbortSignal.timeout(3000) })
     .catch(() => {});
+
+  revalidatePath('/repos');
+}
+
+export async function removeRepo(repoId: string, connectionId: string) {
+  const supabase = await createClient();
+  await requireAdmin(supabase);
+
+  const { error } = await supabase
+    .from('repos')
+    .update({ deleted_at: new Date().toISOString(), enabled: false })
+    .eq('id', repoId)
+    .eq('connection_id', connectionId);
+
+  if (error) {
+    console.error('[github-connections] removeRepo failed:', error);
+    throw new Error('Failed to remove repository');
+  }
 
   revalidatePath('/repos');
 }

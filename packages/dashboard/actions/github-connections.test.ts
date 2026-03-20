@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Chain helper: eq().eq() for removeRepo, eq() for removeConnection/others
+const makeEqChain = (result: { error: null | { message: string } }) => {
+  const inner = vi.fn().mockResolvedValue(result);
+  const outer = vi.fn().mockReturnValue({ eq: inner });
+  return { outer, inner };
+};
+
 const mockRepos = {
-  update: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) }),
+  update: vi.fn(),
 };
 const mockConnections = {
   delete: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) }),
@@ -30,5 +37,29 @@ describe('removeConnection', () => {
     expect(mockRepos.update).toHaveBeenCalledWith(
       expect.objectContaining({ enabled: false, connection_id: null })
     );
+  });
+});
+
+describe('removeRepo', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    const { outer } = makeEqChain({ error: null });
+    mockRepos.update.mockReturnValue({ eq: outer });
+  });
+
+  it('soft-deletes the repo by setting deleted_at and enabled=false', async () => {
+    const { removeRepo } = await import('./github-connections.js');
+    await removeRepo('repo-1', 'conn-1');
+    expect(mockRepos.update).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: false, deleted_at: expect.any(String) })
+    );
+  });
+
+  it('throws a generic error if the update fails', async () => {
+    vi.resetModules();
+    const { outer } = makeEqChain({ error: { message: 'db error' } });
+    mockRepos.update.mockReturnValue({ eq: outer });
+    const { removeRepo } = await import('./github-connections.js');
+    await expect(removeRepo('repo-1', 'conn-1')).rejects.toThrow('Failed to remove repository');
   });
 });
