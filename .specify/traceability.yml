@@ -259,6 +259,10 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/lib/scaffold-templates.ts
     - supabase/migrations/003_command_center.sql
     - supabase/migrations/005_github_connections.sql
+    - packages/dashboard/lib/supabase/service.ts
+    - packages/dashboard/app/api/auth/github-connection/route.ts
+    - packages/dashboard/app/api/auth/github-connection/callback/route.ts
+    - packages/dashboard/app/api/daemon/repos-reload/route.ts
     - docker-compose.prod.yml
     - Caddyfile
     - packages/dashboard/Dockerfile
