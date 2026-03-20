@@ -175,7 +175,9 @@ export class SessionRuntime {
     // 6. Record cost
     if (result.ok) {
       this.costTracker.recordCost(issueNumber, result.value.cost);
-      void runWriter?.writeCostEvent(runId ?? '', type, result.value.cost);
+      if (runWriter && runId) {
+        void runWriter.writeCostEvent(runId, type, result.value.cost);
+      }
     }
 
     return result;

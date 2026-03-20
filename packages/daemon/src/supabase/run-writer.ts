@@ -4,7 +4,7 @@ import type { SessionType } from '../types.js';
 import type { PipelineResult } from '../control-plane/pipeline.js';
 
 export type DbOutcome = 'in-progress' | 'complete' | 'stuck' | 'escalated';
-export type DbSessionType = 'planning' | 'implementation' | 'validation' | 'diagnosis' | 'fix';
+export type DbSessionType = 'planning' | 'implementation' | 'validation' | 'diagnosis';
 
 export function toDbOutcome(outcome: PipelineResult['outcome']): DbOutcome {
   if (outcome === 'complete') return 'complete';

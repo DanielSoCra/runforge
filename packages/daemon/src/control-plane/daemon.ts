@@ -44,11 +44,9 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     runWriter = new SupabaseRunWriter(supabase);
   }
 
-  const globalConfig = configReader?.getGlobalConfig();
-
   // 3. Initialize services
   const costTracker = new CostTracker({
-    dailyBudget: globalConfig?.dailyBudgetLimit ?? config.dailyBudget,
+    dailyBudget: configReader?.getGlobalConfig()?.dailyBudgetLimit ?? config.dailyBudget,
     perRunBudget: config.perRunBudget, // per-run budget is repo-specific, handled per-run
   });
   const runtime = new SessionRuntime(config, costTracker);
@@ -75,7 +73,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       config.pollIntervalMs,
       async (repoId, owner, name, detector) => {
         if (paused || shuttingDown) return;
-        if (activeRuns >= (globalConfig?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
+        if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
         costTracker.maybeResetDaily();
         const workResult = await detector.detectReadyWork();
         if (!workResult.ok) {
@@ -83,7 +81,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           return;
         }
         for (const request of workResult.value) {
-          if (activeRuns >= (globalConfig?.concurrencyLimit ?? config.maxConcurrentRuns)) break;
+          if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) break;
           if (paused || shuttingDown) break;
           const claimResult = await detector.claimWork(request.issueNumber);
           if (!claimResult.ok) continue;
@@ -159,12 +157,12 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     const detector = legacyDetector;
     legacyPoller = setInterval(async () => {
       if (paused || shuttingDown) return;
-      if (activeRuns >= (globalConfig?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
+      if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
       costTracker.maybeResetDaily();
       const workResult = await detector.detectReadyWork();
       if (!workResult.ok) return;
       for (const request of workResult.value) {
-        if (activeRuns >= (globalConfig?.concurrencyLimit ?? config.maxConcurrentRuns)) break;
+        if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) break;
         if (paused || shuttingDown) break;
         const claimResult = await detector.claimWork(request.issueNumber);
         if (!claimResult.ok) continue;
@@ -234,7 +232,7 @@ async function processWorkRequest(
 
   await stateMgr.saveRunState(run);
 
-  void runWriter?.upsertRun(run.id, {
+  await runWriter?.upsertRun(run.id, {
     repo_id: repoId || null,
     repo_owner: owner,
     repo_name: repoName,
