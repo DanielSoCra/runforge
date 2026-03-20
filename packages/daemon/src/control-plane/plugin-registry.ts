@@ -21,10 +21,12 @@ export async function loadPluginRegistry(pluginsDir: string): Promise<PluginRegi
   const raw = await readFile(registryPath, 'utf-8').catch(() => {
     throw new Error(`Plugin registry not found at ${registryPath}`);
   });
-  const json = JSON.parse(raw) as {
-    version: number;
-    plugins: Array<{ id: string; name: string; tags: string[] }>;
-  };
+  let json: { version: number; plugins: Array<{ id: string; name: string; tags: string[] }> };
+  try {
+    json = JSON.parse(raw) as typeof json;
+  } catch {
+    throw new Error(`Plugin registry at ${registryPath} is not valid JSON`);
+  }
 
   const plugins: PluginEntry[] = [];
   for (const entry of json.plugins) {
@@ -33,7 +35,13 @@ export async function loadPluginRegistry(pluginsDir: string): Promise<PluginRegi
       throw new Error(`Plugin directory not found: ${dir}`);
     });
     const manifestPath = join(dir, 'manifest.json');
-    const manifest = JSON.parse(await readFile(manifestPath, 'utf-8')) as Record<string, unknown>;
+    const manifestRaw = await readFile(manifestPath, 'utf-8');
+    let manifest: Record<string, unknown>;
+    try {
+      manifest = JSON.parse(manifestRaw) as Record<string, unknown>;
+    } catch {
+      throw new Error(`Plugin ${entry.id}: manifest.json is not valid JSON`);
+    }
     for (const field of REQUIRED_MANIFEST_FIELDS) {
       if (!manifest[field])
         throw new Error(`Plugin ${entry.id}: manifest missing required fields (${field})`);

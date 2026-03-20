@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { writeFile, mkdir, rm } from 'fs/promises';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import { loadPluginRegistry } from './plugin-registry.js';
 
 const FIXTURES = join(import.meta.dirname, 'fixtures');
@@ -22,5 +24,34 @@ describe('loadPluginRegistry', () => {
     await expect(loadPluginRegistry(join(FIXTURES, 'plugins-bad-manifest'))).rejects.toThrow(
       'missing required fields',
     );
+  });
+});
+
+describe('loadPluginRegistry malformed JSON', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = join(tmpdir(), `plugin-registry-test-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('throws a descriptive error when registry.json is malformed JSON', async () => {
+    await writeFile(join(dir, 'registry.json'), '{ not valid json }');
+    await expect(loadPluginRegistry(dir)).rejects.toThrow('is not valid JSON');
+  });
+
+  it('throws a descriptive error when a plugin manifest.json is malformed JSON', async () => {
+    const pluginDir = join(dir, 'my-plugin');
+    await mkdir(pluginDir);
+    await writeFile(join(dir, 'registry.json'), JSON.stringify({
+      version: 1,
+      plugins: [{ id: 'my-plugin', name: 'Test', tags: [] }],
+    }));
+    await writeFile(join(pluginDir, 'manifest.json'), '{ bad json }');
+    await expect(loadPluginRegistry(dir)).rejects.toThrow('my-plugin');
   });
 });
