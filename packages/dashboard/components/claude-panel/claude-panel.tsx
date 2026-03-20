@@ -75,6 +75,13 @@ export function ClaudePanel() {
             <button
               onClick={startSession}
               disabled={isStarting}
+              aria-label={
+                isStarting
+                  ? 'Starting session'
+                  : sessionState === 'failed'
+                    ? 'Restart Session'
+                    : 'Start Session'
+              }
               className="w-full text-left text-xs px-2 py-1.5 rounded border transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5
                 data-[state=failed]:border-destructive data-[state=failed]:text-destructive
                 data-[state=offline]:border-border data-[state=offline]:text-foreground
