@@ -6,6 +6,12 @@
       "name": "Auto-Claude Dev",
       "description": "Skills and agents for developing the auto-claude daemon: spec-driven development, FSM patterns, traceability workflow.",
       "tags": ["typescript", "daemon", "spec-driven", "fsm"]
+    },
+    {
+      "id": "agency",
+      "name": "Agency — Website Workflow",
+      "description": "Complete website production pipeline: intelligence, brand, design, SEO, content, build, QA, and deployment. Requires Firecrawl and Playwright MCP servers.",
+      "tags": ["website", "astro", "brand", "seo"]
     }
   ]
 }

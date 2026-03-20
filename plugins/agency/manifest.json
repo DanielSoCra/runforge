@@ -1,0 +1,6 @@
+{
+  "id": "agency",
+  "name": "Agency — Website Workflow",
+  "version": "1.0.0",
+  "description": "Complete website production pipeline: intelligence, brand, design, SEO, content, build, QA, and deployment. Requires Firecrawl and Playwright MCP servers."
+}
