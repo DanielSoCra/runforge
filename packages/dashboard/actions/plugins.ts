@@ -64,6 +64,9 @@ export async function triggerRecommendation(repoId: string, repoOwner: string, r
       const registry = await loadDashboardRegistry();
       const catalog = registry.plugins.map(p => `- ${p.id}: ${p.description} [${p.tags.join(', ')}]`).join('\n');
 
+      // TODO(I5): Use the repo's stored `model-provider` credential from api_keys.encrypted_value
+      // once a decryption utility exists. For now falls back to process.env.ANTHROPIC_API_KEY.
+      // Repos without a global key will fail silently (caught below).
       const client = new Anthropic();
       const response = await client.messages.create({
         model: 'claude-sonnet-4-6',
@@ -75,7 +78,15 @@ export async function triggerRecommendation(repoId: string, repoOwner: string, r
       });
 
       const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
-      const parsed = JSON.parse(text) as { recommendations: Array<{ pluginId: string; confidence: string; reason: string }> };
+      // Strip common markdown fences that LLMs add around JSON
+      const cleaned = text.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
+      let parsed: { recommendations: Array<{ pluginId: string; confidence: string; reason: string }> };
+      try {
+        parsed = JSON.parse(cleaned) as typeof parsed;
+      } catch {
+        // LLM returned non-JSON — silently skip (user can re-trigger)
+        return;
+      }
 
       for (const rec of parsed.recommendations) {
         if (!registry.plugins.find(p => p.id === rec.pluginId)) continue;
