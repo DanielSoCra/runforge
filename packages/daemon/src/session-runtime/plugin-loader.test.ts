@@ -48,4 +48,21 @@ describe('readPluginsForContext file size cap', () => {
       else process.env['PLUGINS_DIR'] = orig;
     }
   });
+
+  it('truncates prompt-injection.md content larger than MAX_INJECTION_BYTES', async () => {
+    // Create a prompt-injection.md larger than 20KB
+    const bigInjection = 'y'.repeat(25_000);
+    await writeFile(join(pluginDir, 'prompt-injection.md'), bigInjection);
+
+    const orig = process.env['PLUGINS_DIR'];
+    process.env['PLUGINS_DIR'] = pluginsDir;
+    try {
+      const result = await readPluginsForContext([PLUGIN_ID], new Map());
+      const plugin = result.find(p => p.id === PLUGIN_ID);
+      expect(plugin?.promptInjection.length).toBe(20_000);
+    } finally {
+      if (orig === undefined) delete process.env['PLUGINS_DIR'];
+      else process.env['PLUGINS_DIR'] = orig;
+    }
+  });
 });

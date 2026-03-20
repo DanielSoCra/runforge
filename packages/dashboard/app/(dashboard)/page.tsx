@@ -28,15 +28,19 @@ export default async function HomePage() {
   const todayCost = costs?.reduce((sum, e) => sum + Number(e.cost), 0) ?? 0;
 
   let daemonStatus: 'running' | 'paused' | 'offline' = 'offline';
-  try {
-    const res = await fetch(`${process.env.DAEMON_URL}/status`, {
-      next: { revalidate: 10 },
-      signal: AbortSignal.timeout(3000),
-    });
-    const json = await res.json().catch(() => null);
-    daemonStatus = json?.state ?? (res.ok ? 'running' : 'offline');
-  } catch (err) {
-    console.error('[daemon-status] unreachable:', err instanceof Error ? err.message : err);
+  if (!process.env.DAEMON_URL) {
+    console.error('[daemon-status] DAEMON_URL is not configured');
+  } else {
+    try {
+      const res = await fetch(`${process.env.DAEMON_URL}/status`, {
+        next: { revalidate: 10 },
+        signal: AbortSignal.timeout(3000),
+      });
+      const json = await res.json().catch(() => null);
+      daemonStatus = json?.state ?? (res.ok ? 'running' : 'offline');
+    } catch (err) {
+      console.error('[daemon-status] unreachable:', err instanceof Error ? err.message : err);
+    }
   }
 
   return (

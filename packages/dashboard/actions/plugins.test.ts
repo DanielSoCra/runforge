@@ -13,6 +13,7 @@ import { togglePlugin, enableAllSuggested, triggerRecommendation } from './plugi
 import { createClient } from '@/lib/supabase/server';
 import { loadDashboardRegistry } from '@/lib/plugins/registry';
 import { requireAdmin } from '@/lib/auth';
+import Anthropic from '@anthropic-ai/sdk';
 
 const mockRegistry = { version: 1, plugins: [{ id: 'web-stack', name: 'Web Stack', description: '', tags: [] }] };
 
@@ -133,6 +134,7 @@ describe('triggerRecommendation', () => {
     // Should return without throwing
     await expect(triggerRecommendation('repo-id', 'owner', 'repo')).resolves.toBeUndefined();
     expect(vi.mocked(loadDashboardRegistry)).not.toHaveBeenCalled();
+    expect(vi.mocked(Anthropic)).not.toHaveBeenCalled();
   });
 
   it('returns early when repoOwner fails SAFE_PATTERN', async () => {
@@ -141,6 +143,7 @@ describe('triggerRecommendation', () => {
     // repoOwner with spaces fails the pattern
     await expect(triggerRecommendation('repo-id', 'owner with spaces', 'repo')).resolves.toBeUndefined();
     expect(vi.mocked(loadDashboardRegistry)).not.toHaveBeenCalled();
+    expect(vi.mocked(Anthropic)).not.toHaveBeenCalled();
   });
 
   it('returns early when repoName fails SAFE_PATTERN', async () => {
@@ -149,5 +152,6 @@ describe('triggerRecommendation', () => {
     // repoName with semicolon fails the pattern
     await expect(triggerRecommendation('repo-id', 'owner', 'repo;evil')).resolves.toBeUndefined();
     expect(vi.mocked(loadDashboardRegistry)).not.toHaveBeenCalled();
+    expect(vi.mocked(Anthropic)).not.toHaveBeenCalled();
   });
 });
