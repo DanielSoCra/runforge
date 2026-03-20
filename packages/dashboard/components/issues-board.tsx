@@ -23,7 +23,7 @@ const COLUMN_BORDER: Record<BoardColumn, string> = {
 
 function IssueCard({ card }: { card: BoardCard }) {
   return (
-    <div className={`bg-background rounded-md p-3 border-l-2 ${COLUMN_BORDER[card.column]} space-y-2`}>
+    <div className={`bg-background rounded-md p-3 border-l-2 ${COLUMN_BORDER[card.column]} space-y-2${card.column === 'complete' ? ' opacity-70' : ''}`}>
       <div className="flex items-start justify-between gap-2">
         <span className="text-xs text-muted-foreground font-mono">
           #{card.issueNumber} · {card.repoOwner}/{card.repoName}
@@ -33,6 +33,7 @@ function IssueCard({ card }: { card: BoardCard }) {
           target="_blank"
           rel="noopener noreferrer"
           className="text-xs text-primary hover:underline shrink-0"
+          aria-label={`Open issue #${card.issueNumber} on GitHub`}
         >
           ↗
         </a>

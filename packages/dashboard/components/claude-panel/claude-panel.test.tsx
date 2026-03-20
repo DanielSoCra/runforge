@@ -20,6 +20,8 @@ describe('ClaudePanel', () => {
       toggle: vi.fn(),
       sessionUrl: null,
       sessionState: 'offline',
+      startSession: vi.fn(),
+      isStarting: false,
     });
   });
 
@@ -32,7 +34,7 @@ describe('ClaudePanel', () => {
 
   it('calls toggle when tab is clicked', () => {
     const toggle = vi.fn();
-    mockHook.mockReturnValue({ isOpen: false, toggle, sessionUrl: null, sessionState: 'offline' });
+    mockHook.mockReturnValue({ isOpen: false, toggle, sessionUrl: null, sessionState: 'offline', startSession: vi.fn(), isStarting: false });
     render(<ClaudePanel />);
     fireEvent.click(screen.getByRole('button', { name: /claude/i }));
     expect(toggle).toHaveBeenCalledOnce();
@@ -44,6 +46,8 @@ describe('ClaudePanel', () => {
       toggle: vi.fn(),
       sessionUrl: 'https://claude.ai/remote/test',
       sessionState: 'active',
+      startSession: vi.fn(),
+      isStarting: false,
     });
     render(<ClaudePanel />);
     expect(screen.getByText('https://claude.ai/remote/test')).toBeInTheDocument();
@@ -55,6 +59,8 @@ describe('ClaudePanel', () => {
       toggle: vi.fn(),
       sessionUrl: null,
       sessionState: 'failed',
+      startSession: vi.fn(),
+      isStarting: false,
     });
     render(<ClaudePanel />);
     expect(screen.getByText(/remote control failed/i)).toBeInTheDocument();
