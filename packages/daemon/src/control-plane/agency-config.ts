@@ -48,7 +48,7 @@ const DEFAULTS: AgencyConfig = {
 
 export function mergeAgencyConfig(
   base: AgencyConfig,
-  overrides: Partial<AgencyConfig> & { checkpoints?: Partial<AgencyCheckpoints> },
+  overrides: Omit<Partial<AgencyConfig>, 'checkpoints'> & { checkpoints?: Partial<AgencyCheckpoints> },
 ): AgencyConfig {
   return {
     ...base,
