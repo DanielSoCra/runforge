@@ -64,7 +64,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     },
   });
   const serverResult = await start();
-  if (!serverResult.ok) return serverResult;
+  if (!serverResult.ok) {
+    await remoteControl.stop();
+    return serverResult;
+  }
 
   console.log(`Auto-Claude daemon started on port ${config.controlPort}`);
 

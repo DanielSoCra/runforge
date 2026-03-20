@@ -44,17 +44,25 @@ export async function createGitHubRepo(token: string, opts: CreateRepoOptions): 
       }),
     }) as GitHubRepo;
   } catch (err) {
-    // Org endpoint returns 404 for personal accounts — fall back to user repos endpoint
     if (err instanceof Error && err.message.includes('404')) {
-      return await ghFetch(token, `${GH_API}/user/repos`, {
-        method: 'POST',
-        body: JSON.stringify({
-          name: opts.name,
-          description: opts.description,
-          private: opts.private,
-          auto_init: false,
-        }),
-      }) as GitHubRepo;
+      // Before falling back to the user endpoint, verify opts.org is a personal account.
+      // If the org doesn't exist at all, rethrow the original error.
+      try {
+        const userInfo = await ghFetch(token, `${GH_API}/users/${opts.org}`, { method: 'GET' }) as { type?: string };
+        if (userInfo.type === 'User') {
+          return await ghFetch(token, `${GH_API}/user/repos`, {
+            method: 'POST',
+            body: JSON.stringify({
+              name: opts.name,
+              description: opts.description,
+              private: opts.private,
+              auto_init: false,
+            }),
+          }) as GitHubRepo;
+        }
+      } catch {
+        // User lookup failed — fall through to rethrow original error
+      }
     }
     throw err;
   }

@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 const STORAGE_KEY = 'claude-panel-open';
 const POLL_INTERVAL = 5_000;
@@ -7,10 +7,7 @@ const POLL_INTERVAL = 5_000;
 export type RemoteControlState = 'offline' | 'active' | 'failed';
 
 export function useClaudePanel() {
-  const [isOpen, setIsOpen] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    return localStorage.getItem(STORAGE_KEY) === 'true';
-  });
+  const [isOpen, setIsOpen] = useState(false);
   const [sessionUrl, setSessionUrl] = useState<string | null>(null);
   const [sessionState, setSessionState] = useState<RemoteControlState>('offline');
 
@@ -18,12 +15,13 @@ export function useClaudePanel() {
     setIsOpen((prev) => !prev);
   }, []);
 
-  const isFirstRender = useRef(true);
+  // Mount: restore persisted panel state (SSR-safe — localStorage is client-only)
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
+    setIsOpen(localStorage.getItem(STORAGE_KEY) === 'true');
+  }, []);
+
+  // Persist panel open/closed state on every change
+  useEffect(() => {
     localStorage.setItem(STORAGE_KEY, String(isOpen));
   }, [isOpen]);
 

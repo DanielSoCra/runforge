@@ -2,17 +2,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-
-async function requireAdmin(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Unauthorized');
-  const { data: member } = await supabase.from('team_members')
-    .select('role')
-    .eq('user_id', user.id)
-    .single();
-  if (member?.role !== 'admin') throw new Error('Admin access required');
-  return user;
-}
+import { requireAdmin } from '@/lib/auth';
 
 const SAFE_PATTERN = /^[a-zA-Z0-9._-]+$/;
 

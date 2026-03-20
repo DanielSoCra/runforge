@@ -254,6 +254,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/app/(dashboard)/command-center/page.tsx
     - packages/dashboard/app/(dashboard)/command-center/new-project/page.tsx
     - packages/dashboard/actions/new-project.ts
+    - packages/dashboard/lib/auth.ts
     - packages/dashboard/lib/github-api.ts
     - packages/dashboard/lib/scaffold-templates.ts
     - supabase/migrations/003_command_center.sql

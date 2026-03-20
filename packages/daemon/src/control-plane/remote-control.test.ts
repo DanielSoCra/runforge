@@ -63,29 +63,63 @@ describe('RemoteControlManager', () => {
     expect(manager.getState().remote_control_state).toBe('offline');
   });
 
-  it('transitions to failed after 3 consecutive restart failures', async () => {
+  it('tracks offline state through each failure and reaches failed after 3 exits', async () => {
+    let spawnCount = 0;
     vi.mocked(spawn).mockImplementation(() => {
+      spawnCount++;
       const proc = makeFakeProcess();
       setTimeout(() => proc.emit('exit', 1), 0);
       return proc;
     });
 
     manager.start();
-    await vi.runAllTimersAsync();
+    expect(spawnCount).toBe(1);
 
+    // Failure 1: exit fires → offline, backoff 5s (BACKOFF_MS[0])
+    await vi.advanceTimersByTimeAsync(1);
+    expect(manager.getState().remote_control_state).toBe('offline');
+
+    // Backoff expires → spawn 2
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(spawnCount).toBe(2);
+
+    // Failure 2: exit fires → offline, backoff 15s (BACKOFF_MS[1])
+    await vi.advanceTimersByTimeAsync(1);
+    expect(manager.getState().remote_control_state).toBe('offline');
+
+    // Backoff expires → spawn 3
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(spawnCount).toBe(3);
+
+    // Failure 3: exit fires → failed (failureCount hits MAX_FAILURES)
+    await vi.advanceTimersByTimeAsync(1);
     expect(manager.getState().remote_control_state).toBe('failed');
   });
 
   it('transitions to failed state when process emits error events', async () => {
+    let spawnCount = 0;
     vi.mocked(spawn).mockImplementation(() => {
+      spawnCount++;
       const proc = makeFakeProcess();
       setTimeout(() => proc.emit('error', new Error('spawn ENOENT')), 0);
       return proc;
     });
 
     manager.start();
-    await vi.runAllTimersAsync();
+    expect(spawnCount).toBe(1);
 
+    // Error → offline, backoff 5s
+    await vi.advanceTimersByTimeAsync(1);
+    expect(manager.getState().remote_control_state).toBe('offline');
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(spawnCount).toBe(2);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(spawnCount).toBe(3);
+
+    await vi.advanceTimersByTimeAsync(1);
     expect(manager.getState().remote_control_state).toBe('failed');
   });
 });

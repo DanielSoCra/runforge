@@ -23,6 +23,10 @@ export class RemoteControlManager {
       console.warn('[remote-control] start() called while already running — ignoring');
       return;
     }
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
     this.stopped = false;
     this.failureCount = 0;
     this.state = 'offline';
@@ -66,6 +70,7 @@ export class RemoteControlManager {
       for (const line of lines) {
         const match = line.match(/https:\/\/[^\s,;)'"]+/);
         if (match && this.state !== 'active') {
+          // Strip trailing period (not excluded in the regex above but common punctuation)
           this.url = match[0].replace(/[.,;)'"]+$/, '');
           this.state = 'active';
           this.failureCount = 0;
@@ -77,13 +82,13 @@ export class RemoteControlManager {
 
     proc.on('exit', (code: number | null) => {
       if (this.stopped) return;
+      const wasActive = this.state === 'active';
       this.state = 'offline';
       this.url = null;
       this.proc = null;
-      if (code === 0) {
-        this.failureCount = 0;
-      }
-      this.scheduleRestart(code !== 0);
+      // Count as failure unless the session exited cleanly after becoming active.
+      // Repeated clean exits without ever producing a URL still count toward the limit.
+      this.scheduleRestart(code !== 0 || !wasActive);
     });
 
     proc.on('error', (err: Error) => {
@@ -106,7 +111,7 @@ export class RemoteControlManager {
         return;
       }
     }
-    const delay = BACKOFF_MS[Math.min(this.failureCount, BACKOFF_MS.length - 1)];
+    const delay = BACKOFF_MS[Math.min(this.failureCount - 1, BACKOFF_MS.length - 1)];
     if (countAsFailure) {
       console.warn(`[remote-control] Process exited (attempt ${this.failureCount}/${MAX_FAILURES}), restarting in ${delay}ms`);
     }

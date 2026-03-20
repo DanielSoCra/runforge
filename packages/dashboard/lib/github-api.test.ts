@@ -44,13 +44,20 @@ describe('createGitHubRepo', () => {
     ).rejects.toThrow('GitHub API error 422');
   });
 
-  it('falls back to user repos endpoint when org endpoint returns 404', async () => {
+  it('falls back to user repos endpoint when org endpoint returns 404 for a personal account', async () => {
     mockFetch
+      // 1. POST /orgs/me/repos → 404
       .mockResolvedValueOnce({
         ok: false,
         status: 404,
         json: async () => ({ message: 'Not Found' }),
       } as Response)
+      // 2. GET /users/me → type: User (confirms personal account)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ type: 'User', login: 'me' }),
+      } as Response)
+      // 3. POST /user/repos → success
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({ id: 2, name: 'my-repo', html_url: 'https://github.com/me/my-repo', full_name: 'me/my-repo' }),
@@ -58,8 +65,28 @@ describe('createGitHubRepo', () => {
 
     const result = await createGitHubRepo('token', { org: 'me', name: 'my-repo', description: '', private: false });
     expect(result.html_url).toBe('https://github.com/me/my-repo');
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockFetch.mock.calls[2][0]).toBe('https://api.github.com/user/repos');
+  });
+
+  it('does not fall back when org 404 is for an unknown org (not a personal account)', async () => {
+    mockFetch
+      // 1. POST /orgs/unknown-org/repos → 404
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: async () => ({ message: 'Not Found' }),
+      } as Response)
+      // 2. GET /users/unknown-org → type: Organization
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ type: 'Organization', login: 'unknown-org' }),
+      } as Response);
+
+    await expect(
+      createGitHubRepo('token', { org: 'unknown-org', name: 'repo', description: '', private: false })
+    ).rejects.toThrow('GitHub API error 404');
     expect(mockFetch).toHaveBeenCalledTimes(2);
-    expect(mockFetch.mock.calls[1][0]).toBe('https://api.github.com/user/repos');
   });
 });
 

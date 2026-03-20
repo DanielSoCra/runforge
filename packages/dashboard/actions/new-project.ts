@@ -1,5 +1,6 @@
 'use server';
 import { createClient } from '@/lib/supabase/server';
+import { requireAdmin } from '@/lib/auth';
 import { createGitHubRepo, commitFile } from '@/lib/github-api';
 import {
   buildL0Vision,
@@ -9,6 +10,8 @@ import {
   buildWorkflowYml,
 } from '@/lib/scaffold-templates';
 import { revalidatePath } from 'next/cache';
+
+const SAFE_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
 export interface CreateProjectInput {
   // githubToken is intentionally NOT in this interface — the Server Action reads
@@ -28,16 +31,24 @@ export interface CreateProjectResult {
 
 export async function createProject(input: CreateProjectInput): Promise<CreateProjectResult> {
   const supabase = await createClient();
+
   try {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return { error: 'Unauthorized' };
-    const { data: member } = await supabase.from('team_members')
-      .select('role')
-      .eq('user_id', user.id)
-      .single();
-    if (member?.role !== 'admin') return { error: 'Admin access required' };
-  } catch {
-    return { error: 'Authorization check failed' };
+    await requireAdmin(supabase);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Unauthorized' };
+  }
+
+  if (!input.org.trim() || !input.name.trim()) {
+    return { error: 'Org and name are required' };
+  }
+  if (!SAFE_PATTERN.test(input.org)) {
+    return { error: 'Org must contain only alphanumeric characters, dots, underscores, and hyphens' };
+  }
+  if (!SAFE_PATTERN.test(input.name)) {
+    return { error: 'Name must contain only alphanumeric characters, dots, underscores, and hyphens' };
+  }
+  if (!input.l0Vision.trim()) {
+    return { error: 'L0 vision statement is required' };
   }
 
   const token = process.env.GITHUB_TOKEN ?? '';
@@ -53,8 +64,10 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
     });
     githubRepoCreated = true;
 
-    const owner = input.org;
-    const repoName = input.name;
+    // Use the actual owner/name from GitHub's response — they may differ from input
+    // when the user-endpoint fallback fires (personal account vs org).
+    const owner = repo.full_name.split('/')[0];
+    const repoName = repo.name;
 
     await commitFile(token, {
       owner, repo: repoName,

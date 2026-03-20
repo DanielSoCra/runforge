@@ -70,7 +70,7 @@ describe('createProject', () => {
     expect(vi.mocked(commitFile).mock.calls.length).toBeGreaterThanOrEqual(5);
   });
 
-  it('inserts Supabase repo record with enabled=false', async () => {
+  it('inserts Supabase repo record with owner from GitHub response and enabled=false', async () => {
     await createProject(baseInput);
     expect(reposInsertMock).toHaveBeenCalledWith(
       expect.objectContaining({ owner: 'acme', name: 'test', enabled: false })
@@ -86,5 +86,34 @@ describe('createProject', () => {
     vi.mocked(createGitHubRepo).mockRejectedValueOnce(new Error('GitHub API error 422: name exists'));
     const result = await createProject(baseInput);
     expect(result.error).toContain('GitHub API error');
+  });
+
+  it('returns error when GITHUB_TOKEN is not configured', async () => {
+    process.env.GITHUB_TOKEN = '';
+    const result = await createProject(baseInput);
+    expect(result.error).toContain('GITHUB_TOKEN');
+    expect(createGitHubRepo).not.toHaveBeenCalled();
+  });
+
+  it('returns partial-failure error when GitHub repo created but Supabase insert fails', async () => {
+    reposInsertMock.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        single: vi.fn().mockResolvedValue({ data: null, error: { message: 'DB error' } }),
+      }),
+    });
+    const result = await createProject(baseInput);
+    expect(result.error).toMatch(/GitHub repo was created but registration failed/);
+  });
+
+  it('returns error when name contains invalid characters', async () => {
+    const result = await createProject({ ...baseInput, name: 'my project!' });
+    expect(result.error).toContain('Name must contain');
+    expect(createGitHubRepo).not.toHaveBeenCalled();
+  });
+
+  it('returns error when l0Vision is empty', async () => {
+    const result = await createProject({ ...baseInput, l0Vision: '  ' });
+    expect(result.error).toContain('L0 vision');
+    expect(createGitHubRepo).not.toHaveBeenCalled();
   });
 });
