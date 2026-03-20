@@ -72,7 +72,7 @@ export function ImportReposModal({
   const [visibility, setVisibility] = useState<VisibilityFilter>('all');
   const [status, setStatus] = useState<StatusFilter>('not_imported');
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
-  const [removing, setRemoving] = useState(false);
+  const [removing, setRemoving] = useState<Set<string>>(new Set());
   const [importing, setImporting] = useState(false);
   const [orgsError, setOrgsError] = useState<string | null>(null);
   const [reposError, setReposError] = useState<string | null>(null);
@@ -187,7 +187,7 @@ export function ImportReposModal({
   async function handleRemove(fullName: string) {
     const imported = importedById.get(fullName);
     if (!imported) return;
-    setRemoving(true);
+    setRemoving((prev) => new Set(prev).add(fullName));
     setRemoveError(null);
     try {
       await removeRepo(imported.id);
@@ -196,7 +196,7 @@ export function ImportReposModal({
     } catch {
       setRemoveError({ fullName });
     } finally {
-      setRemoving(false);
+      setRemoving((prev) => { const next = new Set(prev); next.delete(fullName); return next; });
     }
   }
 
@@ -387,10 +387,10 @@ export function ImportReposModal({
                                   variant="destructive"
                                   size="sm"
                                   className="h-6 px-2 text-xs"
-                                  disabled={removing}
+                                  disabled={removing.has(repo.full_name)}
                                   onClick={() => handleRemove(repo.full_name)}
                                 >
-                                  {removing ? 'Removing…' : 'Confirm remove'}
+                                  {removing.has(repo.full_name) ? 'Removing…' : 'Confirm remove'}
                                 </Button>
                               </div>
                             </div>

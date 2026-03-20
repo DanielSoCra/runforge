@@ -32,3 +32,25 @@ describe('removeConnection', () => {
     );
   });
 });
+
+describe('removeRepo', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mockRepos.update.mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
+  });
+
+  it('soft-deletes the repo by setting deleted_at and enabled=false', async () => {
+    const { removeRepo } = await import('./github-connections.js');
+    await removeRepo('repo-1');
+    expect(mockRepos.update).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: false, deleted_at: expect.any(String) })
+    );
+  });
+
+  it('throws a generic error if the update fails', async () => {
+    mockRepos.update.mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: { message: 'db error' } }) });
+    vi.resetModules();
+    const { removeRepo } = await import('./github-connections.js');
+    await expect(removeRepo('repo-1')).rejects.toThrow('Failed to remove repository');
+  });
+});
