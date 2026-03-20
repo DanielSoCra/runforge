@@ -1,5 +1,4 @@
 // src/control-plane/daemon.ts
-import { createClient } from '@supabase/supabase-js';
 import { Octokit } from '@octokit/rest';
 import { loadConfig, type Config } from '../config.js';
 import { SessionRuntime } from '../session-runtime/runtime.js';
@@ -19,6 +18,9 @@ import { notify } from './notify.js';
 import type { RunState, WorkRequest } from '../types.js';
 import { ok, err, type Result } from '../lib/result.js';
 import { RemoteControlManager } from './remote-control.js';
+import { getSupabaseClient } from '../supabase/client.js';
+import { SupabaseConfigReader } from '../supabase/config-reader.js';
+import { SupabaseRunWriter, toDbOutcome } from '../supabase/run-writer.js';
 
 export async function startDaemon(configPath: string): Promise<Result<void>> {
   // 1. Load config
@@ -31,10 +33,23 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   const stateMgr = new StateManager(stateDir);
   await stateMgr.initialize();
 
+  // Initialize Supabase layer (optional — daemon works without it in legacy mode)
+  const supabase = getSupabaseClient();
+  let configReader: SupabaseConfigReader | null = null;
+  let runWriter: SupabaseRunWriter | null = null;
+
+  if (supabase) {
+    configReader = new SupabaseConfigReader(supabase);
+    await configReader.start(); // throws if unreachable — prevents silent misconfiguration
+    runWriter = new SupabaseRunWriter(supabase);
+  }
+
+  const globalConfig = configReader?.getGlobalConfig();
+
   // 3. Initialize services
   const costTracker = new CostTracker({
-    dailyBudget: config.dailyBudget,
-    perRunBudget: config.perRunBudget,
+    dailyBudget: globalConfig?.dailyBudgetLimit ?? config.dailyBudget,
+    perRunBudget: config.perRunBudget, // per-run budget is repo-specific, handled per-run
   });
   const runtime = new SessionRuntime(config, costTracker);
   const coordinator = new ImplementationCoordinator(runtime, process.cwd());
@@ -49,17 +64,14 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   let shuttingDown = false;
 
   // 5. Build RepoManager or legacy single-repo detector
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
   let repoManager: RepoManager | null = null;
   let legacyDetector: WorkDetector | null = null;
 
-  if (supabaseUrl && supabaseKey) {
+  if (supabase) {
     // DB mode
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     repoManager = new RepoManager(
-      supabase,
+      supabase as any,
       config.pollIntervalMs,
       async (repoId, owner, name, detector) => {
         if (paused || shuttingDown) return;
@@ -77,7 +89,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           if (!claimResult.ok) continue;
           activeRuns++;
           repoManager!.notifyRunStart(repoId);
-          processWorkRequest(config, owner, name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir)
+          processWorkRequest(config, repoId, owner, name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined)
             .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
             // CRITICAL: notifyRunEnd must be in .finally(), never only in .catch() or .then().
             // If it is missing here, a disabled repo's poller hangs in pendingDisable forever.
@@ -99,6 +111,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
 
     const initResult = await repoManager.initialize();
     if (!initResult.ok) {
+      configReader?.stop();
       await remoteControl.stop();
       return initResult;
     }
@@ -133,6 +146,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   const serverResult = await start();
   if (!serverResult.ok) {
     repoManager?.stop();
+    configReader?.stop();
     await remoteControl.stop();
     return serverResult;
   }
@@ -155,7 +169,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         const claimResult = await detector.claimWork(request.issueNumber);
         if (!claimResult.ok) continue;
         activeRuns++;
-        processWorkRequest(config, config.repo!.owner, config.repo!.name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir)
+        processWorkRequest(config, '', config.repo!.owner, config.repo!.name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined)
           .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
           .finally(() => { activeRuns--; });
       }
@@ -169,6 +183,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     console.log('Shutting down...');
     if (legacyPoller) clearInterval(legacyPoller);
     repoManager?.stop();
+    configReader?.stop();
     const deadline = Date.now() + config.gracePeriodMs;
     while (activeRuns > 0 && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 1000));
@@ -186,6 +201,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
 
 async function processWorkRequest(
   config: Config,
+  repoId: string,
   owner: string,
   repoName: string,
   request: WorkRequest,
@@ -195,10 +211,13 @@ async function processWorkRequest(
   stateMgr: StateManager,
   detector: WorkDetector,
   stateDir: string,
+  runWriter?: SupabaseRunWriter,
+  configReader?: SupabaseConfigReader,
 ): Promise<void> {
+  const repoConfig = configReader?.getRepoConfig(owner, repoName);
   const variant = selectVariant(request);
   const run: RunState = {
-    id: '',
+    id: crypto.randomUUID(),
     issueNumber: request.issueNumber,
     title: request.title,
     phase: getStartPhase(variant),
@@ -206,7 +225,7 @@ async function processWorkRequest(
     phaseCompletions: {},
     checkpoints: [],
     cost: 0,
-    perRunBudget: config.perRunBudget,
+    perRunBudget: repoConfig?.budgetLimit ?? config.perRunBudget,
     fixAttempts: [],
     errorHashes: {},
     startedAt: new Date().toISOString(),
@@ -215,10 +234,21 @@ async function processWorkRequest(
 
   await stateMgr.saveRunState(run);
 
+  void runWriter?.upsertRun(run.id, {
+    repo_id: repoId || null,
+    repo_owner: owner,
+    repo_name: repoName,
+    issue_number: request.issueNumber,
+    issue_title: request.title,
+    pipeline_variant: run.variant,
+    outcome: 'in-progress',
+    started_at: run.startedAt,
+    active_plugins: repoConfig?.activePlugins.map(p => p.id) ?? [],
+  });
+
   // Build a notifyOctokit from env for phase handlers
   const notifyOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
   const agencyConfig = await readAgencyConfig(null, '');
-  // TODO: pass real supabase client and repoId once available from daemon context
   const handlers = variant === 'website'
     ? createWebsitePhaseHandlers(
         agencyConfig,
@@ -229,12 +259,21 @@ async function processWorkRequest(
         request.issueNumber,
         null,          // repoId — wired in follow-on
       )
-    : createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir);
+    : createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir, runWriter ?? undefined, run.id);
   const table = getPipeline(variant);
 
   console.log(`[daemon] Pipeline start for #${request.issueNumber}: ${request.title}`);
-  const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+  const result = await runPipeline(run, table, handlers, stateMgr, costTracker, undefined, runWriter ?? undefined);
   console.log(`[daemon] Pipeline done for #${request.issueNumber}: ${result.outcome}${result.error ? ` — ${result.error}` : ''}`);
+
+  void runWriter?.upsertRun(run.id, {
+    outcome: toDbOutcome(result.outcome),
+    completed_at: new Date().toISOString(),
+    report: run.report ?? null,
+    total_cost: run.cost,
+    fix_attempts: run.fixAttempts.length,
+    active_plugins: repoConfig?.activePlugins.map(p => p.id) ?? [],
+  });
 
   if (result.outcome === 'stuck') {
     await detector.markStuck(request.issueNumber, result.error ?? 'Unknown error');
