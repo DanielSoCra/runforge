@@ -142,5 +142,7 @@ describe('runPipeline', () => {
     const firstCall = upsertRun.mock.calls[0]!;
     expect(firstCall[0]).toBe('test-run-id');
     expect(firstCall[1]).toHaveProperty('current_phase');
+    expect(firstCall[1]).toHaveProperty('phases');
+    expect(Array.isArray(firstCall[1].phases)).toBe(true);
   });
 });
