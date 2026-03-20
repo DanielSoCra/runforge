@@ -12,7 +12,9 @@ code_paths:
   - packages/dashboard/actions/plugins.ts
   - packages/dashboard/app/repos/[id]/plugins/page.tsx
   - packages/dashboard/components/plugin-card.tsx
+  - packages/dashboard/components/repo-tab-nav.tsx
   - packages/dashboard/lib/plugins/registry.ts
+  - packages/dashboard/vitest.lib.config.ts
 test_paths:
   - supabase/tests/rls-plugins.test.ts
   - packages/dashboard/actions/plugins.test.ts
