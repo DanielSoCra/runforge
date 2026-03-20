@@ -5,7 +5,6 @@ export interface GitHubIssue {
   title: string;
   html_url: string;
   labels: Array<{ name: string }>;
-  state: string;
 }
 
 export interface RunRecord {
@@ -42,6 +41,9 @@ export function classifyIssues(
     runIndex.set(`${run.repo_owner}/${run.repo_name}#${run.issue_number}`, run);
   }
 
+  // Track emitted keys from the first loop to prevent double-counting complete runs
+  const emittedKeys = new Set<string>();
+
   // Classify open GitHub issues
   for (const repo of repos) {
     for (const issue of repo.issues) {
@@ -55,7 +57,7 @@ export function classifyIssues(
       if (run?.outcome === 'in-progress' || labelNames.includes('in-progress')) {
         column = 'running';
         currentPhase = run?.current_phase ?? null;
-      } else if (run?.outcome === 'stuck' || labelNames.includes('stuck')) {
+      } else if (run?.outcome === 'stuck' || run?.outcome === 'escalated' || labelNames.includes('stuck')) {
         column = 'stuck';
       } else if (labelNames.includes('ready')) {
         column = 'ready';
@@ -73,16 +75,15 @@ export function classifyIssues(
         labels: labelNames,
         currentPhase,
       });
+      emittedKeys.add(key);
     }
   }
 
-  // Add complete cards from DB runs (issues are closed on GitHub)
+  // Add complete cards from DB runs (closed issues not in GitHub open-issue API response)
   for (const run of runs) {
     if (run.outcome !== 'complete') continue;
-    const alreadyAdded = cards.some(
-      (c) => c.repoOwner === run.repo_owner && c.repoName === run.repo_name && c.issueNumber === run.issue_number,
-    );
-    if (!alreadyAdded) {
+    const key = `${run.repo_owner}/${run.repo_name}#${run.issue_number}`;
+    if (!emittedKeys.has(key)) {
       cards.push({
         column: 'complete',
         issueNumber: run.issue_number,
@@ -93,6 +94,7 @@ export function classifyIssues(
         labels: [],
         currentPhase: null,
       });
+      emittedKeys.add(key);
     }
   }
 

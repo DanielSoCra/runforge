@@ -7,7 +7,6 @@ function issue(number: number, labels: string[] = []): GitHubIssue {
     title: `Issue ${number}`,
     html_url: `https://github.com/owner/repo/issues/${number}`,
     labels: labels.map((name) => ({ name })),
-    state: 'open',
   };
 }
 
@@ -62,6 +61,14 @@ describe('classifyIssues', () => {
     expect(cards).toHaveLength(1);
     expect(cards[0]?.column).toBe('complete');
     expect(cards[0]?.issueNumber).toBe(7);
+  });
+
+  it('DB escalated run maps issue to stuck column', () => {
+    const cards = classifyIssues(
+      [{ ...REPO, issues: [issue(5)] }],
+      [run(5, 'escalated')],
+    );
+    expect(cards[0]?.column).toBe('stuck');
   });
 
   it('aggregates issues from multiple repos', () => {
