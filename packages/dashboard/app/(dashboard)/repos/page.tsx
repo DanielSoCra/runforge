@@ -31,6 +31,9 @@ export default async function ReposPage() {
               key={conn.id}
               connectionId={conn.id}
               connectionName={conn.display_name}
+              importedRepos={(repos ?? [])
+                .filter((r) => r.connection_id === conn.id)
+                .map((r) => ({ id: r.id, owner: r.owner, name: r.name, enabled: r.enabled }))}
             />
           ))}
           <Button asChild variant="outline">
