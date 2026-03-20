@@ -14,7 +14,7 @@ const COLUMNS: { id: BoardColumn; label: string; countColor: string }[] = [
 ];
 
 const COLUMN_BORDER: Record<BoardColumn, string> = {
-  'not-ready': 'border-l-destructive',
+  'not-ready': 'border-l-muted-foreground',
   'ready':     'border-l-green-500',
   'running':   'border-l-blue-400',
   'complete':  'border-l-purple-500',
