@@ -265,6 +265,9 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/app/api/daemon/repos-reload/route.ts
     - packages/dashboard/actions/github-connections.ts
     - packages/dashboard/components/github-connections-section.tsx
+    - packages/dashboard/components/import-repos-modal.tsx
+    - packages/dashboard/app/api/github/connections/[id]/orgs/route.ts
+    - packages/dashboard/app/api/github/connections/[id]/repos/route.ts
     - docker-compose.prod.yml
     - Caddyfile
     - packages/dashboard/Dockerfile

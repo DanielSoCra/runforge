@@ -6,6 +6,13 @@ import { requireAdmin } from '@/lib/auth';
 
 const SAFE_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
+function notifyDaemonReload() {
+  fetch(`${process.env.DAEMON_URL}/repos/reload`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(3000),
+  }).catch(() => {});
+}
+
 export async function createRepo(formData: FormData) {
   const supabase = await createClient();
   await requireAdmin(supabase);
@@ -77,6 +84,7 @@ export async function enableRepo(id: string) {
     .update({ enabled: true, updated_at: new Date().toISOString() })
     .eq('id', id);
   if (error) throw new Error(error.message);
+  notifyDaemonReload();
   revalidatePath(`/repos/${id}`);
   revalidatePath('/repos');
 }
@@ -89,6 +97,7 @@ export async function disableRepo(id: string) {
     .update({ enabled: false, updated_at: new Date().toISOString() })
     .eq('id', id);
   if (error) throw new Error(error.message);
+  notifyDaemonReload();
   revalidatePath(`/repos/${id}`);
   revalidatePath('/repos');
 }

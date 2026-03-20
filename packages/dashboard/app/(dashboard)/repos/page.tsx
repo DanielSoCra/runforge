@@ -3,15 +3,15 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import Link from 'next/link';
-import { Plus } from 'lucide-react';
+import { Plus, AlertTriangle } from 'lucide-react';
+import { ImportReposModal } from '@/components/import-repos-modal';
 
 export default async function ReposPage() {
   const supabase = await createClient();
-  const { data: repos } = await supabase
-    .from('repos')
-    .select('*')
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false });
+  const [{ data: repos }, { data: connections }] = await Promise.all([
+    supabase.from('repos').select('*, github_connections(display_name, github_login)').is('deleted_at', null).order('created_at', { ascending: false }),
+    supabase.from('github_connections').select('id, display_name, github_login, status').order('created_at'),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -20,29 +20,55 @@ export default async function ReposPage() {
           <h1 className="text-2xl font-semibold">Repositories</h1>
           <p className="text-muted-foreground text-sm mt-1">Manage monitored repositories</p>
         </div>
-        <Button asChild>
-          <Link href="/repos/new"><Plus className="h-4 w-4 mr-2" />Add Repository</Link>
-        </Button>
+        <div className="flex gap-2">
+          {connections?.map((conn) => (
+            <ImportReposModal
+              key={conn.id}
+              connectionId={conn.id}
+              connectionName={conn.display_name}
+            />
+          ))}
+          <Button asChild variant="outline">
+            <Link href="/repos/new"><Plus className="h-4 w-4 mr-2" />Add manually</Link>
+          </Button>
+        </div>
       </div>
       <div className="space-y-3">
-        {repos?.map((repo) => (
-          <Card key={repo.id} className="hover:border-border/80 transition-colors">
-            <CardContent className="flex items-center justify-between py-4">
-              <div className="flex items-center gap-3">
-                <span className="font-mono font-medium">{repo.owner}/{repo.name}</span>
-                <Badge variant={repo.enabled ? 'default' : 'secondary'}>
-                  {repo.enabled ? 'active' : 'disabled'}
-                </Badge>
-              </div>
-              <Button variant="ghost" size="sm" asChild>
-                <Link href={`/repos/${repo.id}`}>Configure →</Link>
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
+        {repos?.map((repo) => {
+          const conn = repo.github_connections as { display_name: string; github_login: string } | null;
+          return (
+            <Card key={repo.id} className="hover:border-border/80 transition-colors">
+              <CardContent className="flex items-center justify-between py-4">
+                <div className="flex items-center gap-3">
+                  <span className="font-mono font-medium">{repo.owner}/{repo.name}</span>
+                  <Badge variant={repo.enabled ? 'default' : 'secondary'}>
+                    {repo.enabled ? 'active' : 'disabled'}
+                  </Badge>
+                  {conn && (
+                    <Badge variant="outline" className="text-xs">{conn.display_name}</Badge>
+                  )}
+                  {repo.github_status === 'not_found' && (
+                    <Badge variant="destructive" className="gap-1">
+                      <AlertTriangle className="h-3 w-3" />not found on GitHub
+                    </Badge>
+                  )}
+                  {!conn && !repo.connection_id && (
+                    <span className="text-xs text-muted-foreground">manual</span>
+                  )}
+                  {repo.connection_id && !conn && (
+                    <Badge variant="secondary" className="text-xs">disconnected</Badge>
+                  )}
+                </div>
+                <Button variant="ghost" size="sm" asChild>
+                  <Link href={`/repos/${repo.id}`}>Configure →</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          );
+        })}
         {(!repos || repos.length === 0) && (
           <div className="text-center py-12 text-muted-foreground">
-            No repositories yet. <Link href="/repos/new" className="underline">Add one</Link>.
+            No repositories yet. Import from GitHub or <Link href="/repos/new" className="underline">add manually</Link>.
           </div>
         )}
       </div>
