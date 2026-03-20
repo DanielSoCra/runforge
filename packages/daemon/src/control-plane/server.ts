@@ -9,6 +9,8 @@ export interface ControlHandlers {
   resume: () => void;
   retry: (issueNumber: number) => Result<void>;
   reloadRepos?: () => Promise<{ active: number }>;
+  restartRemoteControl?: () => void;
+  scanIssues?: () => Promise<{ scanned: number }>;
   stateDir?: string;
 }
 
@@ -48,6 +50,23 @@ export function createControlServer(
         });
       } else {
         json(res, 200, { reloaded: false, active: 0 });
+      }
+    } else if (method === 'POST' && url.pathname === '/remote-control/restart') {
+      if (handlers.restartRemoteControl) {
+        handlers.restartRemoteControl();
+        json(res, 200, { restarted: true });
+      } else {
+        json(res, 501, { error: 'not configured' });
+      }
+    } else if (method === 'POST' && url.pathname === '/issues/scan') {
+      if (handlers.scanIssues) {
+        handlers.scanIssues().then((result) => {
+          json(res, 200, result);
+        }).catch(() => {
+          json(res, 500, { error: 'scan failed' });
+        });
+      } else {
+        json(res, 501, { error: 'not configured' });
       }
     } else if (method === 'POST' && url.pathname.startsWith('/retry/')) {
       const issue = Number(url.pathname.split('/')[2]);
