@@ -53,7 +53,7 @@ describe('loadConfig', () => {
     const result = await loadConfig(path);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.repo.owner).toBe('test-owner');
+      expect(result.value.repo?.owner).toBe('test-owner');
       expect(result.value.controlPort).toBe(3847);
     }
   });

@@ -46,6 +46,9 @@ export async function GET(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.redirect(`${settingsUrl}?error=not_authenticated`);
 
+  const { data: member } = await supabase.from('team_members').select('role').eq('user_id', user.id).single();
+  if (member?.role !== 'admin') return NextResponse.redirect(`${settingsUrl}?error=not_admin`);
+
   const { data: connectionId, error: connErr } = await supabase.rpc('store_github_connection', {
     p_display_name: `${ghUser.login} (personal)`,
     p_github_login: ghUser.login,
@@ -53,7 +56,6 @@ export async function GET(request: NextRequest) {
     p_connection_type: 'oauth_token',
     p_plaintext_token: token,
     p_scopes: scope ?? '',
-    p_created_by: user.id,
   });
   if (connErr) return NextResponse.redirect(`${settingsUrl}?error=store_failed`);
 

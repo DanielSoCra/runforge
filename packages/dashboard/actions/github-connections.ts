@@ -28,10 +28,10 @@ export async function importRepos(
 
   if (repos.length === 0) return;
 
-  // Upsert by owner+name — preserve existing settings, just update connection_id
+  // Upsert by owner+name — for new repos insert disabled; for existing only update connection_id
   for (const { owner, name } of repos) {
     await supabase.from('repos').upsert(
-      { owner, name, connection_id: connectionId, enabled: false },
+      { owner, name, connection_id: connectionId },
       { onConflict: 'owner,name', ignoreDuplicates: false },
     );
   }

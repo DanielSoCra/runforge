@@ -73,8 +73,7 @@ CREATE OR REPLACE FUNCTION store_github_connection(
   p_avatar_url      text,
   p_connection_type text,
   p_plaintext_token text,
-  p_scopes          text,
-  p_created_by      uuid
+  p_scopes          text
 ) RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = public, extensions, vault AS $$
 DECLARE
@@ -89,7 +88,7 @@ BEGIN
      encrypted_token, scopes, status, created_by)
   VALUES
     (p_display_name, p_github_login, p_avatar_url, p_connection_type,
-     pgp_sym_encrypt(p_plaintext_token, v_enc_key), p_scopes, 'active', p_created_by)
+     pgp_sym_encrypt(p_plaintext_token, v_enc_key), p_scopes, 'active', auth.uid())
   RETURNING id INTO v_id;
   RETURN v_id;
 END;

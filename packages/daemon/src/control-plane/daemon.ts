@@ -58,7 +58,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     repoManager = new RepoManager(
       supabase,
       config.pollIntervalMs,
-      async (repoId, detector) => {
+      async (repoId, owner, name, detector) => {
         if (paused || shuttingDown) return;
         if (activeRuns >= config.maxConcurrentRuns) return;
         costTracker.maybeResetDaily();
@@ -74,7 +74,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           if (!claimResult.ok) continue;
           activeRuns++;
           repoManager!.notifyRunStart(repoId);
-          processWorkRequest(config, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir)
+          processWorkRequest(config, owner, name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir)
             .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
             // CRITICAL: notifyRunEnd must be in .finally(), never only in .catch() or .then().
             // If it is missing here, a disabled repo's poller hangs in pendingDisable forever.
@@ -152,7 +152,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         const claimResult = await detector.claimWork(request.issueNumber);
         if (!claimResult.ok) continue;
         activeRuns++;
-        processWorkRequest(config, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir)
+        processWorkRequest(config, config.repo!.owner, config.repo!.name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir)
           .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
           .finally(() => { activeRuns--; });
       }
@@ -183,6 +183,8 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
 
 async function processWorkRequest(
   config: Config,
+  owner: string,
+  repoName: string,
   request: WorkRequest,
   runtime: SessionRuntime,
   coordinator: ImplementationCoordinator,
@@ -210,7 +212,7 @@ async function processWorkRequest(
 
   // Build a notifyOctokit from env for phase handlers
   const notifyOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-  const handlers = createPhaseHandlers(config, runtime, coordinator, notifyOctokit, request, stateDir);
+  const handlers = createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir);
   const table = getPipeline('feature-simple');
 
   console.log(`[daemon] Pipeline start for #${request.issueNumber}: ${request.title}`);

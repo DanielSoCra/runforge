@@ -1,15 +1,22 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
+import { requireAdmin } from '@/lib/auth';
+
+const SAFE_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  try {
+    await requireAdmin(supabase);
+  } catch {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
   const { id } = await params;
   const org = req.nextUrl.searchParams.get('org');
   if (!org) return NextResponse.json({ error: 'Missing org param' }, { status: 400 });
+  if (!SAFE_PATTERN.test(org)) return NextResponse.json({ error: 'Invalid org param' }, { status: 400 });
 
   // Decrypt token — service role required
   const service = createServiceClient();

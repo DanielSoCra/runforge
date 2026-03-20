@@ -27,7 +27,7 @@ export class RepoManager {
   constructor(
     private readonly supabase: SupabaseClient,
     private readonly defaultPollIntervalMs: number,
-    private readonly onPoll: (repoId: string, detector: WorkDetector) => void,
+    private readonly onPoll: (repoId: string, owner: string, name: string, detector: WorkDetector) => void,
   ) {}
 
   async initialize(): Promise<Result<void>> {
@@ -132,7 +132,7 @@ export class RepoManager {
     const intervalHandle = setInterval(() => {
       const entry = this.pollers.get(repo.id);
       if (entry && !entry.pendingDisable) {
-        this.onPoll(repo.id, detector);
+        this.onPoll(repo.id, repo.owner, repo.name, detector);
       }
     }, intervalMs);
 
