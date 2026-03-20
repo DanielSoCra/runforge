@@ -33,8 +33,6 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
   const active = registry.plugins.filter(p => activeMap.get(p.id)?.active);
   const rest = registry.plugins.filter(p => !activeMap.get(p.id)?.active && !activeMap.get(p.id)?.recommended);
 
-  const suggestedIds = suggested.map(p => p.id);
-
   return (
     <div className="max-w-2xl space-y-6">
       <RealtimeRefresh repoId={id} />
@@ -55,7 +53,7 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
             <h3 className="text-xs uppercase tracking-wider text-zinc-500">Suggested</h3>
             <form action={async () => {
               'use server';
-              await enableAllSuggested(id, suggestedIds);
+              await enableAllSuggested(id);
             }}>
               <Button variant="ghost" size="sm" type="submit">Enable All</Button>
             </form>

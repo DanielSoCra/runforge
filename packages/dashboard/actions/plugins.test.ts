@@ -52,34 +52,42 @@ describe('enableAllSuggested', () => {
       auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null } }) },
       from: fromSpy,
     } as never);
-    const result = await enableAllSuggested('repo-id', []);
+    const result = await enableAllSuggested('repo-id');
     expect(result.failed.length).toBe(0);
     expect(result.succeeded.length).toBe(0);
     expect(fromSpy).not.toHaveBeenCalled();
   });
 
-  it('enables each suggested plugin independently and returns failed ids', async () => {
+  it('queries DB for recommended+inactive plugins instead of accepting caller IDs', async () => {
     vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
-    const upsert = vi.fn()
-      .mockResolvedValueOnce({ error: null })
-      .mockResolvedValueOnce({ error: { message: 'db error' } });
+    const upsert = vi.fn().mockResolvedValue({ error: null });
+    // Build the SELECT chain: .eq('repo_id').eq('recommended').eq('active') → resolves to data
+    // Each .eq() must return the next builder. The last .eq() returns a Promise (mockResolvedValue).
+    // Use explicit nesting so each step is unambiguous:
+    const eqActive = vi.fn().mockResolvedValue({ data: [{ plugin_id: 'web-stack' }], error: null });
+    const eqRecommended = vi.fn().mockReturnValue({ eq: eqActive });
+    const eqRepoId = vi.fn().mockReturnValue({ eq: eqRecommended });
+    const select = vi.fn().mockReturnValue({ eq: eqRepoId });
     vi.mocked(createClient).mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
-      from: () => ({ upsert }),
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'u1' } } }) },
+      from: (table: string) => (table === 'repo_plugins' ? { select, upsert } : { upsert }),
     } as never);
-    const result = await enableAllSuggested('repo-id', ['web-stack', 'unknown']);
-    expect(result.failed).toContain('unknown');
+    const result = await enableAllSuggested('repo-id');
+    expect(result.succeeded).toContain('web-stack');
+    expect(result.failed).toHaveLength(0);
   });
 
-  it('tracks failed ids when a valid plugin upsert returns a db error', async () => {
-    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
-    const upsert = vi.fn().mockResolvedValueOnce({ error: { message: 'db error' } });
+  it('returns empty arrays when no recommended+inactive plugins exist', async () => {
+    const eqActive = vi.fn().mockResolvedValue({ data: [], error: null });
+    const eqRecommended = vi.fn().mockReturnValue({ eq: eqActive });
+    const eqRepoId = vi.fn().mockReturnValue({ eq: eqRecommended });
+    const select = vi.fn().mockReturnValue({ eq: eqRepoId });
     vi.mocked(createClient).mockResolvedValue({
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
-      from: () => ({ upsert }),
+      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'u1' } } }) },
+      from: () => ({ select }),
     } as never);
-    const result = await enableAllSuggested('repo-id', ['web-stack']);
-    expect(result.failed).toContain('web-stack');
+    const result = await enableAllSuggested('repo-id');
     expect(result.succeeded).toHaveLength(0);
+    expect(result.failed).toHaveLength(0);
   });
 });

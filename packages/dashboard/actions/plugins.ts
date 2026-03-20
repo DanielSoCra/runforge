@@ -32,11 +32,17 @@ export async function togglePlugin(
 
 export async function enableAllSuggested(
   repoId: string,
-  pluginIds: string[],
 ): Promise<{ succeeded: string[]; failed: string[] }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { succeeded: [], failed: [] };
+  const { data: suggested } = await supabase
+    .from('repo_plugins')
+    .select('plugin_id')
+    .eq('repo_id', repoId)
+    .eq('recommended', true)
+    .eq('active', false);
+  const pluginIds = (suggested ?? []).map((r: { plugin_id: string }) => r.plugin_id);
   const succeeded: string[] = [];
   const failed: string[] = [];
   for (const pluginId of pluginIds) {
