@@ -793,33 +793,7 @@ git commit -m "feat: persist report body to RunState.report in report phase"
 - Modify: `packages/daemon/src/session-runtime/runtime.ts`
 - Modify: `packages/daemon/src/session-runtime/runtime.test.ts`
 
-- [ ] **Step 1: Extend `spawnSession` in `runtime.ts`**
-
-Add import at the top:
-```typescript
-import type { SupabaseRunWriter } from '../supabase/run-writer.js';
-```
-
-Change the `spawnSession` signature (the `options?` param is last today — add two new optional params after it):
-
-```typescript
-async spawnSession(
-  type: SessionType,
-  context: SessionContext,
-  issueNumber: number,
-  options?: { jsonSchema?: string; agentDef?: AgentDefinition },
-  runWriter?: SupabaseRunWriter,
-  runId?: string,
-): Promise<Result<SessionResult>> {
-```
-
-After `this.costTracker.recordCost(issueNumber, result.value.cost);` (line 174), add:
-
-```typescript
-void runWriter?.writeCostEvent(runId ?? '', type, result.value.cost);
-```
-
-- [ ] **Step 2: Add a test in `runtime.test.ts`**
+- [ ] **Step 1: Write the failing test in `runtime.test.ts`**
 
 Add this test to the existing `describe('SessionRuntime')` block:
 
@@ -849,21 +823,55 @@ it('calls runWriter.writeCostEvent after a successful session', async () => {
 });
 ```
 
-- [ ] **Step 3: Run tests**
+- [ ] **Step 2: Run test — verify it fails**
 
 ```bash
 cd packages/daemon && npm test -- src/session-runtime/runtime.test.ts
 ```
 
-Expected: existing tests pass (new params are optional, existing callers unaffected).
+Expected: FAIL — `spawnSession` does not accept `runWriter`/`runId` params yet.
 
-- [ ] **Step 4: Run full test suite + typecheck**
+- [ ] **Step 3: Extend `spawnSession` in `runtime.ts`**
+
+Add import at the top:
+```typescript
+import type { SupabaseRunWriter } from '../supabase/run-writer.js';
+```
+
+Change the `spawnSession` signature (add two new optional params after the existing `options?`):
+
+```typescript
+async spawnSession(
+  type: SessionType,
+  context: SessionContext,
+  issueNumber: number,
+  options?: { jsonSchema?: string; agentDef?: AgentDefinition },
+  runWriter?: SupabaseRunWriter,
+  runId?: string,
+): Promise<Result<SessionResult>> {
+```
+
+After `this.costTracker.recordCost(issueNumber, result.value.cost);` (line 174), add:
+
+```typescript
+void runWriter?.writeCostEvent(runId ?? '', type, result.value.cost);
+```
+
+- [ ] **Step 4: Run tests — verify they pass**
+
+```bash
+cd packages/daemon && npm test -- src/session-runtime/runtime.test.ts
+```
+
+Expected: all tests pass including the new one. Existing tests are unaffected (new params are optional).
+
+- [ ] **Step 5: Run full test suite + typecheck**
 
 ```bash
 cd packages/daemon && npm test && npm run typecheck
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add packages/daemon/src/session-runtime/runtime.ts \
@@ -975,16 +983,7 @@ implement: async (run: RunState): Promise<PhaseEvent> => {
   // ...rest unchanged
 ```
 
-In the `review` handler, forward to `runReview()` (check its signature — if it calls `runtime.spawnSession` internally via `reviewer-session.ts`, it needs the params too):
-
-```typescript
-review: async (_run: RunState): Promise<PhaseEvent> => {
-  const gates: Gate[] = [createGate1(config.validation.gate1Commands)];
-  const result = await runReview(gates, process.cwd(), runWriter, runId);
-  // ...rest unchanged
-```
-
-Read `packages/daemon/src/validation/review.ts` to confirm `runReview()`'s current signature and add the params there too if needed.
+The `review` handler calls `runReview(gates, cwd, options?)` — `runReview` does not call `spawnSession` and does not need `runWriter`/`runId`. Leave the `review` handler unchanged.
 
 Update the `createPhaseHandlers(...)` call in `daemon.ts` `processWorkRequest` to pass `runWriter` and `run.id`:
 
@@ -1170,6 +1169,7 @@ void runWriter?.upsertRun(run.id, {
   report: run.report ?? null,
   total_cost: run.cost,
   fix_attempts: run.fixAttempts.length,
+  active_plugins: repoConfig?.activePlugins.map(p => p.id) ?? [],
 });
 ```
 
