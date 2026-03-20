@@ -1,5 +1,5 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -43,7 +43,7 @@ export function filterRepos(
 ): GhRepo[] {
   return repos
     .filter((r) => {
-      if (search && !r.name.toLowerCase().includes(search.toLowerCase())) return false;
+      if (search && !r.full_name.toLowerCase().includes(search.toLowerCase())) return false;
       if (visibility === 'public' && r.private) return false;
       if (visibility === 'private' && !r.private) return false;
       if (status === 'not_imported' && importedSet.has(r.full_name)) return false;
@@ -81,6 +81,7 @@ export function ImportReposModal({
   const [resyncing, setResyncing] = useState<Set<string>>(new Set());
   const [resyncError, setResyncError] = useState<Set<string>>(new Set());
   const router = useRouter();
+  const abortRef = useRef<AbortController | null>(null);
 
   const importedSet = useMemo(
     () => new Set(importedRepos.map((r) => `${r.owner}/${r.name}`)),
@@ -92,6 +93,9 @@ export function ImportReposModal({
   );
 
   async function handleOpen() {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoadingOrgs(true);
     setOpen(true);
     setSelected(new Set());
@@ -106,16 +110,22 @@ export function ImportReposModal({
     setImportError(null);
     setRemoveError(null);
     setResyncError(new Set());
-    const res = await fetch(`/api/github/connections/${connectionId}/orgs`);
-    if (!res.ok) {
+    try {
+      const res = await fetch(`/api/github/connections/${connectionId}/orgs`, { signal: controller.signal });
+      if (!res.ok) {
+        setOrgsError('Could not load accounts.');
+        setLoadingOrgs(false);
+        return;
+      }
+      const data: Org[] = await res.json();
+      setOrgs(data);
+      setLoadingOrgs(false);
+      if (data.length > 0) await loadOrgRepos(data[0].login);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return;
       setOrgsError('Could not load accounts.');
       setLoadingOrgs(false);
-      return;
     }
-    const data: Org[] = await res.json();
-    setOrgs(data);
-    setLoadingOrgs(false);
-    if (data.length > 0) await loadOrgRepos(data[0].login);
   }
 
   async function loadOrgRepos(login: string) {
@@ -123,17 +133,24 @@ export function ImportReposModal({
     setConfirmRemove(null);
     setReposError(null);
     setLoadingRepos(true);
-    const res = await fetch(
-      `/api/github/connections/${connectionId}/repos?org=${encodeURIComponent(login)}`,
-    );
-    if (!res.ok) {
+    try {
+      const res = await fetch(
+        `/api/github/connections/${connectionId}/repos?org=${encodeURIComponent(login)}`,
+        { signal: abortRef.current?.signal },
+      );
+      if (!res.ok) {
+        setReposError('Could not load repositories.');
+        setLoadingRepos(false);
+        return;
+      }
+      const data: GhRepo[] = await res.json();
+      setOrgRepos((prev) => new Map(prev).set(login, data));
+      setLoadingRepos(false);
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return;
       setReposError('Could not load repositories.');
       setLoadingRepos(false);
-      return;
     }
-    const data: GhRepo[] = await res.json();
-    setOrgRepos((prev) => new Map(prev).set(login, data));
-    setLoadingRepos(false);
   }
 
   const currentRepos = selectedOrg ? (orgRepos.get(selectedOrg) ?? []) : [];
@@ -190,7 +207,7 @@ export function ImportReposModal({
     setRemoving((prev) => new Set(prev).add(fullName));
     setRemoveError(null);
     try {
-      await removeRepo(imported.id);
+      await removeRepo(imported.id, connectionId);
       setConfirmRemove(null);
       router.refresh();
     } catch {
@@ -205,7 +222,7 @@ export function ImportReposModal({
       <Button variant="outline" size="sm" onClick={handleOpen}>
         Import repositories
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(v) => { if (!v) abortRef.current?.abort(); setOpen(v); }}>
         <DialogContent className="max-w-3xl p-0 gap-0">
           <DialogHeader className="px-5 py-4 border-b border-border">
             <DialogTitle>Import Repositories</DialogTitle>
@@ -242,7 +259,7 @@ export function ImportReposModal({
                         />
                       ) : (
                         <span className="w-5 h-5 rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0">
-                          {org.login[0].toUpperCase()}
+                          {org.login?.[0]?.toUpperCase() ?? '?'}
                         </span>
                       )}
                       <span className="truncate">{org.name ?? org.login}</span>

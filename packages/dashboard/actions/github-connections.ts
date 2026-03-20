@@ -31,7 +31,7 @@ export async function importRepos(
   // Upsert by owner+name — for new repos insert disabled; for existing only update connection_id
   for (const { owner, name } of repos) {
     const { error: upsertErr } = await supabase.from('repos').upsert(
-      { owner, name, connection_id: connectionId, deleted_at: null },
+      { owner, name, connection_id: connectionId, deleted_at: null, enabled: true },
       { onConflict: 'owner,name', ignoreDuplicates: false },
     );
     if (upsertErr) {
@@ -47,14 +47,15 @@ export async function importRepos(
   revalidatePath('/repos');
 }
 
-export async function removeRepo(repoId: string) {
+export async function removeRepo(repoId: string, connectionId: string) {
   const supabase = await createClient();
   await requireAdmin(supabase);
 
   const { error } = await supabase
     .from('repos')
     .update({ deleted_at: new Date().toISOString(), enabled: false })
-    .eq('id', repoId);
+    .eq('id', repoId)
+    .eq('connection_id', connectionId);
 
   if (error) {
     console.error('[github-connections] removeRepo failed:', error);
