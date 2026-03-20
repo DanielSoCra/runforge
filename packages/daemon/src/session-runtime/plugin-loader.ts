@@ -16,13 +16,16 @@ async function readMarkdownFiles(dir: string): Promise<SkillDoc[]> {
 }
 
 // Cached registry loaded once at startup — avoids per-session disk reads.
-let _registryCache: Awaited<ReturnType<typeof import('../control-plane/plugin-registry.js').loadPluginRegistry>> | null = null;
-async function getRegistry() {
-  if (!_registryCache) {
-    const { loadPluginRegistry } = await import('../control-plane/plugin-registry.js');
-    _registryCache = await loadPluginRegistry(PLUGINS_DIR);
+// The Promise itself is cached so concurrent callers await the same operation
+// rather than each triggering a separate load.
+type PluginRegistry = Awaited<ReturnType<typeof import('../control-plane/plugin-registry.js').loadPluginRegistry>>;
+let _registryCachePromise: Promise<PluginRegistry> | null = null;
+function getRegistry(): Promise<PluginRegistry> {
+  if (!_registryCachePromise) {
+    _registryCachePromise = import('../control-plane/plugin-registry.js')
+      .then(({ loadPluginRegistry }) => loadPluginRegistry(PLUGINS_DIR));
   }
-  return _registryCache;
+  return _registryCachePromise;
 }
 
 export async function readPluginsForContext(
