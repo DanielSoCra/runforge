@@ -35,7 +35,8 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
   try {
     await requireAdmin(supabase);
   } catch (err) {
-    return { error: err instanceof Error ? err.message : 'Unauthorized' };
+    console.error('[new-project] requireAdmin failed:', err);
+    return { error: 'Unauthorized' };
   }
 
   if (!input.org.trim() || !input.name.trim()) {
@@ -120,15 +121,19 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
       console.error('[new-project] createProject supabase insert failed:', error);
       throw new Error('Failed to register repository');
     }
-    if (!data) throw new Error('Supabase insert returned no data — check RLS policies');
+    if (!data) {
+      console.error('[new-project] createProject: insert returned no data — check RLS policies');
+      throw new Error('Failed to register repository');
+    }
 
     revalidatePath('/repos');
     return { repoId: data.id };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    console.error('[new-project] createProject failed:', err);
     if (githubRepoCreated) {
       return { error: `GitHub repo was created but registration failed — add it manually via Repositories instead of retrying. (${message})` };
     }
-    return { error: message };
+    return { error: 'Failed to create project' };
   }
 }
