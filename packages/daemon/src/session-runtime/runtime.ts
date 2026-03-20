@@ -186,15 +186,8 @@ export class SessionRuntime {
     // If no active plugins, return prompt as-is
     if (!context.activePlugins?.length) return prompt;
 
-    // Support both legacy string[] and new { id, activatedAt }[] formats.
-    const rawPlugins = context.activePlugins as Array<string | { id: string; activatedAt: string }>;
-    const pluginEntries = rawPlugins.map(entry =>
-      typeof entry === 'string'
-        ? { id: entry, activatedAt: new Date(0).toISOString() }
-        : entry,
-    );
-    const pluginIds = pluginEntries.map(e => e.id);
-    const activations = new Map(pluginEntries.map(e => [e.id, e.activatedAt]));
+    const pluginIds = context.activePlugins.map(e => e.id);
+    const activations = new Map(context.activePlugins.map(e => [e.id, e.activatedAt]));
     const loaded = await readPluginsForContext(pluginIds, activations);
     const composite = buildCompositeContext(loaded);
 

@@ -80,6 +80,7 @@ describe('SessionRuntime', () => {
     expect(assembled).toContain('PLUGIN INJECTION');
     expect(assembled.indexOf('PLUGIN INJECTION')).toBeLessThan(assembled.indexOf('SYSTEM PROMPT'));
     expect(assembled.indexOf('SKILL CONTENT')).toBeLessThan(assembled.indexOf('SYSTEM PROMPT'));
+    expect(assembled.indexOf('AGENT CONTENT')).toBeLessThan(assembled.indexOf('SYSTEM PROMPT'));
   });
 
   it('composite context prompt injection appears before system prompt', () => {
