@@ -186,15 +186,28 @@ export class SessionRuntime {
     // If no active plugins, return prompt as-is
     if (!context.activePlugins?.length) return prompt;
 
-    // TODO: pass real activated_at timestamps once config sync carries per-plugin timestamps.
-    // Currently all plugins get epoch-0, so activation order is non-deterministic when names collide.
-    // SessionContext.activePlugins needs to be extended to { id: string; activatedAt: string }[]
-    // for the buildCompositeContext sort to be meaningful.
-    const activations = new Map(context.activePlugins.map(id => [id, new Date(0).toISOString()]));
-    const loaded = await readPluginsForContext(context.activePlugins, activations);
+    // Support both legacy string[] and new { id, activatedAt }[] formats.
+    const rawPlugins = context.activePlugins as Array<string | { id: string; activatedAt: string }>;
+    const pluginEntries = rawPlugins.map(entry =>
+      typeof entry === 'string'
+        ? { id: entry, activatedAt: new Date(0).toISOString() }
+        : entry,
+    );
+    const pluginIds = pluginEntries.map(e => e.id);
+    const activations = new Map(pluginEntries.map(e => [e.id, e.activatedAt]));
+    const loaded = await readPluginsForContext(pluginIds, activations);
     const composite = buildCompositeContext(loaded);
-    if (!composite.promptInjection) return prompt;
-    return `${composite.promptInjection}\n\n---\n\n${prompt}`;
+
+    const parts: string[] = [];
+    if (composite.promptInjection) parts.push(composite.promptInjection);
+    for (const skill of composite.skills) {
+      if (skill.content) parts.push(skill.content);
+    }
+    for (const agent of composite.agents) {
+      if (agent.content) parts.push(agent.content);
+    }
+    if (parts.length === 0) return prompt;
+    return `${parts.join('\n\n---\n\n')}\n\n---\n\n${prompt}`;
   }
 
   getCostTracker(): CostTracker {
