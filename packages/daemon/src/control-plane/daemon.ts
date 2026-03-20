@@ -12,6 +12,7 @@ import { createWorkDetector, type WorkDetector } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
 import { runPipeline } from './pipeline.js';
 import { getPipeline, getStartPhase } from './fsm.js';
+import { selectVariant } from './variants.js';
 import { notify } from './notify.js';
 import type { RunState, WorkRequest } from '../types.js';
 import { ok, err, type Result } from '../lib/result.js';
@@ -193,11 +194,12 @@ async function processWorkRequest(
   detector: WorkDetector,
   stateDir: string,
 ): Promise<void> {
+  const variant = selectVariant(request);
   const run: RunState = {
     issueNumber: request.issueNumber,
     title: request.title,
-    phase: getStartPhase('feature-simple'),
-    variant: 'feature-simple',
+    phase: getStartPhase(variant),
+    variant,
     phaseCompletions: {},
     checkpoints: [],
     cost: 0,
@@ -213,7 +215,7 @@ async function processWorkRequest(
   // Build a notifyOctokit from env for phase handlers
   const notifyOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
   const handlers = createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir);
-  const table = getPipeline('feature-simple');
+  const table = getPipeline(variant);
 
   console.log(`[daemon] Pipeline start for #${request.issueNumber}: ${request.title}`);
   const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
