@@ -81,6 +81,86 @@ export type Database = {
           },
         ]
       }
+      github_connections: {
+        Row: {
+          avatar_url: string | null
+          connection_type: string
+          created_at: string
+          created_by: string
+          display_name: string
+          encrypted_token: string
+          github_login: string
+          id: string
+          scopes: string | null
+          status: string
+          token_expires_at: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          connection_type?: string
+          created_at?: string
+          created_by: string
+          display_name: string
+          encrypted_token: string
+          github_login: string
+          id?: string
+          scopes?: string | null
+          status?: string
+          token_expires_at?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          connection_type?: string
+          created_at?: string
+          created_by?: string
+          display_name?: string
+          encrypted_token?: string
+          github_login?: string
+          id?: string
+          scopes?: string | null
+          status?: string
+          token_expires_at?: string | null
+        }
+        Relationships: []
+      }
+      github_orgs: {
+        Row: {
+          avatar_url: string | null
+          connection_id: string
+          github_id: number
+          id: string
+          is_selected: boolean
+          login: string
+          name: string | null
+        }
+        Insert: {
+          avatar_url?: string | null
+          connection_id: string
+          github_id: number
+          id?: string
+          is_selected?: boolean
+          login: string
+          name?: string | null
+        }
+        Update: {
+          avatar_url?: string | null
+          connection_id?: string
+          github_id?: number
+          id?: string
+          is_selected?: boolean
+          login?: string
+          name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "github_orgs_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "github_connections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       global_settings: {
         Row: {
           concurrency_limit: number
@@ -134,34 +214,34 @@ export type Database = {
       }
       repo_plugins: {
         Row: {
-          id: string
-          repo_id: string
-          plugin_id: string
-          active: boolean
-          recommended: boolean
-          recommendation_reason: string | null
-          recommended_at: string | null
           activated_at: string | null
+          active: boolean
+          id: string
+          plugin_id: string
+          recommendation_reason: string | null
+          recommended: boolean
+          recommended_at: string | null
+          repo_id: string
         }
         Insert: {
-          id?: string
-          repo_id: string
-          plugin_id: string
-          active?: boolean
-          recommended?: boolean
-          recommendation_reason?: string | null
-          recommended_at?: string | null
           activated_at?: string | null
+          active?: boolean
+          id?: string
+          plugin_id: string
+          recommendation_reason?: string | null
+          recommended?: boolean
+          recommended_at?: string | null
+          repo_id: string
         }
         Update: {
-          id?: string
-          repo_id?: string
-          plugin_id?: string
-          active?: boolean
-          recommended?: boolean
-          recommendation_reason?: string | null
-          recommended_at?: string | null
           activated_at?: string | null
+          active?: boolean
+          id?: string
+          plugin_id?: string
+          recommendation_reason?: string | null
+          recommended?: boolean
+          recommended_at?: string | null
+          repo_id?: string
         }
         Relationships: [
           {
@@ -177,9 +257,11 @@ export type Database = {
         Row: {
           budget_limit: number | null
           concurrency_limit: number
+          connection_id: string | null
           created_at: string
           deleted_at: string | null
           enabled: boolean
+          github_status: string
           id: string
           matrix_status: Database["public"]["Enums"]["matrix_status"]
           name: string
@@ -192,9 +274,11 @@ export type Database = {
         Insert: {
           budget_limit?: number | null
           concurrency_limit?: number
+          connection_id?: string | null
           created_at?: string
           deleted_at?: string | null
           enabled?: boolean
+          github_status?: string
           id?: string
           matrix_status?: Database["public"]["Enums"]["matrix_status"]
           name: string
@@ -207,9 +291,11 @@ export type Database = {
         Update: {
           budget_limit?: number | null
           concurrency_limit?: number
+          connection_id?: string | null
           created_at?: string
           deleted_at?: string | null
           enabled?: boolean
+          github_status?: string
           id?: string
           matrix_status?: Database["public"]["Enums"]["matrix_status"]
           name?: string
@@ -219,10 +305,19 @@ export type Database = {
           staging_branch?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "repos_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "github_connections"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       runs: {
         Row: {
+          active_plugins: string[]
           completed_at: string | null
           current_phase: string | null
           fix_attempts: number
@@ -240,6 +335,7 @@ export type Database = {
           total_cost: number
         }
         Insert: {
+          active_plugins?: string[]
           completed_at?: string | null
           current_phase?: string | null
           fix_attempts?: number
@@ -257,6 +353,7 @@ export type Database = {
           total_cost?: number
         }
         Update: {
+          active_plugins?: string[]
           completed_at?: string | null
           current_phase?: string | null
           fix_attempts?: number
@@ -314,18 +411,33 @@ export type Database = {
         Returns: string
       }
       change_member_role: {
-        Args: { p_member_id: string; p_new_role: string }
+        Args: {
+          p_member_id: string
+          p_new_role: Database["public"]["Enums"]["team_role"]
+        }
         Returns: string
       }
       decrypt_api_key: {
         Args: { p_key_type: string; p_repo_id: string }
         Returns: string
       }
+      decrypt_github_token: {
+        Args: { p_connection_id: string }
+        Returns: string
+      }
       get_encryption_key: { Args: never; Returns: string }
       is_admin: { Args: never; Returns: boolean }
       is_member: { Args: never; Returns: boolean }
-      remove_team_member: {
-        Args: { p_member_id: string }
+      remove_team_member: { Args: { p_member_id: string }; Returns: string }
+      store_github_connection: {
+        Args: {
+          p_avatar_url: string
+          p_connection_type: string
+          p_display_name: string
+          p_github_login: string
+          p_plaintext_token: string
+          p_scopes: string
+        }
         Returns: string
       }
       upsert_api_key_encrypted: {
@@ -487,3 +599,5 @@ export const Constants = {
     },
   },
 } as const
+A new version of Supabase CLI is available: v2.78.1 (currently installed v2.72.7)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
