@@ -2,7 +2,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, GitFork, Activity, DollarSign, Users, Settings, Terminal, Zap } from 'lucide-react';
+import { LayoutDashboard, GitFork, Activity, DollarSign, Users, Settings, Terminal, Zap, LogOut } from 'lucide-react';
+import { signOut } from '@/actions/auth';
 
 const nav = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -41,6 +42,17 @@ export function Sidebar() {
           </Link>
         ))}
       </nav>
+      <div className="px-3 py-4 border-t border-border">
+        <form action={signOut}>
+          <button
+            type="submit"
+            className="flex items-center gap-3 px-3 py-2 rounded-md text-sm w-full text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+          >
+            <LogOut className="h-4 w-4" />
+            Sign out
+          </button>
+        </form>
+      </div>
     </aside>
   );
 }
