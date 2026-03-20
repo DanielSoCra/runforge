@@ -1,4 +1,5 @@
 // src/control-plane/daemon.ts
+import { createClient } from '@supabase/supabase-js';
 import { Octokit } from '@octokit/rest';
 import { loadConfig, type Config } from '../config.js';
 import { SessionRuntime } from '../session-runtime/runtime.js';
@@ -6,7 +7,8 @@ import { CostTracker } from '../session-runtime/cost.js';
 import { ImplementationCoordinator } from '../implementation/coordinator.js';
 import { StateManager } from './state.js';
 import { createControlServer } from './server.js';
-import { createWorkDetector } from './work-detection.js';
+import { RepoManager } from './repo-manager.js';
+import { createWorkDetector, type WorkDetector } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
 import { runPipeline } from './pipeline.js';
 import { getPipeline, getStartPhase } from './fsm.js';
@@ -38,14 +40,76 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   const remoteControl = new RemoteControlManager();
   remoteControl.start();
 
-  // 4. Initialize GitHub client
-  const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-  const detector = createWorkDetector(octokit, config.repo.owner, config.repo.name);
-
-  // 5. State tracking
+  // 4. State tracking
   let paused = false;
   let activeRuns = 0;
   let shuttingDown = false;
+
+  // 5. Build RepoManager or legacy single-repo detector
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  let repoManager: RepoManager | null = null;
+  let legacyDetector: WorkDetector | null = null;
+
+  if (supabaseUrl && supabaseKey) {
+    // DB mode
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    repoManager = new RepoManager(
+      supabase,
+      config.pollIntervalMs,
+      async (repoId, detector) => {
+        if (paused || shuttingDown) return;
+        if (activeRuns >= config.maxConcurrentRuns) return;
+        costTracker.maybeResetDaily();
+        const workResult = await detector.detectReadyWork();
+        if (!workResult.ok) {
+          // TODO: proactive token health check — if 401, mark connection token_invalid
+          return;
+        }
+        for (const request of workResult.value) {
+          if (activeRuns >= config.maxConcurrentRuns) break;
+          if (paused || shuttingDown) break;
+          const claimResult = await detector.claimWork(request.issueNumber);
+          if (!claimResult.ok) continue;
+          activeRuns++;
+          repoManager!.notifyRunStart(repoId);
+          processWorkRequest(config, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir)
+            .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
+            // CRITICAL: notifyRunEnd must be in .finally(), never only in .catch() or .then().
+            // If it is missing here, a disabled repo's poller hangs in pendingDisable forever.
+            .finally(() => {
+              activeRuns--;
+              repoManager!.notifyRunEnd(repoId);
+            });
+        }
+      },
+    );
+
+    // If config.repo is present, upsert it as a seed repo
+    if (config.repo) {
+      const upsertResult = await repoManager.upsertRepo(config.repo.owner, config.repo.name);
+      if (!upsertResult.ok) {
+        console.warn(`[daemon] Could not upsert seed repo from config: ${upsertResult.error.message}`);
+      }
+    }
+
+    const initResult = await repoManager.initialize();
+    if (!initResult.ok) {
+      await remoteControl.stop();
+      return initResult;
+    }
+  } else {
+    // Legacy mode: config.repo required
+    if (!config.repo) {
+      await remoteControl.stop();
+      return err(new Error(
+        'No SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY set and no config.repo — cannot determine repos to poll'
+      ));
+    }
+    const legacyOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+    legacyDetector = createWorkDetector(legacyOctokit, config.repo.owner, config.repo.name);
+  }
 
   // 6. Start control server
   const { server, start } = createControlServer(config.controlPort, {
@@ -58,54 +122,50 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     }),
     pause: () => { paused = true; },
     resume: () => { paused = false; },
-    retry: (_issueNumber) => {
-      // TODO: implement retry logic
-      return err(new Error('retry not yet implemented'));
-    },
+    retry: (_issueNumber) => err(new Error('retry not yet implemented')),
+    reloadRepos: repoManager
+      ? async () => repoManager!.reload()
+      : undefined,
   });
   const serverResult = await start();
   if (!serverResult.ok) {
+    repoManager?.stop();
     await remoteControl.stop();
     return serverResult;
   }
 
   console.log(`Auto-Claude daemon started on port ${config.controlPort}`);
 
-  // 7. Polling loop
-  const poller = setInterval(async () => {
-    if (paused || shuttingDown) return;
-    if (activeRuns >= config.maxConcurrentRuns) return;
-
-    // Check daily budget reset
-    costTracker.maybeResetDaily();
-
-    const workResult = await detector.detectReadyWork();
-    if (!workResult.ok) return;
-
-    for (const request of workResult.value) {
-      if (activeRuns >= config.maxConcurrentRuns) break;
-      if (paused || shuttingDown) break;
-
-      // Claim the issue
-      const claimResult = await detector.claimWork(request.issueNumber);
-      if (!claimResult.ok) continue;
-
-      activeRuns++;
-
-      // Process in background (fire and forget)
-      processWorkRequest(config, request, runtime, coordinator, costTracker, stateMgr, octokit, stateDir)
-        .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
-        .finally(() => { activeRuns--; });
-    }
-  }, config.pollIntervalMs);
+  // 7. Legacy polling loop (only used when repoManager is null)
+  let legacyPoller: ReturnType<typeof setInterval> | null = null;
+  if (legacyDetector) {
+    const detector = legacyDetector;
+    legacyPoller = setInterval(async () => {
+      if (paused || shuttingDown) return;
+      if (activeRuns >= config.maxConcurrentRuns) return;
+      costTracker.maybeResetDaily();
+      const workResult = await detector.detectReadyWork();
+      if (!workResult.ok) return;
+      for (const request of workResult.value) {
+        if (activeRuns >= config.maxConcurrentRuns) break;
+        if (paused || shuttingDown) break;
+        const claimResult = await detector.claimWork(request.issueNumber);
+        if (!claimResult.ok) continue;
+        activeRuns++;
+        processWorkRequest(config, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir)
+          .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
+          .finally(() => { activeRuns--; });
+      }
+    }, config.pollIntervalMs);
+  }
 
   // 8. Graceful shutdown
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log('Shutting down...');
-    clearInterval(poller);
-    // Wait for active runs (up to grace period)
+    if (legacyPoller) clearInterval(legacyPoller);
+    repoManager?.stop();
     const deadline = Date.now() + config.gracePeriodMs;
     while (activeRuns > 0 && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 1000));
@@ -128,15 +188,14 @@ async function processWorkRequest(
   coordinator: ImplementationCoordinator,
   costTracker: CostTracker,
   stateMgr: StateManager,
-  octokit: Octokit,
+  detector: WorkDetector,
   stateDir: string,
 ): Promise<void> {
-  // Create run state
   const run: RunState = {
     issueNumber: request.issueNumber,
     title: request.title,
     phase: getStartPhase('feature-simple'),
-    variant: 'feature-simple', // MVP: always simple
+    variant: 'feature-simple',
     phaseCompletions: {},
     checkpoints: [],
     cost: 0,
@@ -149,7 +208,9 @@ async function processWorkRequest(
 
   await stateMgr.saveRunState(run);
 
-  const handlers = createPhaseHandlers(config, runtime, coordinator, octokit, request, stateDir);
+  // Build a notifyOctokit from env for phase handlers
+  const notifyOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+  const handlers = createPhaseHandlers(config, runtime, coordinator, notifyOctokit, request, stateDir);
   const table = getPipeline('feature-simple');
 
   console.log(`[daemon] Pipeline start for #${request.issueNumber}: ${request.title}`);
@@ -157,7 +218,6 @@ async function processWorkRequest(
   console.log(`[daemon] Pipeline done for #${request.issueNumber}: ${result.outcome}${result.error ? ` — ${result.error}` : ''}`);
 
   if (result.outcome === 'stuck') {
-    const detector = createWorkDetector(octokit, config.repo.owner, config.repo.name);
     await detector.markStuck(request.issueNumber, result.error ?? 'Unknown error');
     await notify(config.webhooks, {
       event: 'stuck',

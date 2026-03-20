@@ -71,6 +71,25 @@ describe('ControlServer', () => {
     server2.close();
   });
 
+  it('POST /repos/reload calls reloadRepos and returns count', async () => {
+    const { server, start } = createControlServer(PORT + 2, {
+      ...handlers,
+      reloadRepos: async () => ({ active: 3 }),
+    });
+    const result = await start();
+    expect(result.ok).toBe(true);
+
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT + 2}/repos/reload`, { method: 'POST' });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.reloaded).toBe(true);
+      expect(body.active).toBe(3);
+    } finally {
+      server.close();
+    }
+  });
+
   it('GET /status includes remote_control fields', async () => {
     const { server: s2, start: start2 } = createControlServer(PORT + 1, {
       getStatus: () => ({
