@@ -47,11 +47,15 @@ export async function runPipeline(
 ): Promise<PipelineResult> {
   const maxAttempts = { ...DEFAULT_MAX_ATTEMPTS, ...config?.maxAttempts };
   const retryCounts: Record<string, number> = {};
+  let lastError: string | undefined;
 
   while (true) {
     // Check for terminal states
     if (isTerminal(run.phase)) {
-      return { outcome: run.phase === 'stuck' ? 'stuck' : 'paused', run };
+      const outcome = run.phase === 'stuck' ? 'stuck' : 'paused';
+      return outcome === 'stuck' && lastError
+        ? { outcome, run, error: lastError }
+        : { outcome, run };
     }
 
     // Check budget before each phase
@@ -102,8 +106,10 @@ export async function runPipeline(
     let event: PhaseEvent;
     try {
       event = await handler(run);
-    } catch {
+    } catch (err) {
       event = 'failure';
+      lastError = err instanceof Error ? err.message : String(err);
+      console.error(`[pipeline] Phase ${run.phase} threw:`, err);
     }
 
     // Check for global overrides (budget-exceeded, rate-limited)

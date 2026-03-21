@@ -125,6 +125,34 @@ describe('runPipeline', () => {
     expect(attempts).toBe(3);
   });
 
+  it('preserves error context from thrown exceptions in stuck result (#12)', async () => {
+    const handlers: PhaseHandlerMap = {
+      detect: async () => 'success' as PhaseEvent,
+      classify: async () => 'success:simple' as PhaseEvent,
+      implement: async () => { throw new Error('database connection refused'); },
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('stuck');
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain('database connection refused');
+  });
+
+  it('preserves error context from non-Error thrown values (#12)', async () => {
+    const handlers: PhaseHandlerMap = {
+      detect: async () => 'success' as PhaseEvent,
+      classify: async () => 'success:simple' as PhaseEvent,
+      implement: async () => { throw 'string error'; },
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('stuck');
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain('string error');
+  });
+
   it('calls runWriter.upsertRun on phase transitions', async () => {
     const upsertRun = vi.fn().mockResolvedValue(undefined);
     const runWriter = { upsertRun, writeCostEvent: vi.fn() } as any;
