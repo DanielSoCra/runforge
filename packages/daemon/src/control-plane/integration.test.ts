@@ -143,4 +143,80 @@ describe('integrateToStaging', () => {
     const result = await integrateToStaging('feature/does-not-exist', 'staging', repoDir);
     expect(result.ok).toBe(false);
   });
+
+  it('acquires and releases the integration lock during merge', async () => {
+    // Create staging branch from main
+    sh('git', ['checkout', '-b', 'staging'], repoDir);
+    sh('git', ['checkout', 'main'], repoDir);
+
+    // Create a feature branch
+    sh('git', ['checkout', '-b', 'feature/lock-test'], repoDir);
+    await writeFile(join(repoDir, 'lock-test.ts'), 'export {};\n');
+    sh('git', ['add', 'lock-test.ts'], repoDir);
+    sh('git', ['commit', '-m', 'lock test'], repoDir);
+
+    // Lock should be free before and after
+    expect(isIntegrationLocked()).toBe(false);
+    const result = await integrateToStaging('feature/lock-test', 'staging', repoDir);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.success).toBe(true);
+    expect(isIntegrationLocked()).toBe(false);
+  });
+
+  it('rejects concurrent integration when lock is held', async () => {
+    // Manually acquire the lock to simulate a concurrent run
+    acquireIntegrationLock();
+
+    sh('git', ['checkout', '-b', 'staging'], repoDir);
+    sh('git', ['checkout', 'main'], repoDir);
+    sh('git', ['checkout', '-b', 'feature/blocked'], repoDir);
+    await writeFile(join(repoDir, 'blocked.ts'), 'export {};\n');
+    sh('git', ['add', 'blocked.ts'], repoDir);
+    sh('git', ['commit', '-m', 'blocked'], repoDir);
+
+    const result = await integrateToStaging('feature/blocked', 'staging', repoDir);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('lock');
+
+    // Clean up
+    releaseIntegrationLock();
+  });
+
+  it('releases the lock even when merge fails', async () => {
+    // No staging branch — merge will fail
+    sh('git', ['checkout', '-b', 'feature/fail'], repoDir);
+    await writeFile(join(repoDir, 'fail.ts'), 'export {};\n');
+    sh('git', ['add', 'fail.ts'], repoDir);
+    sh('git', ['commit', '-m', 'fail'], repoDir);
+
+    expect(isIntegrationLocked()).toBe(false);
+    const result = await integrateToStaging('feature/fail', 'nonexistent', repoDir);
+    expect(result.ok).toBe(false);
+    // Lock must be released even on failure
+    expect(isIntegrationLocked()).toBe(false);
+  });
+
+  it('releases the lock after conflict detection', async () => {
+    // Create staging with a conflicting file
+    sh('git', ['checkout', '-b', 'staging'], repoDir);
+    await writeFile(join(repoDir, 'conflict.ts'), 'const x = "staging";\n');
+    sh('git', ['add', 'conflict.ts'], repoDir);
+    sh('git', ['commit', '-m', 'staging change'], repoDir);
+
+    // Create feature branch from main with conflicting change
+    sh('git', ['checkout', 'main'], repoDir);
+    sh('git', ['checkout', '-b', 'feature/conflict-lock'], repoDir);
+    await writeFile(join(repoDir, 'conflict.ts'), 'const x = "feature";\n');
+    sh('git', ['add', 'conflict.ts'], repoDir);
+    sh('git', ['commit', '-m', 'feature change'], repoDir);
+
+    expect(isIntegrationLocked()).toBe(false);
+    const result = await integrateToStaging('feature/conflict-lock', 'staging', repoDir);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.conflicted).toBe(true);
+    }
+    // Lock must be released after conflict
+    expect(isIntegrationLocked()).toBe(false);
+  });
 });
