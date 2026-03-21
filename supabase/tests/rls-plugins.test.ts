@@ -8,6 +8,7 @@ const ADMIN_JWT = process.env['SUPABASE_TEST_ADMIN_JWT'];
 const VIEWER_JWT = process.env['SUPABASE_TEST_VIEWER_JWT'];
 
 const svc = createClient(URL, SERVICE);
+const isCI = !!process.env.CI;
 
 describe('repo_plugins RLS', () => {
   let repoId: string;
@@ -23,6 +24,19 @@ describe('repo_plugins RLS', () => {
 
   afterAll(async () => {
     await svc.from('repos').delete().eq('id', repoId);
+  });
+
+  // --- Guard: fail in CI if JWT env vars are missing (#20) ---
+  it('authenticated RLS tests must not be silently skipped in CI', () => {
+    if (isCI) {
+      expect(ADMIN_JWT, 'SUPABASE_TEST_ADMIN_JWT must be set in CI — otherwise admin RLS tests are silently skipped').toBeTruthy();
+      expect(VIEWER_JWT, 'SUPABASE_TEST_VIEWER_JWT must be set in CI — otherwise viewer RLS tests are silently skipped').toBeTruthy();
+    } else if (!ADMIN_JWT || !VIEWER_JWT) {
+      console.warn(
+        '\n⚠ SUPABASE_TEST_ADMIN_JWT and/or SUPABASE_TEST_VIEWER_JWT not set.\n' +
+        '  Authenticated RLS tests will be SKIPPED. Set these env vars for full coverage.\n'
+      );
+    }
   });
 
   it('unauthenticated cannot read repo_plugins', async () => {

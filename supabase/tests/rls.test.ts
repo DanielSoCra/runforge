@@ -15,6 +15,8 @@ const serviceClient = createClient(SUPABASE_URL, SERVICE_KEY);
 //   SUPABASE_TEST_VIEWER_JWT — JWT for a user with role=viewer in team_members
 // In CI, generate these via the Supabase admin API or signInWithPassword.
 
+const isCI = !!process.env.CI;
+
 describe('RLS policies', () => {
   let testRepoId: string;
 
@@ -29,6 +31,19 @@ describe('RLS policies', () => {
 
   afterAll(async () => {
     await serviceClient.from('repos').delete().eq('id', testRepoId);
+  });
+
+  // --- Guard: fail in CI if JWT env vars are missing (#20) ---
+  it('authenticated RLS tests must not be silently skipped in CI', () => {
+    if (isCI) {
+      expect(ADMIN_JWT, 'SUPABASE_TEST_ADMIN_JWT must be set in CI — otherwise admin RLS tests are silently skipped').toBeTruthy();
+      expect(VIEWER_JWT, 'SUPABASE_TEST_VIEWER_JWT must be set in CI — otherwise viewer RLS tests are silently skipped').toBeTruthy();
+    } else if (!ADMIN_JWT || !VIEWER_JWT) {
+      console.warn(
+        '\n⚠ SUPABASE_TEST_ADMIN_JWT and/or SUPABASE_TEST_VIEWER_JWT not set.\n' +
+        '  Authenticated RLS tests will be SKIPPED. Set these env vars for full coverage.\n'
+      );
+    }
   });
 
   // --- Unauthenticated ---
