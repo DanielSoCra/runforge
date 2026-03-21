@@ -16,12 +16,11 @@ Recommended: **CPX21** (3 vCPUs, 4 GB RAM, 80 GB SSD), Ubuntu 24.04 LTS.
 2. Create a server, add your SSH key, note the public IP.
 3. Point your domain's A record at the server IP.
 
-## 2. Install Docker
+## 2. Verify Docker
 
-SSH into the server as root:
+Docker and Docker Compose are installed automatically by `cloud-init.yml`. If provisioning manually (without Terraform/cloud-init), install Docker first:
 
 ```bash
-apt-get update && apt-get upgrade -y
 curl -fsSL https://get.docker.com | sh
 ```
 
@@ -33,6 +32,8 @@ docker compose version
 ```
 
 ## 3. Create the Deploy User
+
+The `autoclaud` user is created automatically by `cloud-init.yml` (with Docker group membership). If provisioning manually:
 
 ```bash
 useradd -m -s /bin/bash autoclaud

@@ -8,8 +8,13 @@ packages:
   - curl
   - build-essential
   - jq
+  - ca-certificates
+  - gnupg
 
 runcmd:
+  # Docker (convenience script — https://get.docker.com)
+  - curl -fsSL https://get.docker.com | sh
+
   # Node.js 22 LTS
   - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   - apt-get install -y nodejs
@@ -23,6 +28,7 @@ runcmd:
 
   # Create auto-claude user
   - useradd -m -s /bin/bash autoclaud
+  - usermod -aG docker autoclaud
   - mkdir -p /home/autoclaud/.ssh
   - cp /root/.ssh/authorized_keys /home/autoclaud/.ssh/authorized_keys
   - chown -R autoclaud:autoclaud /home/autoclaud/.ssh
