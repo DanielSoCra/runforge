@@ -25,6 +25,10 @@ export async function loadPromptTemplate(
   name: string,
   variables: Record<string, string>,
 ): Promise<string | null> {
+  // Guard against path traversal — agent names must be simple identifiers
+  if (name.includes('/') || name.includes('\\') || name.includes('..')) {
+    return null;
+  }
   const filePath = join(promptsDir(), `${name}.md`);
   try {
     let template = await readFile(filePath, 'utf-8');
@@ -32,8 +36,14 @@ export async function loadPromptTemplate(
       template = template.replaceAll(`{{${key}}}`, value);
     }
     return template;
-  } catch {
-    return null;
+  } catch (e: unknown) {
+    // Only treat "file not found" as a graceful fallback.
+    // Re-throw permission errors, encoding issues, etc. so they surface
+    // rather than silently producing the same empty-prompt bug this fixes.
+    if (e instanceof Error && 'code' in e && (e as NodeJS.ErrnoException).code === 'ENOENT') {
+      return null;
+    }
+    throw e;
   }
 }
 

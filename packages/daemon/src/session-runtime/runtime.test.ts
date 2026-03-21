@@ -70,7 +70,7 @@ describe('SessionRuntime', () => {
   it('assembles prompt with context variables', async () => {
     // Access private method via any for testing
     const assembled = await (runtime as any).assemblePrompt(
-      { systemPrompt: 'Base prompt' },
+      { name: 'test-agent', systemPrompt: 'Base prompt' },
       { variables: { task: 'do something', specs: 'spec content' } },
     );
     expect(assembled).toContain('Base prompt');
@@ -82,7 +82,7 @@ describe('SessionRuntime', () => {
 
   it('includes plugin skills and agents before system prompt', async () => {
     const assembled = await (runtime as any).assemblePrompt(
-      { systemPrompt: 'SYSTEM PROMPT' },
+      { name: 'test-agent', systemPrompt: 'SYSTEM PROMPT' },
       { variables: {}, activePlugins: [{ id: 'test', activatedAt: '2024-01-01T00:00:00Z' }] },
     );
     expect(assembled).toContain('SKILL CONTENT');
@@ -182,6 +182,12 @@ describe('loadPromptTemplate', () => {
     await writeFile(join(tmpDir, 'tester.md'), 'Run {{cmd}} then {{cmd}} again');
     const result = await loadPromptTemplate('tester', { cmd: 'vitest' });
     expect(result).toBe('Run vitest then vitest again');
+  });
+
+  it('rejects path traversal attempts', async () => {
+    expect(await loadPromptTemplate('../../etc/passwd', {})).toBeNull();
+    expect(await loadPromptTemplate('foo/bar', {})).toBeNull();
+    expect(await loadPromptTemplate('foo\\bar', {})).toBeNull();
   });
 });
 
