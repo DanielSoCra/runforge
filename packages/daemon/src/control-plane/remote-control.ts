@@ -36,11 +36,6 @@ export class RemoteControlManager {
     this.spawn();
   }
 
-  async restart(): Promise<void> {
-    await this.stop();
-    this.start();
-  }
-
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.restartTimer) {

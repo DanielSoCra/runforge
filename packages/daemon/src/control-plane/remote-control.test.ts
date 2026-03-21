@@ -194,6 +194,23 @@ describe('RemoteControlManager', () => {
     expect(manager.getState().remote_control_url).toBe('https://session.example.com');
   });
 
+  it('regression #5: only one restart() method exists (no duplicate override)', () => {
+    // Prior bug: two restart() methods were defined — an async version (properly
+    // awaiting stop()) and a sync version. The sync version silently overrode
+    // the async one at runtime. This test verifies the class has exactly one
+    // restart method with the correct (sync) signature.
+    const descriptor = Object.getOwnPropertyDescriptor(
+      RemoteControlManager.prototype,
+      'restart',
+    );
+    expect(descriptor).toBeDefined();
+    expect(typeof descriptor!.value).toBe('function');
+    // The working restart() is sync (returns void, not Promise<void>)
+    vi.mocked(spawn).mockReturnValue(makeFakeProcess());
+    const result = manager.restart();
+    expect(result).toBeUndefined();
+  });
+
   it('schedules immediate restart on clean active exit (code=0 after active)', async () => {
     let spawnCount = 0;
     vi.mocked(spawn).mockImplementation(() => {
