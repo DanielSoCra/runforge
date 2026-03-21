@@ -87,9 +87,13 @@ export async function enableRepo(id: string) {
   await requireAdmin(supabase);
 
   // Spec: credentials must exist before enabling (FUNC-AC-DASHBOARD line 48-51)
-  const { data: keys } = await supabase.from('api_keys')
+  const { data: keys, error: keysError } = await supabase.from('api_keys')
     .select('key_type')
     .eq('repo_id', id);
+  if (keysError) {
+    console.error('[repos] enableRepo credential check failed:', keysError);
+    throw new Error('Failed to verify repository credentials');
+  }
 
   const hasSourceControl = keys?.some(k => k.key_type === 'source-control');
   const hasModelProvider = keys?.some(k => k.key_type === 'model-provider');
