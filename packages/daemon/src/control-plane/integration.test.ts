@@ -78,6 +78,10 @@ describe('integrateToStaging', () => {
     repoDir = await makeRepo();
   });
 
+  afterEach(() => {
+    releaseIntegrationLock();
+  });
+
   it('merges a clean feature branch into staging with --no-ff', async () => {
     // Create staging branch from main
     sh('git', ['checkout', '-b', 'staging'], repoDir);
