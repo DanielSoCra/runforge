@@ -66,24 +66,31 @@ export async function enableAllSuggested(
 
   if (validIds.length === 0) return { succeeded: [], failed: invalidIds };
 
-  // Batch upsert — single DB call instead of N calls via togglePlugin
+  // Independent per-plugin upserts — no transaction wrapping the batch.
+  // Partial failures are collected; successful activations are not rolled back.
   const now = new Date().toISOString();
-  const { error: upsertError } = await supabase.from('repo_plugins').upsert(
-    validIds.map(pluginId => ({
-      repo_id: repoId,
-      plugin_id: pluginId,
-      active: true,
-      activated_at: now,
-    })),
-    { onConflict: 'repo_id,plugin_id', ignoreDuplicates: false },
-  );
+  const succeeded: string[] = [];
+  const failed: string[] = [...invalidIds];
 
-  if (upsertError) {
-    console.error('[plugins] enableAllSuggested upsert failed:', upsertError);
-    return { succeeded: [], failed: validIds.concat(invalidIds) };
+  for (const pluginId of validIds) {
+    const { error: upsertError } = await supabase.from('repo_plugins').upsert(
+      {
+        repo_id: repoId,
+        plugin_id: pluginId,
+        active: true,
+        activated_at: now,
+      },
+      { onConflict: 'repo_id,plugin_id', ignoreDuplicates: false },
+    );
+    if (upsertError) {
+      console.error(`[plugins] enableAllSuggested upsert failed for ${pluginId}:`, upsertError);
+      failed.push(pluginId);
+    } else {
+      succeeded.push(pluginId);
+    }
   }
 
-  return { succeeded: validIds, failed: invalidIds };
+  return { succeeded, failed };
 }
 
 export async function triggerRecommendation(repoId: string, repoOwner: string, repoName: string): Promise<void> {

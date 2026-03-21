@@ -96,6 +96,37 @@ describe('enableAllSuggested', () => {
     expect(result.succeeded).toHaveLength(0);
   });
 
+  it('succeeds for some plugins even when others fail (independent upserts)', async () => {
+    const multiRegistry = {
+      version: 1,
+      plugins: [
+        { id: 'web-stack', name: 'Web Stack', description: '', tags: [] },
+        { id: 'api-tools', name: 'API Tools', description: '', tags: [] },
+      ],
+    };
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'u1' } as never);
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(multiRegistry);
+
+    const upsert = vi.fn()
+      .mockResolvedValueOnce({ error: null })        // web-stack succeeds
+      .mockResolvedValueOnce({ error: { message: 'db error' } }); // api-tools fails
+    const eqActive = vi.fn().mockResolvedValue({
+      data: [{ plugin_id: 'web-stack' }, { plugin_id: 'api-tools' }],
+      error: null,
+    });
+    const eqRecommended = vi.fn().mockReturnValue({ eq: eqActive });
+    const eqRepoId = vi.fn().mockReturnValue({ eq: eqRecommended });
+    const select = vi.fn().mockReturnValue({ eq: eqRepoId });
+    vi.mocked(createClient).mockResolvedValue({
+      from: (table: string) => (table === 'repo_plugins' ? { select, upsert } : { upsert }),
+    } as never);
+
+    const result = await enableAllSuggested('repo-id');
+    expect(result.succeeded).toEqual(['web-stack']);
+    expect(result.failed).toEqual(['api-tools']);
+    expect(upsert).toHaveBeenCalledTimes(2);
+  });
+
   it('returns empty arrays when the DB query errors', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'u1' } as never);
     const eqActive = vi.fn().mockResolvedValue({ data: null, error: { message: 'rls violation' } });
