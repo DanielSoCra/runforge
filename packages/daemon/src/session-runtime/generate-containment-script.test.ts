@@ -180,6 +180,11 @@ describe('generateContainmentScript', () => {
     expect(result.stderr).toContain('read-only path in command');
   });
 
+  it('allows Bash read of .claude/settings.local.json (no write indicator)', () => {
+    const result = runHookScript(script, 'Bash', { command: 'cat .claude/settings.local.json' });
+    expect(result.code).toBe(0);
+  });
+
   it('fails closed on malformed JSON input', () => {
     const scriptPath = join(tmpdir(), `test-hook-failclose-${Date.now()}.mjs`);
     writeFileSync(scriptPath, script, { mode: 0o755 });

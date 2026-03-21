@@ -293,4 +293,13 @@ describe('checkContainment', () => {
     expect(result.allowed).toBe(false);
     if (!result.allowed) expect(result.reason).toContain('read-only');
   });
+
+  it('allows Bash read of .claude/settings.local.json (no write indicator)', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'cat .claude/settings.local.json' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(true);
+  });
 });
