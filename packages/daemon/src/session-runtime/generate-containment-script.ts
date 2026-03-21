@@ -109,6 +109,31 @@ function extractCommandPaths(command) {
 
 const WRITE_INDICATOR_RE = /[>]|\\btee\\b|\\bcp\\b|\\bmv\\b|\\bsed\\s+-i\\b|\\bdd\\b/;
 
+function normalizeShellCommand(command) {
+  return command
+    .replace(/''/g, '')
+    .replace(/""/g, '')
+    .replace(/\\\\(?=\\w)/g, '');
+}
+
+function detectCommandAssignmentBypass(command, blockedCommands) {
+  const re = /\\b(\\w+)=(["']?)(\\S+?)\\2(?=\\s|;|&|$)/g;
+  let match;
+  while ((match = re.exec(command)) !== null) {
+    const value = match[3];
+    for (const blocked of blockedCommands) {
+      const cmd = blocked.trimEnd();
+      if (value === cmd) {
+        const varName = match[1];
+        if (command.includes('$' + varName) || command.includes('\${' + varName + '}')) {
+          return blocked;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function checkContainment(toolName, toolInput) {
   const extracted = extractPaths(toolInput);
   if (extracted.blocked) {
@@ -136,10 +161,16 @@ function checkContainment(toolName, toolInput) {
 
   if (toolName === 'Bash' || toolName === 'shell') {
     const command = String(toolInput.command || toolInput.cmd || '');
+    const normalized = normalizeShellCommand(command);
     for (const blocked of policy.blockedCommands) {
-      if (command.includes(blocked)) {
+      if (command.includes(blocked) || normalized.includes(blocked)) {
         return { allowed: false, reason: 'Blocked command pattern: ' + blocked };
       }
+    }
+
+    const assignmentBypass = detectCommandAssignmentBypass(normalized, policy.blockedCommands);
+    if (assignmentBypass) {
+      return { allowed: false, reason: 'Blocked command pattern (variable indirection): ' + assignmentBypass };
     }
 
     const cmdExtracted = extractCommandPaths(command);

