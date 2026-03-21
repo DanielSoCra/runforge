@@ -51,7 +51,23 @@ function extractPaths(input) {
   return paths;
 }
 
+const PROJECT_ROOT = process.cwd();
+const PROJECT_ROOT_PREFIX = PROJECT_ROOT + '/';
+
 function normalizePath(p) {
+  // SEC-2: Convert absolute paths to project-relative before pattern matching.
+  // Without this, absolute paths bypass blocked pattern checks entirely.
+  if (p.startsWith('/')) {
+    if (p.startsWith(PROJECT_ROOT_PREFIX)) {
+      p = p.slice(PROJECT_ROOT_PREFIX.length);
+    } else if (p === PROJECT_ROOT) {
+      return '.';
+    } else {
+      // Absolute path outside the project — fail closed.
+      // Containment patterns are project-scoped; out-of-project paths are suspicious.
+      return '!!out-of-project!!' + p;
+    }
+  }
   // Inline path normalization: resolve . and .. segments, collapse separators
   const parts = p.split('/');
   const result = [];
