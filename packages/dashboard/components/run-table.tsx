@@ -5,6 +5,20 @@ import type { Database } from '@/lib/types';
 
 type Run = Database['public']['Tables']['runs']['Row'];
 
+function formatElapsed(startedAt: string): string {
+  const ms = Date.now() - new Date(startedAt).getTime();
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainMinutes = minutes % 60;
+  if (hours < 24) return `${hours}h ${remainMinutes}m`;
+  const days = Math.floor(hours / 24);
+  const remainHours = hours % 24;
+  return `${days}d ${remainHours}h`;
+}
+
 const outcomeVariant = {
   'in-progress': 'secondary',
   complete: 'default',
@@ -31,7 +45,7 @@ export function RunTable({ runs }: { runs: Run[] }) {
             <TableHead>Phase</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="text-right">Cost</TableHead>
-            <TableHead>Started</TableHead>
+            <TableHead>Elapsed</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -53,8 +67,10 @@ export function RunTable({ runs }: { runs: Run[] }) {
               <TableCell className="text-right font-mono text-sm">
                 ${Number(run.total_cost).toFixed(4)}
               </TableCell>
-              <TableCell className="text-muted-foreground text-sm">
-                {new Date(run.started_at).toLocaleString()}
+              <TableCell className="text-muted-foreground text-sm" title={new Date(run.started_at).toLocaleString()}>
+                {run.outcome === 'in-progress'
+                  ? formatElapsed(run.started_at)
+                  : new Date(run.started_at).toLocaleString()}
               </TableCell>
             </TableRow>
           ))}

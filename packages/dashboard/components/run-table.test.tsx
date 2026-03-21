@@ -31,4 +31,24 @@ describe('RunTable', () => {
     render(<RunTable runs={[]} />);
     expect(screen.getByText(/no runs/i)).toBeInTheDocument();
   });
+
+  it('shows elapsed time for in-progress runs (#82)', () => {
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const inProgressRun = { ...mockRun, outcome: 'in-progress' as const, started_at: twoHoursAgo };
+    render(<RunTable runs={[inProgressRun as any]} />);
+    expect(screen.getByText(/^\d+h \d+m$/)).toBeInTheDocument();
+  });
+
+  it('shows absolute timestamp for completed runs (#82)', () => {
+    const completedRun = { ...mockRun, outcome: 'complete' as const };
+    render(<RunTable runs={[completedRun as any]} />);
+    // Completed runs show locale string, not elapsed format
+    expect(screen.queryByText(/^\d+h \d+m$/)).not.toBeInTheDocument();
+  });
+
+  it('renders Elapsed column header instead of Started (#82)', () => {
+    render(<RunTable runs={[mockRun as any]} />);
+    expect(screen.getByText('Elapsed')).toBeInTheDocument();
+    expect(screen.queryByText('Started')).not.toBeInTheDocument();
+  });
 });
