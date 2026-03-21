@@ -6,9 +6,19 @@ import { Label } from '@/components/ui/label';
 import { updateGlobalSettings } from '@/actions/settings';
 import { PageError } from '@/components/page-error';
 import { GitHubConnectionsSection } from '@/components/github-connections-section';
+import { isAdmin } from '@/lib/auth';
 
 export default async function SettingsPage() {
   const supabase = await createClient();
+  const admin = await isAdmin(supabase);
+  if (!admin) {
+    return (
+      <div className="max-w-lg space-y-6">
+        <h1 className="text-2xl font-semibold">Settings</h1>
+        <p className="text-muted-foreground">Admin access required to view settings.</p>
+      </div>
+    );
+  }
   const { data: settings, error: settingsError } = await supabase.from('global_settings').select('*').single();
   if (settingsError && settingsError.code !== 'PGRST116') {
     // PGRST116 = no rows — acceptable for first-run (defaults apply)
