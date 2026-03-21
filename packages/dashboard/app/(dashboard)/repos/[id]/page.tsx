@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { upsertApiKey } from '@/actions/api-keys';
-import { enableRepo, disableRepo, deleteRepo } from '@/actions/repos';
+import { enableRepo, disableRepo, deleteRepo, updateRepo } from '@/actions/repos';
 import { RepoTabNav } from '@/components/repo-tab-nav';
 import { isAdmin } from '@/lib/auth';
 
@@ -63,6 +63,41 @@ export default async function RepoDetailPage({ params }: { params: Promise<{ id:
 
       {/* Tab navigation */}
       <RepoTabNav repoId={id} />
+
+      {/* Settings */}
+      {admin && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Settings</CardTitle>
+            <CardDescription>Branch config, budget limit, and concurrency. Applied on next daemon poll.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form action={updateRepo.bind(null, repo.id)} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="staging_branch">Staging Branch</Label>
+                  <Input id="staging_branch" name="staging_branch" defaultValue={repo.staging_branch ?? 'staging'} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="production_branch">Production Branch</Label>
+                  <Input id="production_branch" name="production_branch" defaultValue={repo.production_branch ?? 'main'} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="budget_limit">Budget Limit ($)</Label>
+                  <Input id="budget_limit" name="budget_limit" type="number" step="0.01" min="0" defaultValue={repo.budget_limit ?? ''} placeholder="No limit" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="concurrency_limit">Concurrency Limit</Label>
+                  <Input id="concurrency_limit" name="concurrency_limit" type="number" min="1" defaultValue={repo.concurrency_limit ?? ''} placeholder="Default" />
+                </div>
+              </div>
+              <Button type="submit" size="sm">Save Settings</Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Credentials */}
       {admin && (
