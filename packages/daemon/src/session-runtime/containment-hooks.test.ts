@@ -123,4 +123,93 @@ describe('checkContainment', () => {
     expect(result.allowed).toBe(false);
     if (!result.allowed) expect(result.reason).toContain('wget');
   });
+
+  // Regression tests for SEC-15: Bash command path bypass
+  it('blocks cat of a blocked path via Bash command', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'cat .specify/scenarios/test.yml' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked path in command');
+  });
+
+  it('blocks head/tail of a blocked path via Bash command', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'head -n 10 .specify/methodology/approach.md' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked path in command');
+  });
+
+  it('blocks piped read of a blocked path via Bash command', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'cat state/config.json | jq .key' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked path in command');
+  });
+
+  it('blocks write to read-only path via Bash command', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'echo "hacked" > CLAUDE.md' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('read-only path in command');
+  });
+
+  it('allows Bash command with non-blocked paths', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'cat src/main.ts | wc -l' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(true);
+  });
+
+  it('allows reading a read-only path via Bash (no write indicator)', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'cat CLAUDE.md' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(true);
+  });
+
+  it('blocks ./ prefixed traversal of a blocked path', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'cat ./.specify/scenarios/test.yml' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked path in command');
+  });
+
+  it('blocks ../ traversal of a blocked path', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'cat foo/../.specify/scenarios/test.yml' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked path in command');
+  });
+
+  it('blocks quoted path of a blocked path', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'cat ".specify/scenarios/test.yml"' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked path in command');
+  });
 });

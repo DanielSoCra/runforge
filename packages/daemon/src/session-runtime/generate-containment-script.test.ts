@@ -84,6 +84,59 @@ describe('generateContainmentScript', () => {
     expect(result.stderr).toContain('Blocked path');
   });
 
+  // Regression tests for SEC-15: Bash command path bypass
+  it('blocks cat of a blocked path via Bash command', () => {
+    const result = runHookScript(script, 'Bash', { command: 'cat .specify/scenarios/test.yml' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked path in command');
+  });
+
+  it('blocks head of a blocked path via Bash command', () => {
+    const result = runHookScript(script, 'Bash', { command: 'head -n 10 .specify/methodology/approach.md' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked path in command');
+  });
+
+  it('blocks piped read of a blocked path via Bash command', () => {
+    const result = runHookScript(script, 'Bash', { command: 'cat state/config.json | jq .key' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked path in command');
+  });
+
+  it('blocks write to read-only path via Bash command', () => {
+    const result = runHookScript(script, 'Bash', { command: 'echo "hacked" > CLAUDE.md' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('read-only path in command');
+  });
+
+  it('allows Bash command with non-blocked paths', () => {
+    const result = runHookScript(script, 'Bash', { command: 'cat src/main.ts | wc -l' });
+    expect(result.code).toBe(0);
+  });
+
+  it('allows reading a read-only path via Bash (no write indicator)', () => {
+    const result = runHookScript(script, 'Bash', { command: 'cat CLAUDE.md' });
+    expect(result.code).toBe(0);
+  });
+
+  it('blocks ./ prefixed traversal of a blocked path', () => {
+    const result = runHookScript(script, 'Bash', { command: 'cat ./.specify/scenarios/test.yml' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked path in command');
+  });
+
+  it('blocks ../ traversal of a blocked path', () => {
+    const result = runHookScript(script, 'Bash', { command: 'cat foo/../.specify/scenarios/test.yml' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked path in command');
+  });
+
+  it('blocks quoted path of a blocked path', () => {
+    const result = runHookScript(script, 'Bash', { command: 'cat ".specify/scenarios/test.yml"' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked path in command');
+  });
+
   it('fails closed on malformed JSON input', () => {
     const scriptPath = join(tmpdir(), `test-hook-failclose-${Date.now()}.mjs`);
     writeFileSync(scriptPath, script, { mode: 0o755 });

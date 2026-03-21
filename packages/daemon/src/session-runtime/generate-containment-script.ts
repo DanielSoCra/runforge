@@ -51,6 +51,37 @@ function extractPaths(input) {
   return paths;
 }
 
+function normalizePath(p) {
+  // Inline path normalization: resolve . and .. segments, collapse separators
+  const parts = p.split('/');
+  const result = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i] === '.' || parts[i] === '') continue;
+    if (parts[i] === '..' && result.length > 0 && result[result.length - 1] !== '..') {
+      result.pop();
+    } else {
+      result.push(parts[i]);
+    }
+  }
+  return result.join('/');
+}
+
+function extractCommandPaths(command) {
+  const tokens = command.split(/[|;&\\s]+/).filter(Boolean);
+  const paths = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token.startsWith('-') || token.startsWith('$') || token.includes('=')) continue;
+    if (token.includes('/') || token.includes('.')) {
+      const cleaned = token.replace(/^[<>]+/, '').replace(/^["']|["']$/g, '');
+      if (cleaned) paths.push(normalizePath(cleaned));
+    }
+  }
+  return paths;
+}
+
+const WRITE_INDICATOR_RE = /[>]|\\btee\\b|\\bcp\\b|\\bmv\\b|\\bsed\\s+-i\\b|\\bdd\\b/;
+
 function checkContainment(toolName, toolInput) {
   const paths = extractPaths(toolInput);
 
@@ -77,6 +108,23 @@ function checkContainment(toolName, toolInput) {
     for (const blocked of policy.blockedCommands) {
       if (command.includes(blocked)) {
         return { allowed: false, reason: 'Blocked command pattern: ' + blocked };
+      }
+    }
+
+    const cmdPaths = extractCommandPaths(command);
+    const isWrite = WRITE_INDICATOR_RE.test(command);
+    for (let i = 0; i < cmdPaths.length; i++) {
+      for (const pattern of policy.blockedPaths) {
+        if (globMatch(cmdPaths[i], pattern)) {
+          return { allowed: false, reason: 'Blocked path in command: ' + cmdPaths[i] + ' matches ' + pattern };
+        }
+      }
+      if (isWrite) {
+        for (const pattern of policy.readOnlyPaths) {
+          if (globMatch(cmdPaths[i], pattern)) {
+            return { allowed: false, reason: 'Write blocked on read-only path in command: ' + cmdPaths[i] };
+          }
+        }
       }
     }
   }

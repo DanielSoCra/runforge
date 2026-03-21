@@ -1,5 +1,6 @@
 // src/session-runtime/containment-hooks.ts
 import { minimatch } from 'minimatch';
+import { normalize } from 'path';
 
 export interface ContainmentPolicy {
   blockedPaths: string[];
@@ -46,6 +47,24 @@ export function checkContainment(call: ToolCall, policy: ContainmentPolicy): Con
         return { allowed: false, reason: `Blocked command pattern: ${blocked}` };
       }
     }
+
+    // 4. Extract path references from Bash commands and check against blocked/readOnly paths
+    const commandPaths = extractCommandPaths(command);
+    const commandIsWrite = WRITE_INDICATOR_RE.test(command);
+    for (const p of commandPaths) {
+      for (const pattern of policy.blockedPaths) {
+        if (minimatch(p, pattern, { dot: true })) {
+          return { allowed: false, reason: `Blocked path in command: ${p} matches ${pattern}` };
+        }
+      }
+      if (commandIsWrite) {
+        for (const pattern of policy.readOnlyPaths) {
+          if (minimatch(p, pattern, { dot: true })) {
+            return { allowed: false, reason: `Write blocked on read-only path in command: ${p}` };
+          }
+        }
+      }
+    }
   }
 
   return { allowed: true };
@@ -59,6 +78,23 @@ function extractPaths(input: Record<string, unknown>): string[] {
   }
   return paths;
 }
+
+/** Extract path-like tokens from a shell command string, normalized to prevent traversal bypasses. */
+function extractCommandPaths(command: string): string[] {
+  const tokens = command.split(/[|;&\s]+/).filter(Boolean);
+  const paths: string[] = [];
+  for (const token of tokens) {
+    if (token.startsWith('-') || token.startsWith('$') || token.includes('=')) continue;
+    if (token.includes('/') || token.includes('.')) {
+      // Strip shell redirections and surrounding quotes
+      const cleaned = token.replace(/^[<>]+/, '').replace(/^["']|["']$/g, '');
+      if (cleaned) paths.push(normalize(cleaned));
+    }
+  }
+  return paths;
+}
+
+const WRITE_INDICATOR_RE = /[>]|\btee\b|\bcp\b|\bmv\b|\bsed\s+-i\b|\bdd\b/;
 
 export const WRITE_TOOLS = ['Write', 'Edit', 'NotebookEdit', 'Bash', 'shell'];
 
