@@ -299,6 +299,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/lib/scaffold-templates.test.ts
     - packages/dashboard/actions/new-project.test.ts
     - packages/dashboard/lib/classify-issues.test.ts
+    - packages/dashboard/app/api/daemon/daemon-routes.test.ts
   status: draft
 
 STACK-AC-HANDOFF-RUNTIME:
