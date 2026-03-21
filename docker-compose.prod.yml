@@ -42,6 +42,13 @@ services:
     restart: unless-stopped
     env_file: .env.prod
     ports: []  # NOT exposed externally — internal network only
+    # Git needs a user identity for commits (branch creation, merges, etc.)
+    command: >
+      sh -c "
+        git config --global user.name 'Auto-Claude' &&
+        git config --global user.email 'auto-claude@localhost' &&
+        pnpm start
+      "
     volumes:
       - ./prompts:/app/packages/daemon/prompts:ro
       - ./fitness:/app/packages/daemon/fitness:ro
