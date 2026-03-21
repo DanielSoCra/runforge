@@ -7,6 +7,7 @@ import type { Result } from '../lib/result.js';
 import { ok, err } from '../lib/result.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import { CostTracker } from './cost.js';
+import { RateLimiter } from './rate-limiter.js';
 import { createAdapter, type ProviderAdapter } from './adapters/index.js';
 import { buildCompositeContext } from './plugin-injection.js';
 import { readPluginsForContext } from './plugin-loader.js';
@@ -165,12 +166,14 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
 export class SessionRuntime {
   private adapter: ProviderAdapter;
   private costTracker: CostTracker;
+  private rateLimiter: RateLimiter;
   private lastSpawnTime = 0;
   private staggerMs: number;
 
-  constructor(config: Config, costTracker: CostTracker) {
+  constructor(config: Config, costTracker: CostTracker, rateLimiter?: RateLimiter) {
     this.adapter = createAdapter(config.adapter);
     this.costTracker = costTracker;
+    this.rateLimiter = rateLimiter ?? new RateLimiter();
     this.staggerMs = 2000; // 2 second stagger between session starts
   }
 
@@ -194,7 +197,13 @@ export class SessionRuntime {
       return err(new Error(`Budget exceeded: ${budget.reason}`));
     }
 
-    // 3. Stagger delay
+    // 3. Check rate limit (ARCH-AC-SESSION-RUNTIME step 3)
+    const rateCheck = this.rateLimiter.checkRateLimit();
+    if (!rateCheck.clear) {
+      return err(new Error(`Rate limited: cooling down for ${Math.ceil(rateCheck.remainingMs / 1000)}s`));
+    }
+
+    // 4. Stagger delay
     const now = Date.now();
     const elapsed = now - this.lastSpawnTime;
     if (elapsed < this.staggerMs) {
@@ -202,17 +211,17 @@ export class SessionRuntime {
     }
     this.lastSpawnTime = Date.now();
 
-    // 4. Assemble prompt
+    // 5. Assemble prompt
     const prompt = await this.assemblePrompt(def, context);
 
-    // 5. Delegate to adapter — with containment policy enforced via PreToolUse hooks
+    // 6. Delegate to adapter — with containment policy enforced via PreToolUse hooks
     const result = await this.adapter.spawn(def, prompt, {
       cwd: context.workspacePath,
       jsonSchema: options?.jsonSchema,
       containmentPolicy: DEFAULT_POLICY,
     });
 
-    // 6. Record cost — always, even on failure (ARCH-AC-SESSION-RUNTIME step 10)
+    // 7. Record cost — always, even on failure (ARCH-AC-SESSION-RUNTIME step 10)
     const cost = result.ok
       ? result.value.cost
       : result.error instanceof SessionError
@@ -223,6 +232,11 @@ export class SessionRuntime {
       if (runWriter && runId) {
         void runWriter.writeCostEvent(runId, type, cost);
       }
+    }
+
+    // 8. Detect rate limit in adapter response (ARCH-AC-SESSION-RUNTIME rate limit detection flow)
+    if (!result.ok && result.error instanceof SessionError && result.error.rateLimited) {
+      this.rateLimiter.reportRateLimit();
     }
 
     return result;
@@ -264,5 +278,9 @@ export class SessionRuntime {
 
   getCostTracker(): CostTracker {
     return this.costTracker;
+  }
+
+  getRateLimiter(): RateLimiter {
+    return this.rateLimiter;
   }
 }

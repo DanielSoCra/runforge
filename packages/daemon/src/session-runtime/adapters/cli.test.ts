@@ -111,6 +111,38 @@ describe('CliAdapter.extractHandoff (#11)', () => {
   });
 });
 
+describe('CliAdapter.isRateLimitError (#91)', () => {
+  it('detects "rate limit" in text', () => {
+    const adapter = new CliAdapter();
+    expect(adapter.isRateLimitError('Error: rate limit exceeded')).toBe(true);
+  });
+
+  it('detects "rate_limit" in text', () => {
+    const adapter = new CliAdapter();
+    expect(adapter.isRateLimitError('error_type: rate_limit_error')).toBe(true);
+  });
+
+  it('detects HTTP 429 in text', () => {
+    const adapter = new CliAdapter();
+    expect(adapter.isRateLimitError('HTTP 429 Too Many Requests')).toBe(true);
+  });
+
+  it('detects "overloaded" in text', () => {
+    const adapter = new CliAdapter();
+    expect(adapter.isRateLimitError('API is overloaded')).toBe(true);
+  });
+
+  it('returns false for empty string', () => {
+    const adapter = new CliAdapter();
+    expect(adapter.isRateLimitError('')).toBe(false);
+  });
+
+  it('returns false for unrelated errors', () => {
+    const adapter = new CliAdapter();
+    expect(adapter.isRateLimitError('TypeError: cannot read property')).toBe(false);
+  });
+});
+
 describe('CliAdapter containment hook setup', () => {
   let tempDir: string;
 

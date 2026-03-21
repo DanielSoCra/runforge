@@ -7,10 +7,12 @@
  */
 export class SessionError extends Error {
   readonly cost: number;
+  readonly rateLimited: boolean;
 
-  constructor(message: string, cost = 0) {
+  constructor(message: string, cost = 0, rateLimited = false) {
     super(message);
     this.name = 'SessionError';
     this.cost = cost;
+    this.rateLimited = rateLimited;
   }
 }

@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SessionRuntime, loadPromptTemplate } from './runtime.js';
 import { CostTracker } from './cost.js';
+import { RateLimiter } from './rate-limiter.js';
 import type { Config } from '../config.js';
 import { buildCompositeContext } from './plugin-injection.js';
 import { SessionError } from './session-error.js';
@@ -199,6 +200,48 @@ describe('SessionRuntime', () => {
 
     expect(costTracker.getDailyCost()).toBe(0);
     expect(costTracker.getRunCost(100)).toBe(0);
+  });
+
+  it('rejects when rate limited (cooldown active)', async () => {
+    const rateLimiter = new RateLimiter({ baseBackoffMs: 60000, maxBackoffMs: 300000 });
+    rateLimiter.reportRateLimit(); // activate cooldown
+    const rl = new SessionRuntime(testConfig, costTracker, rateLimiter);
+
+    const result = await rl.spawnSession('worker', { variables: {} }, 1);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('Rate limited');
+  });
+
+  it('reports rate limit to limiter when adapter returns rateLimited error', async () => {
+    const rateLimiter = new RateLimiter({ baseBackoffMs: 1000, maxBackoffMs: 60000 });
+    const rl = new SessionRuntime(testConfig, costTracker, rateLimiter);
+
+    mockSpawn.mockResolvedValueOnce({
+      ok: false,
+      error: new SessionError('Rate limited by upstream provider', 0.1, true),
+    });
+
+    await rl.spawnSession('worker', { variables: { task: 'do it' } }, 42);
+
+    // Rate limiter should now be in cooldown
+    const check = rateLimiter.checkRateLimit();
+    expect(check.clear).toBe(false);
+    expect(rateLimiter.getConsecutiveCount()).toBe(1);
+  });
+
+  it('does not activate rate limiter for non-rate-limit errors', async () => {
+    const rateLimiter = new RateLimiter();
+    const rl = new SessionRuntime(testConfig, costTracker, rateLimiter);
+
+    mockSpawn.mockResolvedValueOnce({
+      ok: false,
+      error: new SessionError('Some other error', 0.1, false),
+    });
+
+    await rl.spawnSession('worker', { variables: { task: 'do it' } }, 42);
+
+    const check = rateLimiter.checkRateLimit();
+    expect(check.clear).toBe(true);
   });
 });
 

@@ -202,6 +202,15 @@ export class CliAdapter implements ProviderAdapter {
         clearTimeout(timer);
         if (hookPaths) this.cleanupHooks(hookPaths);
         const stdout = Buffer.concat(chunks).toString();
+        const stderr = Buffer.concat(errChunks).toString();
+
+        // Detect rate limit signals in stderr before other processing
+        if (this.isRateLimitError(stderr) || this.isRateLimitError(stdout)) {
+          const parsed = this.parseOutput(stdout);
+          const cost = parsed.ok ? parsed.value.cost : 0;
+          resolve(err(new SessionError('Rate limited by upstream provider', cost, true)));
+          return;
+        }
 
         if (timedOut) {
           const timedOutParsed = this.parseOutput(stdout);
@@ -255,6 +264,22 @@ export class CliAdapter implements ProviderAdapter {
     const match = output.match(/\[HANDOFF\]([\s\S]*?)\[\/HANDOFF\]/);
     const note = match?.[1]?.trim();
     return note || undefined;
+  }
+
+  /**
+   * Detect rate limit signals in CLI output/stderr.
+   * Matches common patterns: HTTP 429, "rate limit", "retry-after".
+   */
+  isRateLimitError(text: string): boolean {
+    if (!text) return false;
+    const lower = text.toLowerCase();
+    return (
+      lower.includes('rate limit') ||
+      lower.includes('rate_limit') ||
+      lower.includes('429') ||
+      lower.includes('too many requests') ||
+      lower.includes('overloaded')
+    );
   }
 
   private extractPitfalls(output: string): PitfallMarker[] {
