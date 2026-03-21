@@ -54,6 +54,25 @@ describe('CostTracker', () => {
     expect(tracker.getRunCost(1)).toBe(0);
   });
 
+  // Regression tests for BUG-9: per-repo budgetLimit ignored
+  it('checkBudget uses perRunBudgetOverride when provided', () => {
+    tracker.recordCost(1, 5); // under global 10 but over override 3
+    const result = tracker.checkBudget(1, 3);
+    expect(result).toEqual({ available: false, reason: 'per-run-budget-exceeded' });
+  });
+
+  it('checkBudget allows higher override than global default', () => {
+    tracker.recordCost(1, 15); // over global 10 but under override 20
+    const result = tracker.checkBudget(1, 20);
+    expect(result).toEqual({ available: true, remaining: 35 });
+  });
+
+  it('checkBudget falls back to global default when no override', () => {
+    tracker.recordCost(1, 11); // over global 10
+    const result = tracker.checkBudget(1);
+    expect(result).toEqual({ available: false, reason: 'per-run-budget-exceeded' });
+  });
+
   it('getSnapshot returns serializable state', () => {
     tracker.recordCost(1, 5);
     const snapshot = tracker.getSnapshot();

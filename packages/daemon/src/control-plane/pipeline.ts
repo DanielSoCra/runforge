@@ -59,7 +59,7 @@ export async function runPipeline(
     }
 
     // Check budget before each phase
-    const budget = costTracker.checkBudget(run.issueNumber);
+    const budget = costTracker.checkBudget(run.issueNumber, run.perRunBudget);
     if (!budget.available) {
       run.phase = 'paused';
       await stateMgr.saveRunState(run);

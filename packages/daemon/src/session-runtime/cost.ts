@@ -31,11 +31,12 @@ export class CostTracker {
     return this.runCosts.get(issueNumber) ?? 0;
   }
 
-  checkBudget(issueNumber: number): BudgetCheck {
+  checkBudget(issueNumber: number, perRunBudgetOverride?: number): BudgetCheck {
     if (this.dailyCost >= this.dailyBudget) {
       return { available: false, reason: 'daily-budget-exceeded' };
     }
-    if (this.getRunCost(issueNumber) >= this.perRunBudget) {
+    const effectiveBudget = perRunBudgetOverride ?? this.perRunBudget;
+    if (this.getRunCost(issueNumber) >= effectiveBudget) {
       return { available: false, reason: 'per-run-budget-exceeded' };
     }
     return { available: true, remaining: this.dailyBudget - this.dailyCost };
