@@ -50,10 +50,6 @@ export class GotchaStore {
         const tierOrder = (t: string) => t === 'elevated' ? 1 : 0;
         return tierOrder(b.priorityTier) - tierOrder(a.priorityTier) || b.hitCount - a.hitCount;
       });
-    for (const gotcha of matched) {
-      gotcha.hitCount++;
-      await appendJsonl(this.path, gotcha);
-    }
     return matched;
   }
 
