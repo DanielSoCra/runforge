@@ -37,6 +37,7 @@ export const ConfigSchema = z.object({
     samplingRate: z.number().min(0.01).max(1).default(0.1),
     minSamplingRate: z.number().min(0.01).max(1).default(0.01),
   }).default({}),
+  maxConsecutiveStuck: z.number().int().min(1).default(3),
   gracePeriodMs: z.number().int().default(30000),
   activePlugins: z.array(z.string()).default([]),
 });

@@ -63,6 +63,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   let paused = false;
   let activeRuns = 0;
   let shuttingDown = false;
+  let consecutiveStuckCount = 0;
 
   // 5. Build RepoManager or legacy single-repo detector
   let repoManager: RepoManager | null = null;
@@ -91,6 +92,24 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           activeRuns++;
           repoManager!.notifyRunStart(repoId);
           processWorkRequest(config, repoId, owner, name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined)
+            .then((outcome) => {
+              if (outcome === 'stuck') {
+                consecutiveStuckCount++;
+                console.log(`[daemon] Consecutive stuck count: ${consecutiveStuckCount}/${config.maxConsecutiveStuck}`);
+                if (consecutiveStuckCount >= config.maxConsecutiveStuck && !paused) {
+                  paused = true;
+                  console.warn(`[daemon] Auto-paused: ${consecutiveStuckCount} consecutive stuck runs reached threshold`);
+                  void notify(config.webhooks, {
+                    event: 'auto-paused',
+                    issueNumber: request.issueNumber,
+                    phase: 'stuck',
+                    message: `Daemon auto-paused after ${consecutiveStuckCount} consecutive stuck runs`,
+                  });
+                }
+              } else if (outcome === 'complete') {
+                consecutiveStuckCount = 0;
+              }
+            })
             .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
             // CRITICAL: notifyRunEnd must be in .finally(), never only in .catch() or .then().
             // If it is missing here, a disabled repo's poller hangs in pendingDisable forever.
@@ -134,6 +153,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       activeRuns,
       dailyCost: costTracker.getDailyCost(),
       paused,
+      consecutiveStuckCount,
       uptime: process.uptime(),
       ...remoteControl.getState(),
     }),
@@ -175,6 +195,24 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         if (!claimResult.ok) continue;
         activeRuns++;
         processWorkRequest(config, '', config.repo!.owner, config.repo!.name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined)
+          .then((outcome) => {
+            if (outcome === 'stuck') {
+              consecutiveStuckCount++;
+              console.log(`[daemon] Consecutive stuck count: ${consecutiveStuckCount}/${config.maxConsecutiveStuck}`);
+              if (consecutiveStuckCount >= config.maxConsecutiveStuck && !paused) {
+                paused = true;
+                console.warn(`[daemon] Auto-paused: ${consecutiveStuckCount} consecutive stuck runs reached threshold`);
+                void notify(config.webhooks, {
+                  event: 'auto-paused',
+                  issueNumber: request.issueNumber,
+                  phase: 'stuck',
+                  message: `Daemon auto-paused after ${consecutiveStuckCount} consecutive stuck runs`,
+                });
+              }
+            } else if (outcome === 'complete') {
+              consecutiveStuckCount = 0;
+            }
+          })
           .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
           .finally(() => { activeRuns--; });
       }
@@ -218,7 +256,7 @@ async function processWorkRequest(
   stateDir: string,
   runWriter?: SupabaseRunWriter,
   configReader?: SupabaseConfigReader,
-): Promise<void> {
+): Promise<string> {
   const repoConfig = configReader?.getRepoConfig(owner, repoName);
   const variant = selectVariant(request);
   const run: RunState = {
@@ -289,4 +327,6 @@ async function processWorkRequest(
       message: `Issue #${request.issueNumber} stuck: ${result.error ?? 'unknown'}`,
     });
   }
+
+  return result.outcome;
 }

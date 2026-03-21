@@ -129,6 +129,7 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
   },
   diagnosis: { confidenceThreshold: 0.7 },
   warmup: { threshold: 10, regressionThreshold: 3, samplingRate: 0.1, minSamplingRate: 0.01 },
+  maxConsecutiveStuck: 3,
   gracePeriodMs: 100,
   activePlugins: [],
   repo: { owner: 'test-owner', name: 'test-repo' },
@@ -490,6 +491,86 @@ describe('daemon', () => {
         expect.stringContaining('#42'),
         expect.any(Error),
       );
+    });
+  });
+
+  describe('consecutive stuck auto-pause (#90)', () => {
+    it('auto-pauses after maxConsecutiveStuck stuck runs and notifies', async () => {
+      const config = makeConfig({ maxConsecutiveStuck: 2, webhooks: ['https://hooks.example.com/test'] });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      mockRunPipeline.mockResolvedValue({ outcome: 'stuck', error: 'test failure' });
+
+      const request1 = makeWorkRequest({ issueNumber: 1 });
+      const request2 = makeWorkRequest({ issueNumber: 2 });
+
+      // First poll: one stuck run
+      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request1]));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // After first stuck: not yet paused
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(false);
+
+      // Second poll: another stuck run → auto-pause
+      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request2]));
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(true);
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(2);
+      expect(mockNotify).toHaveBeenCalledWith(
+        ['https://hooks.example.com/test'],
+        expect.objectContaining({
+          event: 'auto-paused',
+          message: expect.stringContaining('2 consecutive stuck runs'),
+        }),
+      );
+    });
+
+    it('resets consecutive stuck count on successful completion', async () => {
+      const config = makeConfig({ maxConsecutiveStuck: 3 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      // First run: stuck
+      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail' });
+      const request1 = makeWorkRequest({ issueNumber: 1 });
+      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request1]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
+
+      // Second run: complete → resets count
+      mockRunPipeline.mockResolvedValueOnce({ outcome: 'complete' });
+      const request2 = makeWorkRequest({ issueNumber: 2 });
+      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request2]));
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(0);
+    });
+
+    it('exposes consecutiveStuckCount in status endpoint', async () => {
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      const status = handlers.getStatus() as Record<string, unknown>;
+
+      expect(status).toHaveProperty('consecutiveStuckCount', 0);
     });
   });
 
