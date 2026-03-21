@@ -84,6 +84,25 @@ describe('generateContainmentScript', () => {
     expect(result.stderr).toContain('Blocked path');
   });
 
+  // Regression tests for SEC-18: path traversal bypass in non-Bash tool input
+  it('blocks Read with ../ traversal to scenarios', () => {
+    const result = runHookScript(script, 'Read', { file_path: 'src/../.specify/scenarios/secret.yml' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked path');
+  });
+
+  it('blocks Edit with ../ traversal to methodology', () => {
+    const result = runHookScript(script, 'Edit', { file_path: 'foo/bar/../../.specify/methodology/approach.md' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked path');
+  });
+
+  it('blocks Write with ./ prefix to blocked path', () => {
+    const result = runHookScript(script, 'Write', { file_path: './.specify/scenarios/test.yml' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked path');
+  });
+
   // Regression tests for SEC-15: Bash command path bypass
   it('blocks cat of a blocked path via Bash command', () => {
     const result = runHookScript(script, 'Bash', { command: 'cat .specify/scenarios/test.yml' });

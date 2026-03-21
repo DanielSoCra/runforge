@@ -46,7 +46,7 @@ const WRITE_TOOLS = ${writeToolsJson};
 function extractPaths(input) {
   const paths = [];
   for (const key of ['file_path', 'path', 'filePath', 'target']) {
-    if (typeof input[key] === 'string') paths.push(input[key]);
+    if (typeof input[key] === 'string') paths.push(normalizePath(input[key]));
   }
   return paths;
 }

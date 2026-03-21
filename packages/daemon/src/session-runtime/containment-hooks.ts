@@ -72,9 +72,9 @@ export function checkContainment(call: ToolCall, policy: ContainmentPolicy): Con
 
 function extractPaths(input: Record<string, unknown>): string[] {
   const paths: string[] = [];
-  // Common tool input field names
+  // Common tool input field names — normalize to prevent ../traversal bypass
   for (const key of ['file_path', 'path', 'filePath', 'target']) {
-    if (typeof input[key] === 'string') paths.push(input[key] as string);
+    if (typeof input[key] === 'string') paths.push(normalize(input[key] as string));
   }
   return paths;
 }

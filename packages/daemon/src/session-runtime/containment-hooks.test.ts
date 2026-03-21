@@ -124,6 +124,37 @@ describe('checkContainment', () => {
     if (!result.allowed) expect(result.reason).toContain('wget');
   });
 
+  // Regression tests for SEC-18: path traversal bypass in non-Bash tool input
+  it('blocks Read with ../ traversal to scenarios', () => {
+    const call: ToolCall = {
+      tool: 'Read',
+      input: { file_path: 'src/../.specify/scenarios/secret.yml' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked path');
+  });
+
+  it('blocks Edit with ../ traversal to methodology', () => {
+    const call: ToolCall = {
+      tool: 'Edit',
+      input: { file_path: 'foo/bar/../../.specify/methodology/approach.md' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked path');
+  });
+
+  it('blocks Write with ./ prefix to blocked path', () => {
+    const call: ToolCall = {
+      tool: 'Write',
+      input: { file_path: './.specify/scenarios/test.yml' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked path');
+  });
+
   // Regression tests for SEC-15: Bash command path bypass
   it('blocks cat of a blocked path via Bash command', () => {
     const call: ToolCall = {
