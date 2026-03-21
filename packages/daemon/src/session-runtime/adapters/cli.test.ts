@@ -99,12 +99,15 @@ describe('CliAdapter containment hook setup', () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('creates .claude/settings.local.json with PreToolUse hook', () => {
+  it('creates .claude/settings.local.json with PreToolUse hooks', () => {
     const adapter = new CliAdapter();
-    const paths = adapter.setupContainmentHook(tempDir, DEFAULT_POLICY);
+    const paths = adapter.setupHooks(tempDir, DEFAULT_POLICY, 30000);
 
-    // Hook script should exist
-    expect(existsSync(paths.scriptPath)).toBe(true);
+    // Hook scripts should exist (containment + timeout)
+    for (const p of paths.scriptPaths) {
+      expect(existsSync(p)).toBe(true);
+    }
+    expect(paths.scriptPaths.length).toBe(2);
 
     // Settings file should exist with hook config
     const settingsPath = join(tempDir, '.claude', 'settings.local.json');
@@ -112,20 +115,23 @@ describe('CliAdapter containment hook setup', () => {
 
     const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
     expect(settings.hooks.PreToolUse).toBeDefined();
+    expect(settings.hooks.PreToolUse.length).toBe(2);
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain('node "');
-    expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain(paths.scriptPath);
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain(paths.scriptPaths[0]);
 
-    adapter.cleanupContainmentHook(paths);
+    adapter.cleanupHooks(paths);
   });
 
-  it('cleans up hook script and settings after cleanup', () => {
+  it('cleans up hook scripts and settings after cleanup', () => {
     const adapter = new CliAdapter();
-    const paths = adapter.setupContainmentHook(tempDir, DEFAULT_POLICY);
+    const paths = adapter.setupHooks(tempDir, DEFAULT_POLICY, 30000);
 
-    adapter.cleanupContainmentHook(paths);
+    adapter.cleanupHooks(paths);
 
-    // Hook script should be deleted
-    expect(existsSync(paths.scriptPath)).toBe(false);
+    // Hook scripts should be deleted
+    for (const p of paths.scriptPaths) {
+      expect(existsSync(p)).toBe(false);
+    }
 
     // Empty settings file should be deleted
     expect(existsSync(paths.settingsPath)).toBe(false);
@@ -142,14 +148,14 @@ describe('CliAdapter containment hook setup', () => {
       JSON.stringify({ customSetting: true }),
     );
 
-    const paths = adapter.setupContainmentHook(tempDir, DEFAULT_POLICY);
+    const paths = adapter.setupHooks(tempDir, DEFAULT_POLICY, 30000);
 
     // Should have merged
     const settings = JSON.parse(readFileSync(paths.settingsPath, 'utf8'));
     expect(settings.customSetting).toBe(true);
     expect(settings.hooks.PreToolUse).toBeDefined();
 
-    adapter.cleanupContainmentHook(paths);
+    adapter.cleanupHooks(paths);
 
     // Should preserve customSetting after cleanup
     expect(existsSync(paths.settingsPath)).toBe(true);
