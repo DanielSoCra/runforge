@@ -79,4 +79,104 @@ describe('CostTracker', () => {
     expect(snapshot.dailyCost).toBe(5);
     expect(snapshot.runCosts).toEqual({ '1': 5 });
   });
+
+  // Regression tests for #101: restoreFromSnapshot zero test coverage
+  describe('restoreFromSnapshot', () => {
+    it('restores dailyCost from snapshot', () => {
+      tracker.restoreFromSnapshot({
+        dailyCost: 25,
+        runCosts: {},
+        resetAt: new Date(Date.now() + 3600_000).toISOString(),
+      });
+      expect(tracker.getDailyCost()).toBe(25);
+    });
+
+    it('restores runCosts from snapshot with numeric key coercion', () => {
+      tracker.restoreFromSnapshot({
+        dailyCost: 10,
+        runCosts: { '42': 7, '99': 3 },
+        resetAt: new Date(Date.now() + 3600_000).toISOString(),
+      });
+      expect(tracker.getRunCost(42)).toBe(7);
+      expect(tracker.getRunCost(99)).toBe(3);
+    });
+
+    it('restores resetAt from snapshot ISO string', () => {
+      const futureDate = new Date(Date.now() + 7200_000);
+      tracker.restoreFromSnapshot({
+        dailyCost: 0,
+        runCosts: {},
+        resetAt: futureDate.toISOString(),
+      });
+      // After restore, daily reset should not trigger (resetAt is in the future)
+      expect(tracker.maybeResetDaily()).toBe(false);
+    });
+
+    it('clears previous runCosts before restoring', () => {
+      tracker.recordCost(1, 5);
+      tracker.restoreFromSnapshot({
+        dailyCost: 0,
+        runCosts: { '2': 3 },
+        resetAt: new Date(Date.now() + 3600_000).toISOString(),
+      });
+      expect(tracker.getRunCost(1)).toBe(0); // old run cost cleared
+      expect(tracker.getRunCost(2)).toBe(3); // new run cost present
+    });
+
+    it('round-trips through getSnapshot → restoreFromSnapshot', () => {
+      tracker.recordCost(10, 4.5);
+      tracker.recordCost(20, 2.1);
+      const snapshot = tracker.getSnapshot();
+
+      const other = new CostTracker({ dailyBudget: 50, perRunBudget: 10 });
+      other.restoreFromSnapshot(snapshot);
+
+      expect(other.getDailyCost()).toBe(tracker.getDailyCost());
+      expect(other.getRunCost(10)).toBe(tracker.getRunCost(10));
+      expect(other.getRunCost(20)).toBe(tracker.getRunCost(20));
+      // Verify resetAt survived the round trip
+      expect(other.maybeResetDaily()).toBe(tracker.maybeResetDaily());
+    });
+
+    it('restored state affects checkBudget correctly', () => {
+      tracker.restoreFromSnapshot({
+        dailyCost: 48,
+        runCosts: { '5': 9 },
+        resetAt: new Date(Date.now() + 3600_000).toISOString(),
+      });
+      // Verify per-run cost was restored
+      expect(tracker.getRunCost(5)).toBe(9);
+      // Daily budget is 50, so 48 is still available
+      expect(tracker.checkBudget(5)).toEqual({ available: true, remaining: 2 });
+      // But per-run budget (10) for issue 5 is 9, still available
+      tracker.recordCost(5, 1);
+      // Now run cost is 10, per-run exceeded
+      expect(tracker.checkBudget(5)).toEqual({
+        available: false,
+        reason: 'per-run-budget-exceeded',
+      });
+    });
+
+    it('handles empty runCosts in snapshot', () => {
+      tracker.recordCost(1, 5); // pre-existing
+      tracker.restoreFromSnapshot({
+        dailyCost: 0,
+        runCosts: {},
+        resetAt: new Date(Date.now() + 3600_000).toISOString(),
+      });
+      expect(tracker.getDailyCost()).toBe(0);
+      expect(tracker.getRunCost(1)).toBe(0);
+    });
+
+    it('restores with past resetAt triggers immediate daily reset', () => {
+      tracker.restoreFromSnapshot({
+        dailyCost: 30,
+        runCosts: { '1': 5 },
+        resetAt: new Date(Date.now() - 1000).toISOString(), // in the past
+      });
+      // maybeResetDaily should trigger because resetAt is in the past
+      expect(tracker.maybeResetDaily()).toBe(true);
+      expect(tracker.getDailyCost()).toBe(0);
+    });
+  });
 });
