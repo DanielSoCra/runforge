@@ -1,4 +1,4 @@
-// src/session-runtime/containment-hooks.ts
+// packages/daemon/src/session-runtime/containment-hooks.ts
 import { minimatch } from 'minimatch';
 import { normalize } from 'path';
 
@@ -107,8 +107,8 @@ export const DEFAULT_POLICY: ContainmentPolicy = {
     '.specify/scenarios/**',
     '.specify/methodology/**',
     'state/**',
-    'src/session-runtime/**',
-    'src/control-plane/**',
+    'packages/daemon/src/session-runtime/**',
+    'packages/daemon/src/control-plane/**',
   ],
   blockedCommands: [
     'curl ', 'wget ', 'nc ', 'ssh ', 'scp ',

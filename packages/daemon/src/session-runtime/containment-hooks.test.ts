@@ -1,4 +1,4 @@
-// src/session-runtime/containment-hooks.test.ts
+// packages/daemon/src/session-runtime/containment-hooks.test.ts
 import { describe, it, expect } from 'vitest';
 import {
   checkContainment,
@@ -301,5 +301,36 @@ describe('checkContainment', () => {
     };
     const result = checkContainment(call, DEFAULT_POLICY);
     expect(result.allowed).toBe(true);
+  });
+
+  // Regression tests for SPEC-38: blockedPaths must use monorepo-prefixed paths
+  it('blocks Read of session-runtime source via monorepo path', () => {
+    const call: ToolCall = {
+      tool: 'Read',
+      input: { file_path: 'packages/daemon/src/session-runtime/runtime.ts' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked path');
+  });
+
+  it('blocks Write to control-plane source via monorepo path', () => {
+    const call: ToolCall = {
+      tool: 'Write',
+      input: { file_path: 'packages/daemon/src/control-plane/daemon.ts' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked path');
+  });
+
+  it('blocks Bash cat of control-plane source via monorepo path', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'cat packages/daemon/src/control-plane/state.ts' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked path in command');
   });
 });
