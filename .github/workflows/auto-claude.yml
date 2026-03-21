@@ -30,7 +30,7 @@ jobs:
         run: pnpm install
 
       - name: Process issue
-        run: npx tsx src/main.ts process "$ISSUE_NUMBER" -c auto-claude.config.json
+        run: npx tsx packages/daemon/src/main.ts process "$ISSUE_NUMBER" -c auto-claude.config.json
         env:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
