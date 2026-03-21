@@ -51,6 +51,7 @@ export interface SessionResult {
   cost: number;
   pitfallMarkers: PitfallMarker[];
   exitStatus: ExitStatus;
+  handoffNote?: string;
 }
 
 export interface PitfallMarker {
@@ -147,6 +148,7 @@ export interface UnitState {
   workspacePath?: string;
   attempt: number;
   error?: string;
+  handoffNote?: string;
 }
 
 // --- Validation ---

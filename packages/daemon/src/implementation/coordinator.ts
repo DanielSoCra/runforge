@@ -15,6 +15,7 @@ export interface ImplementResult {
   totalCost: number;
   batchesCompleted: number;
   error?: string;
+  handoffNotes?: Map<string, string>;
 }
 
 export class ImplementationCoordinator {
@@ -35,7 +36,7 @@ export class ImplementationCoordinator {
     featureBranch: string,
     runWriter?: SupabaseRunWriter,
     runId?: string,
-    options?: { complexity?: 'simple' | 'standard' | 'complex'; specContent?: string; checkpoint?: number },
+    options?: { complexity?: 'simple' | 'standard' | 'complex'; specContent?: string; checkpoint?: number; handoffNotes?: Map<string, string> },
   ): Promise<Result<ImplementResult>> {
     // 1. Get task graph
     let graph: TaskGraph;
@@ -87,7 +88,7 @@ export class ImplementationCoordinator {
         }
       }
 
-      // Execute batch concurrently
+      // Execute batch concurrently (pass handoff notes from prior attempts — ARCH-AC-HANDOFF step 7)
       const batchResult = await executeBatch(
         batch,
         featureBranch,
@@ -99,6 +100,7 @@ export class ImplementationCoordinator {
         runId,
         unitPitfalls,
         this.gotchaStore,
+        options?.handoffNotes,
       );
 
       allResults.push(...batchResult.results);
@@ -119,6 +121,7 @@ export class ImplementationCoordinator {
           totalCost,
           batchesCompleted: i,
           error: `Units blocked: ${blocked.map((r) => r.unitId).join(', ')}`,
+          handoffNotes: collectHandoffNotes(allResults),
         });
       }
 
@@ -130,6 +133,7 @@ export class ImplementationCoordinator {
           totalCost,
           batchesCompleted: i,
           error: `All units in batch ${i} failed`,
+          handoffNotes: collectHandoffNotes(allResults),
         });
       }
 
@@ -147,7 +151,15 @@ export class ImplementationCoordinator {
             totalCost,
             batchesCompleted: i,
             error: `Merge failed for ${unitResult.unitId}: ${mergeResult.error.message}`,
+            handoffNotes: collectHandoffNotes(allResults),
           });
+        }
+      }
+
+      // Clear stale handoffs for successful units (STACK-AC-HANDOFF-COORDINATOR: clear after success)
+      if (options?.handoffNotes) {
+        for (const unitResult of successfulUnits) {
+          options.handoffNotes.delete(unitResult.unitId);
         }
       }
     }
@@ -159,6 +171,17 @@ export class ImplementationCoordinator {
       batchesCompleted: batches.length,
     });
   }
+}
+
+/** Collect handoff notes from unit results for use in retry attempts (ARCH-AC-HANDOFF step 6). */
+function collectHandoffNotes(results: UnitResult[]): Map<string, string> | undefined {
+  const notes = new Map<string, string>();
+  for (const r of results) {
+    if (r.handoffNote) {
+      notes.set(r.unitId, r.handoffNote);
+    }
+  }
+  return notes.size > 0 ? notes : undefined;
 }
 
 function formatGotchas(gotchas: Gotcha[]): string {

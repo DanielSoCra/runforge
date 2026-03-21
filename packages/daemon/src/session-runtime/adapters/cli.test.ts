@@ -88,6 +88,29 @@ describe('CliAdapter', () => {
   });
 });
 
+describe('CliAdapter.extractHandoff (#11)', () => {
+  it('extracts handoff note from session output', () => {
+    const adapter = new CliAdapter();
+    const output = 'some work done\n[HANDOFF]Stopped at step 3\nNext: continue[/HANDOFF]\nmore text';
+    expect(adapter.extractHandoff(output)).toBe('Stopped at step 3\nNext: continue');
+  });
+
+  it('returns undefined when no handoff block present', () => {
+    const adapter = new CliAdapter();
+    expect(adapter.extractHandoff('just normal output')).toBeUndefined();
+  });
+
+  it('returns undefined for empty handoff block (spec: treat as absent)', () => {
+    const adapter = new CliAdapter();
+    expect(adapter.extractHandoff('[HANDOFF]   [/HANDOFF]')).toBeUndefined();
+  });
+
+  it('returns undefined for empty string handoff', () => {
+    const adapter = new CliAdapter();
+    expect(adapter.extractHandoff('[HANDOFF][/HANDOFF]')).toBeUndefined();
+  });
+});
+
 describe('CliAdapter containment hook setup', () => {
   let tempDir: string;
 

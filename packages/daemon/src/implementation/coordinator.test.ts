@@ -407,6 +407,64 @@ describe('ImplementationCoordinator — multi-unit', () => {
     }
   });
 
+  it('collects handoff notes from timed-out units in failure result (#11)', async () => {
+    const timedOutResult: SessionResult = {
+      output: 'partial work [HANDOFF]Stopped at: step 3 of 5\nNext: continue from step 3[/HANDOFF]',
+      structuredData: null,
+      cost: 0.4,
+      pitfallMarkers: [],
+      exitStatus: 'timed-out',
+      handoffNote: 'Stopped at: step 3 of 5\nNext: continue from step 3',
+    };
+
+    const runtime = createMockRuntime(timedOutResult);
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    const result = await coord.implement(mockWorkRequest, 'feature/42');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.success).toBe(false);
+      expect(result.value.handoffNotes).toBeDefined();
+      const notes = result.value.handoffNotes!;
+      expect(notes.size).toBe(1);
+      const note = [...notes.values()][0];
+      expect(note).toContain('Stopped at: step 3 of 5');
+    }
+  });
+
+  it('prepends handoff note to worker context on retry (#11)', async () => {
+    const handoffNotes = new Map<string, string>();
+    // The unit ID for a single-unit graph is `issue-<issueNumber>`
+    handoffNotes.set('issue-42', 'Previous: implemented validation\nNext: write tests');
+
+    const runtime = createMockRuntime(successResult);
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      handoffNotes,
+    });
+
+    // Worker session should receive task context with handoff prepended
+    const workerCall = runtime.spawnSession.mock.calls[0];
+    const taskVar = workerCall[1].variables.task as string;
+    expect(taskVar).toMatch(/^\[PREVIOUS ATTEMPT\]/);
+    expect(taskVar).toContain('Previous: implemented validation');
+    expect(taskVar).toContain('Add feature X'); // original context still present
+  });
+
+  it('does not prepend handoff when no notes match unit (#11)', async () => {
+    const handoffNotes = new Map<string, string>();
+    handoffNotes.set('other-unit', 'irrelevant handoff');
+
+    const runtime = createMockRuntime(successResult);
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      handoffNotes,
+    });
+
+    const workerCall = runtime.spawnSession.mock.calls[0];
+    const taskVar = workerCall[1].variables.task as string;
+    expect(taskVar).not.toContain('[PREVIOUS ATTEMPT]');
+  });
+
   it('returns err when decomposition fails', async () => {
     const runtime = {
       spawnSession: vi.fn().mockResolvedValue({ ok: false, error: new Error('API timeout') }),

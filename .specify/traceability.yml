@@ -318,8 +318,9 @@ STACK-AC-HANDOFF-COORDINATOR:
   parent: ARCH-AC-HANDOFF
   children: []
   code_paths:
-    - packages/daemon/src/implementation/types.ts
+    - packages/daemon/src/types.ts
     - packages/daemon/src/implementation/coordinator.ts
+    - packages/daemon/src/implementation/batch.ts
   test_paths:
     - packages/daemon/src/implementation/coordinator.test.ts
   status: draft

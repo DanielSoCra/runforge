@@ -13,6 +13,7 @@ export interface UnitResult {
   output: string;
   pitfallMarkers: PitfallMarker[];
   error?: string;
+  handoffNote?: string;
 }
 
 export interface BatchResult {
@@ -35,6 +36,7 @@ export async function executeBatch(
   runId?: string,
   unitPitfalls?: Map<string, string>,
   gotchaStore?: GotchaStore,
+  unitHandoffs?: Map<string, string>,
 ): Promise<BatchResult> {
   const staggerMs = options?.staggerMs ?? 2000;
   const maxDiffLines = options?.maxDiffLines ?? 300;
@@ -43,7 +45,7 @@ export async function executeBatch(
     // Stagger delay between starts
     if (index > 0) await delay(index * staggerMs);
     const pitfalls = unitPitfalls?.get(unit.id) ?? '';
-    return executeUnit(unit, featureBranch, issueNumber, runtime, repoRoot, maxDiffLines, runWriter, runId, pitfalls, gotchaStore);
+    return executeUnit(unit, featureBranch, issueNumber, runtime, repoRoot, maxDiffLines, runWriter, runId, pitfalls, gotchaStore, unitHandoffs?.get(unit.id));
   });
 
   const settled = await Promise.allSettled(promises);
@@ -78,6 +80,7 @@ async function executeUnit(
   runId?: string,
   pitfalls?: string,
   gotchaStore?: GotchaStore,
+  handoffNote?: string,
 ): Promise<UnitResult> {
   // 1. Create worktree
   console.log(`[batch] Creating worktree for ${unit.id} from ${featureBranch}`);
@@ -98,8 +101,12 @@ async function executeUnit(
   try {
     // 2. Spawn worker session
     console.log(`[batch] Spawning worker session for ${unit.id}`);
+    // Prepend handoff note from previous attempt (ARCH-AC-HANDOFF step 7)
+    const taskContext = handoffNote
+      ? `[PREVIOUS ATTEMPT]\n${handoffNote}\n\n${unit.context}`
+      : unit.context;
     const variables: Record<string, string> = {
-      task: unit.context,
+      task: taskContext,
       specs: unit.specContent,
       verification: unit.verificationCommand,
     };
@@ -154,6 +161,7 @@ async function executeUnit(
         cost: result.cost,
         output: result.output,
         pitfallMarkers: result.pitfallMarkers,
+        handoffNote: result.handoffNote,
         error: `Diff size ${diffSize.value} exceeds limit of ${maxDiffLines}`,
       };
     }
@@ -164,6 +172,7 @@ async function executeUnit(
       cost: result.cost,
       output: result.output,
       pitfallMarkers: result.pitfallMarkers,
+      handoffNote: result.handoffNote,
     };
   } finally {
     // Remove worktree directory but keep branch alive for merge by coordinator
