@@ -16,6 +16,8 @@ interface PollEntry {
   intervalHandle: ReturnType<typeof setInterval>;
   activeRuns: number;
   pendingDisable: boolean;
+  owner: string;
+  name: string;
 }
 
 type SupabaseClient = ReturnType<typeof createClient>;
@@ -43,6 +45,16 @@ export class RepoManager {
   async reload(): Promise<{ active: number }> {
     await this.sync();
     return { active: this.activePollerCount() };
+  }
+
+  async scanNow(): Promise<{ scanned: number }> {
+    let scanned = 0;
+    for (const [repoId, entry] of this.pollers) {
+      if (entry.pendingDisable) continue;
+      this.onPoll(repoId, entry.owner, entry.name, entry.detector);
+      scanned++;
+    }
+    return { scanned };
   }
 
   async upsertRepo(owner: string, name: string): Promise<Result<string>> {
@@ -141,6 +153,8 @@ export class RepoManager {
       intervalHandle,
       activeRuns: 0,
       pendingDisable: false,
+      owner: repo.owner,
+      name: repo.name,
     });
   }
 

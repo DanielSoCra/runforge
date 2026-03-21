@@ -58,6 +58,17 @@ export class RemoteControlManager {
     this.url = null;
   }
 
+  restart(): void {
+    // stop() sets this.stopped = true and kills any running process.
+    // We must reset stopped before calling spawn() or spawn() will return early.
+    // We call spawn() directly (not start()) to bypass start()'s proc guard
+    // (which would no-op if the old process hasn't exited yet).
+    void this.stop();
+    this.stopped = false;
+    this.failureCount = 0;
+    this.spawn();
+  }
+
   getState(): RemoteControlStatus {
     return {
       remote_control_state: this.state,
@@ -97,7 +108,8 @@ export class RemoteControlManager {
     });
 
     proc.on('exit', (code: number | null) => {
-      this.proc = null; // Always clear, even when stopped — prevents stale reference
+      if (this.proc !== proc) return; // Stale exit — a newer process has already been spawned
+      this.proc = null;
       if (this.stopped) return;
       const wasActive = this.state === 'active';
       this.state = 'offline';
@@ -111,7 +123,8 @@ export class RemoteControlManager {
     });
 
     proc.on('error', (err: Error) => {
-      this.proc = null; // Null first — before the stopped guard
+      if (this.proc !== proc) return; // Stale error — a newer process has already been spawned
+      this.proc = null;
       if (this.stopped) return;
       this.state = 'offline';
       this.url = null;
@@ -131,6 +144,7 @@ export class RemoteControlManager {
         return;
       }
     }
+    // When failureCount is 0 (clean exit after going active), delay is undefined → 0ms restart
     const delay = BACKOFF_MS[Math.min(this.failureCount - 1, BACKOFF_MS.length - 1)];
     if (countAsFailure) {
       console.warn(`[remote-control] Process exited (attempt ${this.failureCount}/${MAX_FAILURES}), restarting in ${delay}ms`);

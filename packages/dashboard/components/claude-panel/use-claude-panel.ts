@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 const STORAGE_KEY = 'claude-panel-open';
 const POLL_INTERVAL = 5_000;
@@ -10,11 +10,31 @@ export function useClaudePanel() {
   const [isOpen, setIsOpen] = useState(false);
   const [sessionUrl, setSessionUrl] = useState<string | null>(null);
   const [sessionState, setSessionState] = useState<RemoteControlState>('offline');
-  const [sessionError, setSessionError] = useState<string | null>(null);
-  const [restarting, setRestarting] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const startErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const toggle = useCallback(() => {
     setIsOpen((prev) => !prev);
+  }, []);
+
+  const startSession = useCallback(async () => {
+    setIsStarting(true);
+    setStartError(null);
+    if (startErrorTimer.current) clearTimeout(startErrorTimer.current);
+    try {
+      const res = await fetch('/api/daemon/remote-control/restart', { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        setStartError(data.error ?? 'Failed to start session');
+        startErrorTimer.current = setTimeout(() => setStartError(null), 4000);
+      }
+    } catch {
+      setStartError('Daemon unreachable');
+      startErrorTimer.current = setTimeout(() => setStartError(null), 4000);
+    } finally {
+      setIsStarting(false);
+    }
   }, []);
 
   // Mount: restore persisted panel state (SSR-safe — localStorage is client-only)
@@ -37,7 +57,6 @@ export function useClaudePanel() {
         const data = await res.json();
         setSessionUrl(data.remote_control_url ?? null);
         setSessionState(data.remote_control_state ?? 'offline');
-        setSessionError(data.remote_control_error ?? null);
       } catch {
         // ignore — panel stays in last known state
       }
@@ -51,14 +70,12 @@ export function useClaudePanel() {
     };
   }, []);
 
-  const restart = useCallback(async () => {
-    setRestarting(true);
-    try {
-      await fetch('/api/daemon/remote-control/restart', { method: 'POST' });
-    } finally {
-      setRestarting(false);
-    }
+  // Cleanup the startError auto-dismiss timer on unmount to avoid state updates on an unmounted component
+  useEffect(() => {
+    return () => {
+      if (startErrorTimer.current) clearTimeout(startErrorTimer.current);
+    };
   }, []);
 
-  return { isOpen, toggle, sessionUrl, sessionState, sessionError, restarting, restart };
+  return { isOpen, toggle, sessionUrl, sessionState, startSession, isStarting, startError };
 }

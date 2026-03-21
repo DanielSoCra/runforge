@@ -5,7 +5,7 @@ import { useClaudePanel } from './use-claude-panel';
 import { getContextActions } from './context-actions';
 
 export function ClaudePanel() {
-  const { isOpen, toggle, sessionUrl, sessionState, sessionError, restarting, restart } = useClaudePanel();
+  const { isOpen, toggle, sessionUrl, sessionState, startSession, isStarting, startError } = useClaudePanel();
   const pathname = usePathname();
   const actions = getContextActions(pathname);
 
@@ -40,19 +40,9 @@ export function ClaudePanel() {
           {sessionState === 'failed' && (
             <div
               role="alert"
-              className="rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive space-y-2"
+              className="rounded-md border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
             >
-              <p>Remote Control failed to start.</p>
-              {sessionError && (
-                <p className="text-xs font-mono break-all opacity-80">{sessionError}</p>
-              )}
-              <button
-                onClick={restart}
-                disabled={restarting}
-                className="text-xs underline hover:no-underline disabled:opacity-50"
-              >
-                {restarting ? 'Restarting…' : 'Retry'}
-              </button>
+              Remote Control failed to start. Please restart the daemon.
             </div>
           )}
 
@@ -75,22 +65,41 @@ export function ClaudePanel() {
                 </div>
               </div>
             ) : (
-              <div className="space-y-2">
-                <p className="text-xs text-muted-foreground italic">
-                  {sessionState === 'offline' ? 'Waiting for session…' : 'No session URL'}
-                </p>
-                {sessionState === 'offline' && (
-                  <button
-                    onClick={restart}
-                    disabled={restarting}
-                    className="text-xs text-primary hover:underline disabled:opacity-50"
-                  >
-                    {restarting ? 'Starting…' : 'Start session'}
-                  </button>
-                )}
-              </div>
+              <p className="text-xs text-muted-foreground italic">
+                {sessionState === 'offline' ? 'Waiting for session…' : 'No session URL'}
+              </p>
             )}
           </div>
+
+          {sessionState !== 'active' && (
+            <div>
+              <button
+                onClick={startSession}
+                disabled={isStarting}
+                aria-label={
+                  isStarting
+                    ? 'Starting session'
+                    : sessionState === 'failed'
+                      ? 'Restart Session'
+                      : 'Start Session'
+                }
+                className="w-full text-left text-xs px-2 py-1.5 rounded border transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5
+                  data-[state=failed]:border-destructive data-[state=failed]:text-destructive
+                  data-[state=offline]:border-border data-[state=offline]:text-foreground
+                  hover:bg-accent"
+                data-state={sessionState}
+              >
+                {isStarting
+                  ? 'Starting…'
+                  : sessionState === 'failed'
+                    ? '↺ Restart Session'
+                    : '▶ Start Session'}
+              </button>
+              {startError && (
+                <p className="text-xs text-destructive mt-1">{startError}</p>
+              )}
+            </div>
+          )}
 
           {actions.length > 0 && (
             <div className="space-y-1">

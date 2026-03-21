@@ -136,6 +136,92 @@ describe('RemoteControlManager', () => {
     expect(mgr.getState().remote_control_state).toBe('offline');
   });
 
+  it('restart() resets failure count and spawns a fresh process', async () => {
+    let spawnCount = 0;
+    vi.mocked(spawn).mockImplementation(() => {
+      spawnCount++;
+      const proc = makeFakeProcess();
+      // First process exits with failure to drive failureCount up.
+      // Processes spawned after restart (spawnCount >= 3) also auto-exit so we
+      // can drive the fresh failure cycle to completion.
+      if (spawnCount === 1 || spawnCount >= 3) setTimeout(() => proc.emit('exit', 1), 0);
+      return proc;
+    });
+
+    manager.start();
+    // Drive one failure to increment failureCount
+    await vi.advanceTimersByTimeAsync(1); // exit fires
+    await vi.advanceTimersByTimeAsync(5000); // backoff expires, spawns proc 2
+    expect(spawnCount).toBe(2);
+
+    // restart() should stop proc2 and spawn proc3 with a clean failure count
+    manager.restart();
+    expect(spawnCount).toBe(3);
+    expect(manager.getState().remote_control_state).toBe('offline');
+
+    // After restart the failure counter is reset — proc3 can fail 3 times before reaching 'failed'
+    // Drive 3 failures from the fresh start
+    for (let i = 0; i < 3; i++) {
+      await vi.advanceTimersByTimeAsync(1);
+      if (i < 2) await vi.advanceTimersByTimeAsync([5000, 15000][i]!);
+    }
+    expect(manager.getState().remote_control_state).toBe('failed');
+  });
+
+  it('restart(): stale exit from old process does not null the new proc reference', async () => {
+    let procs: ReturnType<typeof makeFakeProcess>[] = [];
+    vi.mocked(spawn).mockImplementation(() => {
+      const proc = makeFakeProcess();
+      procs.push(proc);
+      return proc;
+    });
+
+    manager.start();
+    // proc[0] running — don't exit it yet
+
+    manager.restart();
+    // proc[1] is now running; proc[0] is still alive (hasn't exited)
+    expect(procs).toHaveLength(2);
+
+    // Now the old process (proc[0]) exits — should be ignored
+    procs[0]!.emit('exit', 0);
+
+    // proc[1] should still be tracked (not nulled), state should be offline (not failed)
+    expect(manager.getState().remote_control_state).toBe('offline');
+    // Verify proc[1] is still the active one by making it go active
+    procs[1]!.stdout!.emit('data', Buffer.from('Session ready: https://session.example.com\n'));
+    expect(manager.getState().remote_control_state).toBe('active');
+    expect(manager.getState().remote_control_url).toBe('https://session.example.com');
+  });
+
+  it('schedules immediate restart on clean active exit (code=0 after active)', async () => {
+    let spawnCount = 0;
+    vi.mocked(spawn).mockImplementation(() => {
+      spawnCount++;
+      return makeFakeProcess();
+    });
+
+    manager.start();
+    expect(spawnCount).toBe(1);
+
+    // Simulate process becoming active by emitting a URL
+    const proc = vi.mocked(spawn).mock.results[0]!.value as ReturnType<typeof makeFakeProcess>;
+    proc.stdout!.emit('data', Buffer.from('Session ready: https://session.example.com\n'));
+    expect(manager.getState().remote_control_state).toBe('active');
+
+    // Clean exit (code=0) from an active session
+    proc.emit('exit', 0);
+
+    // Should schedule restart with zero delay (BACKOFF_MS[-1] = undefined → 0ms)
+    // and spawn again immediately
+    await vi.advanceTimersByTimeAsync(0);
+    expect(spawnCount).toBe(2);
+    expect(manager.getState().remote_control_state).toBe('offline');
+    // failureCount should NOT have been incremented (clean exit)
+    // so it should NOT be in 'failed' state
+    expect(manager.getState().remote_control_state).not.toBe('failed');
+  });
+
   it('transitions to failed state when process emits error events', async () => {
     let spawnCount = 0;
     vi.mocked(spawn).mockImplementation(() => {

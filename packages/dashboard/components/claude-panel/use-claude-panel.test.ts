@@ -56,4 +56,49 @@ describe('useClaudePanel', () => {
     });
     expect(fetch).toHaveBeenCalledTimes(2); // initial + one poll
   });
+
+  it('startSession() calls POST /api/daemon/remote-control/restart', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ remote_control_state: 'offline', remote_control_url: null }) } as Response)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ restarted: true }) } as Response);
+
+    const { result } = renderHook(() => useClaudePanel());
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); }); // initial poll
+
+    await act(async () => { await result.current.startSession(); });
+
+    expect(fetch).toHaveBeenCalledWith('/api/daemon/remote-control/restart', { method: 'POST' });
+  });
+
+  it('startSession() sets isStarting=true while in flight, false after', async () => {
+    let resolveRestart!: () => void;
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ remote_control_state: 'offline', remote_control_url: null }) } as Response)
+      .mockImplementationOnce(() => new Promise<Response>((res) => {
+        resolveRestart = () => res({ ok: true, json: async () => ({ restarted: true }) } as Response);
+      }));
+
+    const { result } = renderHook(() => useClaudePanel());
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+
+    let startPromise!: Promise<void>;
+    act(() => { startPromise = result.current.startSession(); });
+    expect(result.current.isStarting).toBe(true);
+
+    await act(async () => { resolveRestart(); await startPromise; });
+    expect(result.current.isStarting).toBe(false);
+  });
+
+  it('startSession() sets startError when fetch fails', async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ remote_control_state: 'offline', remote_control_url: null }) } as Response)
+      .mockRejectedValueOnce(new Error('Network error'));
+
+    const { result } = renderHook(() => useClaudePanel());
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+
+    await act(async () => { await result.current.startSession(); });
+
+    expect(result.current.startError).toBe('Daemon unreachable');
+  });
 });

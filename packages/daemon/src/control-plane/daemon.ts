@@ -140,7 +140,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     reloadRepos: repoManager
       ? async () => repoManager!.reload()
       : undefined,
-    restartRemoteControl: async () => remoteControl.restart(),
+    restartRemoteControl: () => { remoteControl.restart(); },
+    scanIssues: repoManager
+      ? async () => repoManager!.scanNow()
+      : undefined,
   });
   const serverResult = await start();
   if (!serverResult.ok) {

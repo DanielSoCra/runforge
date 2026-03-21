@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createControlServer } from './server.js';
 import { ok, err } from '../lib/result.js';
 import type { Server } from 'http';
@@ -88,6 +88,54 @@ describe('ControlServer', () => {
     } finally {
       server.close();
     }
+  });
+
+  it('POST /remote-control/restart calls restartRemoteControl', async () => {
+    const restarted = vi.fn();
+    const { server, start } = createControlServer(PORT + 3, {
+      ...handlers,
+      restartRemoteControl: restarted,
+    });
+    const result = await start();
+    expect(result.ok).toBe(true);
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT + 3}/remote-control/restart`, { method: 'POST' });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.restarted).toBe(true);
+      expect(restarted).toHaveBeenCalledOnce();
+    } finally {
+      server.close();
+    }
+  });
+
+  it('POST /remote-control/restart returns 501 when handler not wired', async () => {
+    await startServer();
+    const res = await fetch(`http://127.0.0.1:${PORT}/remote-control/restart`, { method: 'POST' });
+    expect(res.status).toBe(501);
+  });
+
+  it('POST /issues/scan calls scanIssues and returns count', async () => {
+    const { server, start } = createControlServer(PORT + 4, {
+      ...handlers,
+      scanIssues: async () => ({ scanned: 3 }),
+    });
+    const result = await start();
+    expect(result.ok).toBe(true);
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT + 4}/issues/scan`, { method: 'POST' });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.scanned).toBe(3);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('POST /issues/scan returns 501 when handler not wired', async () => {
+    await startServer();
+    const res = await fetch(`http://127.0.0.1:${PORT}/issues/scan`, { method: 'POST' });
+    expect(res.status).toBe(501);
   });
 
   it('GET /status includes remote_control fields', async () => {

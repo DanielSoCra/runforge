@@ -210,6 +210,7 @@ STACK-AC-KNOWLEDGE:
 STACK-AC-DASHBOARD:
   parent: ARCH-AC-DASHBOARD
   children: []
+  spec: docs/superpowers/specs/2026-03-20-issues-board-design.md
   code_paths:
     - packages/dashboard/
     - supabase/
@@ -266,6 +267,11 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/app/api/auth/github-connection/route.ts
     - packages/dashboard/app/api/auth/github-connection/callback/route.ts
     - packages/dashboard/app/api/daemon/repos-reload/route.ts
+    - packages/dashboard/app/api/daemon/remote-control/restart/route.ts
+    - packages/dashboard/app/api/daemon/issues/scan/route.ts
+    - packages/dashboard/app/(dashboard)/issues/page.tsx
+    - packages/dashboard/components/issues-board.tsx
+    - packages/dashboard/lib/classify-issues.ts
     - packages/dashboard/actions/github-connections.ts
     - packages/dashboard/components/github-connections-section.tsx
     - packages/dashboard/components/import-repos-modal.tsx
@@ -287,6 +293,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/lib/github-api.test.ts
     - packages/dashboard/lib/scaffold-templates.test.ts
     - packages/dashboard/actions/new-project.test.ts
+    - packages/dashboard/lib/classify-issues.test.ts
   status: draft
 
 STACK-AC-HANDOFF-RUNTIME:
