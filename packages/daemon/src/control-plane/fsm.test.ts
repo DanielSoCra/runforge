@@ -54,8 +54,16 @@ describe('FSM', () => {
   describe('bug pipeline', () => {
     const table = getPipeline('bug');
 
-    it('detect → success → implement (skip classify)', () => {
-      expect(transition(table, 'detect', 'success')?.next).toBe('implement');
+    it('detect → success → diagnose (#48)', () => {
+      expect(transition(table, 'detect', 'success')?.next).toBe('diagnose');
+    });
+
+    it('diagnose → success → implement (#48)', () => {
+      expect(transition(table, 'diagnose', 'success')?.next).toBe('implement');
+    });
+
+    it('diagnose → failure → stuck (#48)', () => {
+      expect(transition(table, 'diagnose', 'failure')?.next).toBe('stuck');
     });
 
     it('review → success → integrate (skip holdout)', () => {

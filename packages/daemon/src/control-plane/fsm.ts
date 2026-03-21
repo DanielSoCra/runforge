@@ -46,9 +46,10 @@ const featureSimpleTransitions: TransitionTable = {
   report: { success: { next: 'report' } },
 };
 
-// Bug: skips classify, decompose, holdout
+// Bug: detect → diagnose → implement (skips classify, decompose, holdout)
 const bugTransitions: TransitionTable = {
-  detect: { success: { next: 'implement' }, failure: { next: 'stuck' } },
+  detect: { success: { next: 'diagnose' }, failure: { next: 'stuck' } },
+  diagnose: { success: { next: 'implement' }, failure: { next: 'stuck' } },
   implement: { success: { next: 'review' }, failure: { next: 'implement' } },
   review: { success: { next: 'integrate' }, failure: { next: 'implement' } },
   integrate: { success: { next: 'deploy' }, failure: { next: 'stuck' } },

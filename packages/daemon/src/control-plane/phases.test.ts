@@ -438,14 +438,17 @@ describe('createPhaseHandlers', () => {
       confidence: 0.85,
     };
 
-    it('returns success for Type A diagnosis (proceeds to implement)', async () => {
+    it('returns success for Type A diagnosis and records on run state', async () => {
       mockDiagnose.mockResolvedValue({ ok: true, value: typeADiagnosis });
       mockRouteDiagnosis.mockReturnValue({ route: 'bug-pipeline', diagnosis: typeADiagnosis });
 
       const { handlers } = createHandlers();
-      const result = await handlers.diagnose!(makeRun({ variant: 'bug' }));
+      const run = makeRun({ variant: 'bug' });
+      const result = await handlers.diagnose!(run);
 
       expect(result).toBe('success');
+      expect(run.diagnosisType).toBe('A');
+      expect(run.diagnosisConfidence).toBe(0.9);
       expect(mockDiagnose).toHaveBeenCalledWith(
         mockRuntime, 42, 'Fix something', '', '', undefined, undefined,
       );

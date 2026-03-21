@@ -95,19 +95,26 @@ export function createPhaseHandlers(
       if (!result.ok) {
         console.error(`[diagnose] Diagnosis failed:`, result.error.message);
         // Diagnosis failed — route to human
-        await octokit.issues.addLabels({
-          owner, repo, issue_number: workRequest.issueNumber,
-          labels: ['needs-human'],
-        });
-        await octokit.issues.createComment({
-          owner, repo, issue_number: workRequest.issueNumber,
-          body: `## Diagnosis Failed\n\nAutomatic diagnosis could not produce valid output after retry.\nRouting to human for manual triage.`,
-        });
+        try {
+          await octokit.issues.addLabels({
+            owner, repo, issue_number: workRequest.issueNumber,
+            labels: ['needs-human'],
+          });
+          await octokit.issues.createComment({
+            owner, repo, issue_number: workRequest.issueNumber,
+            body: `## Diagnosis Failed\n\nAutomatic diagnosis could not produce valid output after retry.\nRouting to human for manual triage.`,
+          });
+        } catch (e) {
+          console.error(`[diagnose] Failed to update issue:`, e);
+        }
         return 'failure';
       }
 
+      // Record diagnosis on run state for results ledger
+      run.diagnosisType = result.value.type;
+      run.diagnosisConfidence = result.value.confidence;
+
       const routing = routeDiagnosis(result.value, threshold);
-      run.cost += 0; // diagnosis cost is tracked by runtime internally
 
       if (routing.route === 'bug-pipeline') {
         console.log(`[diagnose] Type A (confidence ${result.value.confidence}) — proceeding to implement`);
@@ -131,14 +138,18 @@ export function createPhaseHandlers(
       const label = routing.route === 'needs-spec-update' ? 'needs-spec-update' : 'needs-human';
       console.log(`[diagnose] ${routing.route} — labeling ${label}`);
 
-      await octokit.issues.addLabels({
-        owner, repo, issue_number: workRequest.issueNumber,
-        labels: [label],
-      });
-      await octokit.issues.createComment({
-        owner, repo, issue_number: workRequest.issueNumber,
-        body: diagnosisComment,
-      });
+      try {
+        await octokit.issues.addLabels({
+          owner, repo, issue_number: workRequest.issueNumber,
+          labels: [label],
+        });
+        await octokit.issues.createComment({
+          owner, repo, issue_number: workRequest.issueNumber,
+          body: diagnosisComment,
+        });
+      } catch (e) {
+        console.error(`[diagnose] Failed to update issue:`, e);
+      }
 
       return 'failure';
     },
@@ -229,6 +240,8 @@ export function createPhaseHandlers(
         phasesExecuted: Object.keys(run.phaseCompletions),
         fixAttemptCount: run.fixAttempts.length,
         outcome,
+        diagnosisType: run.diagnosisType,
+        diagnosisConfidence: run.diagnosisConfidence,
       }, stateDir);
 
       // Notify

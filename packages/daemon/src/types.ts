@@ -3,7 +3,7 @@
 // --- Pipeline ---
 
 export type Phase =
-  | 'detect' | 'classify' | 'decompose' | 'implement'
+  | 'detect' | 'diagnose' | 'classify' | 'decompose' | 'implement'
   | 'review' | 'holdout' | 'integrate' | 'deploy'
   | 'test' | 'report' | 'stuck' | 'paused'
   | 'init' | 'intelligence' | 'brand' | 'design'
@@ -87,6 +87,8 @@ export interface RunState {
   startedAt: string;
   updatedAt: string;
   report?: string;
+  diagnosisType?: BugType;
+  diagnosisConfidence?: number;
 }
 
 // --- Daemon State ---
