@@ -291,6 +291,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     }
     await remoteControl.stop();
     server.close();
+    console.log('[daemon] Instance lock released');
     console.log('Daemon stopped.');
   };
 

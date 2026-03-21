@@ -91,12 +91,17 @@ export function createControlServer(
       new Promise((resolve) => {
         server.on('error', (e: NodeJS.ErrnoException) => {
           if (e.code === 'EADDRINUSE') {
-            resolve(err(new Error(`Port ${port} in use — another instance is running`)));
+            resolve(err(new Error(`Instance lock failed — port ${port} in use (another instance is running)`)));
           } else {
             resolve(err(e));
           }
         });
-        server.listen(port, '127.0.0.1', () => resolve(ok(undefined)));
+        // exclusive: true prevents port sharing; SO_REUSEADDR is set by default (libuv)
+        // allowing immediate rebind after crash without TIME_WAIT delay
+        server.listen({ port, host: '127.0.0.1', exclusive: true }, () => {
+          console.log(`[daemon] Instance lock acquired (port ${port})`);
+          resolve(ok(undefined));
+        });
       }),
   };
 }
