@@ -1,16 +1,18 @@
 // src/implementation/batch.ts
-import type { Unit, SessionResult, ExitStatus } from '../types.js';
+import type { Unit, SessionResult, ExitStatus, PitfallMarker } from '../types.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
+import type { GotchaStore } from '../knowledge/gotcha-store.js';
 import { createWorktree, getWorktreeDiffSize } from './worktree.js';
 import { git } from '../lib/git.js';
-import { ok, err, type Result } from '../lib/result.js';
+
 
 export interface UnitResult {
   unitId: string;
   exitStatus: ExitStatus;
   cost: number;
   output: string;
+  pitfallMarkers: PitfallMarker[];
   error?: string;
 }
 
@@ -32,6 +34,8 @@ export async function executeBatch(
   options?: { staggerMs?: number; maxDiffLines?: number },
   runWriter?: SupabaseRunWriter,
   runId?: string,
+  unitPitfalls?: Map<string, string>,
+  gotchaStore?: GotchaStore,
 ): Promise<BatchResult> {
   const staggerMs = options?.staggerMs ?? 2000;
   const maxDiffLines = options?.maxDiffLines ?? 300;
@@ -39,7 +43,8 @@ export async function executeBatch(
   const promises = units.map(async (unit, index) => {
     // Stagger delay between starts
     if (index > 0) await delay(index * staggerMs);
-    return executeUnit(unit, featureBranch, issueNumber, runtime, repoRoot, maxDiffLines, runWriter, runId);
+    const pitfalls = unitPitfalls?.get(unit.id) ?? '';
+    return executeUnit(unit, featureBranch, issueNumber, runtime, repoRoot, maxDiffLines, runWriter, runId, pitfalls, gotchaStore);
   });
 
   const settled = await Promise.allSettled(promises);
@@ -52,6 +57,7 @@ export async function executeBatch(
       exitStatus: 'failed' as ExitStatus,
       cost: 0,
       output: '',
+      pitfallMarkers: [],
       error: s.reason instanceof Error ? s.reason.message : String(s.reason),
     };
   });
@@ -71,6 +77,8 @@ async function executeUnit(
   maxDiffLines: number,
   runWriter?: SupabaseRunWriter,
   runId?: string,
+  pitfalls?: string,
+  gotchaStore?: GotchaStore,
 ): Promise<UnitResult> {
   // 1. Create worktree
   console.log(`[batch] Creating worktree for ${unit.id} from ${featureBranch}`);
@@ -82,6 +90,7 @@ async function executeUnit(
       exitStatus: 'failed',
       cost: 0,
       output: '',
+      pitfallMarkers: [],
       error: `Worktree creation failed: ${worktreeResult.error.message}`,
     };
   }
@@ -90,14 +99,19 @@ async function executeUnit(
   try {
     // 2. Spawn worker session
     console.log(`[batch] Spawning worker session for ${unit.id}`);
+    const variables: Record<string, string> = {
+      task: unit.context,
+      specs: unit.specContent,
+      verification: unit.verificationCommand,
+    };
+    if (pitfalls) {
+      variables.pitfalls = pitfalls;
+    }
+
     const sessionResult = await runtime.spawnSession(
       'worker',
       {
-        variables: {
-          task: unit.context,
-          specs: unit.specContent,
-          verification: unit.verificationCommand,
-        },
+        variables,
         workspacePath: worktreeResult.value,
         baseBranch: featureBranch,
       },
@@ -114,6 +128,7 @@ async function executeUnit(
         exitStatus: 'failed',
         cost: 0,
         output: '',
+        pitfallMarkers: [],
         error: sessionResult.error.message,
       };
     }
@@ -121,7 +136,17 @@ async function executeUnit(
 
     const result = sessionResult.value;
 
-    // 3. Check diff size
+    // 3. Store pitfall markers as gotchas (knowledge capture)
+    if (gotchaStore && result.pitfallMarkers.length > 0) {
+      try {
+        const stored = await gotchaStore.store(result.pitfallMarkers, issueNumber);
+        if (stored > 0) console.log(`[batch] Stored ${stored} new gotchas from ${unit.id}`);
+      } catch (e) {
+        console.warn(`[batch] Failed to store gotchas for ${unit.id}:`, e);
+      }
+    }
+
+    // 4. Check diff size
     const diffSize = await getWorktreeDiffSize(unit.id, featureBranch, repoRoot);
     if (diffSize.ok && diffSize.value > maxDiffLines) {
       return {
@@ -129,6 +154,7 @@ async function executeUnit(
         exitStatus: 'failed',
         cost: result.cost,
         output: result.output,
+        pitfallMarkers: result.pitfallMarkers,
         error: `Diff size ${diffSize.value} exceeds limit of ${maxDiffLines}`,
       };
     }
@@ -138,6 +164,7 @@ async function executeUnit(
       exitStatus: result.exitStatus,
       cost: result.cost,
       output: result.output,
+      pitfallMarkers: result.pitfallMarkers,
     };
   } finally {
     // Remove worktree directory but keep branch alive for merge by coordinator

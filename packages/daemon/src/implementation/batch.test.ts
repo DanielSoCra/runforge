@@ -90,4 +90,66 @@ describe('executeBatch', () => {
     expect(result.results).toHaveLength(0);
     expect(result.totalCost).toBe(0);
   });
+
+  it('stores pitfall markers as gotchas when GotchaStore is provided (#44)', async () => {
+    const markers = [
+      { artifactPatterns: ['src/**/*.ts'], description: 'Watch out for circular imports' },
+    ];
+    const resultWithPitfalls: SessionResult = {
+      output: 'done', structuredData: null, cost: 0.5,
+      pitfallMarkers: markers, exitStatus: 'completed',
+    };
+    const runtime = createMockRuntime(resultWithPitfalls);
+    const gotchaStore = { store: vi.fn().mockResolvedValue(1) } as any;
+    const units = [makeUnit('a')];
+
+    await executeBatch(units, 'feature/42', 42, runtime, '/tmp/repo', { staggerMs: 0 }, undefined, undefined, undefined, gotchaStore);
+
+    expect(gotchaStore.store).toHaveBeenCalledWith(markers, 42);
+  });
+
+  it('does not call GotchaStore.store when no pitfall markers exist (#44)', async () => {
+    const runtime = createMockRuntime(); // successResult has empty pitfallMarkers
+    const gotchaStore = { store: vi.fn().mockResolvedValue(0) } as any;
+    const units = [makeUnit('a')];
+
+    await executeBatch(units, 'feature/42', 42, runtime, '/tmp/repo', { staggerMs: 0 }, undefined, undefined, undefined, gotchaStore);
+
+    expect(gotchaStore.store).not.toHaveBeenCalled();
+  });
+
+  it('propagates pitfallMarkers through UnitResult (#44)', async () => {
+    const markers = [
+      { artifactPatterns: ['src/foo.ts'], description: 'Foo needs bar' },
+    ];
+    const resultWithPitfalls: SessionResult = {
+      output: 'done', structuredData: null, cost: 0.3,
+      pitfallMarkers: markers, exitStatus: 'completed',
+    };
+    const runtime = createMockRuntime(resultWithPitfalls);
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    expect(result.results[0]?.pitfallMarkers).toEqual(markers);
+  });
+
+  it('handles GotchaStore.store failure gracefully (#44)', async () => {
+    const markers = [
+      { artifactPatterns: ['src/**'], description: 'a pitfall' },
+    ];
+    const resultWithPitfalls: SessionResult = {
+      output: 'done', structuredData: null, cost: 0.5,
+      pitfallMarkers: markers, exitStatus: 'completed',
+    };
+    const runtime = createMockRuntime(resultWithPitfalls);
+    const gotchaStore = { store: vi.fn().mockRejectedValue(new Error('disk full')) } as any;
+    const units = [makeUnit('a')];
+
+    // Should not throw — gotcha storage failure should not break the batch
+    const result = await executeBatch(units, 'feature/42', 42, runtime, '/tmp/repo', { staggerMs: 0 }, undefined, undefined, undefined, gotchaStore);
+
+    expect(result.results[0]?.exitStatus).toBe('completed');
+    expect(gotchaStore.store).toHaveBeenCalled();
+  });
 });

@@ -21,6 +21,8 @@ import { RemoteControlManager } from './remote-control.js';
 import { getSupabaseClient } from '../supabase/client.js';
 import { SupabaseConfigReader } from '../supabase/config-reader.js';
 import { SupabaseRunWriter, toDbOutcome } from '../supabase/run-writer.js';
+import { GotchaStore } from '../knowledge/gotcha-store.js';
+import { join } from 'path';
 
 export async function startDaemon(configPath: string): Promise<Result<void>> {
   // 1. Load config
@@ -50,7 +52,8 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     perRunBudget: config.perRunBudget, // per-run budget is repo-specific, handled per-run
   });
   const runtime = new SessionRuntime(config, costTracker);
-  const coordinator = new ImplementationCoordinator(runtime, process.cwd());
+  const gotchaStore = new GotchaStore(join(stateDir, 'gotchas.jsonl'));
+  const coordinator = new ImplementationCoordinator(runtime, process.cwd(), 300, 2000, gotchaStore);
 
   // 3b. Start Remote Control
   const remoteControl = new RemoteControlManager();

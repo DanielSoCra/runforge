@@ -126,6 +126,97 @@ describe('ImplementationCoordinator', () => {
       expect(result.value.totalCost).toBe(0.5);
     }
   });
+
+  it('injects matched gotchas as pitfalls variable in worker session (#45)', async () => {
+    const unitWithArtifacts = {
+      id: 'unit-gotcha', title: 'Unit with artifacts', specIds: [], specContent: '',
+      expectedArtifacts: ['src/models/*.ts'], dependencies: [], batchNumber: 0,
+      verificationCommand: '', context: 'implement model',
+    };
+
+    const mockGotchaStore = {
+      match: vi.fn().mockResolvedValue([
+        {
+          id: 'gotcha-1',
+          artifactPatterns: ['src/**/*.ts'],
+          description: 'Always check null returns from database queries',
+          sourceIssue: 10,
+          confidence: 1,
+          createdAt: '2026-01-01T00:00:00Z',
+          hitCount: 3,
+          promoted: false,
+          archived: false,
+          originType: 'autonomous' as const,
+          priorityTier: 'normal' as const,
+        },
+      ]),
+      store: vi.fn().mockResolvedValue(0),
+    } as any;
+
+    const runtime = {
+      spawnSession: vi.fn()
+        // decompose call returns unit with expectedArtifacts
+        .mockResolvedValueOnce(ok({
+          output: 'decomposed',
+          structuredData: { units: [unitWithArtifacts] },
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        } as SessionResult))
+        // worker session
+        .mockResolvedValueOnce(ok(successResult)),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0, mockGotchaStore);
+    await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'standard',
+      specContent: 'spec',
+    });
+
+    // GotchaStore.match should have been called with unit's expectedArtifacts
+    expect(mockGotchaStore.match).toHaveBeenCalledWith(['src/models/*.ts']);
+
+    // Worker session (second spawnSession call) should receive pitfalls in variables
+    const workerCall = runtime.spawnSession.mock.calls[1];
+    expect(workerCall[1].variables.pitfalls).toContain('Always check null returns from database queries');
+  });
+
+  it('does not include pitfalls variable when no gotchas match (#45)', async () => {
+    const unitWithArtifacts = {
+      id: 'unit-no-match', title: 'Unit', specIds: [], specContent: '',
+      expectedArtifacts: ['src/other/*.ts'], dependencies: [], batchNumber: 0,
+      verificationCommand: '', context: 'implement other',
+    };
+
+    const mockGotchaStore = {
+      match: vi.fn().mockResolvedValue([]),
+      store: vi.fn().mockResolvedValue(0),
+    } as any;
+
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce(ok({
+          output: 'decomposed',
+          structuredData: { units: [unitWithArtifacts] },
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        } as SessionResult))
+        .mockResolvedValueOnce(ok(successResult)),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0, mockGotchaStore);
+    await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'standard',
+      specContent: 'spec',
+    });
+
+    // Worker session should NOT have pitfalls in variables
+    const workerCall = runtime.spawnSession.mock.calls[1];
+    expect(workerCall[1].variables.pitfalls).toBeUndefined();
+  });
 });
 
 // ---- Multi-unit batch tests ----

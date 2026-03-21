@@ -1,7 +1,8 @@
 import { ok, err, type Result } from '../lib/result.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
-import type { WorkRequest, TaskGraph } from '../types.js';
+import type { WorkRequest, TaskGraph, Gotcha } from '../types.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
+import type { GotchaStore } from '../knowledge/gotcha-store.js';
 import { createSingleUnitGraph, getUnitsByBatch } from './task-graph.js';
 import { executeBatch, type UnitResult } from './batch.js';
 import { mergeWorktree } from './worktree.js';
@@ -22,6 +23,7 @@ export class ImplementationCoordinator {
     private repoRoot: string,
     private maxDiffLines: number = 300,
     private staggerMs: number = 2000,
+    private gotchaStore?: GotchaStore,
   ) {}
 
   /**
@@ -68,6 +70,19 @@ export class ImplementationCoordinator {
     for (let i = startBatch; i < batches.length; i++) {
       const batch = batches[i]!;
 
+      // Match gotchas for each unit's expected artifacts (ARCH-AC-KNOWLEDGE: Gotcha injection flow)
+      const unitPitfalls = new Map<string, string>();
+      if (this.gotchaStore) {
+        for (const unit of batch) {
+          if (unit.expectedArtifacts.length > 0) {
+            const matched = await this.gotchaStore.match(unit.expectedArtifacts);
+            if (matched.length > 0) {
+              unitPitfalls.set(unit.id, formatGotchas(matched));
+            }
+          }
+        }
+      }
+
       // Execute batch concurrently
       const batchResult = await executeBatch(
         batch,
@@ -78,6 +93,8 @@ export class ImplementationCoordinator {
         { staggerMs: this.staggerMs, maxDiffLines: this.maxDiffLines },
         runWriter,
         runId,
+        unitPitfalls,
+        this.gotchaStore,
       );
 
       allResults.push(...batchResult.results);
@@ -138,4 +155,10 @@ export class ImplementationCoordinator {
       batchesCompleted: batches.length,
     });
   }
+}
+
+function formatGotchas(gotchas: Gotcha[]): string {
+  return gotchas
+    .map((g) => `- [${g.priorityTier === 'elevated' ? 'IMPORTANT' : 'note'}] ${g.description} (patterns: ${g.artifactPatterns.join(', ')})`)
+    .join('\n');
 }
