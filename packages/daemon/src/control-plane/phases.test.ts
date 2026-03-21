@@ -10,6 +10,15 @@ vi.mock('../lib/git.js', () => ({
 
 vi.mock('../validation/gates.js', () => ({
   createGate1: vi.fn(),
+  selectGates: vi.fn(),
+}));
+
+vi.mock('../validation/reviewer-session.js', () => ({
+  createReviewerGate: vi.fn(),
+}));
+
+vi.mock('../validation/risk-detection.js', () => ({
+  isRiskSensitive: vi.fn(),
 }));
 
 vi.mock('../validation/review.js', () => ({
@@ -35,18 +44,35 @@ vi.mock('./work-detection.js', () => ({
   })),
 }));
 
+vi.mock('../diagnosis/diagnostician.js', () => ({
+  diagnose: vi.fn(),
+}));
+
+vi.mock('../diagnosis/router.js', () => ({
+  routeDiagnosis: vi.fn(),
+}));
+
 // Import after mocks are set up
 import { createPhaseHandlers, acquireDetectLock, releaseDetectLock, isDetectLocked } from './phases.js';
 import { git } from '../lib/git.js';
-import { createGate1 } from '../validation/gates.js';
+import { createGate1, selectGates } from '../validation/gates.js';
+import { createReviewerGate } from '../validation/reviewer-session.js';
+import { isRiskSensitive } from '../validation/risk-detection.js';
 import { runReview } from '../validation/review.js';
 import { formatReport, postReport } from './reporter.js';
 import { notify } from './notify.js';
 import { appendResult } from './results.js';
 import { createWorkDetector } from './work-detection.js';
+import { diagnose } from '../diagnosis/diagnostician.js';
+import { routeDiagnosis } from '../diagnosis/router.js';
 
 const mockGit = vi.mocked(git);
+const mockDiagnose = vi.mocked(diagnose);
+const mockRouteDiagnosis = vi.mocked(routeDiagnosis);
 const mockCreateGate1 = vi.mocked(createGate1);
+const mockSelectGates = vi.mocked(selectGates);
+const mockCreateReviewerGate = vi.mocked(createReviewerGate);
+const mockIsRiskSensitive = vi.mocked(isRiskSensitive);
 const mockRunReview = vi.mocked(runReview);
 const mockFormatReport = vi.mocked(formatReport);
 const mockPostReport = vi.mocked(postReport);
@@ -77,7 +103,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
   } as Config;
 }
 
-function makeRun(): RunState {
+function makeRun(overrides: Partial<RunState> = {}): RunState {
   return {
     id: 'test-run',
     issueNumber: 42,
@@ -92,6 +118,7 @@ function makeRun(): RunState {
     errorHashes: {},
     startedAt: '2026-03-21T00:00:00Z',
     updatedAt: '2026-03-21T00:00:00Z',
+    ...overrides,
   };
 }
 
@@ -105,16 +132,21 @@ function makeWorkRequest(): WorkRequest {
   };
 }
 
-const mockOctokit = {} as any;
+const mockOctokit = {
+  issues: {
+    addLabels: vi.fn(async () => ({})),
+    createComment: vi.fn(async () => ({})),
+  },
+} as any;
+const mockRuntime = { spawnSession: vi.fn() } as any;
 
-function createHandlers(configOverrides: Partial<Config> = {}) {
+function createHandlers(configOverrides: Partial<Config> = {}, workReq?: WorkRequest) {
   const config = makeConfig(configOverrides);
-  const mockRuntime = {} as any;
   const mockCoordinator = { implement: vi.fn() } as any;
   return {
     handlers: createPhaseHandlers(
       config, 'owner', 'repo', mockRuntime, mockCoordinator,
-      mockOctokit, makeWorkRequest(), '/tmp/state', undefined, undefined,
+      mockOctokit, workReq ?? makeWorkRequest(), '/tmp/state', undefined, undefined,
     ),
     coordinator: mockCoordinator,
     config,
@@ -155,6 +187,13 @@ describe('createPhaseHandlers', () => {
       claimWork: vi.fn(),
       markStuck: vi.fn(),
     } as any);
+    // Reset octokit mocks
+    mockOctokit.issues.addLabels.mockClear();
+    mockOctokit.issues.createComment.mockClear();
+    // Default: git diff returns empty diff
+    mockGit.mockResolvedValue({ ok: true, value: '' });
+    // Default: not risk-sensitive
+    mockIsRiskSensitive.mockReturnValue(false);
   });
 
   afterEach(() => {
@@ -263,9 +302,22 @@ describe('createPhaseHandlers', () => {
   });
 
   describe('review', () => {
+    function setupReviewMocks() {
+      const gate1 = { type: 'deterministic' as const, execute: vi.fn() };
+      const gate2 = { type: 'spec-compliance' as const, execute: vi.fn() };
+      const gate3 = { type: 'quality' as const, execute: vi.fn() };
+      const gate4 = { type: 'security' as const, execute: vi.fn() };
+      mockCreateGate1.mockReturnValue(gate1 as any);
+      mockCreateReviewerGate
+        .mockReturnValueOnce(gate2 as any)
+        .mockReturnValueOnce(gate3 as any)
+        .mockReturnValueOnce(gate4 as any);
+      mockSelectGates.mockReturnValue([gate1, gate2]);
+      return { gate1, gate2, gate3, gate4 };
+    }
+
     it('returns success when all gates pass', async () => {
-      const mockGate = { type: 'deterministic', execute: vi.fn() };
-      mockCreateGate1.mockReturnValue(mockGate as any);
+      setupReviewMocks();
       mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
       const { handlers } = createHandlers();
       const result = await handlers.review!(makeRun());
@@ -274,8 +326,7 @@ describe('createPhaseHandlers', () => {
     });
 
     it('returns failure when gates fail', async () => {
-      const mockGate = { type: 'deterministic', execute: vi.fn() };
-      mockCreateGate1.mockReturnValue(mockGate as any);
+      setupReviewMocks();
       mockRunReview.mockResolvedValue({
         passed: false,
         gateResults: [{ gate: 'deterministic', passed: false, findings: [] }],
@@ -285,6 +336,187 @@ describe('createPhaseHandlers', () => {
       const { handlers } = createHandlers();
       const result = await handlers.review!(makeRun());
       expect(result).toBe('failure');
+    });
+
+    it('creates reviewer gates for spec-compliance, quality, and security (#10)', async () => {
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
+      const { handlers } = createHandlers();
+      await handlers.review!(makeRun());
+
+      // All three reviewer gates must be created
+      expect(mockCreateReviewerGate).toHaveBeenCalledTimes(3);
+      expect(mockCreateReviewerGate).toHaveBeenCalledWith(
+        'spec-compliance', 'reviewer-spec',
+        expect.any(String), mockRuntime, 42,
+        undefined, undefined, expect.any(String), 'Fix something',
+      );
+      expect(mockCreateReviewerGate).toHaveBeenCalledWith(
+        'quality', 'reviewer-quality',
+        expect.any(String), mockRuntime, 42,
+        undefined, undefined, expect.any(String),
+      );
+      expect(mockCreateReviewerGate).toHaveBeenCalledWith(
+        'security', 'reviewer-security',
+        expect.any(String), mockRuntime, 42,
+        undefined, undefined, expect.any(String),
+      );
+    });
+
+    it('calls selectGates with complexity and risk sensitivity (#10)', async () => {
+      const { gate1, gate2, gate3, gate4 } = setupReviewMocks();
+      mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
+      const { handlers } = createHandlers();
+      await handlers.review!(makeRun({ variant: 'feature-simple' }));
+
+      expect(mockSelectGates).toHaveBeenCalledWith('simple', false, gate1, gate2, gate3, gate4);
+    });
+
+    it('uses standard complexity for feature variant (#10)', async () => {
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
+      const { handlers } = createHandlers();
+      await handlers.review!(makeRun({ variant: 'feature' }));
+
+      expect(mockSelectGates).toHaveBeenCalledWith(
+        'standard', expect.any(Boolean),
+        expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+      );
+    });
+
+    it('passes risk-sensitive flag from isRiskSensitive (#10)', async () => {
+      setupReviewMocks();
+      mockIsRiskSensitive.mockReturnValue(true);
+      mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
+
+      const workReq = makeWorkRequest();
+      workReq.labels = ['security'];
+      const { handlers } = createHandlers({}, workReq);
+      await handlers.review!(makeRun());
+
+      expect(mockIsRiskSensitive).toHaveBeenCalledWith(
+        ['security'], expect.stringContaining('Fix something'), [],
+      );
+      expect(mockSelectGates).toHaveBeenCalledWith(
+        'simple', true,
+        expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+      );
+    });
+
+    it('passes maxFixCycles from config to runReview (#10)', async () => {
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
+      const { handlers } = createHandlers({
+        validation: {
+          gate1Commands: ['test'],
+          maxFixCycles: 5,
+          staticAnalysis: { maxComplexity: 15, maxFunctionLength: 50, maxFileSize: 500 },
+        },
+      });
+      await handlers.review!(makeRun());
+
+      expect(mockRunReview).toHaveBeenCalledWith(
+        expect.any(Array), expect.any(String),
+        expect.objectContaining({ maxFixCycles: 5 }),
+      );
+    });
+  });
+
+  describe('diagnose (#48)', () => {
+    const typeADiagnosis = {
+      type: 'A' as const,
+      confidence: 0.9,
+      affectedSpecs: ['FUNC-AC-PIPELINE'],
+      affectedArtifacts: ['src/foo.ts'],
+      suggestedAction: 'Fix the implementation',
+      reasoning: 'The spec says X but code does Y',
+    };
+
+    const typeBDiagnosis = {
+      ...typeADiagnosis,
+      type: 'B' as const,
+      confidence: 0.85,
+    };
+
+    it('returns success for Type A diagnosis (proceeds to implement)', async () => {
+      mockDiagnose.mockResolvedValue({ ok: true, value: typeADiagnosis });
+      mockRouteDiagnosis.mockReturnValue({ route: 'bug-pipeline', diagnosis: typeADiagnosis });
+
+      const { handlers } = createHandlers();
+      const result = await handlers.diagnose!(makeRun({ variant: 'bug' }));
+
+      expect(result).toBe('success');
+      expect(mockDiagnose).toHaveBeenCalledWith(
+        mockRuntime, 42, 'Fix something', '', '', undefined, undefined,
+      );
+      expect(mockRouteDiagnosis).toHaveBeenCalledWith(typeADiagnosis, 0.7);
+    });
+
+    it('returns failure and labels needs-spec-update for Type B', async () => {
+      mockDiagnose.mockResolvedValue({ ok: true, value: typeBDiagnosis });
+      mockRouteDiagnosis.mockReturnValue({ route: 'needs-spec-update', diagnosis: typeBDiagnosis });
+
+      const { handlers } = createHandlers();
+      const result = await handlers.diagnose!(makeRun({ variant: 'bug' }));
+
+      expect(result).toBe('failure');
+      expect(mockOctokit.issues.addLabels).toHaveBeenCalledWith({
+        owner: 'owner', repo: 'repo', issue_number: 42,
+        labels: ['needs-spec-update'],
+      });
+      expect(mockOctokit.issues.createComment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          owner: 'owner', repo: 'repo', issue_number: 42,
+          body: expect.stringContaining('Type:** B'),
+        }),
+      );
+    });
+
+    it('returns failure and labels needs-human for Type C / low confidence', async () => {
+      const lowConf = { ...typeADiagnosis, confidence: 0.3 };
+      mockDiagnose.mockResolvedValue({ ok: true, value: lowConf });
+      mockRouteDiagnosis.mockReturnValue({
+        route: 'needs-human', diagnosis: lowConf, reason: 'Low confidence: 0.3',
+      });
+
+      const { handlers } = createHandlers();
+      const result = await handlers.diagnose!(makeRun({ variant: 'bug' }));
+
+      expect(result).toBe('failure');
+      expect(mockOctokit.issues.addLabels).toHaveBeenCalledWith({
+        owner: 'owner', repo: 'repo', issue_number: 42,
+        labels: ['needs-human'],
+      });
+    });
+
+    it('returns failure and labels needs-human when diagnosis errors', async () => {
+      mockDiagnose.mockResolvedValue({ ok: false, error: new Error('invalid output') });
+
+      const { handlers } = createHandlers();
+      const result = await handlers.diagnose!(makeRun({ variant: 'bug' }));
+
+      expect(result).toBe('failure');
+      expect(mockOctokit.issues.addLabels).toHaveBeenCalledWith({
+        owner: 'owner', repo: 'repo', issue_number: 42,
+        labels: ['needs-human'],
+      });
+      expect(mockOctokit.issues.createComment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.stringContaining('Diagnosis Failed'),
+        }),
+      );
+    });
+
+    it('uses config.diagnosis.confidenceThreshold', async () => {
+      mockDiagnose.mockResolvedValue({ ok: true, value: typeADiagnosis });
+      mockRouteDiagnosis.mockReturnValue({ route: 'bug-pipeline', diagnosis: typeADiagnosis });
+
+      const { handlers } = createHandlers({
+        diagnosis: { confidenceThreshold: 0.9 },
+      });
+      await handlers.diagnose!(makeRun({ variant: 'bug' }));
+
+      expect(mockRouteDiagnosis).toHaveBeenCalledWith(typeADiagnosis, 0.9);
     });
   });
 
@@ -310,7 +542,7 @@ describe('createPhaseHandlers', () => {
       );
 
       // Verify work was completed (label + close issue)
-      const detector = mockCreateWorkDetector.mock.results[0].value;
+      const detector = mockCreateWorkDetector.mock.results[0]!.value;
       expect(detector.completeWork).toHaveBeenCalledWith(42, 'test report body');
 
       // Verify notification was sent

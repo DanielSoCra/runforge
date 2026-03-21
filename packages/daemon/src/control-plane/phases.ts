@@ -5,7 +5,9 @@ import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { ImplementationCoordinator } from '../implementation/coordinator.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import type { Config } from '../config.js';
-import { createGate1, type Gate } from '../validation/gates.js';
+import { createGate1, selectGates, type Gate } from '../validation/gates.js';
+import { createReviewerGate } from '../validation/reviewer-session.js';
+import { isRiskSensitive } from '../validation/risk-detection.js';
 import { runReview } from '../validation/review.js';
 import { formatReport, postReport } from './reporter.js';
 import { notify } from './notify.js';
@@ -13,6 +15,8 @@ import { appendResult } from './results.js';
 import type { Octokit } from '@octokit/rest';
 import { createWorkDetector } from './work-detection.js';
 import { git } from '../lib/git.js';
+import { diagnose } from '../diagnosis/diagnostician.js';
+import { routeDiagnosis } from '../diagnosis/router.js';
 
 // Serializes detect-phase git operations across concurrent pipeline runs.
 // Same pattern as integrationLock in integration.ts — single-process boolean suffices.
@@ -74,6 +78,71 @@ export function createPhaseHandlers(
       return 'success:simple';
     },
 
+    diagnose: async (run: RunState): Promise<PhaseEvent> => {
+      console.log(`[diagnose] Running diagnosis for #${workRequest.issueNumber}`);
+      const threshold = config.diagnosis.confidenceThreshold;
+
+      const result = await diagnose(
+        runtime,
+        workRequest.issueNumber,
+        workRequest.body,
+        '',  // implementation content — not yet available at this phase
+        workRequest.specRefs.join('\n'),
+        runWriter,
+        runId,
+      );
+
+      if (!result.ok) {
+        console.error(`[diagnose] Diagnosis failed:`, result.error.message);
+        // Diagnosis failed — route to human
+        await octokit.issues.addLabels({
+          owner, repo, issue_number: workRequest.issueNumber,
+          labels: ['needs-human'],
+        });
+        await octokit.issues.createComment({
+          owner, repo, issue_number: workRequest.issueNumber,
+          body: `## Diagnosis Failed\n\nAutomatic diagnosis could not produce valid output after retry.\nRouting to human for manual triage.`,
+        });
+        return 'failure';
+      }
+
+      const routing = routeDiagnosis(result.value, threshold);
+      run.cost += 0; // diagnosis cost is tracked by runtime internally
+
+      if (routing.route === 'bug-pipeline') {
+        console.log(`[diagnose] Type A (confidence ${result.value.confidence}) — proceeding to implement`);
+        return 'success';
+      }
+
+      // Type B or Type C / low confidence — post diagnosis and stop
+      const diagnosisComment = [
+        `## Bug Diagnosis`,
+        `**Type:** ${result.value.type} | **Confidence:** ${result.value.confidence}`,
+        `**Affected Specs:** ${result.value.affectedSpecs.join(', ') || 'none'}`,
+        `**Affected Artifacts:** ${result.value.affectedArtifacts.join(', ') || 'none'}`,
+        `**Suggested Action:** ${result.value.suggestedAction}`,
+        `**Reasoning:** ${result.value.reasoning}`,
+        '',
+        routing.route === 'needs-spec-update'
+          ? '_Routed to spec author — implementation is correct per spec, but spec is incomplete._'
+          : `_Routed to human — ${routing.reason}_`,
+      ].join('\n');
+
+      const label = routing.route === 'needs-spec-update' ? 'needs-spec-update' : 'needs-human';
+      console.log(`[diagnose] ${routing.route} — labeling ${label}`);
+
+      await octokit.issues.addLabels({
+        owner, repo, issue_number: workRequest.issueNumber,
+        labels: [label],
+      });
+      await octokit.issues.createComment({
+        owner, repo, issue_number: workRequest.issueNumber,
+        body: diagnosisComment,
+      });
+
+      return 'failure';
+    },
+
     implement: async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[implement] Starting for #${workRequest.issueNumber} on ${featureBranch}`);
       const result = await coordinator.implement(workRequest, featureBranch, runWriter, runId);
@@ -84,12 +153,58 @@ export function createPhaseHandlers(
       return 'success';
     },
 
-    review: async (_run: RunState): Promise<PhaseEvent> => {
-      console.log(`[review] Running gate 1 in ${process.cwd()}`);
-      const gates: Gate[] = [createGate1(config.validation.gate1Commands)];
-      const result = await runReview(gates, process.cwd());
+    review: async (run: RunState): Promise<PhaseEvent> => {
+      const cwd = process.cwd();
+      console.log(`[review] Running review gates in ${cwd}`);
+
+      // Derive complexity from pipeline variant
+      const complexity: 'simple' | 'standard' | 'complex' =
+        run.variant === 'feature' ? 'standard' : 'simple';
+
+      // Determine risk sensitivity from work request metadata
+      const riskSensitive = isRiskSensitive(
+        workRequest.labels,
+        workRequest.body + ' ' + (workRequest.scopeDescription ?? ''),
+        [], // artifact paths — not tracked on WorkRequest yet
+      );
+
+      // Build diff for reviewer context
+      let diff: string | undefined;
+      try {
+        const diffResult = await git(['diff', config.branches.staging + '..HEAD']);
+        if (diffResult.ok) diff = diffResult.value;
+      } catch { /* diff is optional context */ }
+
+      // Create all four gates
+      const gate1 = createGate1(config.validation.gate1Commands);
+      const gate2 = createReviewerGate(
+        'spec-compliance', 'reviewer-spec',
+        'Verify implementation against spec acceptance criteria.',
+        runtime, workRequest.issueNumber, runWriter, runId,
+        diff, workRequest.body,
+      );
+      const gate3 = createReviewerGate(
+        'quality', 'reviewer-quality',
+        'Evaluate code quality, pattern consistency, and test quality.',
+        runtime, workRequest.issueNumber, runWriter, runId,
+        diff,
+      );
+      const gate4 = createReviewerGate(
+        'security', 'reviewer-security',
+        'Evaluate injection risks, authentication, data validation, and concurrency safety.',
+        runtime, workRequest.issueNumber, runWriter, runId,
+        diff,
+      );
+
+      // Select gates based on complexity and risk
+      const gates = selectGates(complexity, riskSensitive, gate1, gate2, gate3, gate4);
+      console.log(`[review] Selected ${gates.length} gates (complexity=${complexity}, riskSensitive=${riskSensitive})`);
+
+      const result = await runReview(gates, cwd, {
+        maxFixCycles: config.validation.maxFixCycles,
+      });
       if (!result.passed) { console.error(`[review] Failed:`, JSON.stringify(result.gateResults)); return 'failure'; }
-      console.log(`[review] Passed`);
+      console.log(`[review] Passed (${result.fixCycles} fix cycles)`);
       return 'success';
     },
 
