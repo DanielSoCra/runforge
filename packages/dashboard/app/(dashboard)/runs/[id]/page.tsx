@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { notFound } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
+import { BudgetBadge } from '@/components/budget-badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageError } from '@/components/page-error';
 
@@ -20,6 +21,12 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
     return <PageError />;
   }
   if (!run) notFound();
+
+  let budgetLimit: number | null = null;
+  if (run.repo_id) {
+    const { data: repo } = await supabase.from('repos').select('budget_limit').eq('id', run.repo_id).single();
+    budgetLimit = repo?.budget_limit ?? null;
+  }
 
   const phases = Array.isArray(run.phases) ? (run.phases as unknown as PhaseEvent[]) : [];
 
@@ -58,7 +65,10 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
             ))}
             <div className="flex items-center justify-between pt-2 font-semibold text-sm">
               <span>Total</span>
-              <span className="font-mono">${Number(run.total_cost).toFixed(4)}</span>
+              <span className="inline-flex items-center font-mono">
+                ${Number(run.total_cost).toFixed(4)}
+                <BudgetBadge totalCost={Number(run.total_cost)} budgetLimit={budgetLimit} />
+              </span>
             </div>
           </div>
         </CardContent>

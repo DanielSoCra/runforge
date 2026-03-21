@@ -9,7 +9,7 @@ export default async function HomePage() {
   const todayUTC = new Date();
   todayUTC.setUTCHours(0, 0, 0, 0);
 
-  const [{ data: repos }, { data: runs }, { data: costs }, { count: activeRunsCount }] = await Promise.all([
+  const [{ data: repos }, { data: runs }, { data: costs }, { count: activeRunsCount }, { data: allRepos }] = await Promise.all([
     supabase.from('repos').select('id').is('deleted_at', null).eq('enabled', true),
     supabase.from('runs')
       .select('*')
@@ -22,10 +22,13 @@ export default async function HomePage() {
     supabase.from('runs')
       .select('id', { count: 'exact', head: true })
       .eq('outcome', 'in-progress'),
+    supabase.from('repos').select('id, budget_limit').is('deleted_at', null),
   ]);
 
   const activeRuns = activeRunsCount ?? 0;
   const todayCost = costs?.reduce((sum, e) => sum + Number(e.cost), 0) ?? 0;
+  const budgetByRepoId: Record<string, number | null> = {};
+  for (const r of allRepos ?? []) budgetByRepoId[r.id] = r.budget_limit;
 
   let daemonStatus: 'running' | 'paused' | 'offline' = 'offline';
   if (!process.env.DAEMON_URL) {
@@ -57,7 +60,7 @@ export default async function HomePage() {
       />
       <div>
         <h2 className="text-lg font-medium mb-4">Recent Runs</h2>
-        <RunTable runs={runs ?? []} />
+        <RunTable runs={runs ?? []} budgetByRepoId={budgetByRepoId} />
       </div>
     </div>
   );

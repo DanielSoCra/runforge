@@ -263,6 +263,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/lib/auth.ts
     - packages/dashboard/lib/github-api.ts
     - packages/dashboard/components/page-error.tsx
+    - packages/dashboard/components/budget-badge.tsx
     - packages/dashboard/components/invite-form.tsx
     - packages/dashboard/lib/scaffold-templates.ts
     - supabase/migrations/004_command_center.sql
@@ -299,6 +300,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/lib/scaffold-templates.test.ts
     - packages/dashboard/actions/new-project.test.ts
     - packages/dashboard/lib/classify-issues.test.ts
+    - packages/dashboard/components/budget-badge.test.tsx
     - packages/dashboard/app/api/daemon/daemon-routes.test.ts
     - packages/dashboard/app/(dashboard)/runs/[id]/page.test.tsx
   status: draft

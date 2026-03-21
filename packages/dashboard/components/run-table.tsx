@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
+import { BudgetBadge } from '@/components/budget-badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import type { Database } from '@/lib/types';
 
@@ -27,7 +28,7 @@ const outcomeVariant = {
   escalated: 'destructive',
 } as const;
 
-export function RunTable({ runs }: { runs: Run[] }) {
+export function RunTable({ runs, budgetByRepoId }: { runs: Run[]; budgetByRepoId?: Record<string, number | null> }) {
   if (runs.length === 0) {
     return (
       <div className="rounded-md border border-border p-8 text-center text-muted-foreground text-sm">
@@ -66,7 +67,13 @@ export function RunTable({ runs }: { runs: Run[] }) {
                 <Badge variant={outcomeVariant[run.outcome]}>{run.outcome}</Badge>
               </TableCell>
               <TableCell className="text-right font-mono text-sm">
-                ${Number(run.total_cost).toFixed(4)}
+                <span className="inline-flex items-center">
+                  ${Number(run.total_cost).toFixed(4)}
+                  <BudgetBadge
+                    totalCost={Number(run.total_cost)}
+                    budgetLimit={run.repo_id ? budgetByRepoId?.[run.repo_id] ?? null : null}
+                  />
+                </span>
               </TableCell>
               <TableCell className="text-muted-foreground text-sm" title={new Date(run.started_at).toLocaleString()}>
                 {run.outcome === 'complete'
