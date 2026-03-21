@@ -25,11 +25,17 @@ export default async function RunsPage({
   if (repo) query = query.eq('repo_id', repo);
   if (outcome && isValidOutcome(outcome)) query = query.eq('outcome', outcome);
 
-  const { data: runs, error: runsError } = await query;
+  const [{ data: runs, error: runsError }, { data: repos }] = await Promise.all([
+    query,
+    supabase.from('repos').select('id, budget_limit').is('deleted_at', null),
+  ]);
   if (runsError) {
     console.error('[runs] failed to load runs:', runsError);
     return <PageError />;
   }
+
+  const budgetByRepoId: Record<string, number | null> = {};
+  for (const r of repos ?? []) budgetByRepoId[r.id] = r.budget_limit;
 
   return (
     <div className="space-y-6">
@@ -37,7 +43,7 @@ export default async function RunsPage({
         <h1 className="text-2xl font-semibold">Runs</h1>
         <p className="text-muted-foreground text-sm mt-1">Pipeline execution history</p>
       </div>
-      <RunTable runs={runs ?? []} />
+      <RunTable runs={runs ?? []} budgetByRepoId={budgetByRepoId} />
     </div>
   );
 }
