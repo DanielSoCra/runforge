@@ -14,9 +14,9 @@ runcmd:
   - curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   - apt-get install -y nodejs
 
-  # pnpm
+  # pnpm — version must match packageManager in package.json
   - corepack enable
-  - corepack prepare pnpm@latest --activate
+  - corepack prepare pnpm@10.32.1 --activate
 
   # Claude CLI
   - npm install -g @anthropic-ai/claude-code
