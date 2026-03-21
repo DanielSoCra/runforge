@@ -1,14 +1,11 @@
-import { headers } from 'next/headers';
 import { createClient } from '@/lib/supabase/server';
+import { getOrigin } from '@/lib/auth';
 import { redirect } from 'next/navigation';
+import { type NextRequest } from 'next/server';
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   const supabase = await createClient();
-  // SITE_URL is a plain (non-NEXT_PUBLIC_) env var read at runtime.
-  // Fall back to X-Forwarded-* headers set by Caddy if SITE_URL is not set.
-  const h = await headers();
-  const origin = process.env.SITE_URL
-    ?? `${h.get('x-forwarded-proto') ?? 'https'}://${h.get('x-forwarded-host') ?? h.get('host') ?? ''}`;
+  const origin = getOrigin(request);
 
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'github',

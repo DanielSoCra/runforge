@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { getOrigin } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient();
@@ -16,8 +17,7 @@ export async function GET(request: NextRequest) {
   if (!clientId) return NextResponse.json({ error: 'GitHub OAuth not configured' }, { status: 500 });
 
   const state = crypto.randomUUID();
-  const origin = process.env.SITE_URL
-    ?? `${request.headers.get('x-forwarded-proto') ?? 'https'}://${request.headers.get('x-forwarded-host') ?? request.headers.get('host') ?? ''}`;
+  const origin = getOrigin(request);
 
   const callbackUrl = `${origin}/api/auth/github-connection/callback`;
   const githubUrl = new URL('https://github.com/login/oauth/authorize');
