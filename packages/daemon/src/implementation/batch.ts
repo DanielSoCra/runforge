@@ -6,7 +6,6 @@ import type { GotchaStore } from '../knowledge/gotcha-store.js';
 import { createWorktree, getWorktreeDiffSize } from './worktree.js';
 import { git } from '../lib/git.js';
 
-
 export interface UnitResult {
   unitId: string;
   exitStatus: ExitStatus;

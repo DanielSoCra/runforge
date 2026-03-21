@@ -75,9 +75,13 @@ export class ImplementationCoordinator {
       if (this.gotchaStore) {
         for (const unit of batch) {
           if (unit.expectedArtifacts.length > 0) {
-            const matched = await this.gotchaStore.match(unit.expectedArtifacts);
-            if (matched.length > 0) {
-              unitPitfalls.set(unit.id, formatGotchas(matched));
+            try {
+              const matched = await this.gotchaStore.match(unit.expectedArtifacts);
+              if (matched.length > 0) {
+                unitPitfalls.set(unit.id, formatGotchas(matched));
+              }
+            } catch (e) {
+              console.warn(`[coordinator] Failed to match gotchas for ${unit.id}:`, e);
             }
           }
         }
