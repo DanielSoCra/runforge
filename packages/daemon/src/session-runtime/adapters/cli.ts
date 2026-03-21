@@ -268,7 +268,7 @@ export class CliAdapter implements ProviderAdapter {
 
   /**
    * Detect rate limit signals in CLI output/stderr.
-   * Matches common patterns: HTTP 429, "rate limit", "retry-after".
+   * Matches common patterns: HTTP 429, "rate limit", "too many requests", "overloaded_error".
    */
   isRateLimitError(text: string): boolean {
     if (!text) return false;
@@ -276,9 +276,10 @@ export class CliAdapter implements ProviderAdapter {
     return (
       lower.includes('rate limit') ||
       lower.includes('rate_limit') ||
-      lower.includes('429') ||
+      /\b429\b/.test(lower) ||
       lower.includes('too many requests') ||
-      lower.includes('overloaded')
+      lower.includes('overloaded_error') ||
+      lower.includes('api is overloaded')
     );
   }
 

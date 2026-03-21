@@ -122,14 +122,30 @@ describe('CliAdapter.isRateLimitError (#91)', () => {
     expect(adapter.isRateLimitError('error_type: rate_limit_error')).toBe(true);
   });
 
-  it('detects HTTP 429 in text', () => {
+  it('detects "overloaded_error" in text', () => {
     const adapter = new CliAdapter();
-    expect(adapter.isRateLimitError('HTTP 429 Too Many Requests')).toBe(true);
+    expect(adapter.isRateLimitError('error_type: overloaded_error')).toBe(true);
   });
 
-  it('detects "overloaded" in text', () => {
+  it('detects "api is overloaded" in text', () => {
     const adapter = new CliAdapter();
     expect(adapter.isRateLimitError('API is overloaded')).toBe(true);
+  });
+
+  it('does not false-positive on "overloaded method"', () => {
+    const adapter = new CliAdapter();
+    expect(adapter.isRateLimitError('overloaded method signature')).toBe(false);
+  });
+
+  it('does not false-positive on 429 in a file path', () => {
+    const adapter = new CliAdapter();
+    expect(adapter.isRateLimitError('/data/item429/output.json')).toBe(false);
+  });
+
+  it('matches word-boundary 429 in error messages', () => {
+    const adapter = new CliAdapter();
+    expect(adapter.isRateLimitError('HTTP 429 Too Many Requests')).toBe(true);
+    expect(adapter.isRateLimitError('status: 429')).toBe(true);
   });
 
   it('returns false for empty string', () => {

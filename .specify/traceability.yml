@@ -192,9 +192,11 @@ STACK-AC-SESSION-RUNTIME:
   code_paths:
     - packages/daemon/src/session-runtime/
     - packages/daemon/src/session-runtime/generate-containment-script.ts
+    - packages/daemon/src/session-runtime/rate-limiter.ts
   test_paths:
     - packages/daemon/src/session-runtime/**/*.test.ts
     - packages/daemon/src/session-runtime/generate-containment-script.test.ts
+    - packages/daemon/src/session-runtime/rate-limiter.test.ts
   status: draft
 
 STACK-AC-DIAGNOSIS:
