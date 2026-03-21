@@ -36,6 +36,23 @@ async function readMarkdownFiles(dir: string): Promise<SkillDoc[]> {
   return results;
 }
 
+async function readGateScripts(dir: string): Promise<string[]> {
+  const files = await readdir(dir).catch(() => [] as string[]);
+  const results: string[] = [];
+  for (const f of files) {
+    const filePath = join(dir, f);
+    const fileStat = await stat(filePath).catch(() => null);
+    if (!fileStat || !fileStat.isFile() || fileStat.size > MAX_FILE_BYTES) {
+      if (fileStat && fileStat.size > MAX_FILE_BYTES) {
+        console.warn(`[plugins] Skipping oversized gate script: ${filePath} (${fileStat.size} bytes > ${MAX_FILE_BYTES} limit)`);
+      }
+      continue;
+    }
+    results.push(await readFile(filePath, 'utf-8'));
+  }
+  return results;
+}
+
 async function readMcpConfigs(dir: string): Promise<McpConfig[]> {
   const files = await readdir(dir).catch(() => [] as string[]);
   const results: McpConfig[] = [];
@@ -115,7 +132,7 @@ export async function readPluginsForContext(
       skills,
       agents,
       mcpConfigs: await readMcpConfigs(join(dir, 'mcps')),
-      gates: [],
+      gates: await readGateScripts(join(dir, 'gates')),
     });
   }
 

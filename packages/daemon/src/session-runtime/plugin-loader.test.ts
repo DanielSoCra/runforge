@@ -157,6 +157,36 @@ describe('readPluginsForContext mcpConfigs loading', () => {
     }
   });
 
+  it('loads gate scripts from gates/ directory (#47)', async () => {
+    await mkdir(join(pluginDir, 'gates'), { recursive: true });
+    await writeFile(join(pluginDir, 'gates', 'lint.sh'), '#!/bin/bash\nnpx eslint .');
+    await writeFile(join(pluginDir, 'gates', 'typecheck.sh'), '#!/bin/bash\ntsc --noEmit');
+
+    const orig = process.env['PLUGINS_DIR'];
+    process.env['PLUGINS_DIR'] = pluginsDir;
+    try {
+      const result = await readPluginsForContext([PLUGIN_ID], new Map());
+      expect(result[0]?.gates).toHaveLength(2);
+      expect(result[0]?.gates).toContain('#!/bin/bash\nnpx eslint .');
+      expect(result[0]?.gates).toContain('#!/bin/bash\ntsc --noEmit');
+    } finally {
+      if (orig === undefined) delete process.env['PLUGINS_DIR'];
+      else process.env['PLUGINS_DIR'] = orig;
+    }
+  });
+
+  it('returns empty gates array when no gates/ directory exists (#47)', async () => {
+    const orig = process.env['PLUGINS_DIR'];
+    process.env['PLUGINS_DIR'] = pluginsDir;
+    try {
+      const result = await readPluginsForContext([PLUGIN_ID], new Map());
+      expect(result[0]?.gates).toEqual([]);
+    } finally {
+      if (orig === undefined) delete process.env['PLUGINS_DIR'];
+      else process.env['PLUGINS_DIR'] = orig;
+    }
+  });
+
   it('skips malformed JSON files in mcps/', async () => {
     await mkdir(join(pluginDir, 'mcps'), { recursive: true });
     await writeFile(join(pluginDir, 'mcps', 'bad.json'), 'this is not valid json {{{');
