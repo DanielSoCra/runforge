@@ -156,6 +156,30 @@ describe('generateContainmentScript', () => {
     expect(result.stderr).toContain('Blocked path in command');
   });
 
+  // Regression tests for SEC-21: child session can disable containment by overwriting .claude/settings.local.json
+  it('blocks Write to .claude/settings.local.json', () => {
+    const result = runHookScript(script, 'Write', { file_path: '.claude/settings.local.json' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('read-only');
+  });
+
+  it('blocks Edit on .claude/settings.local.json', () => {
+    const result = runHookScript(script, 'Edit', { file_path: '.claude/settings.local.json' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('read-only');
+  });
+
+  it('allows Read on .claude/settings.local.json', () => {
+    const result = runHookScript(script, 'Read', { file_path: '.claude/settings.local.json' });
+    expect(result.code).toBe(0);
+  });
+
+  it('blocks Bash write to .claude/ directory', () => {
+    const result = runHookScript(script, 'Bash', { command: 'echo "{}" > .claude/settings.local.json' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('read-only path in command');
+  });
+
   it('fails closed on malformed JSON input', () => {
     const scriptPath = join(tmpdir(), `test-hook-failclose-${Date.now()}.mjs`);
     writeFileSync(scriptPath, script, { mode: 0o755 });

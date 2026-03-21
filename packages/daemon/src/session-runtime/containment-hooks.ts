@@ -116,6 +116,7 @@ export const DEFAULT_POLICY: ContainmentPolicy = {
   ],
   readOnlyPaths: [
     '.specify/**',
+    '.claude/**',
     'CLAUDE.md',
     'AGENTS.md',
   ],

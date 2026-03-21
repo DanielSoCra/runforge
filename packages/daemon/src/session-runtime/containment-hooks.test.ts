@@ -243,4 +243,54 @@ describe('checkContainment', () => {
     expect(result.allowed).toBe(false);
     if (!result.allowed) expect(result.reason).toContain('Blocked path in command');
   });
+
+  // Regression tests for SEC-21: child session can disable containment by overwriting .claude/settings.local.json
+  it('blocks Write to .claude/settings.local.json', () => {
+    const call: ToolCall = {
+      tool: 'Write',
+      input: { file_path: '.claude/settings.local.json' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('read-only');
+  });
+
+  it('blocks Edit on .claude/settings.local.json', () => {
+    const call: ToolCall = {
+      tool: 'Edit',
+      input: { file_path: '.claude/settings.local.json' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('read-only');
+  });
+
+  it('allows Read on .claude/settings.local.json', () => {
+    const call: ToolCall = {
+      tool: 'Read',
+      input: { file_path: '.claude/settings.local.json' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(true);
+  });
+
+  it('blocks Bash write to .claude/ directory', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'echo "{}" > .claude/settings.local.json' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('read-only path in command');
+  });
+
+  it('blocks Write to .claude/ with traversal', () => {
+    const call: ToolCall = {
+      tool: 'Write',
+      input: { file_path: 'src/../.claude/settings.local.json' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('read-only');
+  });
 });
