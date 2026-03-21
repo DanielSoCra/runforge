@@ -66,4 +66,32 @@ describe('worktree management', () => {
     const result = await createWorktree('unit-bad', 'nonexistent', repoDir);
     expect(result.ok).toBe(false);
   });
+
+  it('getWorktreeDiffSize returns correct insertion+deletion count', async () => {
+    const createResult = await createWorktree('unit-diff', 'main', repoDir);
+    if (!createResult.ok) throw new Error('Failed to create worktree');
+
+    // Make changes in the worktree
+    const { writeFile } = await import('fs/promises');
+    await writeFile(join(createResult.value, 'new-file.txt'), 'line1\nline2\nline3\n');
+    await git(['add', '.'], createResult.value);
+    await git(['commit', '-m', 'add 3 lines'], createResult.value);
+
+    const diffResult = await getWorktreeDiffSize('unit-diff', 'main', repoDir);
+    expect(diffResult.ok).toBe(true);
+    if (diffResult.ok) {
+      // 3 insertions from new-file.txt
+      expect(diffResult.value).toBe(3);
+    }
+  });
+
+  it('getWorktreeDiffSize returns 0 for no changes', async () => {
+    await createWorktree('unit-nodiff', 'main', repoDir);
+
+    const diffResult = await getWorktreeDiffSize('unit-nodiff', 'main', repoDir);
+    expect(diffResult.ok).toBe(true);
+    if (diffResult.ok) {
+      expect(diffResult.value).toBe(0);
+    }
+  });
 });

@@ -68,7 +68,7 @@ export async function getWorktreeDiffSize(
   }
 
   // Parse last line: " X files changed, Y insertions(+), Z deletions(-)"
-  const lines = result.value.split('\n');
+  const lines = result.value.split('\n').filter(Boolean);
   const lastLine = lines[lines.length - 1] ?? '';
   const insertions = lastLine.match(/(\d+) insertion/);
   const deletions = lastLine.match(/(\d+) deletion/);
