@@ -1,5 +1,5 @@
 // src/control-plane/phases.test.ts
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { RunState, WorkRequest } from '../types.js';
 import type { Config } from '../config.js';
 
@@ -36,7 +36,7 @@ vi.mock('./work-detection.js', () => ({
 }));
 
 // Import after mocks are set up
-import { createPhaseHandlers } from './phases.js';
+import { createPhaseHandlers, acquireDetectLock, releaseDetectLock, isDetectLocked } from './phases.js';
 import { git } from '../lib/git.js';
 import { createGate1 } from '../validation/gates.js';
 import { runReview } from '../validation/review.js';
@@ -121,9 +121,33 @@ function createHandlers(configOverrides: Partial<Config> = {}) {
   };
 }
 
+describe('detect lock', () => {
+  afterEach(() => {
+    releaseDetectLock();
+  });
+
+  it('acquires the lock when free', () => {
+    expect(isDetectLocked()).toBe(false);
+    expect(acquireDetectLock()).toBe(true);
+    expect(isDetectLocked()).toBe(true);
+  });
+
+  it('rejects second acquisition while locked', () => {
+    acquireDetectLock();
+    expect(acquireDetectLock()).toBe(false);
+  });
+
+  it('allows re-acquisition after release', () => {
+    acquireDetectLock();
+    releaseDetectLock();
+    expect(acquireDetectLock()).toBe(true);
+  });
+});
+
 describe('createPhaseHandlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    releaseDetectLock();
     // Reset completeWork mock on detector
     mockCreateWorkDetector.mockReturnValue({
       completeWork: vi.fn(async () => ({ ok: true, value: undefined })),
@@ -131,6 +155,10 @@ describe('createPhaseHandlers', () => {
       claimWork: vi.fn(),
       markStuck: vi.fn(),
     } as any);
+  });
+
+  afterEach(() => {
+    releaseDetectLock();
   });
 
   describe('detect', () => {
@@ -161,6 +189,34 @@ describe('createPhaseHandlers', () => {
       const { handlers } = createHandlers();
       const result = await handlers.detect!(makeRun());
       expect(result).toBe('failure');
+    });
+
+    it('returns failure when detect lock is held by another run', async () => {
+      acquireDetectLock();
+      const { handlers } = createHandlers();
+      const result = await handlers.detect!(makeRun());
+      expect(result).toBe('failure');
+      // git should never have been called
+      expect(mockGit).not.toHaveBeenCalled();
+    });
+
+    it('releases detect lock after successful detect', async () => {
+      mockGit.mockResolvedValueOnce({ ok: true, value: '' });
+      mockGit.mockResolvedValueOnce({ ok: true, value: '' });
+      const { handlers } = createHandlers();
+      expect(isDetectLocked()).toBe(false);
+      await handlers.detect!(makeRun());
+      expect(isDetectLocked()).toBe(false);
+    });
+
+    it('releases detect lock even when git fails', async () => {
+      mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // checkout staging
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('branch exists') });
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal') });
+      const { handlers } = createHandlers();
+      await handlers.detect!(makeRun());
+      // Lock must be released even on failure
+      expect(isDetectLocked()).toBe(false);
     });
   });
 

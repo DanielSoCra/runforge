@@ -14,6 +14,24 @@ import type { Octokit } from '@octokit/rest';
 import { createWorkDetector } from './work-detection.js';
 import { git } from '../lib/git.js';
 
+// Serializes detect-phase git operations across concurrent pipeline runs.
+// Same pattern as integrationLock in integration.ts — single-process boolean suffices.
+let detectLock = false;
+
+export function acquireDetectLock(): boolean {
+  if (detectLock) return false;
+  detectLock = true;
+  return true;
+}
+
+export function releaseDetectLock(): void {
+  detectLock = false;
+}
+
+export function isDetectLocked(): boolean {
+  return detectLock;
+}
+
 export function createPhaseHandlers(
   config: Config,
   owner: string,
@@ -32,15 +50,23 @@ export function createPhaseHandlers(
 
   return {
     detect: async (_run: RunState): Promise<PhaseEvent> => {
-      console.log(`[detect] Creating branch ${featureBranch} from ${config.branches.staging}`);
-      await git(['checkout', config.branches.staging]);
-      const branchResult = await git(['checkout', '-b', featureBranch, config.branches.staging]);
-      if (!branchResult.ok) {
-        console.log(`[detect] Branch exists, checking out`);
-        const co = await git(['checkout', featureBranch]);
-        if (!co.ok) { console.error(`[detect] Checkout failed:`, co.error.message); return 'failure'; }
+      if (!acquireDetectLock()) {
+        console.error(`[detect] Lock held by another run — aborting`);
+        return 'failure';
       }
-      return 'success';
+      try {
+        console.log(`[detect] Creating branch ${featureBranch} from ${config.branches.staging}`);
+        await git(['checkout', config.branches.staging]);
+        const branchResult = await git(['checkout', '-b', featureBranch, config.branches.staging]);
+        if (!branchResult.ok) {
+          console.log(`[detect] Branch exists, checking out`);
+          const co = await git(['checkout', featureBranch]);
+          if (!co.ok) { console.error(`[detect] Checkout failed:`, co.error.message); return 'failure'; }
+        }
+        return 'success';
+      } finally {
+        releaseDetectLock();
+      }
     },
 
     classify: async (_run: RunState): Promise<PhaseEvent> => {
