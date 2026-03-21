@@ -178,6 +178,64 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
 
   console.log(`Auto-Claude daemon started on port ${config.controlPort}`);
 
+  // 6b. Crash resumption — resume incomplete runs from prior crash
+  const incompleteRuns = await stateMgr.findIncompleteRuns();
+  for (const run of incompleteRuns) {
+    const runOwner = run.repoOwner ?? config.repo?.owner;
+    const runRepoName = run.repoName ?? config.repo?.name;
+    if (!runOwner || !runRepoName) {
+      console.warn(`[daemon] Skipping incomplete run #${run.issueNumber} — missing repo info`);
+      continue;
+    }
+    console.log(`[daemon] Resuming incomplete run #${run.issueNumber} from phase '${run.phase}'`);
+    activeRuns++;
+
+    // Look up repoId for DB-mode repo tracking
+    const resumeRepoId = repoManager?.getRepoId(runOwner, runRepoName) ?? '';
+    if (repoManager && resumeRepoId) {
+      repoManager.notifyRunStart(resumeRepoId);
+    }
+
+    const notifyOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+    const agencyConfig = await readAgencyConfig(null, '');
+    const handlers = run.variant === 'website'
+      ? createWebsitePhaseHandlers(agencyConfig, null, notifyOctokit, runOwner, runRepoName, run.issueNumber, null)
+      : createPhaseHandlers(config, runOwner, runRepoName, runtime, coordinator, notifyOctokit, { issueNumber: run.issueNumber, title: run.title, body: '', labels: [], specRefs: [] }, stateDir, runWriter ?? undefined, run.id);
+    const table = getPipeline(run.variant);
+
+    const resumeDetector = legacyDetector ?? createWorkDetector(new Octokit({ auth: process.env.GITHUB_TOKEN }), runOwner, runRepoName);
+    runPipeline(run, table, handlers, stateMgr, costTracker, undefined, runWriter ?? undefined)
+      .then(async (result) => {
+        console.log(`[daemon] Resumed run #${run.issueNumber} finished: ${result.outcome}`);
+
+        void runWriter?.upsertRun(run.id, {
+          outcome: toDbOutcome(result.outcome),
+          completed_at: new Date().toISOString(),
+          total_cost: run.cost,
+        });
+
+        if (result.outcome === 'stuck') {
+          consecutiveStuckCount++;
+          await resumeDetector.markStuck(run.issueNumber, result.error ?? 'Unknown error');
+          await notify(config.webhooks, {
+            event: 'stuck',
+            issueNumber: run.issueNumber,
+            phase: run.phase,
+            message: `Issue #${run.issueNumber} stuck: ${result.error ?? 'unknown'}`,
+          });
+        } else if (result.outcome === 'complete') {
+          consecutiveStuckCount = 0;
+        }
+      })
+      .catch((e) => console.error(`Resumed run failed for #${run.issueNumber}:`, e))
+      .finally(() => {
+        activeRuns--;
+        if (repoManager && resumeRepoId) {
+          repoManager.notifyRunEnd(resumeRepoId);
+        }
+      });
+  }
+
   // 7. Legacy polling loop (only used when repoManager is null)
   let legacyPoller: ReturnType<typeof setInterval> | null = null;
   if (legacyDetector) {
@@ -271,6 +329,8 @@ async function processWorkRequest(
     perRunBudget: repoConfig?.budgetLimit ?? config.perRunBudget,
     fixAttempts: [],
     errorHashes: {},
+    repoOwner: owner,
+    repoName: repoName,
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };

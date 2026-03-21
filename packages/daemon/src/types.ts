@@ -84,6 +84,8 @@ export interface RunState {
   perRunBudget: number;
   fixAttempts: Array<{ phase: string; attempt: number; errorHash: string }>;
   errorHashes: Record<string, number>;
+  repoOwner?: string;
+  repoName?: string;
   startedAt: string;
   updatedAt: string;
   report?: string;

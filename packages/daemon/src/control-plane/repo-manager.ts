@@ -91,6 +91,13 @@ export class RepoManager {
     }
   }
 
+  getRepoId(owner: string, name: string): string | undefined {
+    for (const [id, entry] of this.pollers) {
+      if (entry.owner === owner && entry.name === name) return id;
+    }
+    return undefined;
+  }
+
   activePollerCount(): number {
     return this.pollers.size;
   }

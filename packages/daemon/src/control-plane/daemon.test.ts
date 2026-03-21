@@ -14,6 +14,7 @@ const {
   mockStateMgr: {
     initialize: vi.fn().mockResolvedValue(undefined),
     saveRunState: vi.fn().mockResolvedValue(undefined),
+    findIncompleteRuns: vi.fn().mockResolvedValue([]),
   },
   mockCostTracker: {
     getDailyCost: vi.fn().mockReturnValue(0),
@@ -47,7 +48,7 @@ const {
 // --- Module mocks (use classes for constructors to work with `new`) ---
 
 vi.mock('./state.js', () => {
-  return { StateManager: class { initialize = mockStateMgr.initialize; saveRunState = mockStateMgr.saveRunState; } };
+  return { StateManager: class { initialize = mockStateMgr.initialize; saveRunState = mockStateMgr.saveRunState; findIncompleteRuns = mockStateMgr.findIncompleteRuns; } };
 });
 vi.mock('../session-runtime/cost.js', () => {
   return { CostTracker: class { getDailyCost = mockCostTracker.getDailyCost; maybeResetDaily = mockCostTracker.maybeResetDaily; } };
@@ -171,6 +172,7 @@ describe('daemon', () => {
     mockNotify.mockResolvedValue(undefined);
     mockStateMgr.initialize.mockResolvedValue(undefined);
     mockStateMgr.saveRunState.mockResolvedValue(undefined);
+    mockStateMgr.findIncompleteRuns.mockResolvedValue([]);
     mockRemoteControl.stop.mockResolvedValue(undefined);
     mockCostTracker.getDailyCost.mockReturnValue(0);
     mockRunWriter.upsertRun.mockResolvedValue(undefined);
@@ -188,7 +190,7 @@ describe('daemon', () => {
     for (const mock of [
       mockDetector.detectReadyWork, mockDetector.claimWork, mockDetector.markStuck,
       mockRunPipeline, mockNotify, mockServerStart, mockLoadConfig,
-      mockStateMgr.initialize, mockStateMgr.saveRunState,
+      mockStateMgr.initialize, mockStateMgr.saveRunState, mockStateMgr.findIncompleteRuns,
       mockServer.close, mockRemoteControl.start, mockRemoteControl.stop,
       mockCostTracker.getDailyCost, mockCostTracker.maybeResetDaily,
       mockRunWriter.upsertRun,
@@ -269,6 +271,117 @@ describe('daemon', () => {
       await startDaemon('config.json');
 
       expect(mockRemoteControl.start).toHaveBeenCalled();
+    });
+  });
+
+  describe('crash resumption (#89)', () => {
+    it('calls findIncompleteRuns on startup', async () => {
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      expect(mockStateMgr.findIncompleteRuns).toHaveBeenCalled();
+    });
+
+    it('resumes incomplete runs through the pipeline', async () => {
+      const incompleteRun = {
+        id: 'run-abc',
+        issueNumber: 55,
+        title: 'Incomplete feature',
+        phase: 'implement',
+        variant: 'feature',
+        phaseCompletions: { detect: true, classify: true },
+        checkpoints: [],
+        cost: 2,
+        perRunBudget: 10,
+        fixAttempts: [],
+        errorHashes: {},
+        repoOwner: 'test-owner',
+        repoName: 'test-repo',
+        startedAt: '2026-03-21T00:00:00Z',
+        updatedAt: '2026-03-21T01:00:00Z',
+      };
+      mockStateMgr.findIncompleteRuns.mockResolvedValue([incompleteRun]);
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockRunPipeline).toHaveBeenCalled();
+      const callArgs = mockRunPipeline.mock.calls[0]!;
+      expect(callArgs[0]).toMatchObject({ issueNumber: 55, phase: 'implement' });
+    });
+
+    it('falls back to config.repo when run has no repoOwner/repoName', async () => {
+      const incompleteRun = {
+        id: 'run-xyz',
+        issueNumber: 66,
+        title: 'Old run',
+        phase: 'review',
+        variant: 'feature',
+        phaseCompletions: {},
+        checkpoints: [],
+        cost: 0,
+        perRunBudget: 10,
+        fixAttempts: [],
+        errorHashes: {},
+        startedAt: '2026-03-21T00:00:00Z',
+        updatedAt: '2026-03-21T01:00:00Z',
+      };
+      mockStateMgr.findIncompleteRuns.mockResolvedValue([incompleteRun]);
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockRunPipeline).toHaveBeenCalled();
+      const callArgs = mockRunPipeline.mock.calls[0]!;
+      expect(callArgs[0]).toMatchObject({ issueNumber: 66 });
+    });
+
+    it('decrements activeRuns after resumed run completes', async () => {
+      const config = makeConfig({ maxConcurrentRuns: 1 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      let resolveResume!: (v: { outcome: string }) => void;
+      mockRunPipeline.mockImplementationOnce(() => new Promise((r) => { resolveResume = r; }));
+
+      const incompleteRun = {
+        id: 'run-block',
+        issueNumber: 77,
+        title: 'Blocking run',
+        phase: 'implement',
+        variant: 'feature',
+        phaseCompletions: {},
+        checkpoints: [],
+        cost: 0,
+        perRunBudget: 10,
+        fixAttempts: [],
+        errorHashes: {},
+        repoOwner: 'test-owner',
+        repoName: 'test-repo',
+        startedAt: '2026-03-21T00:00:00Z',
+        updatedAt: '2026-03-21T01:00:00Z',
+      };
+      mockStateMgr.findIncompleteRuns.mockResolvedValue([incompleteRun]);
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      // Resumed run is blocking — new work should be skipped
+      const request = makeWorkRequest({ issueNumber: 99 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(mockDetector.claimWork).not.toHaveBeenCalled();
+
+      // Resolve the resumed run
+      resolveResume({ outcome: 'complete' });
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Now new work should be claimable
+      mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(99);
     });
   });
 
