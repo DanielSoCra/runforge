@@ -11,6 +11,7 @@ import { createAdapter, type ProviderAdapter } from './adapters/index.js';
 import { buildCompositeContext } from './plugin-injection.js';
 import { readPluginsForContext } from './plugin-loader.js';
 import { DEFAULT_POLICY } from './containment-hooks.js';
+import { SessionError } from './session-error.js';
 
 /** Resolve the prompts/ directory at the repo root. */
 function promptsDir(): string {
@@ -211,11 +212,16 @@ export class SessionRuntime {
       containmentPolicy: DEFAULT_POLICY,
     });
 
-    // 6. Record cost
-    if (result.ok) {
-      this.costTracker.recordCost(issueNumber, result.value.cost);
+    // 6. Record cost — always, even on failure (ARCH-AC-SESSION-RUNTIME step 10)
+    const cost = result.ok
+      ? result.value.cost
+      : result.error instanceof SessionError
+        ? result.error.cost
+        : 0;
+    if (cost > 0) {
+      this.costTracker.recordCost(issueNumber, cost);
       if (runWriter && runId) {
-        void runWriter.writeCostEvent(runId, type, result.value.cost);
+        void runWriter.writeCostEvent(runId, type, cost);
       }
     }
 

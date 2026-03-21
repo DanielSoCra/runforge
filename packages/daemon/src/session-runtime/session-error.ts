@@ -1,0 +1,16 @@
+// src/session-runtime/session-error.ts
+
+/**
+ * Error class for session failures that may have consumed tokens.
+ * Carries an optional `cost` field so the runtime can track spending
+ * even when a session fails (ARCH-AC-SESSION-RUNTIME step 10).
+ */
+export class SessionError extends Error {
+  readonly cost: number;
+
+  constructor(message: string, cost = 0) {
+    super(message);
+    this.name = 'SessionError';
+    this.cost = cost;
+  }
+}

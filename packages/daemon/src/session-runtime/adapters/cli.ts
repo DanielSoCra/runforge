@@ -8,6 +8,7 @@ import type { AgentDefinition, SessionContext, SessionResult, ExitStatus, Pitfal
 import type { ContainmentPolicy } from '../containment-hooks.js';
 import type { ProviderAdapter } from './types.js';
 import { generateContainmentScript } from '../generate-containment-script.js';
+import { SessionError } from '../session-error.js';
 
 export class CliAdapter implements ProviderAdapter {
   buildArgs(def: AgentDefinition, prompt: string, jsonSchema?: string): string[] {
@@ -169,10 +170,13 @@ export class CliAdapter implements ProviderAdapter {
         const stdout = Buffer.concat(chunks).toString();
 
         if (timedOut) {
+          // Extract cost from partial stdout — session may have consumed tokens before timeout
+          const timedOutParsed = this.parseOutput(stdout);
+          const timedOutCost = timedOutParsed.ok ? timedOutParsed.value.cost : 0;
           resolve(ok({
             output: stdout.trim(),
             structuredData: null,
-            cost: 0,
+            cost: timedOutCost,
             pitfallMarkers: [],
             exitStatus: 'timed-out' as ExitStatus,
           }));
@@ -199,7 +203,11 @@ export class CliAdapter implements ProviderAdapter {
       proc.on('error', (e) => {
         clearTimeout(timer);
         if (hookPaths) this.cleanupContainmentHook(hookPaths);
-        resolve(err(e));
+        // Try to extract cost from any partial stdout before reporting error
+        const partialStdout = Buffer.concat(chunks).toString();
+        const parsed = this.parseOutput(partialStdout);
+        const cost = parsed.ok ? parsed.value.cost : 0;
+        resolve(err(new SessionError(e.message, cost)));
       });
     });
   }

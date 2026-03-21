@@ -4,6 +4,7 @@ import { SessionRuntime, loadPromptTemplate } from './runtime.js';
 import { CostTracker } from './cost.js';
 import type { Config } from '../config.js';
 import { buildCompositeContext } from './plugin-injection.js';
+import { SessionError } from './session-error.js';
 import { mkdtemp, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -140,6 +141,63 @@ describe('SessionRuntime', () => {
     if (result.ok) {
       expect(writeCostEvent).toHaveBeenCalledWith('my-run-id', 'worker', expect.any(Number));
     }
+  });
+
+  it('records cost even when session fails with SessionError (#13)', async () => {
+    mockSpawn.mockResolvedValueOnce({ ok: false, error: new SessionError('CLI crashed', 0.42) });
+
+    await runtime.spawnSession(
+      'worker',
+      { variables: { task: 'do it' }, workspacePath: '/tmp' },
+      77,
+    );
+
+    expect(costTracker.getDailyCost()).toBe(0.42);
+    expect(costTracker.getRunCost(77)).toBe(0.42);
+  });
+
+  it('records cost from failed session to runWriter (#13)', async () => {
+    mockSpawn.mockResolvedValueOnce({ ok: false, error: new SessionError('CLI crashed', 1.5) });
+    const writeCostEvent = vi.fn().mockResolvedValue(undefined);
+    const runWriter = { writeCostEvent, upsertRun: vi.fn() } as any;
+
+    await runtime.spawnSession(
+      'worker',
+      { variables: { task: 'do it' }, workspacePath: '/tmp' },
+      88,
+      undefined,
+      runWriter,
+      'run-123',
+    );
+
+    expect(writeCostEvent).toHaveBeenCalledWith('run-123', 'worker', 1.5);
+    expect(costTracker.getDailyCost()).toBe(1.5);
+  });
+
+  it('does not record cost when failure has zero cost', async () => {
+    mockSpawn.mockResolvedValueOnce({ ok: false, error: new SessionError('spawn failed', 0) });
+
+    await runtime.spawnSession(
+      'worker',
+      { variables: { task: 'do it' }, workspacePath: '/tmp' },
+      99,
+    );
+
+    expect(costTracker.getDailyCost()).toBe(0);
+    expect(costTracker.getRunCost(99)).toBe(0);
+  });
+
+  it('does not record cost when failure is a plain Error', async () => {
+    mockSpawn.mockResolvedValueOnce({ ok: false, error: new Error('unknown error') });
+
+    await runtime.spawnSession(
+      'worker',
+      { variables: { task: 'do it' }, workspacePath: '/tmp' },
+      100,
+    );
+
+    expect(costTracker.getDailyCost()).toBe(0);
+    expect(costTracker.getRunCost(100)).toBe(0);
   });
 });
 
