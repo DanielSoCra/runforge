@@ -86,17 +86,33 @@ export class CliAdapter implements ProviderAdapter {
    */
   setupHooks(
     cwd: string,
-    policy: ContainmentPolicy,
+    policy: ContainmentPolicy | undefined,
     timeoutMs: number,
     sessionStartTime?: number,
   ): { scriptPaths: string[]; settingsPath: string; markerPath?: string } {
     const now = sessionStartTime ?? Date.now();
-    // Write self-contained hook scripts to temp files
-    const containmentPath = join(tmpdir(), `containment-hook-${process.pid}-${now}.mjs`);
-    writeFileSync(containmentPath, generateContainmentScript(policy), { mode: 0o755 });
+    const scriptPaths: string[] = [];
+    const preToolUseHooks: { matcher: string; hooks: { type: string; command: string }[] }[] = [];
 
+    // Containment hook — only when a policy is provided
+    if (policy) {
+      const containmentPath = join(tmpdir(), `containment-hook-${process.pid}-${now}.mjs`);
+      writeFileSync(containmentPath, generateContainmentScript(policy), { mode: 0o755 });
+      scriptPaths.push(containmentPath);
+      preToolUseHooks.push({
+        matcher: '',
+        hooks: [{ type: 'command', command: `node "${containmentPath}"` }],
+      });
+    }
+
+    // Timeout hook — always installed when cwd is available
     const timeoutPath = join(tmpdir(), `timeout-hook-${process.pid}-${now}.mjs`);
     writeFileSync(timeoutPath, generateTimeoutHookScript(), { mode: 0o755 });
+    scriptPaths.push(timeoutPath);
+    preToolUseHooks.push({
+      matcher: '',
+      hooks: [{ type: 'command', command: `node "${timeoutPath}"` }],
+    });
 
     // Marker file path for one-shot timeout detection cleanup
     const markerPath = join(tmpdir(), `timeout-warned-${now}.marker`);
@@ -113,20 +129,11 @@ export class CliAdapter implements ProviderAdapter {
     }
     settings.hooks = {
       ...(settings.hooks as Record<string, unknown> ?? {}),
-      PreToolUse: [
-        {
-          matcher: '',
-          hooks: [{ type: 'command', command: `node "${containmentPath}"` }],
-        },
-        {
-          matcher: '',
-          hooks: [{ type: 'command', command: `node "${timeoutPath}"` }],
-        },
-      ],
+      PreToolUse: preToolUseHooks,
     };
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
-    return { scriptPaths: [containmentPath, timeoutPath], settingsPath, markerPath };
+    return { scriptPaths, settingsPath, markerPath };
   }
 
   cleanupHooks(paths: { scriptPaths: string[]; settingsPath: string; markerPath?: string }): void {
@@ -166,9 +173,10 @@ export class CliAdapter implements ProviderAdapter {
     };
     const env = this.buildEnv(extraEnv);
 
-    // Set up hooks (containment + timeout) if policy provided and cwd is known
+    // Set up hooks whenever cwd is known — timeout hooks are always needed,
+    // containment hooks only when a policy is provided
     let hookPaths: { scriptPaths: string[]; settingsPath: string; markerPath?: string } | undefined;
-    if (options?.containmentPolicy && options.cwd) {
+    if (options?.cwd) {
       hookPaths = this.setupHooks(options.cwd, options.containmentPolicy, def.timeoutMs, sessionStartTime);
     }
 

@@ -164,6 +164,38 @@ describe('CliAdapter containment hook setup', () => {
     expect(restored.hooks).toBeUndefined();
   });
 
+  it('installs timeout hook without containment policy (#38)', () => {
+    const adapter = new CliAdapter();
+    const paths = adapter.setupHooks(tempDir, undefined, 30000);
+
+    // Should have only the timeout hook script (no containment)
+    expect(paths.scriptPaths.length).toBe(1);
+    expect(paths.scriptPaths[0]).toContain('timeout-hook-');
+
+    // Settings should have exactly one PreToolUse hook (timeout only)
+    const settingsPath = join(tempDir, '.claude', 'settings.local.json');
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+    expect(settings.hooks.PreToolUse.length).toBe(1);
+    expect(settings.hooks.PreToolUse[0].hooks[0].command).toContain('timeout-hook-');
+
+    adapter.cleanupHooks(paths);
+  });
+
+  it('installs both hooks when containment policy is provided (#38)', () => {
+    const adapter = new CliAdapter();
+    const paths = adapter.setupHooks(tempDir, DEFAULT_POLICY, 30000);
+
+    expect(paths.scriptPaths.length).toBe(2);
+    expect(paths.scriptPaths[0]).toContain('containment-hook-');
+    expect(paths.scriptPaths[1]).toContain('timeout-hook-');
+
+    const settingsPath = join(tempDir, '.claude', 'settings.local.json');
+    const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+    expect(settings.hooks.PreToolUse.length).toBe(2);
+
+    adapter.cleanupHooks(paths);
+  });
+
   it('uses sessionStartTime for marker path so it matches SESSION_START_TIME env var (#37)', () => {
     const adapter = new CliAdapter();
     const fixedTime = 1700000000000;
