@@ -86,6 +86,20 @@ export async function enableRepo(id: string) {
   const supabase = await createClient();
   await requireAdmin(supabase);
 
+  // Spec: credentials must exist before enabling (FUNC-AC-DASHBOARD line 48-51)
+  const { data: keys } = await supabase.from('api_keys')
+    .select('key_type')
+    .eq('repo_id', id);
+
+  const hasSourceControl = keys?.some(k => k.key_type === 'source-control');
+  const hasModelProvider = keys?.some(k => k.key_type === 'model-provider');
+
+  if (!hasSourceControl || !hasModelProvider) {
+    throw new Error(
+      'Cannot enable repository without both source-control and model-provider credentials'
+    );
+  }
+
   const { error } = await supabase.from('repos')
     .update({ enabled: true, updated_at: new Date().toISOString() })
     .eq('id', id);
@@ -118,6 +132,18 @@ export async function deleteRepo(id: string) {
   // Soft delete — preserves run history
   const supabase = await createClient();
   await requireAdmin(supabase);
+
+  // Spec: only a disabled repo can be removed (FUNC-AC-DASHBOARD line 63-66)
+  const { data: repo, error: fetchError } = await supabase.from('repos')
+    .select('enabled')
+    .eq('id', id)
+    .single();
+  if (fetchError || !repo) {
+    throw new Error('Repository not found');
+  }
+  if (repo.enabled) {
+    throw new Error('Cannot delete an enabled repository — disable it first');
+  }
 
   const { error } = await supabase.from('repos')
     .update({ deleted_at: new Date().toISOString(), enabled: false })
