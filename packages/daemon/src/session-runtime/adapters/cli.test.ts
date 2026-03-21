@@ -3,8 +3,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { existsSync, readFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { EventEmitter } from 'events';
 import { CliAdapter } from './cli.js';
 import { DEFAULT_POLICY } from '../containment-hooks.js';
+import { SessionError } from '../session-error.js';
 import type { AgentDefinition, SessionContext } from '../../types.js';
 
 // We can't easily spawn a real `claude` process in tests.
@@ -281,5 +283,285 @@ describe('CliAdapter containment hook setup', () => {
     }
 
     adapter.cleanupHooks(paths);
+  });
+});
+
+// --- spawn() integration tests using mocked child_process ---
+
+/**
+ * Creates a fake ChildProcess that emits events like a real spawned process.
+ * Allows tests to control stdout, stderr, exit code, and error events.
+ */
+function createMockProcess() {
+  const proc = new EventEmitter() as EventEmitter & {
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+    kill: ReturnType<typeof vi.fn>;
+    pid: number;
+  };
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  proc.kill = vi.fn();
+  proc.pid = 12345;
+  return proc;
+}
+
+// Note: vi.mock is hoisted to file scope by Vitest, so this mock applies to ALL
+// describe blocks. Earlier tests don't call child_process.spawn, so no interference.
+vi.mock('child_process', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    spawn: vi.fn(),
+  };
+});
+
+import { spawn as spawnMock } from 'child_process';
+
+describe('CliAdapter.spawn() (#102)', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'cli-spawn-test-'));
+    // Fake timers freeze Date.now() — this is acceptable since spawn() uses
+    // Date.now() for sessionStartTime and we only assert it's defined, not its value.
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    rmSync(tempDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it('returns completed result on exit code 0 with JSON output', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    // Simulate successful JSON output
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+      result: 'task done',
+      cost_usd: 0.03,
+    })));
+    mockProc.emit('close', 0);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.output).toBe('task done');
+      expect(result.value.cost).toBe(0.03);
+      expect(result.value.exitStatus).toBe('completed');
+    }
+  });
+
+  it('returns failed result on non-zero exit code', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+      result: 'partial output',
+      cost_usd: 0.01,
+    })));
+    mockProc.emit('close', 1);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.exitStatus).toBe('failed');
+      expect(result.value.cost).toBe(0.01);
+    }
+  });
+
+  it('returns rate-limited SessionError when stderr contains rate limit signal', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+      result: 'partial',
+      cost_usd: 0.02,
+    })));
+    mockProc.stderr.emit('data', Buffer.from('Error: rate limit exceeded'));
+    mockProc.emit('close', 1);
+
+    const result = await promise;
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(SessionError);
+      expect((result.error as SessionError).rateLimited).toBe(true);
+      expect((result.error as SessionError).cost).toBe(0.02);
+    }
+  });
+
+  it('returns rate-limited SessionError when stdout contains rate limit signal', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    mockProc.stdout.emit('data', Buffer.from('HTTP 429 Too Many Requests'));
+    mockProc.emit('close', 1);
+
+    const result = await promise;
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect((result.error as SessionError).rateLimited).toBe(true);
+    }
+  });
+
+  it('returns timed-out result when timeout fires', async () => {
+    const shortTimeoutDef = { ...mockDef, timeoutMs: 500 };
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(shortTimeoutDef, 'slow work', { cwd: tempDir });
+
+    // Emit partial output before timeout
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+      result: 'partial work [HANDOFF]pick up at step 3[/HANDOFF]',
+      cost_usd: 0.04,
+    })));
+
+    // Advance timer to trigger timeout
+    vi.advanceTimersByTime(600);
+
+    // The timeout callback calls proc.kill('SIGKILL'), then we need
+    // the 'close' event to fire (as the real OS would after SIGKILL)
+    expect(mockProc.kill).toHaveBeenCalledWith('SIGKILL');
+    mockProc.emit('close', null);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.exitStatus).toBe('timed-out');
+      expect(result.value.cost).toBe(0.04);
+      expect(result.value.handoffNote).toBe('pick up at step 3');
+    }
+  });
+
+  it('returns SessionError with cost on process error event', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    // Emit some stdout before error
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+      result: 'started',
+      cost_usd: 0.01,
+    })));
+    mockProc.emit('error', new Error('spawn ENOENT'));
+
+    const result = await promise;
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(SessionError);
+      expect(result.error.message).toBe('spawn ENOENT');
+      expect((result.error as SessionError).cost).toBe(0.01);
+    }
+  });
+
+  it('sets up hooks with containment policy and cleans them up on close', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const setupSpy = vi.spyOn(adapter, 'setupHooks');
+    const cleanupSpy = vi.spyOn(adapter, 'cleanupHooks');
+
+    const promise = adapter.spawn(mockDef, 'do work', {
+      cwd: tempDir,
+      containmentPolicy: DEFAULT_POLICY,
+    });
+
+    expect(setupSpy).toHaveBeenCalledWith(tempDir, DEFAULT_POLICY, mockDef.timeoutMs, expect.any(Number));
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({ result: 'ok' })));
+    mockProc.emit('close', 0);
+
+    await promise;
+    expect(cleanupSpy).toHaveBeenCalled();
+  });
+
+  it('cleans up hooks on error event', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const cleanupSpy = vi.spyOn(adapter, 'cleanupHooks');
+
+    const promise = adapter.spawn(mockDef, 'do work', {
+      cwd: tempDir,
+      containmentPolicy: DEFAULT_POLICY,
+    });
+
+    mockProc.emit('error', new Error('ENOENT'));
+    await promise;
+    expect(cleanupSpy).toHaveBeenCalled();
+  });
+
+  it('passes SESSION_START_TIME and SESSION_TIMEOUT_MS in env', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    const spawnCall = vi.mocked(spawnMock).mock.calls[0];
+    const env = (spawnCall?.[2] as { env: Record<string, string> })?.env;
+    expect(env?.SESSION_START_TIME).toBeDefined();
+    expect(env?.SESSION_TIMEOUT_MS).toBe(String(mockDef.timeoutMs));
+
+    mockProc.stdout.emit('data', Buffer.from('{}'));
+    mockProc.emit('close', 0);
+  });
+
+  it('extracts pitfall markers from output', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    const output = JSON.stringify({
+      result: 'done <!-- PITFALL: {"artifactPatterns":["src/**"],"description":"watch out for X"} --> more',
+      cost_usd: 0.01,
+    });
+    mockProc.stdout.emit('data', Buffer.from(output));
+    mockProc.emit('close', 0);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.pitfallMarkers).toHaveLength(1);
+      expect(result.value.pitfallMarkers[0]?.description).toBe('watch out for X');
+    }
+  });
+
+  it('skips hook setup when cwd is not provided', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const setupSpy = vi.spyOn(adapter, 'setupHooks');
+
+    const promise = adapter.spawn(mockDef, 'do work');
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({ result: 'ok' })));
+    mockProc.emit('close', 0);
+
+    await promise;
+    expect(setupSpy).not.toHaveBeenCalled();
   });
 });
