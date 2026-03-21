@@ -15,6 +15,14 @@ describe('selectVariant', () => {
     expect(selectVariant(makeRequest(['website-init']))).toBe('website');
   });
 
+  it('returns bug for bug label', () => {
+    expect(selectVariant(makeRequest(['bug']))).toBe('bug');
+  });
+
+  it('returns bug when bug label combined with ready', () => {
+    expect(selectVariant(makeRequest(['ready', 'bug']))).toBe('bug');
+  });
+
   it('returns feature-simple when no special labels', () => {
     expect(selectVariant(makeRequest(['ready']))).toBe('feature-simple');
   });
@@ -23,7 +31,7 @@ describe('selectVariant', () => {
     expect(selectVariant(makeRequest([]))).toBe('feature-simple');
   });
 
-  it('website-init takes priority over other labels', () => {
+  it('website-init takes priority over bug label', () => {
     expect(selectVariant(makeRequest(['ready', 'website-init', 'bug']))).toBe('website');
   });
 });
