@@ -138,6 +138,7 @@ describe('SessionRuntime', () => {
       'my-run-id',
     );
 
+    expect(result.ok).toBe(true);
     if (result.ok) {
       expect(writeCostEvent).toHaveBeenCalledWith('my-run-id', 'worker', expect.any(Number));
     }
