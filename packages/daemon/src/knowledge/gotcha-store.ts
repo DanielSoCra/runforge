@@ -83,6 +83,15 @@ export class GotchaStore {
     }
   }
 
+  async archive(id: string): Promise<void> {
+    const all = await this.loadAll();
+    const gotcha = all.find((g) => g.id === id);
+    if (gotcha) {
+      gotcha.archived = true;
+      await appendJsonl(this.path, gotcha);
+    }
+  }
+
   async compact(): Promise<void> {
     const all = await this.loadAll();
     const active = all.filter((g) => !g.archived);

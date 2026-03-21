@@ -1,5 +1,5 @@
 // src/knowledge/gotcha-store.test.ts
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -15,9 +15,9 @@ beforeEach(async () => {
   store = new GotchaStore(storePath);
 });
 
-async function cleanup() {
+afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
-}
+});
 
 describe('GotchaStore', () => {
   describe('store', () => {
@@ -27,7 +27,7 @@ describe('GotchaStore', () => {
         42,
       );
       expect(count).toBe(1);
-      await cleanup();
+
     });
 
     it('deduplicates by patterns + description (case-insensitive) and increments hitCount', async () => {
@@ -44,7 +44,7 @@ describe('GotchaStore', () => {
       const all = await store.match(['src/foo.ts']);
       expect(all).toHaveLength(1);
       expect(all[0]!.hitCount).toBe(2);
-      await cleanup();
+
     });
 
     it('stores multiple distinct gotchas', async () => {
@@ -56,7 +56,7 @@ describe('GotchaStore', () => {
         1,
       );
       expect(count).toBe(2);
-      await cleanup();
+
     });
 
     it('sets originType and priorityTier correctly for operator', async () => {
@@ -68,7 +68,7 @@ describe('GotchaStore', () => {
       const all = await store.match(['foo.ts']);
       expect(all[0]!.originType).toBe('operator');
       expect(all[0]!.priorityTier).toBe('elevated');
-      await cleanup();
+
     });
 
     it('sets originType autonomous and priorityTier normal by default', async () => {
@@ -79,7 +79,7 @@ describe('GotchaStore', () => {
       const all = await store.match(['foo.ts']);
       expect(all[0]!.originType).toBe('autonomous');
       expect(all[0]!.priorityTier).toBe('normal');
-      await cleanup();
+
     });
   });
 
@@ -91,7 +91,7 @@ describe('GotchaStore', () => {
       );
       const matches = await store.match(['src/lib/foo.ts']);
       expect(matches).toHaveLength(1);
-      await cleanup();
+
     });
 
     it('does not match unrelated paths', async () => {
@@ -101,7 +101,7 @@ describe('GotchaStore', () => {
       );
       const matches = await store.match(['docs/readme.md']);
       expect(matches).toHaveLength(0);
-      await cleanup();
+
     });
 
     it('excludes promoted gotchas', async () => {
@@ -113,7 +113,7 @@ describe('GotchaStore', () => {
       await store.promote(all[0]!.id);
       const afterPromotion = await store.match(['foo.ts']);
       expect(afterPromotion).toHaveLength(0);
-      await cleanup();
+
     });
 
     it('excludes archived gotchas', async () => {
@@ -121,12 +121,11 @@ describe('GotchaStore', () => {
         [{ artifactPatterns: ['**/*.ts'], description: 'Archived' }],
         1,
       );
-      // Directly archived via loadAll + compact workaround: read and archive manually
-      // We'll use incrementHitCount to confirm base state, then we'll manipulate via compact
-      // Instead, test via the sorting/filtering path
       const all = await store.match(['foo.ts']);
       expect(all).toHaveLength(1);
-      await cleanup();
+      await store.archive(all[0]!.id);
+      const afterArchival = await store.match(['foo.ts']);
+      expect(afterArchival).toHaveLength(0);
     });
 
     it('sorts elevated before normal, then by hitCount descending', async () => {
@@ -153,7 +152,7 @@ describe('GotchaStore', () => {
       expect(matches).toHaveLength(2);
       expect(matches[0]!.priorityTier).toBe('elevated');
       expect(matches[1]!.priorityTier).toBe('normal');
-      await cleanup();
+
     });
 
     it('does not increment hitCount on match — only store() dedup increments (#75)', async () => {
@@ -177,7 +176,7 @@ describe('GotchaStore', () => {
       );
       const afterDedup = await store.match(['src/foo.ts']);
       expect(afterDedup[0]!.hitCount).toBe(2);
-      await cleanup();
+
     });
 
     it('sorts by hitCount descending within same tier', async () => {
@@ -198,7 +197,7 @@ describe('GotchaStore', () => {
 
       const sorted = await store.match(['foo.ts']);
       expect(sorted[0]!.description).toBe('High hits');
-      await cleanup();
+
     });
   });
 
@@ -213,12 +212,12 @@ describe('GotchaStore', () => {
       await store.incrementHitCount(id); // hitCount: 1→2
       const after = await store.match(['foo.ts']); // hitCount: 2 (match does not increment)
       expect(after[0]!.hitCount).toBe(2);
-      await cleanup();
+
     });
 
     it('does nothing for unknown id', async () => {
       await store.incrementHitCount('non-existent-id');
-      await cleanup();
+
     });
   });
 
@@ -235,7 +234,7 @@ describe('GotchaStore', () => {
       }
       const candidates = await store.getPromotionCandidates(5);
       expect(candidates).toHaveLength(1);
-      await cleanup();
+
     });
 
     it('excludes gotchas below threshold', async () => {
@@ -245,7 +244,7 @@ describe('GotchaStore', () => {
       );
       const candidates = await store.getPromotionCandidates(5);
       expect(candidates).toHaveLength(0);
-      await cleanup();
+
     });
 
     it('halves threshold for elevated (operator) gotchas — floor(5/2)=2', async () => {
@@ -260,7 +259,7 @@ describe('GotchaStore', () => {
       await store.incrementHitCount(id);
       const candidates = await store.getPromotionCandidates(5);
       expect(candidates).toHaveLength(1);
-      await cleanup();
+
     });
 
     it('elevated gotcha with hitCount=1 is NOT a promotion candidate at threshold=5', async () => {
@@ -272,7 +271,7 @@ describe('GotchaStore', () => {
       // hitCount=1, effectiveThreshold=floor(5/2)=2 → not eligible
       const candidates = await store.getPromotionCandidates(5);
       expect(candidates).toHaveLength(0);
-      await cleanup();
+
     });
 
     it('excludes already promoted gotchas', async () => {
@@ -288,7 +287,39 @@ describe('GotchaStore', () => {
       await store.promote(id);
       const candidates = await store.getPromotionCandidates(5);
       expect(candidates).toHaveLength(0);
-      await cleanup();
+
+    });
+  });
+
+  describe('archive', () => {
+    it('archives a gotcha so it is excluded from match and promotion candidates', async () => {
+      await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'Will be archived' }],
+        1,
+      );
+      const m = await store.match(['foo.ts']);
+      expect(m).toHaveLength(1);
+      const id = m[0]!.id;
+      // Bump hitCount to make it a promotion candidate
+      for (let i = 0; i < 4; i++) {
+        await store.incrementHitCount(id);
+      }
+      const candidatesBefore = await store.getPromotionCandidates(5);
+      expect(candidatesBefore).toHaveLength(1);
+
+      await store.archive(id);
+
+      // Excluded from match
+      const afterMatch = await store.match(['foo.ts']);
+      expect(afterMatch).toHaveLength(0);
+      // Excluded from promotion candidates
+      const candidatesAfter = await store.getPromotionCandidates(5);
+      expect(candidatesAfter).toHaveLength(0);
+    });
+
+    it('does nothing for unknown id', async () => {
+      await store.archive('non-existent-id');
+      // No error thrown
     });
   });
 
@@ -312,7 +343,28 @@ describe('GotchaStore', () => {
       const after = await store.match(['foo.ts']);
       expect(after).toHaveLength(1);
       expect(after[0]!.hitCount).toBe(4);
-      await cleanup();
+
+    });
+
+    it('removes archived entries during compaction', async () => {
+      await store.store(
+        [
+          { artifactPatterns: ['**/*.ts'], description: 'Keep' },
+          { artifactPatterns: ['**/*.ts'], description: 'Archive me' },
+        ],
+        1,
+      );
+      const m = await store.match(['foo.ts']);
+      const archiveTarget = m.find((g) => g.description === 'Archive me')!;
+      await store.archive(archiveTarget.id);
+      await store.compact();
+
+      // After compact, archived entry is physically removed
+      // Re-create store to force re-read from disk
+      const freshStore = new GotchaStore(storePath);
+      const all = await freshStore.match(['foo.ts']);
+      expect(all).toHaveLength(1);
+      expect(all[0]!.description).toBe('Keep');
     });
   });
 });
