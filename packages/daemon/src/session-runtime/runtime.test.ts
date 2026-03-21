@@ -55,6 +55,15 @@ describe('SessionRuntime', () => {
     if (!result.ok) expect(result.error.message).toContain('No agent definition');
   });
 
+  it('does not define a reporter agent — reports are generated directly (#54)', async () => {
+    // The reporter prompt template and agent definition were dead code:
+    // phases.ts calls formatReport() directly, no session is spawned.
+    // Attempting to spawn a reporter session should fail with "No agent definition".
+    const result = await runtime.spawnSession('reporter' as any, { variables: {} }, 1);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('No agent definition');
+  });
+
   it('rejects when daily budget exceeded', async () => {
     costTracker.recordCost(1, 51);
     const result = await runtime.spawnSession('worker', { variables: {} }, 2);
@@ -202,14 +211,19 @@ describe('SessionRuntime', () => {
     expect(costTracker.getRunCost(100)).toBe(0);
   });
 
-  it('rejects when rate limited (cooldown active)', async () => {
+  it('rejects when rate limited (cooldown active) with rateLimited flag', async () => {
     const rateLimiter = new RateLimiter({ baseBackoffMs: 60000, maxBackoffMs: 300000 });
     rateLimiter.reportRateLimit(); // activate cooldown
     const rl = new SessionRuntime(testConfig, costTracker, rateLimiter);
 
     const result = await rl.spawnSession('worker', { variables: {} }, 1);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.message).toContain('Rate limited');
+    if (!result.ok) {
+      expect(result.error.message).toContain('Rate limited');
+      // Must be a SessionError with rateLimited=true so control plane can distinguish
+      expect(result.error).toBeInstanceOf(SessionError);
+      expect((result.error as SessionError).rateLimited).toBe(true);
+    }
   });
 
   it('reports rate limit to limiter when adapter returns rateLimited error', async () => {

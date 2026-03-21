@@ -143,15 +143,6 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     timeoutMs: 120_000,
     budgetCap: 1,
   },
-  reporter: {
-    name: 'reporter',
-    description: 'Generates structured completion reports',
-    systemPrompt: '', // loaded from prompts/reporter.md
-    allowedTools: ['Read', 'Glob', 'Grep'],
-    maxTurns: 1,
-    timeoutMs: 60_000,
-    budgetCap: 0.5,
-  },
   'prompt-optimizer': {
     name: 'prompt-optimizer',
     description: 'Proposes improvements to mutable instruction templates',
@@ -200,7 +191,7 @@ export class SessionRuntime {
     // 3. Check rate limit (ARCH-AC-SESSION-RUNTIME step 3)
     const rateCheck = this.rateLimiter.checkRateLimit();
     if (!rateCheck.clear) {
-      return err(new Error(`Rate limited: cooling down for ${Math.ceil(rateCheck.remainingMs / 1000)}s`));
+      return err(new SessionError(`Rate limited: cooling down for ${Math.ceil(rateCheck.remainingMs / 1000)}s`, 0, true));
     }
 
     // 4. Stagger delay

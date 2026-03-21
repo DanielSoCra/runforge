@@ -23,8 +23,7 @@ export function toDbSessionType(type: SessionType): DbSessionType {
     case 'reviewer-spec':
     case 'reviewer-quality':
     case 'reviewer-security':
-    case 'tester':
-    case 'reporter':         return 'validation';
+    case 'tester':           return 'validation';
     case 'diagnostician':    return 'diagnosis';
   }
 }

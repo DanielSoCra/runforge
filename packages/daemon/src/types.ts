@@ -21,7 +21,7 @@ export type SessionType =
   | 'coordinator' | 'classifier' | 'worker'
   | 'reviewer-spec' | 'reviewer-quality' | 'reviewer-security'
   | 'conflict-resolver' | 'bug-worker' | 'tester'
-  | 'diagnostician' | 'reporter' | 'prompt-optimizer';
+  | 'diagnostician' | 'prompt-optimizer';
 
 export type ExitStatus =
   | 'completed' | 'completed-with-concerns'

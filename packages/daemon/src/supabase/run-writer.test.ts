@@ -13,7 +13,6 @@ describe('toDbSessionType', () => {
   it('maps worker → implementation',      () => expect(toDbSessionType('worker')).toBe('implementation'));
   it('maps reviewer-spec → validation',   () => expect(toDbSessionType('reviewer-spec')).toBe('validation'));
   it('maps diagnostician → diagnosis',    () => expect(toDbSessionType('diagnostician')).toBe('diagnosis'));
-  it('maps reporter → validation',        () => expect(toDbSessionType('reporter')).toBe('validation'));
 });
 
 describe('SupabaseRunWriter', () => {
