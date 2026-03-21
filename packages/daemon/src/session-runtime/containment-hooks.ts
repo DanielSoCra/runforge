@@ -42,10 +42,18 @@ export function checkContainment(call: ToolCall, policy: ContainmentPolicy): Con
   // 3. Command blocking — check Bash/shell commands
   if (call.tool === 'Bash' || call.tool === 'shell') {
     const command = String(call.input.command ?? call.input.cmd ?? '');
+    const normalized = normalizeShellCommand(command);
     for (const blocked of policy.blockedCommands) {
-      if (command.includes(blocked)) {
+      // Check both raw and normalized forms
+      if (command.includes(blocked) || normalized.includes(blocked)) {
         return { allowed: false, reason: `Blocked command pattern: ${blocked}` };
       }
+    }
+
+    // Check for variable-based indirection: `x=curl; $x ...` or `x=curl && $x ...`
+    const assignmentBypass = detectCommandAssignmentBypass(normalized, policy.blockedCommands);
+    if (assignmentBypass) {
+      return { allowed: false, reason: `Blocked command pattern (variable indirection): ${assignmentBypass}` };
     }
 
     // 4. Extract path references from Bash commands and check against blocked/readOnly paths
@@ -92,6 +100,47 @@ function extractCommandPaths(command: string): string[] {
     }
   }
   return paths;
+}
+
+/**
+ * Normalize a shell command by stripping common evasion techniques:
+ * - Empty quote pairs: cu''rl → curl, cu""rl → curl
+ * - Backslash escapes: cu\rl → curl
+ */
+function normalizeShellCommand(command: string): string {
+  return command
+    .replace(/''/g, '')       // remove empty single-quote pairs
+    .replace(/""/g, '')       // remove empty double-quote pairs
+    .replace(/\\(?=\w)/g, '') // remove backslash before word chars
+    ;
+}
+
+/**
+ * Detect variable assignment bypass: patterns like `x=curl; $x http://...`
+ * where a variable is assigned a blocked command name and then expanded.
+ * Returns the matched blocked command or null.
+ */
+function detectCommandAssignmentBypass(
+  command: string,
+  blockedCommands: string[],
+): string | null {
+  // Match `VAR=value` patterns (possibly after ; or && or ||)
+  const assignments = command.matchAll(/\b(\w+)=(["']?)(\S+?)\2(?=\s|;|&|$)/g);
+  for (const match of assignments) {
+    const value = match[3];
+    for (const blocked of blockedCommands) {
+      // blocked entries have trailing space (e.g. "curl "), trim for comparison
+      const cmd = blocked.trimEnd();
+      if (value === cmd) {
+        // Only flag if the variable is actually expanded later
+        const varName = match[1];
+        if (command.includes(`$${varName}`) || command.includes(`\${${varName}}`)) {
+          return blocked;
+        }
+      }
+    }
+  }
+  return null;
 }
 
 const WRITE_INDICATOR_RE = /[>]|\btee\b|\bcp\b|\bmv\b|\bsed\s+-i\b|\bdd\b/;
