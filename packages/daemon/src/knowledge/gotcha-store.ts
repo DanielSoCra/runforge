@@ -41,7 +41,7 @@ export class GotchaStore {
 
   async match(artifactPaths: string[]): Promise<Gotcha[]> {
     const all = await this.loadAll();
-    return all
+    const matched = all
       .filter((g) => !g.promoted && !g.archived)
       .filter((g) => g.artifactPatterns.some((pattern) =>
         artifactPaths.some((path) => minimatch(path, pattern, { dot: true })),
@@ -50,6 +50,11 @@ export class GotchaStore {
         const tierOrder = (t: string) => t === 'elevated' ? 1 : 0;
         return tierOrder(b.priorityTier) - tierOrder(a.priorityTier) || b.hitCount - a.hitCount;
       });
+    for (const gotcha of matched) {
+      gotcha.hitCount++;
+      await appendJsonl(this.path, gotcha);
+    }
+    return matched;
   }
 
   async incrementHitCount(id: string): Promise<void> {

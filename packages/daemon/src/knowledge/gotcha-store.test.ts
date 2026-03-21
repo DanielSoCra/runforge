@@ -40,10 +40,10 @@ describe('GotchaStore', () => {
         43,
       );
       expect(count).toBe(0);
-      // Verify hit count incremented
+      // Verify hit count incremented (2 from dedup + 1 from match() auto-increment)
       const all = await store.match(['src/foo.ts']);
       expect(all).toHaveLength(1);
-      expect(all[0]!.hitCount).toBe(2);
+      expect(all[0]!.hitCount).toBe(3);
       await cleanup();
     });
 
@@ -156,6 +156,35 @@ describe('GotchaStore', () => {
       await cleanup();
     });
 
+    it('increments hitCount for each matched gotcha on match (#43)', async () => {
+      await store.store(
+        [{ artifactPatterns: ['src/**/*.ts'], description: 'Gotcha A' }],
+        1,
+      );
+      await store.store(
+        [{ artifactPatterns: ['src/**/*.ts'], description: 'Gotcha B' }],
+        2,
+      );
+      // Both start with hitCount=1
+      const firstMatch = await store.match(['src/foo.ts']);
+      expect(firstMatch).toHaveLength(2);
+      // match() should have incremented both to hitCount=2
+      expect(firstMatch.every((g) => g.hitCount === 2)).toBe(true);
+
+      // Second match should increment again to 3
+      const secondMatch = await store.match(['src/foo.ts']);
+      expect(secondMatch.every((g) => g.hitCount === 3)).toBe(true);
+
+      // Non-matching paths should not increment
+      const noMatch = await store.match(['docs/readme.md']);
+      expect(noMatch).toHaveLength(0);
+
+      // Verify hitCount unchanged at 3 (only incremented by matching calls)
+      const thirdMatch = await store.match(['src/bar.ts']);
+      expect(thirdMatch.every((g) => g.hitCount === 4)).toBe(true);
+      await cleanup();
+    });
+
     it('sorts by hitCount descending within same tier', async () => {
       await store.store(
         [{ artifactPatterns: ['**/*.ts'], description: 'Low hits' }],
@@ -184,11 +213,11 @@ describe('GotchaStore', () => {
         [{ artifactPatterns: ['**/*.ts'], description: 'Test' }],
         1,
       );
-      const m = await store.match(['foo.ts']);
+      const m = await store.match(['foo.ts']); // hitCount: 1→2 (match auto-increment)
       const id = m[0]!.id;
-      await store.incrementHitCount(id);
-      const after = await store.match(['foo.ts']);
-      expect(after[0]!.hitCount).toBe(2);
+      await store.incrementHitCount(id); // hitCount: 2→3
+      const after = await store.match(['foo.ts']); // hitCount: 3→4 (match auto-increment)
+      expect(after[0]!.hitCount).toBe(4);
       await cleanup();
     });
 
@@ -284,9 +313,10 @@ describe('GotchaStore', () => {
       await store.compact();
 
       // After compact, only one entry per id
+      // hitCount: 1 (store) + 1 (match) + 3 (incrementHitCount×3) = 5, then +1 from this match = 6
       const after = await store.match(['foo.ts']);
       expect(after).toHaveLength(1);
-      expect(after[0]!.hitCount).toBe(4);
+      expect(after[0]!.hitCount).toBe(6);
       await cleanup();
     });
   });
