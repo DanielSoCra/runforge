@@ -1,8 +1,9 @@
+import { vi, describe, it, expect } from 'vitest';
+
 vi.mock('next/link', () => ({ default: ({ href, children, className }: any) => <a href={href} className={className}>{children}</a> }));
 
 import { render, screen } from '@testing-library/react';
 import { RunTable } from './run-table';
-import { describe, it, expect } from 'vitest';
 
 const mockRun = {
   id: 'run-1',
@@ -46,9 +47,16 @@ describe('RunTable', () => {
     expect(screen.queryByText(/^\d+h \d+m$/)).not.toBeInTheDocument();
   });
 
-  it('renders Elapsed column header instead of Started (#82)', () => {
+  it('shows elapsed time for stuck runs (#82)', () => {
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const stuckRun = { ...mockRun, outcome: 'stuck' as const, started_at: oneHourAgo };
+    render(<RunTable runs={[stuckRun as any]} />);
+    expect(screen.getByText(/^\d+h \d+m$/)).toBeInTheDocument();
+  });
+
+  it('renders Time column header instead of Started (#82)', () => {
     render(<RunTable runs={[mockRun as any]} />);
-    expect(screen.getByText('Elapsed')).toBeInTheDocument();
+    expect(screen.getByText('Time')).toBeInTheDocument();
     expect(screen.queryByText('Started')).not.toBeInTheDocument();
   });
 });

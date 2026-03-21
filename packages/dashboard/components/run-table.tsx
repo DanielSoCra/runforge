@@ -7,6 +7,7 @@ type Run = Database['public']['Tables']['runs']['Row'];
 
 function formatElapsed(startedAt: string): string {
   const ms = Date.now() - new Date(startedAt).getTime();
+  if (ms <= 0) return '0s';
   const seconds = Math.floor(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
   const minutes = Math.floor(seconds / 60);
@@ -45,7 +46,7 @@ export function RunTable({ runs }: { runs: Run[] }) {
             <TableHead>Phase</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="text-right">Cost</TableHead>
-            <TableHead>Elapsed</TableHead>
+            <TableHead>Time</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -68,9 +69,9 @@ export function RunTable({ runs }: { runs: Run[] }) {
                 ${Number(run.total_cost).toFixed(4)}
               </TableCell>
               <TableCell className="text-muted-foreground text-sm" title={new Date(run.started_at).toLocaleString()}>
-                {run.outcome === 'in-progress'
-                  ? formatElapsed(run.started_at)
-                  : new Date(run.started_at).toLocaleString()}
+                {run.outcome === 'complete'
+                  ? new Date(run.started_at).toLocaleString()
+                  : formatElapsed(run.started_at)}
               </TableCell>
             </TableRow>
           ))}
