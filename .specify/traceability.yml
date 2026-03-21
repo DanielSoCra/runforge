@@ -210,6 +210,7 @@ STACK-AC-KNOWLEDGE:
 STACK-AC-DASHBOARD:
   parent: ARCH-AC-DASHBOARD
   children: []
+  spec: docs/superpowers/specs/2026-03-20-issues-board-design.md
   code_paths:
     - packages/dashboard/
     - supabase/

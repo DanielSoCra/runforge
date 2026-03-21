@@ -22,6 +22,7 @@ describe('ClaudePanel', () => {
       sessionState: 'offline',
       startSession: vi.fn(),
       isStarting: false,
+      startError: null,
     });
   });
 
@@ -34,7 +35,7 @@ describe('ClaudePanel', () => {
 
   it('calls toggle when tab is clicked', () => {
     const toggle = vi.fn();
-    mockHook.mockReturnValue({ isOpen: false, toggle, sessionUrl: null, sessionState: 'offline', startSession: vi.fn(), isStarting: false });
+    mockHook.mockReturnValue({ isOpen: false, toggle, sessionUrl: null, sessionState: 'offline', startSession: vi.fn(), isStarting: false, startError: null });
     render(<ClaudePanel />);
     fireEvent.click(screen.getByRole('button', { name: /claude/i }));
     expect(toggle).toHaveBeenCalledOnce();
@@ -48,6 +49,7 @@ describe('ClaudePanel', () => {
       sessionState: 'active',
       startSession: vi.fn(),
       isStarting: false,
+      startError: null,
     });
     render(<ClaudePanel />);
     expect(screen.getByText('https://claude.ai/remote/test')).toBeInTheDocument();
@@ -61,8 +63,23 @@ describe('ClaudePanel', () => {
       sessionState: 'failed',
       startSession: vi.fn(),
       isStarting: false,
+      startError: null,
     });
     render(<ClaudePanel />);
     expect(screen.getByText(/remote control failed/i)).toBeInTheDocument();
+  });
+
+  it('shows startError message when set', () => {
+    mockHook.mockReturnValue({
+      isOpen: true,
+      toggle: vi.fn(),
+      sessionUrl: null,
+      sessionState: 'offline',
+      startSession: vi.fn(),
+      isStarting: false,
+      startError: 'Daemon unreachable',
+    });
+    render(<ClaudePanel />);
+    expect(screen.getByText('Daemon unreachable')).toBeInTheDocument();
   });
 });

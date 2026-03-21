@@ -194,6 +194,34 @@ describe('RemoteControlManager', () => {
     expect(manager.getState().remote_control_url).toBe('https://session.example.com');
   });
 
+  it('schedules immediate restart on clean active exit (code=0 after active)', async () => {
+    let spawnCount = 0;
+    vi.mocked(spawn).mockImplementation(() => {
+      spawnCount++;
+      return makeFakeProcess();
+    });
+
+    manager.start();
+    expect(spawnCount).toBe(1);
+
+    // Simulate process becoming active by emitting a URL
+    const proc = vi.mocked(spawn).mock.results[0]!.value as ReturnType<typeof makeFakeProcess>;
+    proc.stdout!.emit('data', Buffer.from('Session ready: https://session.example.com\n'));
+    expect(manager.getState().remote_control_state).toBe('active');
+
+    // Clean exit (code=0) from an active session
+    proc.emit('exit', 0);
+
+    // Should schedule restart with zero delay (BACKOFF_MS[-1] = undefined → 0ms)
+    // and spawn again immediately
+    await vi.advanceTimersByTimeAsync(0);
+    expect(spawnCount).toBe(2);
+    expect(manager.getState().remote_control_state).toBe('offline');
+    // failureCount should NOT have been incremented (clean exit)
+    // so it should NOT be in 'failed' state
+    expect(manager.getState().remote_control_state).not.toBe('failed');
+  });
+
   it('transitions to failed state when process emits error events', async () => {
     let spawnCount = 0;
     vi.mocked(spawn).mockImplementation(() => {
