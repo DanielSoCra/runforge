@@ -99,6 +99,7 @@ export function isComplete(phase: Phase, event: PhaseEvent): boolean {
 // Global transitions that apply regardless of pipeline variant
 export function applyGlobalTransition(event: PhaseEvent): Phase | undefined {
   if (event === 'budget-exceeded') return 'paused';
+  if (event === 'per-run-budget-exceeded') return 'stuck';
   if (event === 'rate-limited') return 'paused';
   return undefined;
 }

@@ -61,13 +61,16 @@ export async function runPipeline(
     // Check budget before each phase
     const budget = costTracker.checkBudget(run.issueNumber, run.perRunBudget);
     if (!budget.available) {
-      run.phase = 'paused';
+      // Per-run budget exceeded → stuck (prevents one issue consuming entire daily budget)
+      // Daily budget exceeded → paused (resumes on daily reset)
+      const isPerRun = budget.reason === 'per-run-budget-exceeded';
+      run.phase = isPerRun ? 'stuck' : 'paused';
       await stateMgr.saveRunState(run);
       void runWriter?.upsertRun(run.id, {
         current_phase: run.phase,
         phases: buildPhaseRecords(run),
       });
-      return { outcome: 'paused', run };
+      return { outcome: isPerRun ? 'stuck' : 'paused', run };
     }
 
     // Get the handler for the current phase
@@ -121,7 +124,8 @@ export async function runPipeline(
         current_phase: run.phase,
         phases: buildPhaseRecords(run),
       });
-      return { outcome: 'paused', run };
+      const globalOutcome = globalNext === 'stuck' ? 'stuck' : 'paused';
+      return { outcome: globalOutcome, run };
     }
 
     // Check for completion

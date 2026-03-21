@@ -90,6 +90,10 @@ describe('FSM', () => {
       expect(applyGlobalTransition('budget-exceeded')).toBe('paused');
     });
 
+    it('per-run-budget-exceeded → stuck (#92)', () => {
+      expect(applyGlobalTransition('per-run-budget-exceeded')).toBe('stuck');
+    });
+
     it('rate-limited → paused', () => {
       expect(applyGlobalTransition('rate-limited')).toBe('paused');
     });

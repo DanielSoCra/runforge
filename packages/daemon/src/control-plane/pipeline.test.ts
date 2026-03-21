@@ -80,6 +80,19 @@ describe('runPipeline', () => {
     expect(result.outcome).toBe('paused');
   });
 
+  it('transitions to stuck when per-run budget exceeded (#92)', async () => {
+    costTracker.recordCost(1, 11); // exceed per-run budget of 10
+    const handlers: PhaseHandlerMap = {
+      detect: async () => 'success' as PhaseEvent,
+    };
+    const run = makeRun();
+    run.phase = 'implement';
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('stuck');
+    expect(run.phase).toBe('stuck');
+  });
+
   it('pauses on budget-exceeded event from handler', async () => {
     const handlers: PhaseHandlerMap = {
       detect: async () => 'success' as PhaseEvent,
@@ -90,6 +103,19 @@ describe('runPipeline', () => {
     const table = getPipeline('feature-simple');
     const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
     expect(result.outcome).toBe('paused');
+  });
+
+  it('transitions to stuck on per-run-budget-exceeded event from handler (#92)', async () => {
+    const handlers: PhaseHandlerMap = {
+      detect: async () => 'success' as PhaseEvent,
+      classify: async () => 'success:simple' as PhaseEvent,
+      implement: async () => 'per-run-budget-exceeded' as PhaseEvent,
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('stuck');
+    expect(run.phase).toBe('stuck');
   });
 
   it('saves state after each phase transition', async () => {
