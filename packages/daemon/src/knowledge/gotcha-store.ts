@@ -68,7 +68,7 @@ export class GotchaStore {
       if (g.promoted || g.archived) return false;
       const age = (now - new Date(g.createdAt).getTime()) / (1000 * 60 * 60 * 24);
       if (age > maxAgeDays) return false;
-      const effectiveThreshold = g.priorityTier === 'elevated' ? Math.ceil(threshold / 2) : threshold;
+      const effectiveThreshold = g.priorityTier === 'elevated' ? Math.floor(threshold / 2) : threshold;
       return g.hitCount >= effectiveThreshold;
     });
   }

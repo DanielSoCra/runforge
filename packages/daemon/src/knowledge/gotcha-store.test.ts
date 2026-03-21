@@ -224,7 +224,7 @@ describe('GotchaStore', () => {
       await cleanup();
     });
 
-    it('halves threshold for elevated (operator) gotchas', async () => {
+    it('halves threshold for elevated (operator) gotchas — floor(5/2)=2', async () => {
       await store.store(
         [{ artifactPatterns: ['**/*.ts'], description: 'Op gotcha' }],
         1,
@@ -232,11 +232,22 @@ describe('GotchaStore', () => {
       );
       const m = await store.match(['foo.ts']);
       const id = m[0]!.id;
-      // threshold=5, elevated => effectiveThreshold=3; hitCount starts at 1, need 2 more
-      await store.incrementHitCount(id);
+      // threshold=5, elevated => effectiveThreshold=floor(5/2)=2; hitCount starts at 1, need 1 more
       await store.incrementHitCount(id);
       const candidates = await store.getPromotionCandidates(5);
       expect(candidates).toHaveLength(1);
+      await cleanup();
+    });
+
+    it('elevated gotcha with hitCount=1 is NOT a promotion candidate at threshold=5', async () => {
+      await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'Single hit elevated' }],
+        1,
+        'operator',
+      );
+      // hitCount=1, effectiveThreshold=floor(5/2)=2 → not eligible
+      const candidates = await store.getPromotionCandidates(5);
+      expect(candidates).toHaveLength(0);
       await cleanup();
     });
 
