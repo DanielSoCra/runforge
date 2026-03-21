@@ -300,6 +300,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/actions/new-project.test.ts
     - packages/dashboard/lib/classify-issues.test.ts
     - packages/dashboard/app/api/daemon/daemon-routes.test.ts
+    - packages/dashboard/app/(dashboard)/runs/[id]/page.test.tsx
   status: draft
 
 STACK-AC-HANDOFF-RUNTIME:
