@@ -138,6 +138,18 @@ describe('ControlServer', () => {
     expect(res.status).toBe(501);
   });
 
+  it('allows immediate rebind after close (SO_REUSEADDR / no TIME_WAIT block)', async () => {
+    const server1 = await startServer();
+    // Close the first server and immediately try to rebind the same port
+    await new Promise<void>((resolve) => server1.close(() => resolve()));
+    serverRef = undefined;
+    // If SO_REUSEADDR is not set, this would fail with EADDRINUSE due to TIME_WAIT
+    const { server: server2, start: start2 } = createControlServer(PORT, handlers);
+    serverRef = server2;
+    const result = await start2();
+    expect(result.ok).toBe(true);
+  });
+
   it('GET /status includes remote_control fields', async () => {
     const { server: s2, start: start2 } = createControlServer(PORT + 1, {
       getStatus: () => ({
