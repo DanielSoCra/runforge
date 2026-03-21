@@ -27,14 +27,20 @@ export function createReviewerGate(
   issueNumber: number,
   runWriter?: SupabaseRunWriter,
   runId?: string,
+  diff?: string,
+  specs?: string,
 ): { type: GateType; execute: (cwd: string) => Promise<GateResult> } {
   return {
     type,
     async execute(cwd: string): Promise<GateResult> {
+      const variables: Record<string, string> = { rubric, cwd };
+      if (diff !== undefined) variables.diff = diff;
+      if (specs !== undefined) variables.specs = specs;
+
       const result = await runtime.spawnSession(
         sessionType,
         {
-          variables: { rubric, cwd },
+          variables,
           workspacePath: cwd,
         },
         issueNumber,

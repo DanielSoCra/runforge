@@ -199,4 +199,64 @@ describe('createReviewerGate', () => {
       undefined,
     );
   });
+
+  it('passes diff and specs variables when provided', async () => {
+    const runtime = makeRuntime({
+      ok: true,
+      value: {
+        structuredData: { findings: [], summary: 'ok', approved: true },
+        output: '',
+        cost: 0.05,
+        pitfallMarkers: [],
+        exitStatus: 'completed',
+      },
+    });
+
+    const gate = createReviewerGate(
+      'spec-compliance', 'reviewer-spec', 'my rubric', runtime, 99,
+      undefined, undefined,
+      '--- a/file.ts\n+++ b/file.ts\n@@ added line',
+      '# Spec Content\nAcceptance criteria here',
+    );
+    await gate.execute('/my/workspace');
+
+    expect(runtime.spawnSession).toHaveBeenCalledWith(
+      'reviewer-spec',
+      expect.objectContaining({
+        variables: {
+          rubric: 'my rubric',
+          cwd: '/my/workspace',
+          diff: '--- a/file.ts\n+++ b/file.ts\n@@ added line',
+          specs: '# Spec Content\nAcceptance criteria here',
+        },
+        workspacePath: '/my/workspace',
+      }),
+      99,
+      expect.objectContaining({ jsonSchema: expect.any(String) }),
+      undefined,
+      undefined,
+    );
+  });
+
+  it('omits diff and specs from variables when not provided', async () => {
+    const runtime = makeRuntime({
+      ok: true,
+      value: {
+        structuredData: { findings: [], summary: 'ok', approved: true },
+        output: '',
+        cost: 0.05,
+        pitfallMarkers: [],
+        exitStatus: 'completed',
+      },
+    });
+
+    const gate = createReviewerGate('quality', 'reviewer-quality', 'rubric', runtime, 42);
+    await gate.execute('/workspace');
+
+    const callArgs = (runtime.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const passedVariables = (callArgs[1] as { variables: Record<string, string> }).variables;
+    expect(passedVariables).toEqual({ rubric: 'rubric', cwd: '/workspace' });
+    expect(passedVariables).not.toHaveProperty('diff');
+    expect(passedVariables).not.toHaveProperty('specs');
+  });
 });
