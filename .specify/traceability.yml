@@ -189,8 +189,12 @@ STACK-AC-VALIDATION:
 STACK-AC-SESSION-RUNTIME:
   parent: ARCH-AC-SESSION-RUNTIME
   children: []
-  code_paths: [packages/daemon/src/session-runtime/]
-  test_paths: [packages/daemon/src/session-runtime/**/*.test.ts]
+  code_paths:
+    - packages/daemon/src/session-runtime/
+    - packages/daemon/src/session-runtime/generate-containment-script.ts
+  test_paths:
+    - packages/daemon/src/session-runtime/**/*.test.ts
+    - packages/daemon/src/session-runtime/generate-containment-script.test.ts
   status: draft
 
 STACK-AC-DIAGNOSIS:

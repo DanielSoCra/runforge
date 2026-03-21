@@ -1,8 +1,13 @@
 // src/session-runtime/adapters/cli.ts
 import { spawn } from 'child_process';
+import { writeFileSync, mkdirSync, unlinkSync, existsSync, readFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import { ok, err, type Result } from '../../lib/result.js';
 import type { AgentDefinition, SessionContext, SessionResult, ExitStatus, PitfallMarker } from '../../types.js';
+import type { ContainmentPolicy } from '../containment-hooks.js';
 import type { ProviderAdapter } from './types.js';
+import { generateContainmentScript } from '../generate-containment-script.js';
 
 export class CliAdapter implements ProviderAdapter {
   buildArgs(def: AgentDefinition, prompt: string, jsonSchema?: string): string[] {
@@ -73,13 +78,72 @@ export class CliAdapter implements ProviderAdapter {
     }
   }
 
+  /**
+   * Set up a PreToolUse containment hook in the workspace's .claude/ directory.
+   * Returns paths to clean up after the session exits.
+   */
+  setupContainmentHook(
+    cwd: string,
+    policy: ContainmentPolicy,
+  ): { scriptPath: string; settingsPath: string } {
+    // Write self-contained hook script to a temp file
+    const scriptPath = join(tmpdir(), `containment-hook-${process.pid}-${Date.now()}.mjs`);
+    writeFileSync(scriptPath, generateContainmentScript(policy), { mode: 0o755 });
+
+    // Write .claude/settings.local.json with PreToolUse hook
+    const claudeDir = join(cwd, '.claude');
+    mkdirSync(claudeDir, { recursive: true });
+    const settingsPath = join(claudeDir, 'settings.local.json');
+
+    // Merge with existing settings if present
+    let settings: Record<string, unknown> = {};
+    if (existsSync(settingsPath)) {
+      try { settings = JSON.parse(readFileSync(settingsPath, 'utf8')); } catch { /* start fresh */ }
+    }
+    settings.hooks = {
+      ...(settings.hooks as Record<string, unknown> ?? {}),
+      PreToolUse: [{
+        matcher: '',
+        hooks: [{ type: 'command', command: `node "${scriptPath}"` }],
+      }],
+    };
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+    return { scriptPath, settingsPath };
+  }
+
+  cleanupContainmentHook(paths: { scriptPath: string; settingsPath: string }): void {
+    try { unlinkSync(paths.scriptPath); } catch { /* already cleaned */ }
+    // Remove only our hook from settings — restore previous state
+    try {
+      const content = readFileSync(paths.settingsPath, 'utf8');
+      const settings = JSON.parse(content) as Record<string, unknown>;
+      const hooks = settings.hooks as Record<string, unknown> | undefined;
+      if (hooks) {
+        delete hooks.PreToolUse;
+        if (Object.keys(hooks).length === 0) delete settings.hooks;
+      }
+      if (Object.keys(settings).length === 0) {
+        unlinkSync(paths.settingsPath);
+      } else {
+        writeFileSync(paths.settingsPath, JSON.stringify(settings, null, 2));
+      }
+    } catch { /* best-effort cleanup */ }
+  }
+
   async spawn(
     def: AgentDefinition,
     prompt: string,
-    options?: { cwd?: string; jsonSchema?: string },
+    options?: { cwd?: string; jsonSchema?: string; containmentPolicy?: ContainmentPolicy },
   ): Promise<Result<SessionResult>> {
     const args = this.buildArgs(def, prompt, options?.jsonSchema);
     const env = this.buildEnv();
+
+    // Set up containment hook if policy provided and cwd is known
+    let hookPaths: { scriptPath: string; settingsPath: string } | undefined;
+    if (options?.containmentPolicy && options.cwd) {
+      hookPaths = this.setupContainmentHook(options.cwd, options.containmentPolicy);
+    }
 
     return new Promise((resolve) => {
       const chunks: Buffer[] = [];
@@ -101,6 +165,7 @@ export class CliAdapter implements ProviderAdapter {
 
       proc.on('close', (code) => {
         clearTimeout(timer);
+        if (hookPaths) this.cleanupContainmentHook(hookPaths);
         const stdout = Buffer.concat(chunks).toString();
 
         if (timedOut) {
@@ -133,6 +198,7 @@ export class CliAdapter implements ProviderAdapter {
 
       proc.on('error', (e) => {
         clearTimeout(timer);
+        if (hookPaths) this.cleanupContainmentHook(hookPaths);
         resolve(err(e));
       });
     });

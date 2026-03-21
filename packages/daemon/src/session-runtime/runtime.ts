@@ -8,6 +8,7 @@ import { CostTracker } from './cost.js';
 import { createAdapter, type ProviderAdapter } from './adapters/index.js';
 import { buildCompositeContext } from './plugin-injection.js';
 import { readPluginsForContext } from './plugin-loader.js';
+import { DEFAULT_POLICY } from './containment-hooks.js';
 
 // Agent definition registry — maps session types to their operational parameters.
 // System prompts are placeholders here; the real content lives in prompts/*.md
@@ -166,10 +167,11 @@ export class SessionRuntime {
     // 4. Assemble prompt
     const prompt = await this.assemblePrompt(def, context);
 
-    // 5. Delegate to adapter
+    // 5. Delegate to adapter — with containment policy enforced via PreToolUse hooks
     const result = await this.adapter.spawn(def, prompt, {
       cwd: context.workspacePath,
       jsonSchema: options?.jsonSchema,
+      containmentPolicy: DEFAULT_POLICY,
     });
 
     // 6. Record cost

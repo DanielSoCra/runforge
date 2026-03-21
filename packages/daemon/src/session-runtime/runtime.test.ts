@@ -17,9 +17,10 @@ vi.mock('./plugin-loader.js', () => ({
   }]),
 }));
 
+const mockSpawn = vi.fn().mockResolvedValue({ ok: true, value: { output: '', cost: 0.05 } });
 vi.mock('./adapters/index.js', () => ({
   createAdapter: vi.fn(() => ({
-    spawn: vi.fn().mockResolvedValue({ ok: true, value: { output: '', cost: 0.05 } }),
+    spawn: mockSpawn,
   })),
 }));
 
@@ -98,6 +99,26 @@ describe('SessionRuntime', () => {
     const systemPrompt = 'SYSTEM PROMPT';
     const assembled = [ctx.promptInjection, systemPrompt].filter(Boolean).join('\n\n---\n\n');
     expect(assembled.indexOf('PLUGIN INJECTION')).toBeLessThan(assembled.indexOf('SYSTEM PROMPT'));
+  });
+
+  it('passes containmentPolicy to adapter.spawn', async () => {
+    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '', cost: 0.01 } });
+    await runtime.spawnSession(
+      'worker',
+      { variables: { task: 'do it' }, workspacePath: '/tmp/ws' },
+      99,
+    );
+    expect(mockSpawn).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      expect.objectContaining({
+        containmentPolicy: expect.objectContaining({
+          blockedPaths: expect.arrayContaining(['.specify/scenarios/**']),
+          blockedCommands: expect.arrayContaining(['curl ']),
+          readOnlyPaths: expect.arrayContaining(['.specify/**']),
+        }),
+      }),
+    );
   });
 
   it('calls runWriter.writeCostEvent after a successful session', async () => {

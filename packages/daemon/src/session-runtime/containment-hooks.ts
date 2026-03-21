@@ -60,9 +60,10 @@ function extractPaths(input: Record<string, unknown>): string[] {
   return paths;
 }
 
+export const WRITE_TOOLS = ['Write', 'Edit', 'NotebookEdit', 'Bash', 'shell'];
+
 function isWriteTool(tool: string): boolean {
-  const writeTools = ['Write', 'Edit', 'NotebookEdit', 'Bash', 'shell'];
-  return writeTools.includes(tool);
+  return WRITE_TOOLS.includes(tool);
 }
 
 export const DEFAULT_POLICY: ContainmentPolicy = {
