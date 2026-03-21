@@ -24,10 +24,12 @@ export function validatePolicyPatterns(policy: ContainmentPolicy): void {
   }
 }
 
-export function generateContainmentScript(policy: ContainmentPolicy): string {
+export function generateContainmentScript(policy: ContainmentPolicy, projectRoot?: string): string {
   validatePolicyPatterns(policy);
+  const resolvedRoot = projectRoot ?? process.cwd();
   const policyJson = JSON.stringify(policy);
   const writeToolsJson = JSON.stringify(WRITE_TOOLS);
+  const projectRootJson = JSON.stringify(resolvedRoot);
   return `#!/usr/bin/env node
 'use strict';
 
@@ -43,15 +45,8 @@ function globMatch(path, pattern) {
 
 const WRITE_TOOLS = ${writeToolsJson};
 
-function extractPaths(input) {
-  const paths = [];
-  for (const key of ['file_path', 'path', 'filePath', 'target']) {
-    if (typeof input[key] === 'string') paths.push(normalizePath(input[key]));
-  }
-  return paths;
-}
-
-const PROJECT_ROOT = process.cwd();
+// SEC-2: Project root embedded at generation time for deterministic behavior.
+const PROJECT_ROOT = ${projectRootJson};
 const PROJECT_ROOT_PREFIX = PROJECT_ROOT + '/';
 
 function normalizePath(p) {
@@ -63,9 +58,9 @@ function normalizePath(p) {
     } else if (p === PROJECT_ROOT) {
       return '.';
     } else {
-      // Absolute path outside the project — fail closed.
-      // Containment patterns are project-scoped; out-of-project paths are suspicious.
-      return '!!out-of-project!!' + p;
+      // Absolute path outside the project — block it (fail-closed).
+      // Containment is project-scoped; out-of-project absolute paths are rejected.
+      return null;
     }
   }
   // Inline path normalization: resolve . and .. segments, collapse separators
@@ -82,24 +77,44 @@ function normalizePath(p) {
   return result.join('/');
 }
 
+function extractPaths(input) {
+  const paths = [];
+  for (const key of ['file_path', 'path', 'filePath', 'target']) {
+    if (typeof input[key] === 'string') {
+      const normalized = normalizePath(input[key]);
+      if (normalized === null) return { paths: [], blocked: 'Out-of-project absolute path: ' + input[key] };
+      paths.push(normalized);
+    }
+  }
+  return { paths, blocked: null };
+}
+
 function extractCommandPaths(command) {
   const tokens = command.split(/[|;&\\s]+/).filter(Boolean);
   const paths = [];
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
-    if (token.startsWith('-') || token.startsWith('$') || token.includes('=')) continue;
+    if (token.startsWith('-') || token.startsWith('\$') || token.includes('=')) continue;
     if (token.includes('/') || token.includes('.')) {
       const cleaned = token.replace(/^[<>]+/, '').replace(/^["']|["']$/g, '');
-      if (cleaned) paths.push(normalizePath(cleaned));
+      if (cleaned) {
+        const normalized = normalizePath(cleaned);
+        if (normalized === null) return { paths: [], blocked: 'Out-of-project absolute path in command: ' + cleaned };
+        paths.push(normalized);
+      }
     }
   }
-  return paths;
+  return { paths, blocked: null };
 }
 
 const WRITE_INDICATOR_RE = /[>]|\\btee\\b|\\bcp\\b|\\bmv\\b|\\bsed\\s+-i\\b|\\bdd\\b/;
 
 function checkContainment(toolName, toolInput) {
-  const paths = extractPaths(toolInput);
+  const extracted = extractPaths(toolInput);
+  if (extracted.blocked) {
+    return { allowed: false, reason: extracted.blocked };
+  }
+  const paths = extracted.paths;
 
   for (const p of paths) {
     for (const pattern of policy.blockedPaths) {
@@ -127,7 +142,11 @@ function checkContainment(toolName, toolInput) {
       }
     }
 
-    const cmdPaths = extractCommandPaths(command);
+    const cmdExtracted = extractCommandPaths(command);
+    if (cmdExtracted.blocked) {
+      return { allowed: false, reason: cmdExtracted.blocked };
+    }
+    const cmdPaths = cmdExtracted.paths;
     const isWrite = WRITE_INDICATOR_RE.test(command);
     for (let i = 0; i < cmdPaths.length; i++) {
       for (const pattern of policy.blockedPaths) {

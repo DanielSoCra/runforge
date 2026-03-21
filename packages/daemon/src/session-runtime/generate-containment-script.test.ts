@@ -26,7 +26,8 @@ function runHookScript(script: string, toolName: string, toolInput: Record<strin
 }
 
 describe('generateContainmentScript', () => {
-  const script = generateContainmentScript(DEFAULT_POLICY);
+  // Pass process.cwd() as projectRoot so generated script embeds the test's cwd
+  const script = generateContainmentScript(DEFAULT_POLICY, process.cwd());
 
   it('generates a non-empty script string', () => {
     expect(script).toContain('checkContainment');
@@ -229,9 +230,21 @@ describe('generateContainmentScript', () => {
 
   it('blocks Read with absolute path outside project (fail-closed)', () => {
     const result = runHookScript(script, 'Read', { file_path: '/etc/passwd' });
-    expect(result.code).toBe(0); // normalizePath returns mangled path, doesn't match any pattern — allowed by default
-    // Out-of-project paths get a poison prefix that won't match any blocked pattern,
-    // but also won't match any real file. The containment system is project-scoped.
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Out-of-project absolute path');
+  });
+
+  it('blocks Bash with absolute path outside project in command', () => {
+    const result = runHookScript(script, 'Bash', { command: 'cat /etc/passwd' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Out-of-project absolute path in command');
+  });
+
+  it('blocks Read with absolute path + ../ traversal to blocked dir', () => {
+    const absPath = process.cwd() + '/src/../.specify/scenarios/secret.yml';
+    const result = runHookScript(script, 'Read', { file_path: absPath });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked path');
   });
 
   it('fails closed on malformed JSON input', () => {
