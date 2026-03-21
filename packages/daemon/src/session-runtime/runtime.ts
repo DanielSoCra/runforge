@@ -1,4 +1,6 @@
 // src/session-runtime/runtime.ts
+import { readFile } from 'fs/promises';
+import { join } from 'path';
 import type { Config } from '../config.js';
 import type { SessionType, AgentDefinition, SessionContext, SessionResult } from '../types.js';
 import type { Result } from '../lib/result.js';
@@ -9,6 +11,31 @@ import { createAdapter, type ProviderAdapter } from './adapters/index.js';
 import { buildCompositeContext } from './plugin-injection.js';
 import { readPluginsForContext } from './plugin-loader.js';
 import { DEFAULT_POLICY } from './containment-hooks.js';
+
+/** Resolve the prompts/ directory at the repo root. */
+function promptsDir(): string {
+  return process.env['PROMPTS_DIR'] ?? join(import.meta.dirname, '../../../../prompts');
+}
+
+/**
+ * Load a prompt template from prompts/{name}.md and substitute {{variable}} placeholders.
+ * Returns null if the file does not exist (caller falls back to def.systemPrompt).
+ */
+export async function loadPromptTemplate(
+  name: string,
+  variables: Record<string, string>,
+): Promise<string | null> {
+  const filePath = join(promptsDir(), `${name}.md`);
+  try {
+    let template = await readFile(filePath, 'utf-8');
+    for (const [key, value] of Object.entries(variables)) {
+      template = template.replaceAll(`{{${key}}}`, value);
+    }
+    return template;
+  } catch {
+    return null;
+  }
+}
 
 // Agent definition registry — maps session types to their operational parameters.
 // System prompts are placeholders here; the real content lives in prompts/*.md
@@ -186,9 +213,17 @@ export class SessionRuntime {
   }
 
   private async assemblePrompt(def: AgentDefinition, context: SessionContext): Promise<string> {
-    let prompt = def.systemPrompt;
-    for (const [key, value] of Object.entries(context.variables)) {
-      prompt += `\n\n## ${key}\n${value}`;
+    // Load the prompt template from prompts/{name}.md with {{variable}} substitution.
+    // Falls back to def.systemPrompt + appended variables if template file is missing.
+    const template = await loadPromptTemplate(def.name, context.variables);
+    let prompt: string;
+    if (template !== null) {
+      prompt = template;
+    } else {
+      prompt = def.systemPrompt;
+      for (const [key, value] of Object.entries(context.variables)) {
+        prompt += `\n\n## ${key}\n${value}`;
+      }
     }
 
     // If no active plugins, return prompt as-is

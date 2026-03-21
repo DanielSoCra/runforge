@@ -1,9 +1,12 @@
 // src/session-runtime/runtime.test.ts
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SessionRuntime } from './runtime.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { SessionRuntime, loadPromptTemplate } from './runtime.js';
 import { CostTracker } from './cost.js';
 import type { Config } from '../config.js';
 import { buildCompositeContext } from './plugin-injection.js';
+import { mkdtemp, writeFile, rm } from 'fs/promises';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
 vi.mock('./plugin-loader.js', () => ({
   readPluginsForContext: vi.fn().mockResolvedValue([{
@@ -137,5 +140,98 @@ describe('SessionRuntime', () => {
     if (result.ok) {
       expect(writeCostEvent).toHaveBeenCalledWith('my-run-id', 'worker', expect.any(Number));
     }
+  });
+});
+
+describe('loadPromptTemplate', () => {
+  let tmpDir: string;
+  const originalEnv = process.env['PROMPTS_DIR'];
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'prompt-test-'));
+    process.env['PROMPTS_DIR'] = tmpDir;
+  });
+
+  afterEach(async () => {
+    if (originalEnv === undefined) {
+      delete process.env['PROMPTS_DIR'];
+    } else {
+      process.env['PROMPTS_DIR'] = originalEnv;
+    }
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('loads template from prompts/{name}.md and substitutes {{variables}}', async () => {
+    await writeFile(join(tmpDir, 'worker.md'), '# Worker\n\nTask: {{task}}\nSpecs: {{specs}}');
+    const result = await loadPromptTemplate('worker', { task: 'build feature', specs: 'FUNC-1' });
+    expect(result).toBe('# Worker\n\nTask: build feature\nSpecs: FUNC-1');
+  });
+
+  it('returns null when template file does not exist', async () => {
+    const result = await loadPromptTemplate('nonexistent', {});
+    expect(result).toBeNull();
+  });
+
+  it('returns template unchanged when no variables match placeholders', async () => {
+    await writeFile(join(tmpDir, 'classifier.md'), '# Classifier\n\nNo placeholders here.');
+    const result = await loadPromptTemplate('classifier', { unused: 'value' });
+    expect(result).toBe('# Classifier\n\nNo placeholders here.');
+  });
+
+  it('replaces all occurrences of the same placeholder', async () => {
+    await writeFile(join(tmpDir, 'tester.md'), 'Run {{cmd}} then {{cmd}} again');
+    const result = await loadPromptTemplate('tester', { cmd: 'vitest' });
+    expect(result).toBe('Run vitest then vitest again');
+  });
+});
+
+describe('SessionRuntime prompt assembly with templates', () => {
+  let tmpDir: string;
+  const originalEnv = process.env['PROMPTS_DIR'];
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'prompt-asm-'));
+    process.env['PROMPTS_DIR'] = tmpDir;
+  });
+
+  afterEach(async () => {
+    if (originalEnv === undefined) {
+      delete process.env['PROMPTS_DIR'];
+    } else {
+      process.env['PROMPTS_DIR'] = originalEnv;
+    }
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('assemblePrompt loads template instead of using empty systemPrompt', async () => {
+    await writeFile(join(tmpDir, 'worker.md'), '# Worker\n\nYou implement {{task}} per {{specs}}.');
+    const costTracker = new CostTracker({ dailyBudget: 50, perRunBudget: 10 });
+    const runtime = new SessionRuntime(
+      { adapter: 'cli', dailyBudget: 50, perRunBudget: 10 } as Config,
+      costTracker,
+    );
+    const assembled = await (runtime as any).assemblePrompt(
+      { name: 'worker', systemPrompt: '' },
+      { variables: { task: 'add auth', specs: 'FUNC-AC-SAFETY' } },
+    );
+    expect(assembled).toContain('# Worker');
+    expect(assembled).toContain('You implement add auth per FUNC-AC-SAFETY.');
+    // Must NOT contain the old appended-variable format when template is loaded
+    expect(assembled).not.toContain('## task');
+  });
+
+  it('falls back to systemPrompt + appended variables when template is missing', async () => {
+    const costTracker = new CostTracker({ dailyBudget: 50, perRunBudget: 10 });
+    const runtime = new SessionRuntime(
+      { adapter: 'cli', dailyBudget: 50, perRunBudget: 10 } as Config,
+      costTracker,
+    );
+    const assembled = await (runtime as any).assemblePrompt(
+      { name: 'nonexistent-agent', systemPrompt: 'Fallback prompt' },
+      { variables: { task: 'do something' } },
+    );
+    expect(assembled).toContain('Fallback prompt');
+    expect(assembled).toContain('## task');
+    expect(assembled).toContain('do something');
   });
 });
