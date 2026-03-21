@@ -116,4 +116,75 @@ describe('RLS policies', () => {
     });
     expect(error).not.toBeNull();
   });
+
+  // --- SEC-14: RPC privilege escalation regression tests ---
+
+  it.skipIf(!ADMIN_JWT)('admin can call change_member_role RPC', async () => {
+    const adminClient = createClient(SUPABASE_URL, ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${ADMIN_JWT}` } },
+    });
+    // Call with a non-existent member ID — should return 'not_found' (not a permission error)
+    const { data, error } = await adminClient.rpc('change_member_role', {
+      p_member_id: '00000000-0000-0000-0000-000000000000',
+      p_new_role: 'viewer',
+    });
+    expect(error).toBeNull();
+    expect(data).toBe('not_found');
+  });
+
+  it.skipIf(!ADMIN_JWT)('admin can call remove_team_member RPC', async () => {
+    const adminClient = createClient(SUPABASE_URL, ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${ADMIN_JWT}` } },
+    });
+    // Call with a non-existent member ID — should return 'not_found' (not a permission error)
+    const { data, error } = await adminClient.rpc('remove_team_member', {
+      p_member_id: '00000000-0000-0000-0000-000000000000',
+    });
+    expect(error).toBeNull();
+    expect(data).toBe('not_found');
+  });
+
+  it.skipIf(!VIEWER_JWT)('viewer cannot call change_member_role RPC', async () => {
+    const viewerClient = createClient(SUPABASE_URL, ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${VIEWER_JWT}` } },
+    });
+    // Attempt to escalate own role to admin — should be denied
+    const { error } = await viewerClient.rpc('change_member_role', {
+      p_member_id: '00000000-0000-0000-0000-000000000000',
+      p_new_role: 'admin',
+    });
+    expect(error).not.toBeNull();
+    expect(error!.message).toContain('permission denied');
+  });
+
+  it.skipIf(!VIEWER_JWT)('viewer cannot call remove_team_member RPC', async () => {
+    const viewerClient = createClient(SUPABASE_URL, ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${VIEWER_JWT}` } },
+    });
+    // Attempt to remove another team member — should be denied
+    const { error } = await viewerClient.rpc('remove_team_member', {
+      p_member_id: '00000000-0000-0000-0000-000000000000',
+    });
+    expect(error).not.toBeNull();
+    expect(error!.message).toContain('permission denied');
+  });
+
+  it('unauthenticated client cannot call change_member_role RPC', async () => {
+    const anonClient = createClient(SUPABASE_URL, ANON_KEY);
+    const { error } = await anonClient.rpc('change_member_role', {
+      p_member_id: '00000000-0000-0000-0000-000000000000',
+      p_new_role: 'admin',
+    });
+    // Blocked by REVOKE at the Postgres level, not by is_admin() guard
+    expect(error).not.toBeNull();
+  });
+
+  it('unauthenticated client cannot call remove_team_member RPC', async () => {
+    const anonClient = createClient(SUPABASE_URL, ANON_KEY);
+    const { error } = await anonClient.rpc('remove_team_member', {
+      p_member_id: '00000000-0000-0000-0000-000000000000',
+    });
+    // Blocked by REVOKE at the Postgres level, not by is_admin() guard
+    expect(error).not.toBeNull();
+  });
 });
