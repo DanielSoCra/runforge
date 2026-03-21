@@ -1,6 +1,7 @@
 'use server';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import { requireAdmin } from '@/lib/auth';
 
 const VALID_KEY_TYPES = ['source-control', 'model-provider'] as const;
 type KeyType = typeof VALID_KEY_TYPES[number];
@@ -8,9 +9,8 @@ type KeyType = typeof VALID_KEY_TYPES[number];
 export async function upsertApiKey(formData: FormData) {
   const supabase = await createClient();
 
-  // Auth check — belt-and-suspenders alongside middleware
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Unauthorized');
+  // Admin-only — RPC uses SECURITY DEFINER which bypasses RLS
+  await requireAdmin(supabase);
 
   const repoId = formData.get('repo_id');
   const keyType = formData.get('key_type');
