@@ -63,3 +63,36 @@ describe('removeRepo', () => {
     await expect(removeRepo('repo-1', 'conn-1')).rejects.toThrow('Failed to remove repository');
   });
 });
+
+describe('importRepos', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('rejects owner containing shell metacharacters', async () => {
+    const { importRepos } = await import('./github-connections.js');
+    await expect(importRepos('conn-1', [{ owner: 'foo;rm -rf', name: 'bar' }]))
+      .rejects.toThrow('Owner must contain only alphanumeric characters');
+  });
+
+  it('rejects name containing shell metacharacters', async () => {
+    const { importRepos } = await import('./github-connections.js');
+    await expect(importRepos('conn-1', [{ owner: 'foo', name: 'bar$(evil)' }]))
+      .rejects.toThrow('Name must contain only alphanumeric characters');
+  });
+
+  it('rejects owner with spaces', async () => {
+    const { importRepos } = await import('./github-connections.js');
+    await expect(importRepos('conn-1', [{ owner: 'foo bar', name: 'repo' }]))
+      .rejects.toThrow('Owner must contain only alphanumeric characters');
+  });
+
+  it('accepts valid owner and name with dots, underscores, hyphens', async () => {
+    const mockUpsert = vi.fn().mockResolvedValue({ error: null });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockFrom.mockImplementation((() => ({ upsert: mockUpsert })) as any);
+    const { importRepos } = await import('./github-connections.js');
+    await importRepos('conn-1', [{ owner: 'my-org.test', name: 'repo_name-1' }]);
+    expect(mockUpsert).toHaveBeenCalled();
+  });
+});

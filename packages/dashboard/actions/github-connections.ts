@@ -3,6 +3,8 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/auth';
 
+const SAFE_PATTERN = /^[a-zA-Z0-9._-]+$/;
+
 export async function removeConnection(connectionId: string) {
   const supabase = await createClient();
   await requireAdmin(supabase);
@@ -27,6 +29,15 @@ export async function importRepos(
   await requireAdmin(supabase);
 
   if (repos.length === 0) return;
+
+  for (const { owner, name } of repos) {
+    if (!SAFE_PATTERN.test(owner)) {
+      throw new Error('Owner must contain only alphanumeric characters, dots, underscores, and hyphens');
+    }
+    if (!SAFE_PATTERN.test(name)) {
+      throw new Error('Name must contain only alphanumeric characters, dots, underscores, and hyphens');
+    }
+  }
 
   // Upsert by owner+name — for new repos insert disabled; for existing only update connection_id
   for (const { owner, name } of repos) {
