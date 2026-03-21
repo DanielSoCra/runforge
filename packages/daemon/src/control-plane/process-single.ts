@@ -26,7 +26,8 @@ export async function processSingleIssue(issueNumber: number, configPath: string
 
   const costTracker = new CostTracker({ dailyBudget: config.dailyBudget, perRunBudget: config.perRunBudget });
   const runtime = new SessionRuntime(config, costTracker);
-  const coordinator = new ImplementationCoordinator(runtime, process.cwd());
+  const repoRoot = process.cwd();
+  const coordinator = new ImplementationCoordinator(runtime, repoRoot);
   if (!config.repo) return err(new Error('config.repo is required for single-issue processing'));
   const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
   const { owner, name: repo } = config.repo;
@@ -63,7 +64,7 @@ export async function processSingleIssue(issueNumber: number, configPath: string
   await stateMgr.saveRunState(run);
 
   console.log(`[process] Running pipeline for #${issueNumber}: ${request.title}`);
-  const handlers = createPhaseHandlers(config, owner, repo, runtime, coordinator, octokit, request, stateDir);
+  const handlers = createPhaseHandlers(config, owner, repo, runtime, coordinator, octokit, request, stateDir, undefined, undefined, repoRoot);
   const table = getPipeline(variant);
   const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
   console.log(`[process] Result: ${result.outcome}${result.error ? ` — ${result.error}` : ''}`);

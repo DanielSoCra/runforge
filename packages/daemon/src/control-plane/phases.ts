@@ -47,6 +47,7 @@ export function createPhaseHandlers(
   stateDir: string,
   runWriter?: SupabaseRunWriter,
   runId?: string,
+  repoRoot?: string,
 ): PhaseHandlerMap {
   const repo = repoName;
   const detector = createWorkDetector(octokit, owner, repo);
@@ -60,11 +61,11 @@ export function createPhaseHandlers(
       }
       try {
         console.log(`[detect] Creating branch ${featureBranch} from ${config.branches.staging}`);
-        await git(['checkout', config.branches.staging]);
-        const branchResult = await git(['checkout', '-b', featureBranch, config.branches.staging]);
+        await git(['checkout', config.branches.staging], repoRoot);
+        const branchResult = await git(['checkout', '-b', featureBranch, config.branches.staging], repoRoot);
         if (!branchResult.ok) {
           console.log(`[detect] Branch exists, checking out`);
-          const co = await git(['checkout', featureBranch]);
+          const co = await git(['checkout', featureBranch], repoRoot);
           if (!co.ok) { console.error(`[detect] Checkout failed:`, co.error.message); return 'failure'; }
         }
         return 'success';
@@ -165,7 +166,7 @@ export function createPhaseHandlers(
     },
 
     review: async (run: RunState): Promise<PhaseEvent> => {
-      const cwd = process.cwd();
+      const cwd = repoRoot ?? process.cwd();
       console.log(`[review] Running review gates in ${cwd}`);
 
       // Derive complexity from pipeline variant
@@ -182,7 +183,7 @@ export function createPhaseHandlers(
       // Build diff for reviewer context
       let diff: string | undefined;
       try {
-        const diffResult = await git(['diff', config.branches.staging + '..HEAD']);
+        const diffResult = await git(['diff', config.branches.staging + '..HEAD'], repoRoot);
         if (diffResult.ok) diff = diffResult.value;
       } catch { /* diff is optional context */ }
 

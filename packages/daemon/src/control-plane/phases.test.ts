@@ -140,13 +140,13 @@ const mockOctokit = {
 } as any;
 const mockRuntime = { spawnSession: vi.fn() } as any;
 
-function createHandlers(configOverrides: Partial<Config> = {}, workReq?: WorkRequest) {
+function createHandlers(configOverrides: Partial<Config> = {}, workReq?: WorkRequest, repoRoot?: string) {
   const config = makeConfig(configOverrides);
   const mockCoordinator = { implement: vi.fn() } as any;
   return {
     handlers: createPhaseHandlers(
       config, 'owner', 'repo', mockRuntime, mockCoordinator,
-      mockOctokit, workReq ?? makeWorkRequest(), '/tmp/state', undefined, undefined,
+      mockOctokit, workReq ?? makeWorkRequest(), '/tmp/state', undefined, undefined, repoRoot,
     ),
     coordinator: mockCoordinator,
     config,
@@ -207,8 +207,8 @@ describe('createPhaseHandlers', () => {
       const { handlers } = createHandlers();
       const result = await handlers.detect!(makeRun());
       expect(result).toBe('success');
-      expect(mockGit).toHaveBeenCalledWith(['checkout', 'staging']);
-      expect(mockGit).toHaveBeenCalledWith(['checkout', '-b', 'feature/42', 'staging']);
+      expect(mockGit).toHaveBeenCalledWith(['checkout', 'staging'], undefined);
+      expect(mockGit).toHaveBeenCalledWith(['checkout', '-b', 'feature/42', 'staging'], undefined);
     });
 
     it('checks out existing branch when creation fails', async () => {
@@ -218,7 +218,17 @@ describe('createPhaseHandlers', () => {
       const { handlers } = createHandlers();
       const result = await handlers.detect!(makeRun());
       expect(result).toBe('success');
-      expect(mockGit).toHaveBeenCalledWith(['checkout', 'feature/42']);
+      expect(mockGit).toHaveBeenCalledWith(['checkout', 'feature/42'], undefined);
+    });
+
+    it('passes repoRoot to git calls instead of relying on process.cwd() (#77)', async () => {
+      mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // checkout staging
+      mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // checkout -b feature/42
+      const { handlers } = createHandlers({}, undefined, '/custom/repo/root');
+      const result = await handlers.detect!(makeRun());
+      expect(result).toBe('success');
+      expect(mockGit).toHaveBeenCalledWith(['checkout', 'staging'], '/custom/repo/root');
+      expect(mockGit).toHaveBeenCalledWith(['checkout', '-b', 'feature/42', 'staging'], '/custom/repo/root');
     });
 
     it('returns failure when fallback checkout also fails', async () => {
@@ -418,6 +428,18 @@ describe('createPhaseHandlers', () => {
       expect(mockRunReview).toHaveBeenCalledWith(
         expect.any(Array), expect.any(String),
         expect.objectContaining({ maxFixCycles: 5 }),
+      );
+    });
+
+    it('passes repoRoot to runReview instead of process.cwd() (#77)', async () => {
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
+      const { handlers } = createHandlers({}, undefined, '/custom/repo/root');
+      await handlers.review!(makeRun());
+
+      expect(mockRunReview).toHaveBeenCalledWith(
+        expect.any(Array), '/custom/repo/root',
+        expect.any(Object),
       );
     });
   });

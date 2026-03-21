@@ -53,7 +53,8 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   });
   const runtime = new SessionRuntime(config, costTracker);
   const gotchaStore = new GotchaStore(join(stateDir, 'gotchas.jsonl'));
-  const coordinator = new ImplementationCoordinator(runtime, process.cwd(), 300, 2000, gotchaStore);
+  const repoRoot = process.cwd();
+  const coordinator = new ImplementationCoordinator(runtime, repoRoot, 300, 2000, gotchaStore);
 
   // 3b. Start Remote Control
   const remoteControl = new RemoteControlManager();
@@ -91,7 +92,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           if (!claimResult.ok) continue;
           activeRuns++;
           repoManager!.notifyRunStart(repoId);
-          processWorkRequest(config, repoId, owner, name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined)
+          processWorkRequest(config, repoId, owner, name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot)
             .then((outcome) => {
               if (outcome === 'stuck') {
                 consecutiveStuckCount++;
@@ -200,7 +201,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     const agencyConfig = await readAgencyConfig(null, '');
     const handlers = run.variant === 'website'
       ? createWebsitePhaseHandlers(agencyConfig, null, notifyOctokit, runOwner, runRepoName, run.issueNumber, null)
-      : createPhaseHandlers(config, runOwner, runRepoName, runtime, coordinator, notifyOctokit, { issueNumber: run.issueNumber, title: run.title, body: '', labels: [], specRefs: [] }, stateDir, runWriter ?? undefined, run.id);
+      : createPhaseHandlers(config, runOwner, runRepoName, runtime, coordinator, notifyOctokit, { issueNumber: run.issueNumber, title: run.title, body: '', labels: [], specRefs: [] }, stateDir, runWriter ?? undefined, run.id, repoRoot);
     const table = getPipeline(run.variant);
 
     const resumeDetector = legacyDetector ?? createWorkDetector(new Octokit({ auth: process.env.GITHUB_TOKEN }), runOwner, runRepoName);
@@ -252,7 +253,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         const claimResult = await detector.claimWork(request.issueNumber);
         if (!claimResult.ok) continue;
         activeRuns++;
-        processWorkRequest(config, '', config.repo!.owner, config.repo!.name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined)
+        processWorkRequest(config, '', config.repo!.owner, config.repo!.name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot)
           .then((outcome) => {
             if (outcome === 'stuck') {
               consecutiveStuckCount++;
@@ -315,6 +316,7 @@ async function processWorkRequest(
   stateDir: string,
   runWriter?: SupabaseRunWriter,
   configReader?: SupabaseConfigReader,
+  repoRoot?: string,
 ): Promise<string> {
   const repoConfig = configReader?.getRepoConfig(owner, repoName);
   const variant = selectVariant(request);
@@ -363,7 +365,7 @@ async function processWorkRequest(
         request.issueNumber,
         null,          // repoId — wired in follow-on
       )
-    : createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir, runWriter ?? undefined, run.id);
+    : createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir, runWriter ?? undefined, run.id, repoRoot);
   const table = getPipeline(variant);
 
   console.log(`[daemon] Pipeline start for #${request.issueNumber}: ${request.title}`);
