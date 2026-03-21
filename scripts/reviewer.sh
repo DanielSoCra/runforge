@@ -22,7 +22,7 @@ while true; do
     git pull --no-rebase 2>&1 || { log "ERROR: git pull failed"; sleep 300; continue; }
   fi
 
-  if clyo -p --max-budget-usd 5 "Use the verified-codebase-review skill. Review this repo. Use gh CLI to check existing review-finding issues and determine which category area is stalest. Two-phase discovery+verification. HIGH confidence findings: create GitHub issue with review-finding + priority + category labels. MEDIUM: create with unverified label. Discard LOW. Also spot-check open issues and close any that have been fixed on dev."; then
+  if claude --dangerously-skip-permissions -p --max-budget-usd 5 "Use the verified-codebase-review skill. Review this repo. Use gh CLI to check existing review-finding issues and determine which category area is stalest. Two-phase discovery+verification. HIGH confidence findings: create GitHub issue with review-finding + priority + category labels. MEDIUM: create with unverified label. Discard LOW. Also spot-check open issues and close any that have been fixed on dev."; then
     FAIL_COUNT=0
     date '+%Y-%m-%d %H:%M:%S' > ~/logs/claude-reviewer.heartbeat
     log "Review cycle complete"
@@ -30,7 +30,7 @@ while true; do
     FAIL_COUNT=$((FAIL_COUNT + 1))
     BACKOFF=$(( 60 * (2 ** (FAIL_COUNT - 1)) ))
     [ $BACKOFF -gt $MAX_BACKOFF ] && BACKOFF=$MAX_BACKOFF
-    log "ERROR: clyo failed (attempt $FAIL_COUNT), backing off ${BACKOFF}s"
+    log "ERROR: claude --dangerously-skip-permissions failed (attempt $FAIL_COUNT), backing off ${BACKOFF}s"
     sleep $BACKOFF
     continue
   fi

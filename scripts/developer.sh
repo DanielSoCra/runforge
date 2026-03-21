@@ -22,7 +22,7 @@ while true; do
     git pull --no-rebase 2>&1 || { log "ERROR: git pull failed"; sleep 300; continue; }
   fi
 
-  clyo -p --max-budget-usd 10 "Use the fix-review-issues skill. Use gh CLI to find the highest priority open issue labeled review-finding that does not have in-progress or blocked labels (check P0 first, then P1, P2, P3). If none found, exit 0. Add in-progress label. Fix it: read the spec chain first (traceability.yml → L3 → L2 → L1), implement on a fix/ branch from dev, write a regression test, run pnpm -r run test and typecheck, use the requesting-code-review superpower to review changes, rebase onto dev and merge. Close the issue with gh issue close and note the commit SHA. If blocked after 3 attempts, add blocked label and move on."
+  claude --dangerously-skip-permissions -p --max-budget-usd 10 "Use the fix-review-issues skill. Use gh CLI to find the highest priority open issue labeled review-finding that does not have in-progress or blocked labels (check P0 first, then P1, P2, P3). If none found, exit 0. Add in-progress label. Fix it: read the spec chain first (traceability.yml → L3 → L2 → L1), implement on a fix/ branch from dev, write a regression test, run pnpm -r run test and typecheck, use the requesting-code-review superpower to review changes, rebase onto dev and merge. Close the issue with gh issue close and note the commit SHA. If blocked after 3 attempts, add blocked label and move on."
   EXIT_CODE=$?
 
   if [ $EXIT_CODE -eq 0 ]; then
@@ -34,7 +34,7 @@ while true; do
     FAIL_COUNT=$((FAIL_COUNT + 1))
     BACKOFF=$(( 60 * (2 ** (FAIL_COUNT - 1)) ))
     [ $BACKOFF -gt $MAX_BACKOFF ] && BACKOFF=$MAX_BACKOFF
-    log "ERROR: clyo failed (exit $EXIT_CODE, attempt $FAIL_COUNT), backing off ${BACKOFF}s"
+    log "ERROR: claude --dangerously-skip-permissions failed (exit $EXIT_CODE, attempt $FAIL_COUNT), backing off ${BACKOFF}s"
     sleep $BACKOFF
   fi
 done
