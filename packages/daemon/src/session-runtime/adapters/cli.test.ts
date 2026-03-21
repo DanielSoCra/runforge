@@ -163,4 +163,20 @@ describe('CliAdapter containment hook setup', () => {
     expect(restored.customSetting).toBe(true);
     expect(restored.hooks).toBeUndefined();
   });
+
+  it('uses sessionStartTime for marker path so it matches SESSION_START_TIME env var (#37)', () => {
+    const adapter = new CliAdapter();
+    const fixedTime = 1700000000000;
+    const paths = adapter.setupHooks(tempDir, DEFAULT_POLICY, 30000, fixedTime);
+
+    // Marker path should use the same timestamp passed as sessionStartTime
+    expect(paths.markerPath).toContain(`timeout-warned-${fixedTime}.marker`);
+
+    // Script filenames should also use this timestamp
+    for (const p of paths.scriptPaths) {
+      expect(p).toContain(String(fixedTime));
+    }
+
+    adapter.cleanupHooks(paths);
+  });
 });

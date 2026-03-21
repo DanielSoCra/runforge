@@ -8,6 +8,7 @@ import type { AgentDefinition, SessionContext, SessionResult, ExitStatus, Pitfal
 import type { ContainmentPolicy } from '../containment-hooks.js';
 import type { ProviderAdapter } from './types.js';
 import { generateContainmentScript } from '../generate-containment-script.js';
+import { generateTimeoutHookScript } from '../timeout-hook-script.js';
 import { SessionError } from '../session-error.js';
 
 export class CliAdapter implements ProviderAdapter {
@@ -80,18 +81,27 @@ export class CliAdapter implements ProviderAdapter {
   }
 
   /**
-   * Set up a PreToolUse containment hook in the workspace's .claude/ directory.
+   * Set up PreToolUse hooks (containment + timeout) in the workspace's .claude/ directory.
    * Returns paths to clean up after the session exits.
    */
-  setupContainmentHook(
+  setupHooks(
     cwd: string,
     policy: ContainmentPolicy,
-  ): { scriptPath: string; settingsPath: string } {
-    // Write self-contained hook script to a temp file
-    const scriptPath = join(tmpdir(), `containment-hook-${process.pid}-${Date.now()}.mjs`);
-    writeFileSync(scriptPath, generateContainmentScript(policy), { mode: 0o755 });
+    timeoutMs: number,
+    sessionStartTime?: number,
+  ): { scriptPaths: string[]; settingsPath: string; markerPath?: string } {
+    const now = sessionStartTime ?? Date.now();
+    // Write self-contained hook scripts to temp files
+    const containmentPath = join(tmpdir(), `containment-hook-${process.pid}-${now}.mjs`);
+    writeFileSync(containmentPath, generateContainmentScript(policy), { mode: 0o755 });
 
-    // Write .claude/settings.local.json with PreToolUse hook
+    const timeoutPath = join(tmpdir(), `timeout-hook-${process.pid}-${now}.mjs`);
+    writeFileSync(timeoutPath, generateTimeoutHookScript(), { mode: 0o755 });
+
+    // Marker file path for one-shot timeout detection cleanup
+    const markerPath = join(tmpdir(), `timeout-warned-${now}.marker`);
+
+    // Write .claude/settings.local.json with PreToolUse hooks
     const claudeDir = join(cwd, '.claude');
     mkdirSync(claudeDir, { recursive: true });
     const settingsPath = join(claudeDir, 'settings.local.json');
@@ -103,19 +113,30 @@ export class CliAdapter implements ProviderAdapter {
     }
     settings.hooks = {
       ...(settings.hooks as Record<string, unknown> ?? {}),
-      PreToolUse: [{
-        matcher: '',
-        hooks: [{ type: 'command', command: `node "${scriptPath}"` }],
-      }],
+      PreToolUse: [
+        {
+          matcher: '',
+          hooks: [{ type: 'command', command: `node "${containmentPath}"` }],
+        },
+        {
+          matcher: '',
+          hooks: [{ type: 'command', command: `node "${timeoutPath}"` }],
+        },
+      ],
     };
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
-    return { scriptPath, settingsPath };
+    return { scriptPaths: [containmentPath, timeoutPath], settingsPath, markerPath };
   }
 
-  cleanupContainmentHook(paths: { scriptPath: string; settingsPath: string }): void {
-    try { unlinkSync(paths.scriptPath); } catch { /* already cleaned */ }
-    // Remove only our hook from settings — restore previous state
+  cleanupHooks(paths: { scriptPaths: string[]; settingsPath: string; markerPath?: string }): void {
+    for (const p of paths.scriptPaths) {
+      try { unlinkSync(p); } catch { /* already cleaned */ }
+    }
+    if (paths.markerPath) {
+      try { unlinkSync(paths.markerPath); } catch { /* may not exist */ }
+    }
+    // Remove only our hooks from settings — restore previous state
     try {
       const content = readFileSync(paths.settingsPath, 'utf8');
       const settings = JSON.parse(content) as Record<string, unknown>;
@@ -138,12 +159,17 @@ export class CliAdapter implements ProviderAdapter {
     options?: { cwd?: string; jsonSchema?: string; containmentPolicy?: ContainmentPolicy },
   ): Promise<Result<SessionResult>> {
     const args = this.buildArgs(def, prompt, options?.jsonSchema);
-    const env = this.buildEnv();
+    const sessionStartTime = Date.now();
+    const extraEnv: Record<string, string> = {
+      SESSION_START_TIME: String(sessionStartTime),
+      SESSION_TIMEOUT_MS: String(def.timeoutMs),
+    };
+    const env = this.buildEnv(extraEnv);
 
-    // Set up containment hook if policy provided and cwd is known
-    let hookPaths: { scriptPath: string; settingsPath: string } | undefined;
+    // Set up hooks (containment + timeout) if policy provided and cwd is known
+    let hookPaths: { scriptPaths: string[]; settingsPath: string; markerPath?: string } | undefined;
     if (options?.containmentPolicy && options.cwd) {
-      hookPaths = this.setupContainmentHook(options.cwd, options.containmentPolicy);
+      hookPaths = this.setupHooks(options.cwd, options.containmentPolicy, def.timeoutMs, sessionStartTime);
     }
 
     return new Promise((resolve) => {
@@ -166,19 +192,20 @@ export class CliAdapter implements ProviderAdapter {
 
       proc.on('close', (code) => {
         clearTimeout(timer);
-        if (hookPaths) this.cleanupContainmentHook(hookPaths);
+        if (hookPaths) this.cleanupHooks(hookPaths);
         const stdout = Buffer.concat(chunks).toString();
 
         if (timedOut) {
-          // Extract cost from partial stdout — session may have consumed tokens before timeout
           const timedOutParsed = this.parseOutput(stdout);
           const timedOutCost = timedOutParsed.ok ? timedOutParsed.value.cost : 0;
+          const timedOutOutput = timedOutParsed.ok ? timedOutParsed.value.output : stdout.trim();
           resolve(ok({
-            output: stdout.trim(),
+            output: timedOutOutput,
             structuredData: null,
             cost: timedOutCost,
-            pitfallMarkers: [],
+            pitfallMarkers: this.extractPitfalls(timedOutOutput),
             exitStatus: 'timed-out' as ExitStatus,
+            handoffNote: this.extractHandoff(timedOutOutput),
           }));
           return;
         }
@@ -197,19 +224,29 @@ export class CliAdapter implements ProviderAdapter {
           cost: parsed.value.cost,
           pitfallMarkers: this.extractPitfalls(parsed.value.output),
           exitStatus,
+          handoffNote: this.extractHandoff(parsed.value.output),
         }));
       });
 
       proc.on('error', (e) => {
         clearTimeout(timer);
-        if (hookPaths) this.cleanupContainmentHook(hookPaths);
-        // Try to extract cost from any partial stdout before reporting error
+        if (hookPaths) this.cleanupHooks(hookPaths);
         const partialStdout = Buffer.concat(chunks).toString();
         const parsed = this.parseOutput(partialStdout);
         const cost = parsed.ok ? parsed.value.cost : 0;
         resolve(err(new SessionError(e.message, cost)));
       });
     });
+  }
+
+  /**
+   * Extract a handoff note from session output delimited by [HANDOFF]...[/HANDOFF].
+   * Returns undefined if absent or empty (spec: treat empty as absent).
+   */
+  extractHandoff(output: string): string | undefined {
+    const match = output.match(/\[HANDOFF\]([\s\S]*?)\[\/HANDOFF\]/);
+    const note = match?.[1]?.trim();
+    return note || undefined;
   }
 
   private extractPitfalls(output: string): PitfallMarker[] {
