@@ -12,7 +12,7 @@ export default async function CostPage() {
 
   const { data: events, error: eventsError } = await supabase
     .from('cost_events')
-    .select('cost, recorded_at, session_type')
+    .select('cost, recorded_at, session_type, runs(repo_name)')
     .gte('recorded_at', since.toISOString())
     .order('recorded_at');
   if (eventsError) {
@@ -36,6 +36,14 @@ export default async function CostPage() {
 
   const totalCost = events?.reduce((s, e) => s + Number(e.cost), 0) ?? 0;
 
+  // By repository
+  const byRepo: Record<string, number> = {};
+  events?.forEach((e) => {
+    const run = e.runs as { repo_name: string } | null;
+    const repoName = run?.repo_name ?? 'unknown';
+    byRepo[repoName] = (byRepo[repoName] ?? 0) + Number(e.cost);
+  });
+
   // By session type
   const byType: Record<string, number> = {};
   events?.forEach((e) => {
@@ -54,6 +62,24 @@ export default async function CostPage() {
           {chartData.length === 0
             ? <p className="text-muted-foreground text-sm py-4">No cost data for the last 30 days.</p>
             : <CostChart data={chartData} />}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle>By Repository</CardTitle></CardHeader>
+        <CardContent>
+          <div className="space-y-2" data-testid="by-repo">
+            {Object.entries(byRepo)
+              .sort(([, a], [, b]) => b - a)
+              .map(([repo, cost]) => (
+              <div key={repo} className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground font-mono">{repo}</span>
+                <span className="font-mono">${cost.toFixed(4)}</span>
+              </div>
+            ))}
+            {Object.keys(byRepo).length === 0 && (
+              <p className="text-muted-foreground text-sm">No cost data for the last 30 days.</p>
+            )}
+          </div>
         </CardContent>
       </Card>
       <Card>
