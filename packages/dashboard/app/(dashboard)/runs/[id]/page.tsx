@@ -33,6 +33,14 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
         <p className="text-muted-foreground">{run.issue_title}</p>
       </div>
 
+      {/* Fix attempts */}
+      {run.fix_attempts > 0 && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span>Fix attempts:</span>
+          <span className="font-semibold text-foreground">{run.fix_attempts}</span>
+        </div>
+      )}
+
       {/* Phase timeline */}
       <Card>
         <CardHeader><CardTitle>Phases</CardTitle></CardHeader>
