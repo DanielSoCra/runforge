@@ -1,6 +1,7 @@
 // src/control-plane/pipeline.ts
 import type { Phase, PhaseEvent, RunState } from '../types.js';
 import { transition, isTerminal, isComplete, applyGlobalTransition, type TransitionTable } from './fsm.js';
+import { hashError, isCircularError, recordErrorHash } from './error-hash.js';
 import type { StateManager } from './state.js';
 import type { CostTracker } from '../session-runtime/cost.js';
 import type { SupabaseRunWriter, PhaseRecord } from '../supabase/run-writer.js';
@@ -107,11 +108,13 @@ export async function runPipeline(
     // Execute the phase handler
     console.log(`[pipeline] Phase: ${run.phase}`);
     let event: PhaseEvent;
+    let currentError: string | undefined;
     try {
       event = await handler(run);
     } catch (err) {
       event = 'failure';
-      lastError = err instanceof Error ? err.message : String(err);
+      currentError = err instanceof Error ? err.message : String(err);
+      lastError = currentError;
       console.error(`[pipeline] Phase ${run.phase} threw:`, err);
     }
 
@@ -137,6 +140,24 @@ export async function runPipeline(
         phases: buildPhaseRecords(run),
       });
       return { outcome: 'complete', run };
+    }
+
+    // Circular fix detection: hash the error and check for repeated failures.
+    // Runs before advancePhase so circular detection takes precedence over retry exhaustion.
+    // Only applies to thrown exceptions (currentError set); returned 'failure' events have no error to hash.
+    if (event === 'failure' && currentError) {
+      const errHash = hashError(currentError);
+      run.errorHashes = recordErrorHash(errHash, run.errorHashes);
+      if (isCircularError(errHash, run.errorHashes)) {
+        console.log(`[pipeline] Circular error detected in ${run.phase} (hash ${errHash}), transitioning to stuck`);
+        run.phase = 'stuck';
+        await stateMgr.saveRunState(run);
+        void runWriter?.upsertRun(run.id, {
+          current_phase: run.phase,
+          phases: buildPhaseRecords(run),
+        });
+        return { outcome: 'stuck', run, error: `Circular error detected: ${lastError}` };
+      }
     }
 
     // Advance the FSM

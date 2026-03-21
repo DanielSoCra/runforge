@@ -179,6 +179,59 @@ describe('runPipeline', () => {
     expect(result.error).toContain('string error');
   });
 
+  it('transitions to stuck on circular error before exhausting retries (#88)', async () => {
+    let attempts = 0;
+    const handlers: PhaseHandlerMap = {
+      detect: async () => 'success' as PhaseEvent,
+      classify: async () => 'success:simple' as PhaseEvent,
+      implement: async () => { attempts++; throw new Error('connection refused at db:5432'); },
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    // Set maxAttempts to 5 so circular detection (threshold 3) fires before retries exhaust
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker, {
+      maxAttempts: { implement: 5 },
+    });
+    expect(result.outcome).toBe('stuck');
+    expect(result.error).toContain('Circular error detected');
+    expect(attempts).toBe(3); // stopped at 3 (circular), not 5 (max retries)
+    expect(Object.values(run.errorHashes).some((count) => count >= 3)).toBe(true);
+  });
+
+  it('does not trigger circular detection for distinct errors (#88)', async () => {
+    let attempts = 0;
+    const handlers: PhaseHandlerMap = {
+      detect: async () => 'success' as PhaseEvent,
+      classify: async () => 'success:simple' as PhaseEvent,
+      implement: async () => {
+        attempts++;
+        // Each attempt throws a different error — no circular pattern
+        throw new Error(`unique error ${attempts}`);
+      },
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('stuck');
+    // Should exhaust retries, not circular detection
+    expect(result.error).not.toContain('Circular error detected');
+    expect(attempts).toBe(3);
+  });
+
+  it('records error hashes on run.errorHashes across failures (#88)', async () => {
+    let attempts = 0;
+    const handlers: PhaseHandlerMap = {
+      detect: async () => 'success' as PhaseEvent,
+      classify: async () => 'success:simple' as PhaseEvent,
+      implement: async () => { attempts++; throw new Error('same error every time'); },
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    await runPipeline(run, table, handlers, stateMgr, costTracker);
+    // errorHashes should be populated (not empty as before the fix)
+    expect(Object.keys(run.errorHashes).length).toBeGreaterThan(0);
+  });
+
   it('calls runWriter.upsertRun on phase transitions', async () => {
     const upsertRun = vi.fn().mockResolvedValue(undefined);
     const runWriter = { upsertRun, writeCostEvent: vi.fn() } as any;
