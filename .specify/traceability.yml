@@ -58,7 +58,7 @@ L0-AC-VISION:
 # --- Auto-Claude L1 specs ---
 
 FUNC-AC-PIPELINE:
-  children: [ARCH-AC-CONTROL-PLANE]
+  children: [ARCH-AC-CONTROL-PLANE, ARCH-AC-SPEC-PIPELINE]
   status: draft
 
 FUNC-AC-IMPLEMENTATION:
@@ -109,6 +109,10 @@ ARCH-AC-PLUGINS:
 ARCH-AC-CONTROL-PLANE:
   parent: FUNC-AC-PIPELINE
   children: [STACK-AC-CONTROL-PLANE]
+  status: draft
+
+ARCH-AC-SPEC-PIPELINE:
+  parent: FUNC-AC-PIPELINE
   status: draft
 
 ARCH-AC-IMPLEMENTATION:
