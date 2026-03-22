@@ -148,6 +148,22 @@ describe('extractActivityEvents', () => {
       );
     });
 
+    it('builds full GitHub PR URL when repoUrl is provided (#228)', () => {
+      const events = extractActivityEvents(baseSignals, previousSnapshot, 'https://github.com/acme/web');
+
+      const mergeEvents = events.filter((e) => e.event_type === 'merge');
+      expect(mergeEvents).toHaveLength(1);
+      expect(mergeEvents[0].links[0].url).toBe('https://github.com/acme/web/pull/50');
+    });
+
+    it('falls back to fragment URL when repoUrl is null (#228)', () => {
+      const events = extractActivityEvents(baseSignals, previousSnapshot, null);
+
+      const mergeEvents = events.filter((e) => e.event_type === 'merge');
+      expect(mergeEvents).toHaveLength(1);
+      expect(mergeEvents[0].links[0].url).toBe('#50');
+    });
+
     it('does not flag non-merge commits as merges', () => {
       const events = extractActivityEvents(baseSignals, previousSnapshot);
 
