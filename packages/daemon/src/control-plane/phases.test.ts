@@ -394,6 +394,26 @@ describe('createPhaseHandlers', () => {
       );
     });
 
+    it('passes variant and diagnosisDetail to coordinator for bug pipeline (#146)', async () => {
+      const { handlers, coordinator } = createHandlers();
+      coordinator.implement.mockResolvedValue({
+        ok: true,
+        value: { success: true, totalCost: 1.0 },
+      });
+      const run = makeRun({
+        variant: 'bug',
+        diagnosisDetail: '{"type":"A","confidence":0.9,"affectedSpecs":["FUNC-AC-PIPELINE"]}',
+      });
+      await handlers.implement!(run);
+      expect(coordinator.implement).toHaveBeenCalledWith(
+        expect.anything(), 'feature/42', undefined, undefined,
+        expect.objectContaining({
+          variant: 'bug',
+          diagnosisDetail: '{"type":"A","confidence":0.9,"affectedSpecs":["FUNC-AC-PIPELINE"]}',
+        }),
+      );
+    });
+
     it('clears handoff notes from RunState after successful implementation (#121)', async () => {
       const { handlers, coordinator } = createHandlers();
       coordinator.implement.mockResolvedValue({
@@ -618,6 +638,17 @@ describe('createPhaseHandlers', () => {
         mockRuntime, 42, 'Fix something', '', '', undefined, undefined, undefined,
       );
       expect(mockRouteDiagnosis).toHaveBeenCalledWith(typeADiagnosis, 0.7);
+    });
+
+    it('stores full diagnosisDetail JSON on run state for bug-worker (#146)', async () => {
+      mockDiagnose.mockResolvedValue({ ok: true, value: typeADiagnosis });
+      mockRouteDiagnosis.mockReturnValue({ route: 'bug-pipeline', diagnosis: typeADiagnosis });
+
+      const { handlers } = createHandlers();
+      const run = makeRun({ variant: 'bug' });
+      await handlers.diagnose!(run);
+
+      expect(run.diagnosisDetail).toBe(JSON.stringify(typeADiagnosis));
     });
 
     it('loads spec content from .specify/ instead of passing spec IDs (#143)', async () => {

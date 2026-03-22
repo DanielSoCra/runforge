@@ -1,5 +1,5 @@
 // src/implementation/batch.ts
-import type { Unit, SessionResult, ExitStatus, PitfallMarker } from '../types.js';
+import type { Unit, SessionResult, ExitStatus, PitfallMarker, PipelineVariant } from '../types.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import type { GotchaStore } from '../knowledge/gotcha-store.js';
@@ -37,6 +37,8 @@ export async function executeBatch(
   unitPitfalls?: Map<string, string>,
   gotchaStore?: GotchaStore,
   unitHandoffs?: Map<string, string>,
+  variant?: PipelineVariant,
+  bugContext?: { bugReport: string; diagnosis: string },
 ): Promise<BatchResult> {
   const staggerMs = options?.staggerMs ?? 2000;
   const maxDiffLines = options?.maxDiffLines ?? 300;
@@ -45,7 +47,7 @@ export async function executeBatch(
     // Stagger delay between starts
     if (index > 0) await delay(index * staggerMs);
     const pitfalls = unitPitfalls?.get(unit.id) ?? '';
-    return executeUnit(unit, featureBranch, issueNumber, runtime, repoRoot, maxDiffLines, runWriter, runId, pitfalls, gotchaStore, unitHandoffs?.get(unit.id));
+    return executeUnit(unit, featureBranch, issueNumber, runtime, repoRoot, maxDiffLines, runWriter, runId, pitfalls, gotchaStore, unitHandoffs?.get(unit.id), variant, bugContext);
   });
 
   const settled = await Promise.allSettled(promises);
@@ -81,6 +83,8 @@ async function executeUnit(
   pitfalls?: string,
   gotchaStore?: GotchaStore,
   handoffNote?: string,
+  variant?: PipelineVariant,
+  bugContext?: { bugReport: string; diagnosis: string },
 ): Promise<UnitResult> {
   // 1. Create worktree
   console.log(`[batch] Creating worktree for ${unit.id} from ${featureBranch}`);
@@ -99,21 +103,31 @@ async function executeUnit(
   console.log(`[batch] Worktree created at ${worktreeResult.value}`);
 
   try {
-    // 2. Spawn worker session
-    console.log(`[batch] Spawning worker session for ${unit.id}`);
+    // 2. Spawn worker session (bug-worker for bug pipeline, worker otherwise)
+    const sessionType = variant === 'bug' ? 'bug-worker' : 'worker';
+    console.log(`[batch] Spawning ${sessionType} session for ${unit.id}`);
     // Prepend handoff note from previous attempt (ARCH-AC-HANDOFF step 7)
     const taskContext = handoffNote
       ? `[PREVIOUS ATTEMPT]\n${handoffNote}\n\n${unit.context}`
       : unit.context;
-    const variables: Record<string, string> = {
-      task: taskContext,
-      specs: unit.specContent,
-      verification: unit.verificationCommand,
-      pitfalls: pitfalls || '',
-    };
+    const variables: Record<string, string> = variant === 'bug' && bugContext
+      ? {
+          bugReport: handoffNote
+            ? `[PREVIOUS ATTEMPT]\n${handoffNote}\n\n${bugContext.bugReport}`
+            : bugContext.bugReport,
+          diagnosis: bugContext.diagnosis,
+          specs: unit.specContent,
+          pitfalls: pitfalls || '',
+        }
+      : {
+          task: taskContext,
+          specs: unit.specContent,
+          verification: unit.verificationCommand,
+          pitfalls: pitfalls || '',
+        };
 
     const sessionResult = await runtime.spawnSession(
-      'worker',
+      sessionType,
       {
         variables,
         workspacePath: worktreeResult.value,

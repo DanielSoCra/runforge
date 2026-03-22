@@ -1,6 +1,6 @@
 import { ok, err, type Result } from '../lib/result.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
-import type { WorkRequest, TaskGraph, Gotcha } from '../types.js';
+import type { WorkRequest, TaskGraph, Gotcha, PipelineVariant } from '../types.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import type { GotchaStore } from '../knowledge/gotcha-store.js';
 import { createSingleUnitGraph, getUnitsByBatch } from './task-graph.js';
@@ -36,7 +36,7 @@ export class ImplementationCoordinator {
     featureBranch: string,
     runWriter?: SupabaseRunWriter,
     runId?: string,
-    options?: { complexity?: 'simple' | 'standard' | 'complex'; specContent?: string; checkpoint?: number; handoffNotes?: Map<string, string> },
+    options?: { complexity?: 'simple' | 'standard' | 'complex'; specContent?: string; checkpoint?: number; handoffNotes?: Map<string, string>; variant?: PipelineVariant; diagnosisDetail?: string },
   ): Promise<Result<ImplementResult>> {
     // 1. Get task graph
     let graph: TaskGraph;
@@ -101,6 +101,8 @@ export class ImplementationCoordinator {
         unitPitfalls,
         this.gotchaStore,
         options?.handoffNotes,
+        options?.variant,
+        options?.variant === 'bug' ? { bugReport: request.body, diagnosis: options?.diagnosisDetail ?? '' } : undefined,
       );
 
       allResults.push(...batchResult.results);

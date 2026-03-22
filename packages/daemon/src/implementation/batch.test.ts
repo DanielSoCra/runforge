@@ -226,6 +226,85 @@ describe('executeBatch', () => {
     expect(variables).toHaveProperty('pitfalls', 'Watch out for X');
   });
 
+  it('spawns bug-worker session with bugReport and diagnosis when variant is bug (#146)', async () => {
+    const runtime = createMockRuntime();
+    const unit = makeUnit('a');
+    unit.context = 'fix the widget';
+    unit.specContent = 'widget spec';
+    const bugContext = { bugReport: 'widget is broken', diagnosis: '{"type":"A","confidence":0.9}' };
+
+    await executeBatch(
+      [unit], 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 },
+      undefined, undefined, undefined, undefined, undefined,
+      'bug', bugContext,
+    );
+
+    expect(runtime.spawnSession).toHaveBeenCalledWith(
+      'bug-worker',
+      expect.objectContaining({
+        variables: expect.objectContaining({
+          bugReport: 'widget is broken',
+          diagnosis: '{"type":"A","confidence":0.9}',
+          specs: 'widget spec',
+          pitfalls: '',
+        }),
+      }),
+      1,
+      undefined,
+      undefined,
+      undefined,
+    );
+    // bug-worker variables should NOT include task or verification
+    const spawnCall = runtime.spawnSession.mock.calls[0];
+    const variables = spawnCall?.[1]?.variables as Record<string, string>;
+    expect(variables).not.toHaveProperty('task');
+    expect(variables).not.toHaveProperty('verification');
+  });
+
+  it('prepends handoff note to bugReport for bug-worker retries (#146)', async () => {
+    const runtime = createMockRuntime();
+    const unit = makeUnit('a');
+    const bugContext = { bugReport: 'widget is broken', diagnosis: '{"type":"A"}' };
+    const unitHandoffs = new Map([['a', 'Stopped at step 2']]);
+
+    await executeBatch(
+      [unit], 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 },
+      undefined, undefined, undefined, undefined, unitHandoffs,
+      'bug', bugContext,
+    );
+
+    const spawnCall = runtime.spawnSession.mock.calls[0];
+    const variables = spawnCall?.[1]?.variables as Record<string, string>;
+    expect(variables.bugReport).toContain('[PREVIOUS ATTEMPT]');
+    expect(variables.bugReport).toContain('Stopped at step 2');
+    expect(variables.bugReport).toContain('widget is broken');
+  });
+
+  it('spawns regular worker session when variant is not bug (#146)', async () => {
+    const runtime = createMockRuntime();
+    const unit = makeUnit('a');
+
+    await executeBatch(
+      [unit], 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 },
+      undefined, undefined, undefined, undefined, undefined,
+      'feature-simple', undefined,
+    );
+
+    expect(runtime.spawnSession).toHaveBeenCalledWith(
+      'worker',
+      expect.objectContaining({
+        variables: expect.objectContaining({
+          task: 'implement something',
+          specs: 'spec content',
+        }),
+      }),
+      1,
+      undefined,
+      undefined,
+      undefined,
+    );
+  });
+
   it('propagates timed-out exit status through UnitResult (#64)', async () => {
     const timedOutResult: SessionResult = {
       output: 'timed out waiting', structuredData: null, cost: 1.2,
