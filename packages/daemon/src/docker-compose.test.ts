@@ -4,6 +4,18 @@ import { resolve } from 'path';
 
 const REPO_ROOT = resolve(__dirname, '../../..');
 
+describe('docker-compose.yml daemon env vars', () => {
+  const raw = readFileSync(resolve(REPO_ROOT, 'docker-compose.yml'), 'utf-8');
+
+  it('should forward SUPABASE_URL to the daemon', () => {
+    expect(raw).toContain('SUPABASE_URL');
+  });
+
+  it('should forward SUPABASE_SERVICE_ROLE_KEY to the daemon', () => {
+    expect(raw).toContain('SUPABASE_SERVICE_ROLE_KEY');
+  });
+});
+
 describe('docker-compose git config', () => {
   const composeFiles = ['docker-compose.yml', 'docker-compose.prod.yml'];
 
