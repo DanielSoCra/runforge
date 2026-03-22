@@ -3,7 +3,7 @@ id: FUNC-AC-COORDINATION
 type: functional
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 1
 ---
 

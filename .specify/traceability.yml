@@ -94,7 +94,7 @@ FUNC-AC-HANDOFF:
   status: draft
 
 FUNC-AC-ENRICHED-COMMITS:
-  children: [ARCH-AC-ENRICHED-COMMITS]
+  children: []  # ARCH-AC-ENRICHED-COMMITS re-parented under FUNC-AC-LEARNING
   status: deprecated
 
 FUNC-AC-PLUGINS:
