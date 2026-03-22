@@ -4,8 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/auth';
 import { loadDashboardRegistry } from '@/lib/plugins/registry';
 import Anthropic from '@anthropic-ai/sdk';
-import { readFile, readdir, mkdir, writeFile, stat } from 'fs/promises';
-import { join, resolve, normalize } from 'path';
+import { readFile, readdir, mkdir, writeFile, stat, realpath } from 'fs/promises';
+import { join, resolve } from 'path';
 
 // SAFE_PATTERN prevents prompt injection by blocking shell metacharacters, spaces, and control
 // characters. It is not a strict GitHub identifier validator — use for LLM prompt safety only.
@@ -172,20 +172,44 @@ export async function exportPlugin(
     return { error: `Unknown plugin: ${pluginId}` };
   }
 
-  // Validate targetRepoPath: must be absolute, no traversal, and must exist as a directory
-  const resolved = resolve(targetRepoPath);
+  // Validate targetRepoPath: must be absolute, exist as a directory, and fall within
+  // the EXPORT_ALLOWED_DIRS allowlist. Fail closed if no allowlist is configured.
   if (!targetRepoPath.startsWith('/')) {
     return { error: 'Target path must be absolute' };
   }
 
+  const resolved = resolve(targetRepoPath);
   const targetStat = await stat(resolved).catch(() => null);
   if (!targetStat || !targetStat.isDirectory()) {
     return { error: 'Target path does not exist or is not a directory' };
   }
 
+  // Resolve symlinks to prevent symlink-based escapes
+  const realTarget = await realpath(resolved);
+
+  // Allowlist check: EXPORT_ALLOWED_DIRS is a colon-separated list of allowed base dirs.
+  // If not configured, fail closed — no exports are permitted.
+  const allowedDirsRaw = process.env['EXPORT_ALLOWED_DIRS'];
+  if (!allowedDirsRaw) {
+    return { error: 'Export not configured: EXPORT_ALLOWED_DIRS is not set' };
+  }
+  const allowedDirs = allowedDirsRaw.split(':').filter(Boolean);
+  // Resolve allowlist entries too (handles symlinks like /tmp → /private/tmp on macOS)
+  const resolvedAllowedDirs = await Promise.all(
+    allowedDirs.map(dir => realpath(dir).catch(() => dir)),
+  );
+  const withinAllowed = resolvedAllowedDirs.some(dir => {
+    const normalizedDir = dir.endsWith('/') ? dir : dir + '/';
+    return realTarget === dir || realTarget.startsWith(normalizedDir);
+  });
+  if (!withinAllowed) {
+    return { error: 'Target path is outside allowed directories' };
+  }
+
   const pluginsDir = getPluginsDir();
   const skillsDir = join(pluginsDir, pluginId, 'skills');
-  const destDir = join(resolved, '.claude', 'plugins', pluginId, 'skills');
+  // Use realTarget (symlink-resolved) so the write path matches the validated path
+  const destDir = join(realTarget, '.claude', 'plugins', pluginId, 'skills');
 
   const files = await readdir(skillsDir).catch(() => [] as string[]);
   const mdFiles = files.filter(f => f.endsWith('.md'));

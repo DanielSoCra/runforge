@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, readFile, readdir, mkdir, writeFile } from 'fs/promises';
+import { mkdtemp, rm, readFile, readdir, mkdir, writeFile, symlink } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -240,10 +240,13 @@ describe('exportPlugin', () => {
     pluginsDir = join(tmpDir, 'plugins');
     // Set PLUGINS_DIR so the Server Action reads from our temp directory
     process.env['PLUGINS_DIR'] = pluginsDir;
+    // Set EXPORT_ALLOWED_DIRS to allow writing within our temp directory
+    process.env['EXPORT_ALLOWED_DIRS'] = tmpDir;
   });
 
   afterEach(async () => {
     delete process.env['PLUGINS_DIR'];
+    delete process.env['EXPORT_ALLOWED_DIRS'];
     await rm(tmpDir, { recursive: true, force: true });
   });
 
@@ -346,5 +349,91 @@ describe('exportPlugin', () => {
     const destDir = join(targetRepo, '.claude', 'plugins', 'web-stack', 'skills');
     const files = await readdir(destDir);
     expect(files).toEqual(['guide.md']);
+  });
+
+  it('rejects when EXPORT_ALLOWED_DIRS is not set (fail closed)', async () => {
+    delete process.env['EXPORT_ALLOWED_DIRS'];
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
+    vi.mocked(createClient).mockResolvedValue({} as never);
+
+    const targetRepo = join(tmpDir, 'target-repo');
+    await mkdir(targetRepo, { recursive: true });
+
+    const result = await exportPlugin('repo-id', 'web-stack', targetRepo);
+    expect(result.error).toContain('EXPORT_ALLOWED_DIRS is not set');
+  });
+
+  it('rejects target path outside allowed directories', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
+    vi.mocked(createClient).mockResolvedValue({} as never);
+
+    // Set allowed dirs to a different location than where we'll target
+    const allowedDir = await mkdtemp(join(tmpdir(), 'allowed-'));
+    process.env['EXPORT_ALLOWED_DIRS'] = allowedDir;
+
+    const disallowedTarget = await mkdtemp(join(tmpdir(), 'disallowed-'));
+
+    const result = await exportPlugin('repo-id', 'web-stack', disallowedTarget);
+    expect(result.error).toContain('outside allowed directories');
+
+    await rm(allowedDir, { recursive: true, force: true });
+    await rm(disallowedTarget, { recursive: true, force: true });
+  });
+
+  it('rejects symlink-based path escapes', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
+    vi.mocked(createClient).mockResolvedValue({} as never);
+
+    // Create an outside directory that the symlink will point to
+    const outsideDir = await mkdtemp(join(tmpdir(), 'outside-'));
+
+    // Create a symlink inside the allowed tmpDir that points outside
+    const symlinkPath = join(tmpDir, 'sneaky-link');
+    await symlink(outsideDir, symlinkPath);
+
+    const result = await exportPlugin('repo-id', 'web-stack', symlinkPath);
+    expect(result.error).toContain('outside allowed directories');
+
+    await rm(outsideDir, { recursive: true, force: true });
+  });
+
+  it('allows export when target is within EXPORT_ALLOWED_DIRS', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
+    vi.mocked(createClient).mockResolvedValue({} as never);
+
+    const skillsDir = join(pluginsDir, 'web-stack', 'skills');
+    await mkdir(skillsDir, { recursive: true });
+    await writeFile(join(skillsDir, 'guide.md'), '# Guide');
+
+    const targetRepo = join(tmpDir, 'allowed-repo');
+    await mkdir(targetRepo, { recursive: true });
+
+    const result = await exportPlugin('repo-id', 'web-stack', targetRepo);
+    expect(result.ok).toBe(true);
+  });
+
+  it('supports multiple colon-separated allowed directories', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
+    vi.mocked(createClient).mockResolvedValue({} as never);
+
+    const secondAllowed = await mkdtemp(join(tmpdir(), 'second-allowed-'));
+    process.env['EXPORT_ALLOWED_DIRS'] = `/nonexistent:${secondAllowed}`;
+
+    const skillsDir = join(pluginsDir, 'web-stack', 'skills');
+    await mkdir(skillsDir, { recursive: true });
+    await writeFile(join(skillsDir, 'guide.md'), '# Guide');
+
+    const targetRepo = join(secondAllowed, 'repo');
+    await mkdir(targetRepo, { recursive: true });
+
+    const result = await exportPlugin('repo-id', 'web-stack', targetRepo);
+    expect(result.ok).toBe(true);
+
+    await rm(secondAllowed, { recursive: true, force: true });
   });
 });
