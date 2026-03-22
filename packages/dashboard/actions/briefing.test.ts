@@ -94,6 +94,44 @@ describe('getLatestBriefing', () => {
 
     expect(result).toBeNull();
   });
+
+  it('returns null when Supabase returns PGRST116 (no rows)', async () => {
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        order: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({
+              data: null,
+              error: { code: 'PGRST116', message: 'No rows found' },
+            }),
+          }),
+        }),
+      }),
+    });
+
+    const { getLatestBriefing } = await import('./briefing');
+    const result = await getLatestBriefing();
+
+    expect(result).toBeNull();
+  });
+
+  it('throws when Supabase returns a non-PGRST116 error', async () => {
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        order: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({
+              data: null,
+              error: { code: '42P01', message: 'relation does not exist' },
+            }),
+          }),
+        }),
+      }),
+    });
+
+    const { getLatestBriefing } = await import('./briefing');
+    await expect(getLatestBriefing()).rejects.toThrow('Failed to fetch latest briefing');
+  });
 });
 
 describe('getActiveRuns', () => {
@@ -140,6 +178,22 @@ describe('getActiveRuns', () => {
     const result = await getActiveRuns();
 
     expect(result).toEqual([]);
+  });
+
+  it('throws when Supabase returns an error', async () => {
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          order: vi.fn().mockResolvedValue({
+            data: null,
+            error: { code: '42P01', message: 'relation does not exist' },
+          }),
+        }),
+      }),
+    });
+
+    const { getActiveRuns } = await import('./briefing');
+    await expect(getActiveRuns()).rejects.toThrow('Failed to fetch active runs');
   });
 });
 
@@ -240,6 +294,48 @@ describe('getNeedsAttention', () => {
     const result = await getNeedsAttention();
 
     expect(result[0].waitDuration).toBe('2h');
+  });
+
+  it('throws when stuck runs query fails', async () => {
+    // stuck query returns error
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({
+          data: null,
+          error: { code: '42P01', message: 'relation does not exist' },
+        }),
+      }),
+    });
+    // escalated query succeeds
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }),
+    });
+
+    const { getNeedsAttention } = await import('./briefing');
+    await expect(getNeedsAttention()).rejects.toThrow('Failed to fetch stuck runs');
+  });
+
+  it('throws when escalated runs query fails', async () => {
+    // stuck query succeeds
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }),
+    });
+    // escalated query returns error
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({
+          data: null,
+          error: { code: '42P01', message: 'relation does not exist' },
+        }),
+      }),
+    });
+
+    const { getNeedsAttention } = await import('./briefing');
+    await expect(getNeedsAttention()).rejects.toThrow('Failed to fetch escalated runs');
   });
 });
 
@@ -440,6 +536,22 @@ describe('getActivityFeed', () => {
     await getActivityFeed({ pageSize: 10 });
 
     expect(limitMock).toHaveBeenCalledWith(10);
+  });
+
+  it('throws when Supabase returns an error', async () => {
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        order: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue({
+            data: null,
+            error: { code: '42P01', message: 'relation does not exist' },
+          }),
+        }),
+      }),
+    });
+
+    const { getActivityFeed } = await import('./briefing');
+    await expect(getActivityFeed()).rejects.toThrow('Failed to fetch activity feed');
   });
 });
 
