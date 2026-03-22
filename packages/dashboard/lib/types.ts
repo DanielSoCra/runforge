@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      activity_events: {
+        Row: {
+          id: string
+          occurred_at: string
+          event_type: Database["public"]["Enums"]["activity_event_type"]
+          severity: Database["public"]["Enums"]["activity_severity"]
+          summary: string
+          links: Json
+        }
+        Insert: {
+          id?: string
+          occurred_at?: string
+          event_type: Database["public"]["Enums"]["activity_event_type"]
+          severity?: Database["public"]["Enums"]["activity_severity"]
+          summary: string
+          links?: Json
+        }
+        Update: {
+          id?: string
+          occurred_at?: string
+          event_type?: Database["public"]["Enums"]["activity_event_type"]
+          severity?: Database["public"]["Enums"]["activity_severity"]
+          summary?: string
+          links?: Json
+        }
+        Relationships: []
+      }
       api_keys: {
         Row: {
           created_at: string
@@ -48,6 +75,36 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      briefings: {
+        Row: {
+          id: string
+          status_line: string
+          changes: Json
+          attention: Json
+          forecast: string
+          signal_snapshot: Json
+          generated_at: string
+        }
+        Insert: {
+          id?: string
+          status_line: string
+          changes?: Json
+          attention?: Json
+          forecast: string
+          signal_snapshot?: Json
+          generated_at?: string
+        }
+        Update: {
+          id?: string
+          status_line?: string
+          changes?: Json
+          attention?: Json
+          forecast?: string
+          signal_snapshot?: Json
+          generated_at?: string
+        }
+        Relationships: []
       }
       cost_events: {
         Row: {
@@ -160,6 +217,27 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      notification_channel_configs: {
+        Row: {
+          id: string
+          channel_type: Database["public"]["Enums"]["notification_channel_type"]
+          target: string
+          events: Database["public"]["Enums"]["notification_event_kind"][]
+        }
+        Insert: {
+          id?: string
+          channel_type: Database["public"]["Enums"]["notification_channel_type"]
+          target?: string
+          events?: Database["public"]["Enums"]["notification_event_kind"][]
+        }
+        Update: {
+          id?: string
+          channel_type?: Database["public"]["Enums"]["notification_channel_type"]
+          target?: string
+          events?: Database["public"]["Enums"]["notification_event_kind"][]
+        }
+        Relationships: []
       }
       global_settings: {
         Row: {
@@ -446,9 +524,13 @@ export type Database = {
       }
     }
     Enums: {
+      activity_event_type: "state-transition" | "merge" | "error" | "heartbeat" | "completion"
+      activity_severity: "info" | "warning" | "error"
       invite_status: "pending" | "accepted"
       key_type: "source-control" | "model-provider" | "webhook-secret"
       matrix_status: "ok" | "degraded" | "failed"
+      notification_channel_type: "web-push" | "slack" | "macos" | "webhook"
+      notification_event_kind: "attention-required" | "work-completed" | "error" | "digest"
       run_outcome: "in-progress" | "complete" | "stuck" | "escalated"
       session_type:
         | "planning"
@@ -584,9 +666,13 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      activity_event_type: ["state-transition", "merge", "error", "heartbeat", "completion"],
+      activity_severity: ["info", "warning", "error"],
       invite_status: ["pending", "accepted"],
       key_type: ["source-control", "model-provider", "webhook-secret"],
       matrix_status: ["ok", "degraded", "failed"],
+      notification_channel_type: ["web-push", "slack", "macos", "webhook"],
+      notification_event_kind: ["attention-required", "work-completed", "error", "digest"],
       run_outcome: ["in-progress", "complete", "stuck", "escalated"],
       session_type: [
         "planning",

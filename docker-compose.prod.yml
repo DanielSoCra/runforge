@@ -60,6 +60,20 @@ services:
     networks:
       - app
 
+  briefing-summarizer:
+    build:
+      context: .
+      dockerfile: packages/briefing-summarizer/Dockerfile
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      NODE_ENV: production
+      DAEMON_URL: http://daemon:3847
+    networks:
+      - app
+    depends_on:
+      - daemon
+
 volumes:
   caddy_data:
   caddy_config:

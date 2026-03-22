@@ -8,6 +8,25 @@ importers:
 
   .: {}
 
+  packages/briefing-summarizer:
+    dependencies:
+      '@anthropic-ai/sdk':
+        specifier: ^0.52.0
+        version: 0.52.0
+      '@supabase/supabase-js':
+        specifier: ^2.49.4
+        version: 2.99.3
+    devDependencies:
+      tsx:
+        specifier: ^4.19.4
+        version: 4.21.0
+      typescript:
+        specifier: ^5.8.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.1.1
+        version: 3.2.4(@types/node@25.5.0)(jiti@2.6.1)(jsdom@29.0.0(@noble/hashes@1.8.0))(lightningcss@1.32.0)(msw@2.12.13(@types/node@25.5.0)(typescript@5.9.3))(tsx@4.21.0)
+
   packages/daemon:
     dependencies:
       '@octokit/rest':
@@ -171,6 +190,10 @@ packages:
   '@alloc/quick-lru@5.2.0':
     resolution: {integrity: sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw==}
     engines: {node: '>=10'}
+
+  '@anthropic-ai/sdk@0.52.0':
+    resolution: {integrity: sha512-d4c+fg+xy9e46c8+YnrrgIQR45CZlAi7PwdzIfDXDM6ACxEZli1/fxhURsq30ZpMZy6LvSkr41jGq5aF5TD7rQ==}
+    hasBin: true
 
   '@anthropic-ai/sdk@0.80.0':
     resolution: {integrity: sha512-WeXLn7zNVk3yjeshn+xZHvld6AoFUOR3Sep6pSoHho5YbSi6HwcirqgPA5ccFuW8QTVJAAU7N8uQQC6Wa9TG+g==}
@@ -5031,6 +5054,8 @@ snapshots:
   '@adobe/css-tools@4.4.4': {}
 
   '@alloc/quick-lru@5.2.0': {}
+
+  '@anthropic-ai/sdk@0.52.0': {}
 
   '@anthropic-ai/sdk@0.80.0(zod@4.3.6)':
     dependencies:
