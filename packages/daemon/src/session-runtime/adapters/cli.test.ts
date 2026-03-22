@@ -79,13 +79,35 @@ describe('CliAdapter', () => {
     }
   });
 
-  it('handles non-JSON stdout gracefully', () => {
+  it('returns error on non-JSON stdout (#170)', () => {
     const adapter = new CliAdapter();
     const parsed = adapter.parseOutput('not json at all');
-    expect(parsed.ok).toBe(true);
-    if (parsed.ok) {
-      expect(parsed.value.output).toBe('not json at all');
-      expect(parsed.value.cost).toBe(0);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.error).toBeInstanceOf(SessionError);
+      expect(parsed.error.message).toContain('non-JSON output');
+      expect(parsed.error.message).toContain('not json at all');
+      expect((parsed.error as SessionError).cost).toBe(0);
+    }
+  });
+
+  it('truncates long non-JSON output in error message (#170)', () => {
+    const adapter = new CliAdapter();
+    const longOutput = 'x'.repeat(1000);
+    const parsed = adapter.parseOutput(longOutput);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.error.message).toContain('[truncated]');
+      expect(parsed.error.message.length).toBeLessThan(600);
+    }
+  });
+
+  it('handles empty output as error (#170)', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput('');
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) {
+      expect(parsed.error.message).toContain('(empty output)');
     }
   });
 });

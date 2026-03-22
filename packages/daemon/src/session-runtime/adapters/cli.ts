@@ -71,12 +71,15 @@ export class CliAdapter implements ProviderAdapter {
         structuredData: json,
       });
     } catch {
-      // Non-JSON output — treat as plain text
-      return ok({
-        output: stdout.trim(),
-        cost: 0,
-        structuredData: null,
-      });
+      // Non-JSON output means the CLI crashed, was killed, or produced unexpected output.
+      // Returning ok() here would silently mask the failure and lose cost data.
+      const truncated = stdout.length > 500 ? stdout.slice(0, 500) + '... [truncated]' : stdout;
+      const rawPreview = truncated.trim() || '(empty output)';
+      console.warn(`[cli-adapter] parseOutput: CLI produced non-JSON output: ${rawPreview}`);
+      return err(new SessionError(
+        `CLI produced non-JSON output (possible crash): ${rawPreview}`,
+        0,
+      ));
     }
   }
 
