@@ -286,7 +286,7 @@ The first run targets the core pipeline: **FUNC-AC-PIPELINE**, **FUNC-AC-IMPLEME
 - Every L1 requirement has a traced path through L2→L3→code→tests
 - End-to-end tests prove the pipeline works
 - Pipeline status visible via `gh issue list` and GitHub labels (dashboard integration is Phase 2+)
-- Auto-claude can be pointed at a new repo and it works
+- Auto-claude can be pointed at a new repo and it works (stretch goal — Phase 1 validates on auto-claude itself)
 
 ## Orchestrator Script
 
