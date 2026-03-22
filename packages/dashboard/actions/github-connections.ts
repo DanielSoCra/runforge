@@ -52,8 +52,11 @@ export async function importRepos(
   }
 
   // Notify daemon best-effort
-  fetch(`${process.env.DAEMON_URL}/repos/reload`, { method: 'POST', signal: AbortSignal.timeout(3000) })
-    .catch(() => {});
+  fetch(`${process.env.DAEMON_URL}/repos/reload`, {
+    method: 'POST',
+    headers: { 'X-Requested-By': 'dashboard' },
+    signal: AbortSignal.timeout(3000),
+  }).catch(() => {});
 
   revalidatePath('/repos');
 }

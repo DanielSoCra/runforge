@@ -97,7 +97,7 @@ describe.each(inlineAuthRoutes)('POST /api/daemon/$name', ({ path, daemonPath })
     expect(await res.json()).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       `http://localhost:9800${daemonPath}`,
-      expect.objectContaining({ method: 'POST' }),
+      expect.objectContaining({ method: 'POST', headers: { 'X-Requested-By': 'dashboard' } }),
     );
   });
 
@@ -144,7 +144,7 @@ describe('POST /api/daemon/remote-control/restart', () => {
     expect(await res.json()).toEqual({ ok: true });
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:9800/remote-control/restart',
-      expect.objectContaining({ method: 'POST' }),
+      expect.objectContaining({ method: 'POST', headers: { 'X-Requested-By': 'dashboard' } }),
     );
   });
 

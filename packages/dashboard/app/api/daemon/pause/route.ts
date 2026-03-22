@@ -13,6 +13,7 @@ export async function POST() {
   try {
     const res = await fetch(`${process.env.DAEMON_URL}/pause`, {
       method: 'POST',
+      headers: { 'X-Requested-By': 'dashboard' },
       signal: AbortSignal.timeout(5000),
     });
     const json = await res.json();

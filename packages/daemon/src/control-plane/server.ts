@@ -22,13 +22,23 @@ export function createControlServer(
     const url = new URL(req.url ?? '/', `http://localhost:${port}`);
     const method = req.method ?? 'GET';
 
+    // CSRF protection: require a custom header on POST requests.
+    // Browsers enforce CORS preflight for requests with custom headers,
+    // and since this server sets no Access-Control-Allow-* headers,
+    // cross-origin POSTs from malicious pages are blocked.
+    if (method === 'POST' && !req.headers['x-requested-by']) {
+      json(res, 403, { error: 'Missing X-Requested-By header' });
+      return;
+    }
+
     if (method === 'GET' && url.pathname === '/dashboard') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(getDashboardHtml());
     } else if (method === 'GET' && url.pathname === '/api/runs') {
       readResults(handlers.stateDir).then((runs) => {
         json(res, 200, runs);
-      }).catch(() => {
+      }).catch((e: unknown) => {
+        console.error('[control-plane] GET /api/runs failed:', e);
         json(res, 200, []);
       });
     } else if (method === 'GET' && url.pathname === '/health') {
@@ -45,7 +55,8 @@ export function createControlServer(
       if (handlers.reloadRepos) {
         handlers.reloadRepos().then((result) => {
           json(res, 200, { reloaded: true, active: result.active });
-        }).catch(() => {
+        }).catch((e: unknown) => {
+          console.error('[control-plane] POST /repos/reload failed:', e);
           json(res, 500, { error: 'reload failed' });
         });
       } else {
@@ -62,7 +73,8 @@ export function createControlServer(
       if (handlers.scanIssues) {
         handlers.scanIssues().then((result) => {
           json(res, 200, result);
-        }).catch(() => {
+        }).catch((e: unknown) => {
+          console.error('[control-plane] POST /issues/scan failed:', e);
           json(res, 500, { error: 'scan failed' });
         });
       } else {

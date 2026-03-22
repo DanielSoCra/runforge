@@ -45,7 +45,7 @@ describe('ControlServer', () => {
 
   it('POST /pause returns paused', async () => {
     await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/pause`, { method: 'POST' });
+    const res = await fetch(`http://127.0.0.1:${PORT}/pause`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.paused).toBe(true);
@@ -53,13 +53,13 @@ describe('ControlServer', () => {
 
   it('POST /retry/42 succeeds', async () => {
     await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/retry/42`, { method: 'POST' });
+    const res = await fetch(`http://127.0.0.1:${PORT}/retry/42`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
     expect(res.status).toBe(200);
   });
 
   it('POST /retry/999 returns 404', async () => {
     await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/retry/999`, { method: 'POST' });
+    const res = await fetch(`http://127.0.0.1:${PORT}/retry/999`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
     expect(res.status).toBe(404);
   });
 
@@ -80,7 +80,7 @@ describe('ControlServer', () => {
     expect(result.ok).toBe(true);
 
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT + 2}/repos/reload`, { method: 'POST' });
+      const res = await fetch(`http://127.0.0.1:${PORT + 2}/repos/reload`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.reloaded).toBe(true);
@@ -99,7 +99,7 @@ describe('ControlServer', () => {
     const result = await start();
     expect(result.ok).toBe(true);
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT + 3}/remote-control/restart`, { method: 'POST' });
+      const res = await fetch(`http://127.0.0.1:${PORT + 3}/remote-control/restart`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.restarted).toBe(true);
@@ -111,7 +111,7 @@ describe('ControlServer', () => {
 
   it('POST /remote-control/restart returns 501 when handler not wired', async () => {
     await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/remote-control/restart`, { method: 'POST' });
+    const res = await fetch(`http://127.0.0.1:${PORT}/remote-control/restart`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
     expect(res.status).toBe(501);
   });
 
@@ -123,7 +123,7 @@ describe('ControlServer', () => {
     const result = await start();
     expect(result.ok).toBe(true);
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT + 4}/issues/scan`, { method: 'POST' });
+      const res = await fetch(`http://127.0.0.1:${PORT + 4}/issues/scan`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.scanned).toBe(3);
@@ -134,7 +134,7 @@ describe('ControlServer', () => {
 
   it('POST /issues/scan returns 501 when handler not wired', async () => {
     await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/issues/scan`, { method: 'POST' });
+    const res = await fetch(`http://127.0.0.1:${PORT}/issues/scan`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
     expect(res.status).toBe(501);
   });
 
@@ -148,6 +148,73 @@ describe('ControlServer', () => {
     serverRef = server2;
     const result = await start2();
     expect(result.ok).toBe(true);
+  });
+
+  it('rejects POST without X-Requested-By header (CSRF protection)', async () => {
+    await startServer();
+    const res = await fetch(`http://127.0.0.1:${PORT}/pause`, { method: 'POST' });
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toMatch(/X-Requested-By/);
+  });
+
+  it('allows POST with X-Requested-By header', async () => {
+    await startServer();
+    const res = await fetch(`http://127.0.0.1:${PORT}/pause`, {
+      method: 'POST',
+      headers: { 'X-Requested-By': 'test' },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('allows GET requests without X-Requested-By header', async () => {
+    await startServer();
+    const res = await fetch(`http://127.0.0.1:${PORT}/health`);
+    expect(res.status).toBe(200);
+  });
+
+  it('logs error to console.error when /repos/reload handler fails', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const reloadError = new Error('db connection lost');
+    const { server, start } = createControlServer(PORT + 6, {
+      ...handlers,
+      reloadRepos: async () => { throw reloadError; },
+    });
+    const result = await start();
+    expect(result.ok).toBe(true);
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT + 6}/repos/reload`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      expect(res.status).toBe(500);
+      expect(spy).toHaveBeenCalledWith(
+        '[control-plane] POST /repos/reload failed:',
+        reloadError,
+      );
+    } finally {
+      server.close();
+      spy.mockRestore();
+    }
+  });
+
+  it('logs error to console.error when /issues/scan handler fails', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const scanError = new Error('GitHub API rate limited');
+    const { server, start } = createControlServer(PORT + 7, {
+      ...handlers,
+      scanIssues: async () => { throw scanError; },
+    });
+    const result = await start();
+    expect(result.ok).toBe(true);
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT + 7}/issues/scan`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      expect(res.status).toBe(500);
+      expect(spy).toHaveBeenCalledWith(
+        '[control-plane] POST /issues/scan failed:',
+        scanError,
+      );
+    } finally {
+      server.close();
+      spy.mockRestore();
+    }
   });
 
   it('GET /status includes remote_control fields', async () => {

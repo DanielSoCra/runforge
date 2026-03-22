@@ -9,6 +9,7 @@ const SAFE_PATTERN = /^[a-zA-Z0-9._-]+$/;
 function notifyDaemonReload() {
   fetch(`${process.env.DAEMON_URL}/repos/reload`, {
     method: 'POST',
+    headers: { 'X-Requested-By': 'dashboard' },
     signal: AbortSignal.timeout(3000),
   }).catch(() => {});
 }
