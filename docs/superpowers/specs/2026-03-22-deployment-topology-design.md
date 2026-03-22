@@ -24,15 +24,33 @@ All existing service definitions from `docker-compose.prod.yml` are preserved: b
 
 **caddy** — Gated behind Docker Compose profile `public`. Only starts on Hetzner. Handles TLS termination and reverse proxies to the dashboard container. Uses automatic ACME certificate provisioning.
 
+### Environment file loading
+
+Docker Compose's `--env-file` flag sets variables for interpolation in the compose file (e.g., `${DASHBOARD_PORT}`). To load environment variables into container runtimes, each service uses the `env_file` directive. The compose file uses an interpolated `env_file` path so both mechanisms are driven by the same variable:
+
+```yaml
+services:
+  dashboard:
+    env_file: ${ENV_FILE:-.env.prod}
+    ports:
+      - "${DASHBOARD_PORT}"
+  daemon:
+    env_file: ${ENV_FILE:-.env.prod}
+  briefing-summarizer:
+    env_file: ${ENV_FILE:-.env.prod}
+```
+
 ### Starting the stack
 
 ```bash
 # Mac Mini — local network access, no TLS, no auth
-docker compose --env-file .env.mac up -d
+ENV_FILE=.env.mac docker compose --env-file .env.mac up -d
 
 # Hetzner — public, TLS via Caddy, GitHub OAuth
 docker compose --env-file .env.prod --profile public up -d
 ```
+
+The `ENV_FILE` shell variable controls which env file is loaded into containers. On Hetzner, the default (`.env.prod`) applies without setting `ENV_FILE`.
 
 ## Environment Files
 
@@ -58,11 +76,21 @@ docker compose --env-file .env.prod --profile public up -d
 
 ## Authentication
 
-On Hetzner, the dashboard uses Supabase Auth with GitHub OAuth. On the Mac Mini, auth is disabled via `AUTH_DISABLED=true`. The dashboard middleware checks this env var and skips auth checks when set.
+On Hetzner, the dashboard uses Supabase Auth with GitHub OAuth. On the Mac Mini, auth is disabled via `AUTH_DISABLED=true`.
 
 This avoids the OAuth callback URL problem — GitHub OAuth requires HTTPS or localhost, and `http://localhost:3000` qualifies as neither. Since the Mac Mini is on a private network with a single operator, auth adds no value.
 
-The `AUTH_DISABLED` flag only affects the dashboard's auth middleware. Supabase connections still use the service role key for database operations.
+### AUTH_DISABLED behavior (end-to-end)
+
+When `AUTH_DISABLED=true`, the entire auth chain is bypassed:
+
+1. **Proxy (`proxy.ts`)** — passes all requests through without redirecting to `/login`. Does not call `supabase.auth.getUser()`.
+2. **Server Actions** — any action that checks user identity or admin role skips the check and treats the request as admin. A helper function (e.g., `getAuthenticatedUser()`) returns a synthetic admin user when auth is disabled, so calling code does not need per-action conditionals.
+3. **API routes** (daemon proxy) — admin-only checks (pause, resume, restart) are bypassed. CSRF protection (`X-Requested-By` header) is retained regardless of auth mode.
+4. **Supabase database access** — uses the service role key for all operations, bypassing RLS. This is the same key the daemon uses. No user-scoped RLS applies.
+5. **Login page** — not rendered. If accessed directly, redirects to `/`.
+
+The `AUTH_DISABLED` flag does not affect the daemon or briefing summarizer — they never use Supabase Auth.
 
 ## Configuration Differences Summary
 
@@ -80,10 +108,11 @@ The `AUTH_DISABLED` flag only affects the dashboard's auth middleware. Supabase 
 
 ### Changed
 
-- `docker-compose.yml` — new file, replaces `docker-compose.prod.yml`. Single compose file with profile-gated Caddy service.
-- `.env.prod.example` — updated to include `DASHBOARD_PORT` variable.
-- `.gitignore` — ensure `.env.mac` is ignored alongside `.env.prod`.
-- Dashboard auth middleware — respect `AUTH_DISABLED` env var to bypass authentication.
+- `docker-compose.yml` — new file, replaces `docker-compose.prod.yml`. Single compose file with profile-gated Caddy service and interpolated `env_file`.
+- `.env.prod.example` — updated to include `DASHBOARD_PORT` and `ENV_FILE` variables.
+- `.specify/traceability.yml` — update governance: replace `docker-compose.prod.yml` with `docker-compose.yml`, add `.env.mac.example`.
+- `docs/running.md` — update all references from `docker-compose.prod.yml` to `docker-compose.yml`.
+- Dashboard auth system — proxy, server actions, and API routes respect `AUTH_DISABLED` env var (see Authentication section).
 
 ### New
 
@@ -91,7 +120,7 @@ The `AUTH_DISABLED` flag only affects the dashboard's auth middleware. Supabase 
 
 ### Removed
 
-- `docker-compose.prod.yml` — superseded by `docker-compose.yml`.
+- `docker-compose.prod.yml` — superseded by `docker-compose.yml`. All references in docs and tests updated.
 
 ### Unchanged
 
@@ -105,7 +134,14 @@ The `AUTH_DISABLED` flag only affects the dashboard's auth middleware. Supabase 
 - `scripts/com.autoclaude.reviewer.plist` — replaced by daemon running in Docker.
 - `scripts/com.autoclaude.developer.plist` — replaced by daemon running in Docker.
 
-These launchd plists should be unloaded once Docker is running on the Mac Mini. They are not deleted yet because the daemon's native FSM migration (issues #200, #201) is still in progress. Once the FSM replaces the shell scripts, these plists and their corresponding shell scripts can be removed.
+**Cutover sequence** (to avoid dual daemon operation):
+
+1. Unload launchd services: `launchctl unload ~/Library/LaunchAgents/com.autoclaude.*.plist`
+2. Verify no auto-claude processes running: `ps aux | grep pipeline.sh`
+3. Start Docker stack: `ENV_FILE=.env.mac docker compose --env-file .env.mac up -d`
+4. Verify healthy: `docker compose ps` — all services should be `running`
+
+The launchd plists are not deleted yet because the daemon's native FSM migration (issues #200, #201) is still in progress. Once the FSM replaces the shell scripts, these plists and their corresponding shell scripts can be removed.
 
 ## Spec Updates Required
 
@@ -115,6 +151,10 @@ Replace hardcoded "internal container network" references with environment-agnos
 
 Affected lines: overview (line 15), API contract (line 53), system boundaries (line 112), daemon control flow (line 171).
 
+### FUNC-AC-DASHBOARD (L1)
+
+Add a note to the Authentication section: authentication scenarios apply when auth is enabled. When `AUTH_DISABLED` is set, the system operates as a single-admin instance — all auth scenarios are bypassed and all users have admin access.
+
 ### STACK-AC-DASHBOARD (L3)
 
-Replace the "Docker Compose for deployment" paragraph (line 27) with the profile-based model: single compose file, environment-driven configuration, Caddy gated behind a profile for public deployments.
+Replace the "Docker Compose for deployment" paragraph (line 27) with the profile-based model: single compose file, environment-driven configuration, Caddy gated behind a profile for public deployments. Update the project structure section (line 256) to reference `docker-compose.yml` instead of `docker-compose.prod.yml`.
