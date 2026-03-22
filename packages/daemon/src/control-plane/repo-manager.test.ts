@@ -191,6 +191,39 @@ describe('RepoManager', () => {
     mgr.stop();
   });
 
+  it('upsertRepo returns err() when Supabase returns null data without error', async () => {
+    const onPoll = vi.fn();
+    const supabase = {
+      from: vi.fn().mockImplementation((table: string) => {
+        if (table === 'repos') {
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            is: vi.fn().mockResolvedValue({ data: [], error: null }),
+            upsert: vi.fn().mockReturnValue({
+              select: vi.fn().mockReturnValue({
+                single: vi.fn().mockResolvedValue({ data: null, error: null }),
+              }),
+            }),
+          };
+        }
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          is: vi.fn().mockResolvedValue({ data: [], error: null }),
+        };
+      }),
+      rpc: vi.fn().mockResolvedValue({ data: 'token', error: null }),
+    } as any;
+
+    const mgr = new RepoManager(supabase, 60_000, onPoll);
+    await mgr.initialize();
+    const result = await mgr.upsertRepo('acme', 'web');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toBe('upsertRepo returned null data');
+    mgr.stop();
+  });
+
   it('upsertRepo inserts a repo and returns its id', async () => {
     const onPoll = vi.fn();
     const supabase = {

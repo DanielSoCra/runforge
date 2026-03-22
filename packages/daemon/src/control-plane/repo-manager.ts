@@ -64,6 +64,7 @@ export class RepoManager {
       .select('id')
       .single();
     if (error) return err(new Error(error.message));
+    if (!data) return err(new Error('upsertRepo returned null data'));
     return ok((data as { id: string }).id);
   }
 
