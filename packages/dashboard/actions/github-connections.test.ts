@@ -38,6 +38,18 @@ describe('removeConnection', () => {
       expect.objectContaining({ enabled: false, connection_id: null })
     );
   });
+
+  it('throws and does not delete connection when repos update fails (#173)', async () => {
+    vi.resetModules();
+    mockRepos.update.mockReturnValue({
+      eq: vi.fn().mockResolvedValue({ error: { message: 'RLS violation' } }),
+    });
+    const deleteSpy = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
+    mockConnections.delete = deleteSpy;
+    const { removeConnection } = await import('./github-connections.js');
+    await expect(removeConnection('conn-1')).rejects.toThrow('Failed to disconnect repos');
+    expect(deleteSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe('removeRepo', () => {

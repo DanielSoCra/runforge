@@ -10,9 +10,10 @@ export async function removeConnection(connectionId: string) {
   await requireAdmin(supabase);
 
   // Disconnect repos before deleting connection
-  await supabase.from('repos')
+  const { error: reposError } = await supabase.from('repos')
     .update({ enabled: false, connection_id: null, updated_at: new Date().toISOString() })
     .eq('connection_id', connectionId);
+  if (reposError) throw new Error('Failed to disconnect repos: ' + reposError.message);
 
   const { error } = await supabase.from('github_connections').delete().eq('id', connectionId);
   if (error) throw new Error(error.message);
