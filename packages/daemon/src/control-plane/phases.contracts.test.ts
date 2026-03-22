@@ -22,7 +22,7 @@ import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
 import { loadSpecContent } from '../infra/spec-loader.js';
 import { classify } from './classifier.js';
-import { createPhaseHandlers, acquireDetectLock, releaseDetectLock, isDetectLocked } from './phases.js';
+import { createPhaseHandlers, acquireDetectLock, releaseDetectLock, isDetectLocked, acquireRepoGitLock, releaseRepoGitLock, isRepoGitLocked } from './phases.js';
 
 describe('phases dependency contracts (#139)', () => {
   // Each test verifies that a real module export exists, is a function, and
@@ -129,5 +129,19 @@ describe('phases dependency contracts (#139)', () => {
     expect(acquireDetectLock()).toBe(false); // already held
     releaseDetectLock();
     expect(isDetectLocked()).toBe(false);
+  });
+
+  it('repoGitLock utilities are the canonical names, detectLock aliases point to same lock (#178)', () => {
+    expect(typeof acquireRepoGitLock).toBe('function');
+    expect(typeof releaseRepoGitLock).toBe('function');
+    expect(typeof isRepoGitLocked).toBe('function');
+
+    // Aliases must share the same underlying state
+    releaseRepoGitLock();
+    expect(acquireRepoGitLock()).toBe(true);
+    expect(isDetectLocked()).toBe(true); // alias sees the lock
+    expect(acquireDetectLock()).toBe(false); // alias can't re-acquire
+    releaseDetectLock(); // alias can release
+    expect(isRepoGitLocked()).toBe(false);
   });
 });

@@ -21,23 +21,30 @@ import { routeDiagnosis } from '../diagnosis/router.js';
 import { loadSpecContent } from '../infra/spec-loader.js';
 import { classify as runClassify } from './classifier.js';
 
-// Serializes detect-phase git operations across concurrent pipeline runs.
-// Same pattern as integrationLock in integration.ts — single-process boolean suffices.
-let detectLock = false;
+// Serializes git operations on the shared repoRoot across concurrent pipeline runs.
+// Currently protects detect (which modifies checkout state via git checkout).
+// Review uses explicit branch refs (#178) so it no longer depends on checkout state.
+// Single-process cooperative async — boolean suffices (same as integrationLock).
+let repoGitLock = false;
 
-export function acquireDetectLock(): boolean {
-  if (detectLock) return false;
-  detectLock = true;
+export function acquireRepoGitLock(): boolean {
+  if (repoGitLock) return false;
+  repoGitLock = true;
   return true;
 }
 
-export function releaseDetectLock(): void {
-  detectLock = false;
+export function releaseRepoGitLock(): void {
+  repoGitLock = false;
 }
 
-export function isDetectLocked(): boolean {
-  return detectLock;
+export function isRepoGitLocked(): boolean {
+  return repoGitLock;
 }
+
+// Backwards-compat aliases — existing callers use detectLock naming
+export const acquireDetectLock = acquireRepoGitLock;
+export const releaseDetectLock = releaseRepoGitLock;
+export const isDetectLocked = isRepoGitLocked;
 
 export function createPhaseHandlers(
   config: Config,
@@ -58,7 +65,7 @@ export function createPhaseHandlers(
 
   return {
     detect: async (_run: RunState): Promise<PhaseEvent> => {
-      if (!acquireDetectLock()) {
+      if (!acquireRepoGitLock()) {
         console.error(`[detect] Lock held by another run — aborting`);
         return 'failure';
       }
@@ -73,7 +80,7 @@ export function createPhaseHandlers(
         }
         return 'success';
       } finally {
-        releaseDetectLock();
+        releaseRepoGitLock();
       }
     },
 
@@ -204,9 +211,9 @@ export function createPhaseHandlers(
       const cwd = repoRoot ?? process.cwd();
       console.log(`[review] Running review gates in ${cwd}`);
 
-      // Derive complexity from pipeline variant
+      // Use classifier-determined complexity (set in classify phase, line 83)
       const complexity: 'simple' | 'standard' | 'complex' =
-        run.variant === 'feature' ? 'standard' : 'simple';
+        run.classificationComplexity ?? 'simple';
 
       // Determine risk sensitivity from work request metadata
       const riskSensitive = isRiskSensitive(
@@ -215,10 +222,12 @@ export function createPhaseHandlers(
         [], // artifact paths — not tracked on WorkRequest yet
       );
 
-      // Build diff for reviewer context
+      // Build diff for reviewer context.
+      // Use explicit branch ref (not HEAD) so the diff is correct even when
+      // a concurrent detect phase has checked out a different branch (#178).
       let diff: string | undefined;
       try {
-        const diffResult = await git(['diff', config.branches.staging + '..HEAD'], repoRoot);
+        const diffResult = await git(['diff', config.branches.staging + '..' + featureBranch], repoRoot);
         if (diffResult.ok) diff = diffResult.value;
       } catch { /* diff is optional context */ }
 

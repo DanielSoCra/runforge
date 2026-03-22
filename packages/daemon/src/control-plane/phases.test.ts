@@ -524,19 +524,49 @@ describe('createPhaseHandlers', () => {
       const { gate1, gate2, gate3, gate4 } = setupReviewMocks();
       mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
       const { handlers } = createHandlers();
-      await handlers.review!(makeRun({ variant: 'feature-simple' }));
+      await handlers.review!(makeRun({ classificationComplexity: 'simple' }));
 
       expect(mockSelectGates).toHaveBeenCalledWith('simple', false, gate1, gate2, gate3, gate4);
     });
 
-    it('uses standard complexity for feature variant (#10)', async () => {
+    it('uses standard complexity when classifier set standard (#10, #177)', async () => {
       setupReviewMocks();
       mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
       const { handlers } = createHandlers();
-      await handlers.review!(makeRun({ variant: 'feature' }));
+      await handlers.review!(makeRun({ classificationComplexity: 'standard' }));
 
       expect(mockSelectGates).toHaveBeenCalledWith(
         'standard', expect.any(Boolean),
+        expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+      );
+    });
+
+    it('uses classificationComplexity instead of variant for gate selection (#177)', async () => {
+      // Regression: variant 'feature-simple' with classificationComplexity 'complex'
+      // must use 'complex', not derive from variant
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
+      const { handlers } = createHandlers();
+      await handlers.review!(makeRun({
+        variant: 'feature-simple',
+        classificationComplexity: 'complex',
+      }));
+
+      expect(mockSelectGates).toHaveBeenCalledWith(
+        'complex', expect.any(Boolean),
+        expect.anything(), expect.anything(), expect.anything(), expect.anything(),
+      );
+    });
+
+    it('defaults to simple when classificationComplexity is undefined (#177)', async () => {
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
+      const { handlers } = createHandlers();
+      // No classificationComplexity set (e.g., bug pipeline skips classify)
+      await handlers.review!(makeRun({ classificationComplexity: undefined }));
+
+      expect(mockSelectGates).toHaveBeenCalledWith(
+        'simple', expect.any(Boolean),
         expect.anything(), expect.anything(), expect.anything(), expect.anything(),
       );
     });
@@ -587,6 +617,20 @@ describe('createPhaseHandlers', () => {
       expect(mockRunReview).toHaveBeenCalledWith(
         expect.any(Array), '/custom/repo/root',
         expect.any(Object),
+      );
+    });
+
+    it('uses explicit branch ref instead of HEAD in git diff (#178)', async () => {
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
+      const { handlers } = createHandlers();
+      await handlers.review!(makeRun());
+
+      // Must use staging..feature/42 (explicit ref), NOT staging..HEAD
+      // to avoid corruption when a concurrent detect phase checks out staging
+      expect(mockGit).toHaveBeenCalledWith(
+        ['diff', 'staging..feature/42'],
+        undefined,
       );
     });
 
