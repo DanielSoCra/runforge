@@ -47,6 +47,51 @@ describe('GotchaStore', () => {
 
     });
 
+    it('accumulates hitCount correctly across 3+ consecutive store() dedups (#105)', async () => {
+      // First store: creates entry with hitCount=1
+      await store.store(
+        [{ artifactPatterns: ['src/**/*.ts'], description: 'Repeated gotcha' }],
+        10,
+      );
+
+      // Second store (dedup): hitCount should be 2
+      await store.store(
+        [{ artifactPatterns: ['src/**/*.ts'], description: 'repeated gotcha' }],
+        11,
+      );
+
+      // Third store (dedup): hitCount should be 3
+      await store.store(
+        [{ artifactPatterns: ['src/**/*.ts'], description: 'Repeated Gotcha' }],
+        12,
+      );
+
+      // Fourth store (dedup): hitCount should be 4
+      await store.store(
+        [{ artifactPatterns: ['src/**/*.ts'], description: 'REPEATED GOTCHA' }],
+        13,
+      );
+
+      // Fifth store (dedup): hitCount should be 5
+      const count = await store.store(
+        [{ artifactPatterns: ['src/**/*.ts'], description: 'repeated GOTCHA' }],
+        14,
+      );
+      expect(count).toBe(0);
+
+      // Verify: 1 (initial) + 4 (dedups) = 5, then +1 (match) = 6
+      const all = await store.match(['src/foo.ts']);
+      expect(all).toHaveLength(1);
+      expect(all[0]!.hitCount).toBe(6);
+
+      // Verify persistence: re-create store from disk and check
+      const freshStore = new GotchaStore(storePath);
+      const fromDisk = await freshStore.match(['src/foo.ts']);
+      expect(fromDisk).toHaveLength(1);
+      // 6 (persisted from match above) + 1 (this match) = 7
+      expect(fromDisk[0]!.hitCount).toBe(7);
+    });
+
     it('stores multiple distinct gotchas', async () => {
       const count = await store.store(
         [
