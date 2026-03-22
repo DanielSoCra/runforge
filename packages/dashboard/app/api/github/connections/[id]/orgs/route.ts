@@ -17,6 +17,9 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     .eq('connection_id', id)
     .order('login');
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error('[orgs] Failed to fetch orgs for connection:', error);
+    return NextResponse.json({ error: 'Failed to fetch organizations' }, { status: 500 });
+  }
   return NextResponse.json(orgs ?? []);
 }

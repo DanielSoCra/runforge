@@ -13,10 +13,16 @@ export async function removeConnection(connectionId: string) {
   const { error: reposError } = await supabase.from('repos')
     .update({ enabled: false, connection_id: null, updated_at: new Date().toISOString() })
     .eq('connection_id', connectionId);
-  if (reposError) throw new Error('Failed to disconnect repos: ' + reposError.message);
+  if (reposError) {
+    console.error('[github-connections] removeConnection disconnect repos failed:', reposError);
+    throw new Error('Failed to disconnect repos');
+  }
 
   const { error } = await supabase.from('github_connections').delete().eq('id', connectionId);
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error('[github-connections] removeConnection delete failed:', error);
+    throw new Error('Failed to remove connection');
+  }
 
   // Notify daemon to drop stale polling for disconnected repos
   fetch(`${process.env.DAEMON_URL}/repos/reload`, {

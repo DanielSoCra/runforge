@@ -15,7 +15,10 @@ export async function updateGlobalSettings(formData: FormData) {
   }
 
   const { data: existing } = await supabase.from('global_settings').select('id').single();
-  if (!existing) throw new Error('Global settings row missing — check migration');
+  if (!existing) {
+    console.error('[settings] Global settings row missing — check migration');
+    throw new Error('Failed to load settings');
+  }
   const { error } = await supabase
     .from('global_settings')
     .update({

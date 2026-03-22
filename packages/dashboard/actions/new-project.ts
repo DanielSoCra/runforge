@@ -132,7 +132,7 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
     const message = err instanceof Error ? err.message : String(err);
     console.error('[new-project] createProject failed:', err);
     if (githubRepoCreated) {
-      return { error: `GitHub repo was created but registration failed — add it manually via Repositories instead of retrying. (${message})` };
+      return { error: 'GitHub repo was created but registration failed — add it manually via Repositories instead of retrying.' };
     }
     return { error: 'Failed to create project' };
   }

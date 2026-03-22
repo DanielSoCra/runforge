@@ -229,9 +229,8 @@ export async function exportPlugin(
       await writeFile(join(destDir, f), content, 'utf-8');
     }
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    console.error(`[plugins] exportPlugin failed for repo ${repoId}, plugin ${pluginId}:`, message);
-    return { error: `Failed to export plugin: ${message}` };
+    console.error(`[plugins] exportPlugin failed for repo ${repoId}, plugin ${pluginId}:`, e);
+    return { error: 'Failed to export plugin' };
   }
 
   console.log(`[plugins] Exported plugin ${pluginId} to ${destDir} for repo ${repoId}`);
