@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { getOrigin, requireAdmin, isAdmin } from './auth';
+import { getOrigin, requireAdmin, isAdmin, isAuthDisabled } from './auth';
 
 describe('getOrigin', () => {
   const originalEnv = { ...process.env };
@@ -181,6 +181,87 @@ describe('isAdmin', () => {
         }),
       }),
     } as any;
+    expect(await isAdmin(supabase)).toBe(false);
+  });
+});
+
+describe('isAuthDisabled', () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    delete process.env.AUTH_DISABLED;
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    delete process.env.AUTH_DISABLED;
+  });
+
+  it('returns true when AUTH_DISABLED is "true"', () => {
+    vi.stubEnv('AUTH_DISABLED', 'true');
+    expect(isAuthDisabled()).toBe(true);
+  });
+
+  it('returns false when AUTH_DISABLED is not set', () => {
+    expect(isAuthDisabled()).toBe(false);
+  });
+
+  it('returns false when AUTH_DISABLED is "1" (only exact "true" is accepted)', () => {
+    vi.stubEnv('AUTH_DISABLED', '1');
+    expect(isAuthDisabled()).toBe(false);
+  });
+
+  it('returns false when AUTH_DISABLED is "false"', () => {
+    vi.stubEnv('AUTH_DISABLED', 'false');
+    expect(isAuthDisabled()).toBe(false);
+  });
+});
+
+describe('requireAdmin — AUTH_DISABLED bypass', () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    delete process.env.AUTH_DISABLED;
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    delete process.env.AUTH_DISABLED;
+  });
+
+  it('returns synthetic admin without calling supabase when AUTH_DISABLED=true', async () => {
+    vi.stubEnv('AUTH_DISABLED', 'true');
+    const supabase = mockSupabase({ user: null }); // would normally reject
+    const user = await requireAdmin(supabase);
+    expect(user.id).toBe('00000000-0000-0000-0000-000000000000');
+    expect(user.email).toBe('admin@localhost');
+    expect(supabase.auth.getUser).not.toHaveBeenCalled();
+  });
+
+  it('still enforces auth when AUTH_DISABLED is not set', async () => {
+    const supabase = mockSupabase({ user: null });
+    await expect(requireAdmin(supabase)).rejects.toThrow('Unauthorized');
+  });
+});
+
+describe('isAdmin — AUTH_DISABLED bypass', () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    delete process.env.AUTH_DISABLED;
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    delete process.env.AUTH_DISABLED;
+  });
+
+  it('returns true without calling supabase when AUTH_DISABLED=true', async () => {
+    vi.stubEnv('AUTH_DISABLED', 'true');
+    const supabase = mockSupabase({ user: null }); // would normally return false
+    expect(await isAdmin(supabase)).toBe(true);
+    expect(supabase.auth.getUser).not.toHaveBeenCalled();
+  });
+
+  it('still checks auth when AUTH_DISABLED is not set', async () => {
+    const supabase = mockSupabase({ user: null });
     expect(await isAdmin(supabase)).toBe(false);
   });
 });
