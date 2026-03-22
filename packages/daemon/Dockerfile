@@ -5,7 +5,7 @@ RUN corepack enable
 RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
 
 # Install Claude CLI
-RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g @anthropic-ai/claude-code@2.1.81
 
 # Install phase — build context is repo root so pnpm-lock.yaml is accessible
 WORKDIR /app
