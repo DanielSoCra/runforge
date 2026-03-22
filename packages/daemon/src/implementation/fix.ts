@@ -18,11 +18,11 @@ export interface FixResult {
  */
 export async function fix(
   findings: ReviewFinding[],
-  specIds: string[],
   targetBranch: string,
   runtime: SessionRuntime,
   repoRoot: string,
   specContent?: string,
+  verificationCommand?: string,
 ): Promise<Result<FixResult>> {
   const fixId = `fix-${Date.now()}`;
 
@@ -60,7 +60,7 @@ export async function fix(
           task: taskContext,
           specs: specContent ?? '',
           findings: findingsText,
-          verification: 'pnpm -r run test',
+          verification: verificationCommand ?? 'pnpm -r run test',
           pitfalls: '',
         },
         workspacePath: worktreeResult.value,

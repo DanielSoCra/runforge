@@ -46,7 +46,7 @@ describe('fix', () => {
     const { createWorktree, mergeWorktree } = await import('./worktree.js');
     const runtime = createMockRuntime();
 
-    const result = await fix(mockFindings, ['STACK-AC-IMPL'], 'feature/42', runtime, '/tmp/repo');
+    const result = await fix(mockFindings, 'feature/42', runtime, '/tmp/repo');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -60,7 +60,7 @@ describe('fix', () => {
   it('passes findings and spec content in worker session variables', async () => {
     const runtime = createMockRuntime();
 
-    await fix(mockFindings, ['STACK-AC-IMPL'], 'feature/42', runtime, '/tmp/repo', 'spec content here');
+    await fix(mockFindings, 'feature/42', runtime, '/tmp/repo', 'spec content here');
 
     const call = runtime.spawnSession.mock.calls[0];
     expect(call[0]).toBe('worker');
@@ -80,7 +80,7 @@ describe('fix', () => {
     };
     const runtime = createMockRuntime(failResult);
 
-    const result = await fix(mockFindings, ['SPEC-1'], 'feature/42', runtime, '/tmp/repo');
+    const result = await fix(mockFindings, 'feature/42', runtime, '/tmp/repo');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -93,7 +93,7 @@ describe('fix', () => {
     vi.mocked(createWorktree).mockResolvedValueOnce(err(new Error('disk full')));
 
     const runtime = createMockRuntime();
-    const result = await fix(mockFindings, ['SPEC-1'], 'feature/42', runtime, '/tmp/repo');
+    const result = await fix(mockFindings, 'feature/42', runtime, '/tmp/repo');
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -110,7 +110,7 @@ describe('fix', () => {
     } as any;
 
     const { deleteUnitBranch } = await import('./worktree.js');
-    const result = await fix(mockFindings, ['SPEC-1'], 'feature/42', runtime, '/tmp/repo');
+    const result = await fix(mockFindings, 'feature/42', runtime, '/tmp/repo');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -122,7 +122,7 @@ describe('fix', () => {
 
   it('uses regression-test-first protocol in worker prompt', async () => {
     const runtime = createMockRuntime();
-    await fix(mockFindings, ['SPEC-1'], 'feature/42', runtime, '/tmp/repo');
+    await fix(mockFindings, 'feature/42', runtime, '/tmp/repo');
 
     const call = runtime.spawnSession.mock.calls[0];
     const vars = call[1].variables;
