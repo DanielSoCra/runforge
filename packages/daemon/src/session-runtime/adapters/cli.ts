@@ -190,9 +190,14 @@ export class CliAdapter implements ProviderAdapter {
       });
 
       let timedOut = false;
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      const SIGTERM_GRACE_MS = 5_000;
       const timer = setTimeout(() => {
         timedOut = true;
-        proc.kill('SIGKILL');
+        try { proc.kill('SIGTERM'); } catch { /* already exited */ }
+        killTimer = setTimeout(() => {
+          try { proc.kill('SIGKILL'); } catch { /* already exited */ }
+        }, SIGTERM_GRACE_MS);
       }, def.timeoutMs);
 
       proc.stdout.on('data', (d: Buffer) => chunks.push(d));
@@ -200,6 +205,7 @@ export class CliAdapter implements ProviderAdapter {
 
       proc.on('close', (code) => {
         clearTimeout(timer);
+        if (killTimer) clearTimeout(killTimer);
         if (hookPaths) this.cleanupHooks(hookPaths);
         const stdout = Buffer.concat(chunks).toString();
         const stderr = Buffer.concat(errChunks).toString();
@@ -247,6 +253,7 @@ export class CliAdapter implements ProviderAdapter {
 
       proc.on('error', (e) => {
         clearTimeout(timer);
+        if (killTimer) clearTimeout(killTimer);
         if (hookPaths) this.cleanupHooks(hookPaths);
         const partialStdout = Buffer.concat(chunks).toString();
         const parsed = this.parseOutput(partialStdout);

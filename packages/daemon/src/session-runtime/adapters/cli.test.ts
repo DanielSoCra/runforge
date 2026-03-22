@@ -432,12 +432,11 @@ describe('CliAdapter.spawn() (#102)', () => {
       cost_usd: 0.04,
     })));
 
-    // Advance timer to trigger timeout
+    // Advance timer to trigger timeout — sends SIGTERM first
     vi.advanceTimersByTime(600);
+    expect(mockProc.kill).toHaveBeenCalledWith('SIGTERM');
 
-    // The timeout callback calls proc.kill('SIGKILL'), then we need
-    // the 'close' event to fire (as the real OS would after SIGKILL)
-    expect(mockProc.kill).toHaveBeenCalledWith('SIGKILL');
+    // Process exits gracefully after SIGTERM (before SIGKILL grace period)
     mockProc.emit('close', null);
 
     const result = await promise;
@@ -446,6 +445,38 @@ describe('CliAdapter.spawn() (#102)', () => {
       expect(result.value.exitStatus).toBe('timed-out');
       expect(result.value.cost).toBe(0.04);
       expect(result.value.handoffNote).toBe('pick up at step 3');
+    }
+  });
+
+  it('sends SIGTERM then SIGKILL after grace period on timeout (#42)', async () => {
+    const shortTimeoutDef = { ...mockDef, timeoutMs: 500 };
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(shortTimeoutDef, 'stubborn work', { cwd: tempDir });
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+      result: 'partial',
+      cost_usd: 0.01,
+    })));
+
+    // Trigger timeout — should send SIGTERM first
+    vi.advanceTimersByTime(600);
+    expect(mockProc.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(mockProc.kill).not.toHaveBeenCalledWith('SIGKILL');
+
+    // Advance past the 5-second grace period — SIGKILL should fire
+    vi.advanceTimersByTime(5_000);
+    expect(mockProc.kill).toHaveBeenCalledWith('SIGKILL');
+
+    // Process finally exits after SIGKILL
+    mockProc.emit('close', null);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.exitStatus).toBe('timed-out');
     }
   });
 
