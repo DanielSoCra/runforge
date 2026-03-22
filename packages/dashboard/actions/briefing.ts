@@ -74,7 +74,10 @@ export async function getActiveRuns() {
     .eq('outcome', 'in-progress')
     .order('started_at', { ascending: true });
 
-  if (error) throw new Error(`Failed to fetch active runs: ${error.message}`);
+  if (error) {
+    console.error('[briefing] getActiveRuns failed:', error);
+    throw new Error('Failed to fetch active runs');
+  }
   return data ?? [];
 }
 
@@ -96,8 +99,14 @@ export async function getNeedsAttention(): Promise<AttentionItem[]> {
       .eq('outcome', 'escalated'),
   ]);
 
-  if (stuckResult.error) throw new Error(`Failed to fetch stuck runs: ${stuckResult.error.message}`);
-  if (escalatedResult.error) throw new Error(`Failed to fetch escalated runs: ${escalatedResult.error.message}`);
+  if (stuckResult.error) {
+    console.error('[briefing] getNeedsAttention stuck query failed:', stuckResult.error);
+    throw new Error('Failed to fetch stuck runs');
+  }
+  if (escalatedResult.error) {
+    console.error('[briefing] getNeedsAttention escalated query failed:', escalatedResult.error);
+    throw new Error('Failed to fetch escalated runs');
+  }
 
   const items: AttentionItem[] = [];
 
@@ -176,6 +185,9 @@ export async function getActivityFeed(
 
   const { data, error } = await query.limit(pageSize);
 
-  if (error) throw new Error(`Failed to fetch activity feed: ${error.message}`);
+  if (error) {
+    console.error('[briefing] getActivityFeed failed:', error);
+    throw new Error('Failed to fetch activity feed');
+  }
   return data ?? [];
 }
