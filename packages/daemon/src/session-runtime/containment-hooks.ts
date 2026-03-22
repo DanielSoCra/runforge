@@ -160,7 +160,18 @@ export const DEFAULT_POLICY: ContainmentPolicy = {
     'packages/daemon/src/control-plane/**',
   ],
   blockedCommands: [
+    // Direct network tools
     'curl ', 'wget ', 'nc ', 'ssh ', 'scp ',
+    // Network-capable alternatives (ncat, socat, telnet)
+    'ncat ', 'socat ', 'telnet ',
+    // Runtime interpreters — can make arbitrary outbound requests.
+    // Uses trailing-space pattern (same as curl/wget) for consistency.
+    // Substring matching may cause false positives on commands that
+    // reference interpreter names in non-command positions; this is
+    // acceptable in the autonomous agent context where agents use
+    // dedicated tools (Read, Grep, Glob) rather than shell interpreters.
+    'python3 ', 'python ', 'node ', 'perl ', 'ruby ', 'php ',
+    // Destructive disk commands
     'rm -rf /', 'mkfs', 'dd if=',
   ],
   readOnlyPaths: [
@@ -168,5 +179,6 @@ export const DEFAULT_POLICY: ContainmentPolicy = {
     '.claude/**',
     'CLAUDE.md',
     'AGENTS.md',
+    'auto-claude.config.json',
   ],
 };
