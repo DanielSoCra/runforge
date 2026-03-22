@@ -51,7 +51,8 @@ Every feature starts as a GitHub Issue and progresses through label-driven stage
 | (new issue) | Operator | L1 spec exists | Create issue | — | `feature-pipeline`, `l1-approved` | — |
 | `l1-approved` | `spec-brainstorm-l2` skill | No `l2-in-progress` or `blocked` | Start L2 generation | `l1-approved` | `l2-in-progress` | Create `spec/l2/<N>-<name>` |
 | `l2-in-progress` | `spec-brainstorm-l2` skill | L2 spec written, PR opened | Submit for review | `l2-in-progress` | `l2-review` | Push to `spec/l2/` branch, open PR |
-| `l2-review` | Operator | Reviews PR/summary | Approve or request changes | `l2-review` | `l2-approved` (or back to `l2-in-progress` with comment) | Merge PR to `dev` |
+| `l2-review` | Operator | Approves PR | Approve | `l2-review` | `l2-approved` | Merge PR to `dev` |
+| `l2-review` | Operator | Requests changes (comment on issue/PR) | Request changes | `l2-review` | `l2-in-progress` | — (branch stays open) |
 | `l2-approved` | `spec-generate-l3` skill | No `l3-in-progress` or `blocked` | Start L3 generation | `l2-approved` | `l3-in-progress` | Create `spec/l3/<N>-<name>` |
 | `l3-in-progress` | `spec-generate-l3` skill | L3 spec written | Submit for auto-review | `l3-in-progress` | `l3-review` | Push to `spec/l3/` branch, open PR |
 | `l3-review` | `spec-generate-l3` skill | Compliance check passes | Mark ready | `l3-review` | `l3-approved`, `ready-to-implement` | Merge PR to `dev` |
@@ -60,7 +61,11 @@ Every feature starts as a GitHub Issue and progresses through label-driven stage
 | `implementing` | `spec-implement` skill | Tests + review pass | Submit for final review | `implementing` | `in-review` | Push to `feat/` branch |
 | `in-review` | `spec-implement` skill | Code review passes | Complete | `in-review` | — | Merge to `dev`, push, close issue |
 | `in-review` | `spec-implement` skill | Code review fails 3x | Block | `in-review` | `blocked` | — |
-| `blocked` (any state) | Operator | Resolves blocker | Resume | `blocked` | (restore previous state label) | — |
+| `blocked` + `was-l3-review` | Operator | Resolves blocker | Resume L3 review | `blocked`, `was-l3-review` | `l3-review` | — |
+| `blocked` + `was-implementing` | Operator | Resolves blocker | Resume implementation | `blocked`, `was-implementing` | `implementing` | — |
+| `blocked` + `was-in-review` | Operator | Resolves blocker | Resume review | `blocked`, `was-in-review` | `in-review` | — |
+
+**Blocked state persistence:** When a skill adds the `blocked` label, it also adds a `was-<previous-state>` label (e.g., `was-implementing`). This allows the Operator to resume by removing `blocked` + `was-*` and the orchestrator to know which stage to re-enter. The `was-*` labels are: `was-l3-review`, `was-implementing`, `was-in-review`.
 
 ### Entry Points
 
@@ -95,6 +100,9 @@ Every feature starts as a GitHub Issue and progresses through label-driven stage
 | `l2-suggestion` | Suggested change is to L2 (requires EVIDENCE) |
 | `self-modification-suggestion` | Change to the pipeline's own specs (extra scrutiny) |
 | `blocked` | Needs human input |
+| `was-l3-review` | Pre-blocked state was `l3-review` |
+| `was-implementing` | Pre-blocked state was `implementing` |
+| `was-in-review` | Pre-blocked state was `in-review` |
 | `phase-2` | Earmarked for Phase 2 (not yet active) |
 | `phase-3` | Earmarked for Phase 3 (not yet active) |
 
@@ -116,7 +124,8 @@ The script checks all pipeline stages in priority order and only invokes Claude 
 **Priority order:** Finish what's started before starting new work.
 1. `ready-to-implement` issues without `implementing` or `blocked` (implementation)
 2. `l2-approved` issues without `l3-in-progress` or `blocked` (L3 generation)
-3. `l1-approved` issues without `l2-in-progress` or `blocked` (L2 brainstorming)
+3. `l2-in-progress` issues (L2 feedback re-run — Operator sent back from `l2-review` with comments)
+4. `l1-approved` issues without `l2-in-progress` or `blocked` (L2 brainstorming — new work)
 
 Note: `l3-review` is handled within the `spec-generate-l3` skill session (compliance check is part of L3 generation, not a separate orchestrator stage). The `in-review` state is handled within the `spec-implement` skill session (code review is part of implementation).
 
@@ -131,7 +140,7 @@ Note: `l3-review` is handled within the `spec-generate-l3` skill session (compli
 2. Read the L1 spec referenced in the issue body
 3. Read L0 vision and existing L2 specs for context and patterns
 4. Self-brainstorm: ask architectural questions and answer them grounded in L1 constraints. Explore 2-3 approaches, pick the best with reasoning.
-5. Validate generated spec using `l2-spec-guardian` skill (local skill at `plugins/auto-claude-dev/skills/spec-guardian/`)
+5. Validate generated spec using `l2-spec-guardian` skill (local skill at `plugins/auto-claude-dev/skills/spec-guardian.md`)
 6. Write L2 spec file(s) to `.specify/architecture/` on branch `spec/l2/<issue-number>-<name>`
 7. Update `traceability.yml` with new spec linkages
 8. Open PR linked to the issue
@@ -152,14 +161,14 @@ Note: `l3-review` is handled within the `spec-generate-l3` skill session (compli
 2. Read approved L1 + L2 specs from the spec chain
 3. Generate L3 spec(s) in `.specify/stack/` on branch `spec/l3/<issue-number>-<name>`
 4. Update `traceability.yml` with `code_paths` and `test_paths`
-5. Validate generated spec using `l3-spec-guardian` skill (local skill at `plugins/auto-claude-dev/skills/spec-guardian/`)
+5. Validate generated spec using `l3-spec-guardian` skill (local skill at `plugins/auto-claude-dev/skills/spec-guardian.md`)
 6. Run compliance check: does L3 contradict L2 or L1? Fix or create `l2-suggestion` issue with evidence.
 7. Relabel: remove `l3-in-progress`, add `l3-review`
 8. Run `spec-review-compliance` check against L1/L2/existing code
 9. If compliance passes: merge PR to `dev`, relabel to `l3-approved` + `ready-to-implement`
-10. If issues found: fix and re-review (max 3 iterations, then add `blocked`)
+10. If issues found: fix and re-review (max 3 iterations, then add `blocked` + `was-l3-review`, remove `l3-review`)
 
-**Note on `spec-document-reviewer`:** This is a subagent prompt template defined in the brainstorming skill (`skills/brainstorming/spec-document-reviewer-prompt.md`), not a standalone skill. The `spec-generate-l3` skill dispatches it as a general-purpose Agent with the reviewer prompt.
+**Note on `spec-document-reviewer`:** This is a subagent prompt template from the Superpowers plugin (not checked into the repo). The `spec-generate-l3` skill dispatches it as a general-purpose Agent with the reviewer prompt. **Prerequisite:** The Superpowers plugin must be installed in Claude Code for this to work.
 
 ### 3. `spec-review-compliance` (Quality Gate)
 
@@ -186,14 +195,14 @@ Note: `l3-review` is handled within the `spec-generate-l3` skill session (compli
 1. Add `implementing` label, remove `ready-to-implement`
 2. Read L3 spec, understand the full spec chain (L3→L2→L1)
 3. Create implementation plan (as issue comment)
-4. Scope guard: >20 steps or >10 files → add `blocked` label, remove `implementing`, request Operator decomposition
+4. Scope guard: >20 steps or >10 files → add `blocked` + `was-implementing` labels, remove `implementing`, request Operator decomposition
 5. Branch `feat/<issue-number>-<name>` from `dev`
 6. TDD: write tests first based on L3's `test_paths`
 7. Implement until tests pass + typecheck passes
 8. Run `pnpm -r run test` — zero regressions
 9. Relabel: remove `implementing`, add `in-review`
 10. Dispatch `requesting-code-review` superpower (this is a built-in superpower available in all Claude Code sessions, not a local skill)
-11. If review fails, relabel back to `implementing`, iterate (max 3 attempts, then add `blocked`)
+11. If review fails, relabel back to `implementing`, iterate (max 3 attempts, then add `blocked` + `was-in-review`, remove `in-review`)
 12. Merge `feat/` branch to `dev`, push to remote
 13. Self-verify: check the fix works on merged `dev`
 14. Remove `in-review` label, close issue with comment noting commit SHA
@@ -296,14 +305,14 @@ The Hetzner deployment continues as-is. Local and remote don't need to coordinat
 
 | Existing Skill/Tool | Type | Location | Role in Pipeline |
 |---|---|---|---|
-| `l1-spec-guardian` | Local skill | `plugins/auto-claude-dev/skills/spec-guardian/` | Validates L1 spec quality during brainstorming |
-| `l2-spec-guardian` | Local skill | `plugins/auto-claude-dev/skills/spec-guardian/` | Used by `spec-brainstorm-l2` to validate generated L2 |
-| `l3-spec-guardian` | Local skill | `plugins/auto-claude-dev/skills/spec-guardian/` | Used by `spec-generate-l3` to validate generated L3 |
+| `l1-spec-guardian` | Local skill | `plugins/auto-claude-dev/skills/spec-guardian.md` | Validates L1 spec quality during brainstorming |
+| `l2-spec-guardian` | Local skill | `plugins/auto-claude-dev/skills/spec-guardian.md` | Used by `spec-brainstorm-l2` to validate generated L2 |
+| `l3-spec-guardian` | Local skill | `plugins/auto-claude-dev/skills/spec-guardian.md` | Used by `spec-generate-l3` to validate generated L3 |
 | `verified-codebase-review` | Claude Code skill | `~/.claude/skills/verified-codebase-review/` | Maintenance track only (not used in feature pipeline) |
 | `fix-review-issues` | Claude Code skill | `~/.claude/skills/fix-review-issues/` | Maintenance track only (not used in feature pipeline) |
 | `progress-summary` | Claude Code skill | `~/.claude/skills/progress-summary/` | Reports on pipeline + maintenance activity |
 | `requesting-code-review` | Built-in superpower | (part of Claude Code) | Quality gate in `spec-implement` step 10 |
-| `spec-document-reviewer` | Subagent prompt | `skills/brainstorming/spec-document-reviewer-prompt.md` | Dispatched as Agent in `spec-generate-l3` |
+| `spec-document-reviewer` | Subagent prompt | Superpowers plugin (`brainstorming/spec-document-reviewer-prompt.md`) — not in repo, provided by Claude Code plugin system | Dispatched as Agent in `spec-generate-l3` |
 
 **New skills to build (Phase 1):**
 - `spec-brainstorm-l2` — new Claude Code skill
@@ -368,7 +377,15 @@ find_work() {
     return 0
   fi
 
-  # Priority 3: L2 brainstorming from approved L1
+  # Priority 3: L2 feedback re-run (Operator sent back from l2-review)
+  eligible=$(check_stage "l2-in-progress" "blocked")
+  if [ "$(echo "$eligible" | jq 'length' 2>/dev/null)" -gt 0 ]; then
+    ISSUE_NUM=$(echo "$eligible" | jq -r '.[0].number')
+    SKILL="spec-brainstorm-l2"
+    return 0
+  fi
+
+  # Priority 4: L2 brainstorming from approved L1 (new work)
   eligible=$(check_stage "l1-approved" "l2-in-progress" "blocked")
   if [ "$(echo "$eligible" | jq 'length' 2>/dev/null)" -gt 0 ]; then
     ISSUE_NUM=$(echo "$eligible" | jq -r '.[0].number')
