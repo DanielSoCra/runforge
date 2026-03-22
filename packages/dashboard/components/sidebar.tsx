@@ -7,9 +7,9 @@ import { signOut } from '@/actions/auth';
 
 const nav = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/repos', label: 'Repositories', icon: GitFork },
   { href: '/runs', label: 'Runs', icon: Activity },
   { href: '/issues', label: 'Issues', icon: CircleDot },
+  { href: '/repos', label: 'Repositories', icon: GitFork },
   { href: '/command-center', label: 'Command Center', icon: Zap },
   { href: '/cost', label: 'Costs', icon: DollarSign },
   { href: '/team', label: 'Team', icon: Users },
