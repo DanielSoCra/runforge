@@ -15,6 +15,9 @@ export const BugDiagnosisSchema = z
   );
 
 export type BugDiagnosisOutput = z.infer<typeof BugDiagnosisSchema>;
-// Note: z.toJSONSchema strips the .refine() constraint (not representable in JSON Schema).
+// z.toJSONSchema strips the .refine() constraint (not representable in JSON Schema).
 // The "at least one affected spec or artifact" rule is enforced at parse time, not in the schema.
-export const bugDiagnosisJsonSchema = JSON.stringify(z.toJSONSchema(BugDiagnosisSchema));
+// target: 'draft-07' ensures CLI adapter compatibility (spec gotcha: --json-schema requires draft-07).
+export const bugDiagnosisJsonSchema = JSON.stringify(
+  z.toJSONSchema(BugDiagnosisSchema, { target: 'draft-07' }),
+);

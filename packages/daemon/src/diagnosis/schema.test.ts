@@ -110,4 +110,9 @@ describe('bugDiagnosisJsonSchema', () => {
     const schema = JSON.parse(bugDiagnosisJsonSchema) as Record<string, unknown>;
     expect(JSON.stringify(schema)).toContain('type');
   });
+
+  it('produces draft-07 JSON Schema, not draft-2020-12 (#120)', () => {
+    const schema = JSON.parse(bugDiagnosisJsonSchema) as Record<string, unknown>;
+    expect(schema.$schema).toBe('http://json-schema.org/draft-07/schema#');
+  });
 });
