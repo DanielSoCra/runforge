@@ -36,7 +36,7 @@ export default async function HomePage() {
   } else {
     try {
       const res = await fetch(`${process.env.DAEMON_URL}/status`, {
-        next: { revalidate: 10 },
+        cache: 'no-store',
         signal: AbortSignal.timeout(3000),
       });
       const json = await res.json().catch(() => null);

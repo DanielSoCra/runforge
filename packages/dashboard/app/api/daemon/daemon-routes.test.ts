@@ -197,6 +197,23 @@ describe('GET /api/daemon/status', () => {
     );
   });
 
+  it('fetches daemon status without cache (no-store) to avoid stale data (#174)', async () => {
+    const createClient = await getCreateClient();
+    createClient.mockResolvedValueOnce(mockSupabaseAdmin());
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ state: 'running' }), { status: 200 }),
+    );
+    const { GET } = await import('./status/route.js');
+    await GET();
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:9800/status',
+      expect.objectContaining({ cache: 'no-store' }),
+    );
+    // Ensure revalidate is NOT set — it caused stale status when client polls every 5s
+    const callArgs = fetchMock.mock.calls[0][1];
+    expect(callArgs).not.toHaveProperty('next');
+  });
+
   it('returns 503 with fallback body when daemon is unreachable', async () => {
     const createClient = await getCreateClient();
     createClient.mockResolvedValueOnce(mockSupabaseAdmin());
