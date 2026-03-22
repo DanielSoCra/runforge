@@ -204,4 +204,38 @@ export interface Gotcha {
   archived: boolean;
   originType: 'autonomous' | 'operator';
   priorityTier: 'normal' | 'elevated';
+  reviewedAt?: string;
+}
+
+export interface Exemplar {
+  deliverableType: string;
+  branch: string;
+  commitSha: string;
+  filePaths: string[];
+  qualityScore: number;
+  createdAt: string;
+}
+
+export interface Pattern {
+  key: string;
+  description: string;
+  confidence: number;
+  sourceSpecs: string[];
+}
+
+export interface PromptProposal {
+  id: string;
+  templateName: string;
+  currentContent: string;
+  proposedContent: string;
+  reasoning: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  rejectedAt?: string;
+}
+
+export interface PromptVersionEntry {
+  content: string;
+  timestamp: string;
+  status: 'approved' | 'rejected' | 'rollback';
 }

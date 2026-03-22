@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { GotchaStore } from './gotcha-store.js';
+import { GotchaStore, tokenize, jaccardSimilarity } from './gotcha-store.js';
 
 let dir: string;
 let storePath: string;
@@ -483,5 +483,122 @@ describe('GotchaStore', () => {
       expect(all).toHaveLength(1);
       expect(all[0]!.description).toBe('Keep');
     });
+  });
+
+  describe('Jaccard dedup', () => {
+    it('deduplicates descriptions with >0.7 Jaccard similarity', async () => {
+      await store.store(
+        [{ artifactPatterns: ['src/**/*.ts'], description: 'Always validate user input before processing' }],
+        1,
+      );
+      // Similar but not identical description
+      const count = await store.store(
+        [{ artifactPatterns: ['src/**/*.ts'], description: 'Always validate user input before handling' }],
+        2,
+      );
+      expect(count).toBe(0); // deduped
+    });
+
+    it('does NOT deduplicate descriptions with <=0.7 Jaccard similarity', async () => {
+      await store.store(
+        [{ artifactPatterns: ['src/**/*.ts'], description: 'Always validate user input before processing' }],
+        1,
+      );
+      const count = await store.store(
+        [{ artifactPatterns: ['src/**/*.ts'], description: 'Never forget to close file handles after reading' }],
+        2,
+      );
+      expect(count).toBe(1); // distinct
+    });
+  });
+
+  describe('rejectPromotion', () => {
+    it('sets reviewedAt and excludes from promotion candidates during cooldown', async () => {
+      await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'Rejected gotcha' }],
+        1,
+      );
+      const m = await store.match(['foo.ts']);
+      const id = m[0]!.id;
+      // Bump hits to make it a candidate
+      for (let i = 0; i < 4; i++) await store.incrementHitCount(id);
+      // Verify it's a candidate first
+      let candidates = await store.getPromotionCandidates(5);
+      expect(candidates).toHaveLength(1);
+
+      await store.rejectPromotion(id);
+
+      // Now excluded during cooldown (default 30 days)
+      candidates = await store.getPromotionCandidates(5);
+      expect(candidates).toHaveLength(0);
+    });
+  });
+
+  describe('scanForArchival', () => {
+    it('archives old gotchas with low hit counts', async () => {
+      // Create a gotcha with old createdAt
+      await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'Old and unused' }],
+        1,
+      );
+      const m = await store.match(['foo.ts']);
+      const id = m[0]!.id;
+
+      // scanForArchival with maxAgeDays=0 to treat everything as old
+      const archived = await store.scanForArchival(0, 100);
+      expect(archived).toContain(id);
+
+      // Verify excluded from match
+      const afterMatch = await store.match(['foo.ts']);
+      expect(afterMatch).toHaveLength(0);
+    });
+
+    it('does not archive gotchas with sufficient hits', async () => {
+      await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'Frequently hit' }],
+        1,
+      );
+      const m = await store.match(['foo.ts']);
+      const id = m[0]!.id;
+      for (let i = 0; i < 5; i++) await store.incrementHitCount(id);
+
+      const archived = await store.scanForArchival(0, 5);
+      expect(archived).not.toContain(id);
+    });
+  });
+});
+
+describe('tokenize', () => {
+  it('lowercases and removes stopwords', () => {
+    const tokens = tokenize('The quick Brown fox is Very fast');
+    expect(tokens.has('quick')).toBe(true);
+    expect(tokens.has('brown')).toBe(true);
+    expect(tokens.has('fox')).toBe(true);
+    expect(tokens.has('fast')).toBe(true);
+    expect(tokens.has('the')).toBe(false);
+    expect(tokens.has('is')).toBe(false);
+    expect(tokens.has('very')).toBe(false);
+  });
+});
+
+describe('jaccardSimilarity', () => {
+  it('returns 1 for identical sets', () => {
+    const s = new Set(['a', 'b', 'c']);
+    expect(jaccardSimilarity(s, s)).toBe(1);
+  });
+
+  it('returns 0 for disjoint sets', () => {
+    expect(jaccardSimilarity(new Set(['a']), new Set(['b']))).toBe(0);
+  });
+
+  it('returns correct value for partial overlap', () => {
+    const a = new Set(['a', 'b', 'c']);
+    const b = new Set(['b', 'c', 'd']);
+    // intersection=2, union=4 → 0.5
+    expect(jaccardSimilarity(a, b)).toBe(0.5);
+  });
+
+  it('returns 1 for two empty sets', () => {
+    expect(jaccardSimilarity(new Set(), new Set())).toBe(1);
   });
 });
