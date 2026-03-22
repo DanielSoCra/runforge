@@ -476,7 +476,7 @@ describe('createPhaseHandlers', () => {
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'spec-compliance', 'reviewer-spec',
         expect.any(String), mockRuntime, 42,
-        undefined, undefined, expect.any(String), undefined,
+        undefined, undefined, expect.any(String), '',
       );
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'quality', 'reviewer-quality',
@@ -590,18 +590,18 @@ describe('createPhaseHandlers', () => {
       );
     });
 
-    it('passes undefined specs when loadSpecContent returns empty string (#122)', async () => {
+    it('passes empty string specs when loadSpecContent returns empty string (#122, #169)', async () => {
       mockLoadSpecContent.mockResolvedValue('');
       setupReviewMocks();
       mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
       const { handlers } = createHandlers();
       await handlers.review!(makeRun());
 
-      // Empty string should become undefined (no specs to pass)
+      // Empty string is passed through; reviewer-session.ts applies fallback (#169)
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'spec-compliance', 'reviewer-spec',
         expect.any(String), mockRuntime, 42,
-        undefined, undefined, expect.any(String), undefined,
+        undefined, undefined, expect.any(String), '',
       );
     });
   });

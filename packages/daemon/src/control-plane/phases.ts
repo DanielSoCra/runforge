@@ -237,7 +237,7 @@ export function createPhaseHandlers(
         'spec-compliance', 'reviewer-spec',
         'Verify implementation against spec acceptance criteria.',
         runtime, workRequest.issueNumber, runWriter, runId,
-        diff, specContent || undefined,
+        diff, specContent,
       );
       const gate3 = createReviewerGate(
         'quality', 'reviewer-quality',

@@ -190,7 +190,7 @@ describe('createReviewerGate', () => {
     expect(runtime.spawnSession).toHaveBeenCalledWith(
       'reviewer-spec',
       expect.objectContaining({
-        variables: { rubric: 'my rubric', cwd: '/my/workspace' },
+        variables: { rubric: 'my rubric', cwd: '/my/workspace', specs: 'No spec content available for this review.' },
         workspacePath: '/my/workspace',
       }),
       99,
@@ -238,7 +238,7 @@ describe('createReviewerGate', () => {
     );
   });
 
-  it('omits diff and specs from variables when not provided', async () => {
+  it('omits diff from variables when not provided but always includes specs fallback', async () => {
     const runtime = makeRuntime({
       ok: true,
       value: {
@@ -255,8 +255,32 @@ describe('createReviewerGate', () => {
 
     const callArgs = (runtime.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]!;
     const passedVariables = (callArgs[1] as { variables: Record<string, string> }).variables;
-    expect(passedVariables).toEqual({ rubric: 'rubric', cwd: '/workspace' });
     expect(passedVariables).not.toHaveProperty('diff');
-    expect(passedVariables).not.toHaveProperty('specs');
+    expect(passedVariables).toHaveProperty('specs');
+    expect(passedVariables.specs).toBe('No spec content available for this review.');
+  });
+
+  it('uses fallback specs text when specs is empty string (#169)', async () => {
+    const runtime = makeRuntime({
+      ok: true,
+      value: {
+        structuredData: { findings: [], summary: 'ok', approved: true },
+        output: '',
+        cost: 0.05,
+        pitfallMarkers: [],
+        exitStatus: 'completed',
+      },
+    });
+
+    const gate = createReviewerGate(
+      'spec-compliance', 'reviewer-spec', 'rubric', runtime, 42,
+      undefined, undefined,
+      'some diff', '',
+    );
+    await gate.execute('/workspace');
+
+    const callArgs = (runtime.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const passedVariables = (callArgs[1] as { variables: Record<string, string> }).variables;
+    expect(passedVariables.specs).toBe('No spec content available for this review.');
   });
 });

@@ -34,7 +34,7 @@ export function createReviewerGate(
     async execute(cwd: string): Promise<GateResult> {
       const variables: Record<string, string> = { rubric, cwd };
       if (diff !== undefined) variables.diff = diff;
-      if (specs !== undefined) variables.specs = specs;
+      variables.specs = specs || 'No spec content available for this review.';
 
       const result = await runtime.spawnSession(
         sessionType,
