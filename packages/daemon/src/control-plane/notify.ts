@@ -128,8 +128,15 @@ export async function validateResolvedIP(raw: string): Promise<string | null> {
     }
     return null;
   } catch (err) {
+    // IMPORTANT: isDnsTransientError() relies on this "DNS resolution failed" prefix
+    // to distinguish transient DNS errors from security rejections. Keep in sync.
     return `DNS resolution failed for '${hostname}': ${(err as Error).message}`;
   }
+}
+
+/** Returns true if the rejection from validateResolvedIP is a transient DNS error (not a security block). */
+export function isDnsTransientError(rejection: string): boolean {
+  return rejection.startsWith('DNS resolution failed');
 }
 
 export async function notify(
@@ -153,20 +160,33 @@ export async function notify(
     // an attacker would need sub-second TTL rebinding timed precisely in the gap.
     const ipRejection = await validateResolvedIP(url);
     if (ipRejection) {
-      console.warn(`Webhook URL rejected (${ipRejection}): ${url}`);
-      failedUrls.push(url);
-      continue;
+      // Security rejections (blocked internal address) are permanent — skip immediately.
+      // Transient DNS failures get the same retry path as fetch errors.
+      if (!isDnsTransientError(ipRejection)) {
+        console.warn(`Webhook URL rejected (${ipRejection}): ${url}`);
+        failedUrls.push(url);
+        continue;
+      }
+      console.warn(`Transient DNS failure, will retry (${ipRejection}): ${url}`);
     }
 
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    } catch {
+    // Only attempt fetch if DNS validation passed (ipRejection is null)
+    let fetchFailed = !!ipRejection;
+    if (!ipRejection) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      } catch {
+        fetchFailed = true;
+      }
+    }
+
+    if (fetchFailed) {
       // Retry once after 5 seconds (per STACK-AC-CONTROL-PLANE spec)
       await new Promise((r) => setTimeout(r, 5000));
 

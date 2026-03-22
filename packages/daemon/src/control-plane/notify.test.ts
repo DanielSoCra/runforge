@@ -1,7 +1,7 @@
 // src/control-plane/notify.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as notifyModule from './notify.js';
-const { notify, validateWebhookUrl, validateResolvedIP, isPrivateIP } = notifyModule;
+const { notify, validateWebhookUrl, validateResolvedIP, isPrivateIP, isDnsTransientError } = notifyModule;
 import type { NotificationPayload } from './notify.js';
 
 // Mock dns/promises so we can control resolved IPs in tests.
@@ -440,6 +440,97 @@ describe('DNS rebinding protection (#153)', () => {
     warnSpy.mockRestore();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+});
+
+describe('isDnsTransientError', () => {
+  it('returns true for DNS resolution failures', () => {
+    expect(isDnsTransientError("DNS resolution failed for 'example.com': ENOTFOUND")).toBe(true);
+    expect(isDnsTransientError("DNS resolution failed for 'example.com': ETIMEOUT")).toBe(true);
+  });
+
+  it('returns false for blocked internal address rejections', () => {
+    expect(isDnsTransientError("resolved IP '127.0.0.1' for hostname 'evil.com' is a blocked internal address (possible DNS rebinding)")).toBe(false);
+    expect(isDnsTransientError("resolved IP '10.0.0.1' is a blocked internal address")).toBe(false);
+  });
+});
+
+describe('transient DNS failure retry (#159)', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('retries after transient DNS failure and succeeds on retry', async () => {
+    let dnsCallCount = 0;
+    vi.mocked(mockLookup).mockImplementation(async () => {
+      dnsCallCount++;
+      if (dnsCallCount === 1) {
+        throw new Error('ETIMEOUT');
+      }
+      // Second call resolves successfully
+      return [{ address: '203.0.113.1', family: 4 }];
+    });
+
+    fetchMock.mockResolvedValueOnce({ ok: true });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const promise = notify(
+      ['https://flaky-dns.example.com/hook'],
+      makePayload(),
+    );
+    await vi.advanceTimersByTimeAsync(5000);
+    const result = await promise;
+
+    // DNS failed initially, but retry succeeded — fetch should have been called once
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.failedUrls).toEqual([]);
+
+    warnSpy.mockRestore();
+  });
+
+  it('reports failure when DNS fails on both initial and retry attempts', async () => {
+    vi.mocked(mockLookup).mockRejectedValue(new Error('ETIMEOUT'));
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const promise = notify(
+      ['https://dead-dns.example.com/hook'],
+      makePayload(),
+    );
+    await vi.advanceTimersByTimeAsync(5000);
+    const result = await promise;
+
+    // fetch should never have been called — DNS failed both times
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.failedUrls).toEqual(['https://dead-dns.example.com/hook']);
+
+    warnSpy.mockRestore();
+  });
+
+  it('does NOT retry when DNS resolves to a blocked internal address', async () => {
+    vi.mocked(mockLookup).mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await notify(
+      ['https://evil-rebinding.example.com/hook'],
+      makePayload(),
+    );
+
+    // Should immediately fail — no retry, no fetch
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.failedUrls).toEqual(['https://evil-rebinding.example.com/hook']);
+
+    warnSpy.mockRestore();
   });
 });
 
