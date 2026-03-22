@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, rm, readFile, readdir, mkdir, writeFile } from 'fs/promises';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }));
 vi.mock('@/lib/plugins/registry', () => ({ loadDashboardRegistry: vi.fn() }));
@@ -9,7 +12,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
   })),
 }));
 
-import { togglePlugin, enableAllSuggested, triggerRecommendation } from './plugins.js';
+import { togglePlugin, enableAllSuggested, triggerRecommendation, exportPlugin } from './plugins.js';
 import { createClient } from '@/lib/supabase/server';
 import { loadDashboardRegistry } from '@/lib/plugins/registry';
 import { requireAdmin } from '@/lib/auth';
@@ -224,5 +227,124 @@ describe('triggerRecommendation', () => {
     await expect(triggerRecommendation('repo-id', 'owner', 'repo;evil')).resolves.toBeUndefined();
     expect(vi.mocked(loadDashboardRegistry)).not.toHaveBeenCalled();
     expect(vi.mocked(Anthropic)).not.toHaveBeenCalled();
+  });
+});
+
+describe('exportPlugin', () => {
+  let tmpDir: string;
+  let pluginsDir: string;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    tmpDir = await mkdtemp(join(tmpdir(), 'export-test-'));
+    pluginsDir = join(tmpDir, 'plugins');
+    // Set PLUGINS_DIR so the Server Action reads from our temp directory
+    process.env['PLUGINS_DIR'] = pluginsDir;
+  });
+
+  afterEach(async () => {
+    delete process.env['PLUGINS_DIR'];
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('rejects unauthenticated callers', async () => {
+    vi.mocked(requireAdmin).mockRejectedValue(new Error('Unauthorized'));
+    vi.mocked(createClient).mockResolvedValue({} as never);
+    const result = await exportPlugin('repo-id', 'web-stack', '/some/path');
+    expect(result.error).toContain('Unauthorized');
+  });
+
+  it('rejects plugin ids with unsafe characters', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(createClient).mockResolvedValue({} as never);
+    const result = await exportPlugin('repo-id', '../../etc', '/some/path');
+    expect(result.error).toContain('Invalid plugin identifier');
+  });
+
+  it('rejects unknown plugin ids', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
+    vi.mocked(createClient).mockResolvedValue({} as never);
+    const result = await exportPlugin('repo-id', 'nonexistent', '/some/path');
+    expect(result.error).toContain('Unknown plugin');
+  });
+
+  it('rejects relative target paths', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
+    vi.mocked(createClient).mockResolvedValue({} as never);
+    const result = await exportPlugin('repo-id', 'web-stack', 'relative/path');
+    expect(result.error).toContain('Target path must be absolute');
+  });
+
+  it('rejects target path that does not exist', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
+    vi.mocked(createClient).mockResolvedValue({} as never);
+    const result = await exportPlugin('repo-id', 'web-stack', '/nonexistent/path');
+    expect(result.error).toContain('does not exist');
+  });
+
+  it('copies skill documents to target repo .claude/plugins/<id>/skills/', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
+    vi.mocked(createClient).mockResolvedValue({} as never);
+
+    // Create a fake plugin with skills
+    const skillsDir = join(pluginsDir, 'web-stack', 'skills');
+    await mkdir(skillsDir, { recursive: true });
+    await writeFile(join(skillsDir, 'testing.md'), '# Testing Guide\nUse vitest.');
+    await writeFile(join(skillsDir, 'patterns.md'), '# Patterns\nUse composition.');
+
+    const targetRepo = join(tmpDir, 'target-repo');
+    await mkdir(targetRepo, { recursive: true });
+
+    const result = await exportPlugin('repo-id', 'web-stack', targetRepo);
+    expect(result.ok).toBe(true);
+
+    // Verify files were copied
+    const destDir = join(targetRepo, '.claude', 'plugins', 'web-stack', 'skills');
+    const files = await readdir(destDir);
+    expect(files.sort()).toEqual(['patterns.md', 'testing.md']);
+
+    const content = await readFile(join(destDir, 'testing.md'), 'utf-8');
+    expect(content).toBe('# Testing Guide\nUse vitest.');
+  });
+
+  it('returns error when plugin has no skill documents', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
+    vi.mocked(createClient).mockResolvedValue({} as never);
+
+    // Create plugin dir with no skills
+    await mkdir(join(pluginsDir, 'web-stack', 'skills'), { recursive: true });
+
+    const targetRepo = join(tmpDir, 'target-repo');
+    await mkdir(targetRepo, { recursive: true });
+
+    const result = await exportPlugin('repo-id', 'web-stack', targetRepo);
+    expect(result.error).toContain('No skill documents');
+  });
+
+  it('only copies .md files, skipping non-markdown files', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
+    vi.mocked(createClient).mockResolvedValue({} as never);
+
+    const skillsDir = join(pluginsDir, 'web-stack', 'skills');
+    await mkdir(skillsDir, { recursive: true });
+    await writeFile(join(skillsDir, 'guide.md'), '# Guide');
+    await writeFile(join(skillsDir, '.gitkeep'), '');
+    await writeFile(join(skillsDir, 'notes.txt'), 'not a skill');
+
+    const targetRepo = join(tmpDir, 'target-repo');
+    await mkdir(targetRepo, { recursive: true });
+
+    const result = await exportPlugin('repo-id', 'web-stack', targetRepo);
+    expect(result.ok).toBe(true);
+
+    const destDir = join(targetRepo, '.claude', 'plugins', 'web-stack', 'skills');
+    const files = await readdir(destDir);
+    expect(files).toEqual(['guide.md']);
   });
 });

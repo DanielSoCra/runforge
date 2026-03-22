@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/auth';
 import { loadDashboardRegistry } from '@/lib/plugins/registry';
 import Anthropic from '@anthropic-ai/sdk';
+import { readFile, readdir, mkdir, writeFile, stat } from 'fs/promises';
+import { join, resolve, normalize } from 'path';
 
 // SAFE_PATTERN prevents prompt injection by blocking shell metacharacters, spaces, and control
 // characters. It is not a strict GitHub identifier validator — use for LLM prompt safety only.
@@ -146,4 +148,68 @@ export async function triggerRecommendation(repoId: string, repoOwner: string, r
       // Fail silently — user can re-trigger via dashboard
     }
   })();
+}
+
+function getPluginsDir(): string {
+  return process.env['PLUGINS_DIR'] ?? join(process.cwd(), '../..', 'plugins');
+}
+
+export async function exportPlugin(
+  repoId: string,
+  pluginId: string,
+  targetRepoPath: string,
+): Promise<{ ok?: true; error?: string }> {
+  const supabase = await createClient();
+  try { await requireAdmin(supabase); } catch { return { error: 'Unauthorized' }; }
+
+  // Validate pluginId against SAFE_PATTERN before using in filesystem paths
+  if (!SAFE_PATTERN.test(pluginId)) {
+    return { error: 'Invalid plugin identifier' };
+  }
+
+  const registry = await loadDashboardRegistry();
+  if (!registry.plugins.find(p => p.id === pluginId)) {
+    return { error: `Unknown plugin: ${pluginId}` };
+  }
+
+  // Validate targetRepoPath: must be absolute, no traversal, and must exist as a directory
+  const resolved = resolve(targetRepoPath);
+  if (!targetRepoPath.startsWith('/')) {
+    return { error: 'Target path must be absolute' };
+  }
+
+  const targetStat = await stat(resolved).catch(() => null);
+  if (!targetStat || !targetStat.isDirectory()) {
+    return { error: 'Target path does not exist or is not a directory' };
+  }
+
+  const pluginsDir = getPluginsDir();
+  const skillsDir = join(pluginsDir, pluginId, 'skills');
+  const destDir = join(resolved, '.claude', 'plugins', pluginId, 'skills');
+
+  const files = await readdir(skillsDir).catch(() => [] as string[]);
+  const mdFiles = files.filter(f => f.endsWith('.md'));
+
+  if (mdFiles.length === 0) {
+    return { error: 'No skill documents found for this plugin' };
+  }
+
+  try {
+    await mkdir(destDir, { recursive: true });
+
+    for (const f of mdFiles) {
+      const srcPath = join(skillsDir, f);
+      const fileStat = await stat(srcPath).catch(() => null);
+      if (!fileStat || !fileStat.isFile()) continue;
+      const content = await readFile(srcPath, 'utf-8');
+      await writeFile(join(destDir, f), content, 'utf-8');
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error(`[plugins] exportPlugin failed for repo ${repoId}, plugin ${pluginId}:`, message);
+    return { error: `Failed to export plugin: ${message}` };
+  }
+
+  console.log(`[plugins] Exported plugin ${pluginId} to ${destDir} for repo ${repoId}`);
+  return { ok: true };
 }
