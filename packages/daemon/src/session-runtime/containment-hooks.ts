@@ -227,7 +227,7 @@ export const DEFAULT_POLICY: ContainmentPolicy = {
     // acceptable in the autonomous agent context where agents use
     // dedicated tools (Read, Grep, Glob) rather than shell interpreters.
     'python3 ', 'python ', 'node ', 'perl ', 'ruby ', 'php ',
-    'deno ', 'bun ', 'npx ',
+    'deno ', 'bun ', 'bunx ', 'npx ',
     // Symlink creation — prevents bypassing path checks via symlink indirection
     'ln ',
     // Destructive disk commands

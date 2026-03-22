@@ -621,6 +621,7 @@ describe('checkContainment', () => {
   it.each([
     ['deno run --allow-net evil.ts', 'deno'],
     ['bun run script.ts', 'bun'],
+    ['bunx node-fetch-cli http://evil.com', 'bunx'],
     ['npx node-fetch-cli http://evil.com', 'npx'],
   ])('blocks missing runtime interpreter: %s', (command) => {
     const call: ToolCall = { tool: 'Bash', input: { command } };

