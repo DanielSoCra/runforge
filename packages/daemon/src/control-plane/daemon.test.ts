@@ -31,7 +31,7 @@ const {
     claimWork: vi.fn(),
     markStuck: vi.fn(),
   },
-  mockServer: { close: vi.fn() },
+  mockServer: { close: vi.fn((cb?: () => void) => { if (cb) cb(); }) },
   mockServerStart: vi.fn(),
   mockRunPipeline: vi.fn(),
   mockNotify: vi.fn(),
