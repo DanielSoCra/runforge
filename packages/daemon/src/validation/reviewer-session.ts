@@ -36,42 +36,55 @@ export function createReviewerGate(
       if (diff !== undefined) variables.diff = diff;
       variables.specs = specs || 'No spec content available for this review.';
 
-      const result = await runtime.spawnSession(
-        sessionType,
-        {
-          variables,
-          workspacePath: cwd,
-        },
-        issueNumber,
-        { jsonSchema },
-        runWriter,
-        runId,
-      );
+      const sessionOpts = {
+        variables,
+        workspacePath: cwd,
+      };
 
-      if (!result.ok) {
+      // Retry logic: one retry on session failure or invalid structured output
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = await runtime.spawnSession(
+          sessionType,
+          sessionOpts,
+          issueNumber,
+          { jsonSchema },
+          runWriter,
+          runId,
+        );
+
+        if (!result.ok) {
+          if (attempt === 0) continue; // retry once
+          return {
+            gate: type,
+            passed: false,
+            findings: [{ severity: 'critical', location: 'session', description: result.error.message }],
+          };
+        }
+
+        // Parse structured output
+        const parsed = ReviewFindingsSchema.safeParse(result.value.structuredData);
+        if (!parsed.success) {
+          if (attempt === 0) continue; // retry once
+          return {
+            gate: type,
+            passed: false,
+            findings: [{ severity: 'critical', location: 'output', description: 'Reviewer produced invalid structured output' }],
+          };
+        }
+
+        const hasCritical = parsed.data.findings.some((f) => f.severity === 'critical');
         return {
           gate: type,
-          passed: false,
-          findings: [{ severity: 'critical', location: 'session', description: result.error.message }],
+          passed: parsed.data.approved && !hasCritical,
+          findings: parsed.data.findings as ReviewFinding[],
         };
       }
 
-      // Parse structured output
-      const parsed = ReviewFindingsSchema.safeParse(result.value.structuredData);
-      if (!parsed.success) {
-        // Treat unparseable output as failure
-        return {
-          gate: type,
-          passed: false,
-          findings: [{ severity: 'critical', location: 'output', description: 'Reviewer produced invalid structured output' }],
-        };
-      }
-
-      const hasCritical = parsed.data.findings.some((f) => f.severity === 'critical');
+      // Unreachable, but TypeScript needs it
       return {
         gate: type,
-        passed: parsed.data.approved && !hasCritical,
-        findings: parsed.data.findings as ReviewFinding[],
+        passed: false,
+        findings: [{ severity: 'critical', location: 'session', description: 'Unexpected retry exhaustion' }],
       };
     },
   };

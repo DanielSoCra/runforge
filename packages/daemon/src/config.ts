@@ -39,10 +39,37 @@ export const ConfigSchema = z.object({
       maxFunctionLength: z.number().int().default(50),
       maxFileSize: z.number().int().default(500),
     }).default({ maxComplexity: 15, maxFunctionLength: 50, maxFileSize: 500 }),
+    diminishingReturns: z.object({
+      minCycles: z.number().int().min(1).default(2),
+      improvementThreshold: z.number().min(0).max(1).default(0.2),
+    }).default({ minCycles: 2, improvementThreshold: 0.2 }),
+    deployCommand: z.string().refine(
+      (cmd: string) => !cmd.trim() || validateGate1Command(cmd) === null,
+      { message: 'Deploy command contains disallowed shell characters' },
+    ).optional(),
+    healthCheckUrl: z.string().url().optional(),
+    healthCheckIntervalMs: z.number().int().min(1000).default(5000),
+    deployTimeoutMs: z.number().int().min(5000).default(120000),
+    maxDeployAttempts: z.number().int().min(1).default(2),
+    testCommands: z.array(
+      z.string().refine(
+        (cmd: string) => !cmd.trim() || validateGate1Command(cmd) === null,
+        { message: 'Test command contains disallowed shell characters' },
+      ),
+    ).default([]),
+    maxTestFixAttempts: z.number().int().min(1).default(3),
+    failureExcerptLines: z.number().int().min(10).default(50),
   }).default({
     gate1Commands: ['vitest run', 'tsc --noEmit', 'eslint --max-warnings 0 src/'],
     maxFixCycles: 3,
     staticAnalysis: { maxComplexity: 15, maxFunctionLength: 50, maxFileSize: 500 },
+    diminishingReturns: { minCycles: 2, improvementThreshold: 0.2 },
+    healthCheckIntervalMs: 5000,
+    deployTimeoutMs: 120000,
+    maxDeployAttempts: 2,
+    testCommands: [],
+    maxTestFixAttempts: 3,
+    failureExcerptLines: 50,
   }),
   diagnosis: z.object({
     confidenceThreshold: z.number().min(0).max(1).default(0.7),

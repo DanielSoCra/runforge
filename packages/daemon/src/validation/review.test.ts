@@ -193,4 +193,116 @@ describe('runReview', () => {
 
     expect(fixHandler).toHaveBeenCalledWith(findings);
   });
+
+  // Diminishing returns tests
+
+  it('escalates with diminishing-returns when improvement stalls for 2 consecutive cycles', async () => {
+    // Cycle 1: 10 findings, Cycle 2: 9 findings (10% improvement < 20% threshold), Cycle 3: 8 findings (11% < 20%)
+    // Should escalate after cycle 3 (2 consecutive stalled cycles)
+    let callCount = 0;
+    const findingCounts = [10, 9, 8]; // stalling improvement
+    const gate1: Gate = {
+      type: 'deterministic',
+      execute: vi.fn().mockImplementation(async () => {
+        const count = findingCounts[callCount] ?? 0;
+        callCount++;
+        const findings = Array.from({ length: count }, (_, i) => ({
+          severity: 'important' as const,
+          location: `file${i}.ts`,
+          description: `issue ${i}`,
+        }));
+        return { gate: 'deterministic', passed: false, findings };
+      }),
+    };
+    const fixHandler = vi.fn().mockResolvedValue(true);
+
+    const result = await runReview([gate1], '/workspace', {
+      maxFixCycles: 10,
+      fixHandler,
+      diminishingReturns: { minCycles: 2, improvementThreshold: 0.2 },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.escalated).toBe(true);
+    expect(result.escalationReason).toBe('diminishing-returns');
+    expect(result.fixCycles).toBeLessThan(10); // escalated early
+  });
+
+  it('does not trigger diminishing returns before minCycles', async () => {
+    let callCount = 0;
+    const gate1: Gate = {
+      type: 'deterministic',
+      execute: vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount <= 2) {
+          return {
+            gate: 'deterministic',
+            passed: false,
+            findings: [{ severity: 'important', location: 'f.ts', description: 'issue' }],
+          };
+        }
+        return { gate: 'deterministic', passed: true, findings: [] };
+      }),
+    };
+    const fixHandler = vi.fn().mockResolvedValue(true);
+
+    const result = await runReview([gate1], '/workspace', {
+      maxFixCycles: 10,
+      fixHandler,
+      diminishingReturns: { minCycles: 2, improvementThreshold: 0.2 },
+    });
+
+    // Should pass because it fixes on cycle 3 (before diminishing returns kicks in after minCycles)
+    expect(result.passed).toBe(true);
+  });
+
+  it('resets stalled count when improvement exceeds threshold', async () => {
+    // Cycle 1: 10 findings, Cycle 2: 9 (stall), Cycle 3: 5 (good improvement), Cycle 4: 4 (stall), Cycle 5: pass
+    let callCount = 0;
+    const findingCounts = [10, 9, 5, 4];
+    const gate1: Gate = {
+      type: 'deterministic',
+      execute: vi.fn().mockImplementation(async () => {
+        if (callCount >= findingCounts.length) {
+          return { gate: 'deterministic', passed: true, findings: [] };
+        }
+        const count = findingCounts[callCount]!;
+        callCount++;
+        const findings = Array.from({ length: count }, (_, i) => ({
+          severity: 'important' as const,
+          location: `file${i}.ts`,
+          description: `issue ${i}`,
+        }));
+        return { gate: 'deterministic', passed: false, findings };
+      }),
+    };
+    const fixHandler = vi.fn().mockResolvedValue(true);
+
+    const result = await runReview([gate1], '/workspace', {
+      maxFixCycles: 10,
+      fixHandler,
+      diminishingReturns: { minCycles: 2, improvementThreshold: 0.2 },
+    });
+
+    expect(result.passed).toBe(true);
+  });
+
+  it('reports max-cycles-exceeded when max reached without diminishing returns', async () => {
+    const gate1 = makeGate('deterministic', {
+      gate: 'deterministic',
+      passed: false,
+      findings: [{ severity: 'critical', location: 'tsc', description: 'persistent error' }],
+    });
+    const fixHandler = vi.fn().mockResolvedValue(true);
+
+    const result = await runReview([gate1], '/workspace', {
+      maxFixCycles: 2,
+      fixHandler,
+      diminishingReturns: { minCycles: 2, improvementThreshold: 0.2 },
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.escalated).toBe(true);
+    expect(result.escalationReason).toBe('max-cycles-exceeded');
+  });
 });

@@ -198,9 +198,27 @@ STACK-AC-VALIDATION:
   children: []
   code_paths:
     - packages/daemon/src/validation/
+    - packages/daemon/src/validation/review.ts
+    - packages/daemon/src/validation/gates.ts
+    - packages/daemon/src/validation/reviewer-session.ts
+    - packages/daemon/src/validation/risk-detection.ts
+    - packages/daemon/src/validation/sampling.ts
+    - packages/daemon/src/validation/warmup.ts
+    - packages/daemon/src/validation/holdout.ts
+    - packages/daemon/src/validation/deploy.ts
+    - packages/daemon/src/validation/post-deploy-test.ts
     - packages/daemon/src/infra/spec-loader.ts
   test_paths:
     - packages/daemon/src/validation/**/*.test.ts
+    - packages/daemon/src/validation/review.test.ts
+    - packages/daemon/src/validation/gates.test.ts
+    - packages/daemon/src/validation/reviewer-session.test.ts
+    - packages/daemon/src/validation/risk-detection.test.ts
+    - packages/daemon/src/validation/sampling.test.ts
+    - packages/daemon/src/validation/warmup.test.ts
+    - packages/daemon/src/validation/holdout.test.ts
+    - packages/daemon/src/validation/deploy.test.ts
+    - packages/daemon/src/validation/post-deploy-test.test.ts
     - packages/daemon/src/infra/spec-loader.test.ts
   status: draft
 

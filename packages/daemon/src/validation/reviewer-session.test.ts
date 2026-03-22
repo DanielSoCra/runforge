@@ -260,6 +260,91 @@ describe('createReviewerGate', () => {
     expect(passedVariables.specs).toBe('No spec content available for this review.');
   });
 
+  it('retries once on session failure then returns failure', async () => {
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce({ ok: false, error: new Error('session timed out') })
+        .mockResolvedValueOnce({ ok: false, error: new Error('session timed out again') }),
+      getCostTracker: vi.fn(),
+    } as unknown as SessionRuntime;
+
+    const gate = createReviewerGate('quality', 'reviewer-quality', 'Check quality', runtime, 42);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries once on session failure then succeeds', async () => {
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce({ ok: false, error: new Error('session timed out') })
+        .mockResolvedValueOnce({
+          ok: true,
+          value: {
+            structuredData: { findings: [], summary: 'ok', approved: true },
+            output: '', cost: 0.05, pitfallMarkers: [], exitStatus: 'completed',
+          },
+        }),
+      getCostTracker: vi.fn(),
+    } as unknown as SessionRuntime;
+
+    const gate = createReviewerGate('quality', 'reviewer-quality', 'Check quality', runtime, 42);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(true);
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries once on invalid structured output then returns failure', async () => {
+    const badOutput = {
+      ok: true,
+      value: {
+        structuredData: { bad: 'data' },
+        output: '', cost: 0.1, pitfallMarkers: [], exitStatus: 'completed',
+      },
+    };
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce(badOutput)
+        .mockResolvedValueOnce(badOutput),
+      getCostTracker: vi.fn(),
+    } as unknown as SessionRuntime;
+
+    const gate = createReviewerGate('quality', 'reviewer-quality', 'Check quality', runtime, 42);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries once on invalid structured output then succeeds', async () => {
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          value: {
+            structuredData: { bad: 'data' },
+            output: '', cost: 0.1, pitfallMarkers: [], exitStatus: 'completed',
+          },
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          value: {
+            structuredData: { findings: [], summary: 'ok', approved: true },
+            output: '', cost: 0.05, pitfallMarkers: [], exitStatus: 'completed',
+          },
+        }),
+      getCostTracker: vi.fn(),
+    } as unknown as SessionRuntime;
+
+    const gate = createReviewerGate('quality', 'reviewer-quality', 'Check quality', runtime, 42);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(true);
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(2);
+  });
+
   it('uses fallback specs text when specs is empty string (#169)', async () => {
     const runtime = makeRuntime({
       ok: true,
