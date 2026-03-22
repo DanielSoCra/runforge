@@ -8,6 +8,10 @@ const WORKFLOW_PATH = resolve(REPO_ROOT, '.github/workflows/auto-claude.yml');
 describe('auto-claude CI workflow', () => {
   const raw = readFileSync(WORKFLOW_PATH, 'utf-8');
 
+  it('uses --frozen-lockfile for reproducible installs (#185)', () => {
+    expect(raw).toContain('pnpm install --frozen-lockfile');
+  });
+
   it('should reference existing .ts file paths in run commands', () => {
     // Extract all .ts file paths referenced in tsx/node run commands
     const tsFileRefs = raw.matchAll(/(?:npx\s+tsx|node)\s+(\S+\.ts)/g);
