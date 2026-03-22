@@ -39,6 +39,12 @@ test_paths:
 
 **Pattern extraction: Tokenize + overlap.** Extract keywords from gotcha descriptions by splitting on whitespace, lowercasing, and removing common stopwords (a hardcoded ~50-word list). For each pair of gotchas with overlapping artifact patterns, compute keyword overlap as `intersection.size / union.size` (Jaccard similarity). Pairs with >50% overlap are grouped. Groups with 3+ members become candidate patterns stored in `state/patterns.json`. No NLP library — simple tokenization is sufficient for this domain.
 
+**Gotcha deduplication: Artifact pattern + description similarity.** On store, check existing gotchas for matching artifact patterns. If a gotcha with identical `artifactPatterns` and a similar description exists (Jaccard similarity > 0.7 on tokenized words), increment its hit count instead of creating a duplicate. Otherwise, create a new entry with hit count 1. This prevents the store from growing unboundedly when sessions repeatedly discover the same pitfall.
+
+**Promotion thresholds: Configurable per priority tier.** Normal-priority gotchas require 5 hits for promotion eligibility. Elevated-priority gotchas (operator corrections) require 2 hits. Both thresholds are configurable via `config.promotionThresholds: { normal: number, elevated: number }`. Age ceiling for promotion: 90 days (configurable). Rejected promotions enter a cooldown period (default: 30 days) tracked via a `reviewedAt` timestamp on the gotcha — the gotcha is not re-proposed until cooldown expires.
+
+**Proposal cooldown: Timestamp-based.** Rejected prompt proposals store a `rejectedAt` timestamp. The optimization flow skips re-proposing changes to the same template until the cooldown period (default: 30 days, configurable) has elapsed. Cooldown is checked by comparing `rejectedAt + cooldownMs` against `Date.now()`.
+
 **Archival: Age + hit count filter.** During periodic maintenance (triggered by the Control Plane on a configurable schedule), scan all gotchas. Archive any gotcha where age exceeds the configured maximum (default: 90 days) AND hit count is below a configured minimum (default: 2). Archived gotchas are moved to `state/gotchas-archive.jsonl` — retained for historical reference but excluded from active matching and injection.
 
 ## Examples
@@ -97,3 +103,5 @@ async function compactGotchaStore(): Promise<void> {
 - The mutable/protected boundary is enforced by the optimization flow's context assembly: only files in `prompts/` are loaded as mutable input. Files in `.specify/methodology/` are never passed to the optimizer session.
 - Archival is distinct from compaction. Compaction removes duplicate versions of the same gotcha. Archival removes stale gotchas (old + low hit count) from the active store. Both run during maintenance, but serve different purposes.
 - Unified diff parsing: split on lines starting with `---`, `+++`, `@@`. No library needed — the format is well-defined. If the optimizer produces malformed diffs, reject the proposal and log a warning.
+- Dedup similarity: the 0.7 Jaccard threshold is intentionally high to avoid false merges. Two gotchas about different issues in the same files should remain separate. When in doubt, store as new — the operator can deduplicate manually during promotion review.
+- Cooldown timestamps: store `reviewedAt` on the gotcha record itself (not in a separate structure). This keeps all gotcha state in the JSONL log and avoids needing a secondary index.
