@@ -32,7 +32,11 @@ export function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
 export class GotchaStore {
   private compacting = false;
 
-  constructor(private path: string) {}
+  private archivePath: string;
+
+  constructor(private path: string) {
+    this.archivePath = path.replace(/\.jsonl$/, '-archive.jsonl');
+  }
 
   async store(markers: Array<{ artifactPatterns: string[]; description: string }>, sourceIssue: number, originType: 'autonomous' | 'operator' = 'autonomous'): Promise<number> {
     let stored = 0;
@@ -164,7 +168,12 @@ export class GotchaStore {
 
   async compact(): Promise<void> {
     const all = await this.loadAll();
+    const archived = all.filter((g) => g.archived);
     const active = all.filter((g) => !g.archived);
+    // Move archived entries to archive file per L3 spec (retained for historical reference)
+    for (const g of archived) {
+      await appendJsonl(this.archivePath, g);
+    }
     await writeTextSafe(this.path, active.map((g) => JSON.stringify(g)).join('\n') + '\n');
   }
 

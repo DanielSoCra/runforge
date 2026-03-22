@@ -220,8 +220,22 @@ STACK-AC-DIAGNOSIS:
 STACK-AC-KNOWLEDGE:
   parent: ARCH-AC-KNOWLEDGE
   children: []
-  code_paths: [packages/daemon/src/knowledge/]
-  test_paths: [packages/daemon/src/knowledge/**/*.test.ts]
+  code_paths:
+    - packages/daemon/src/knowledge/gotcha-store.ts
+    - packages/daemon/src/knowledge/extractor.ts
+    - packages/daemon/src/knowledge/promotion.ts
+    - packages/daemon/src/knowledge/templates.ts
+    - packages/daemon/src/knowledge/exemplar-store.ts
+    - packages/daemon/src/knowledge/pattern-extractor.ts
+    - packages/daemon/src/knowledge/proposal-store.ts
+  test_paths:
+    - packages/daemon/src/knowledge/gotcha-store.test.ts
+    - packages/daemon/src/knowledge/extractor.test.ts
+    - packages/daemon/src/knowledge/promotion.test.ts
+    - packages/daemon/src/knowledge/templates.test.ts
+    - packages/daemon/src/knowledge/exemplar-store.test.ts
+    - packages/daemon/src/knowledge/pattern-extractor.test.ts
+    - packages/daemon/src/knowledge/proposal-store.test.ts
   status: draft
 
 STACK-AC-DASHBOARD:
