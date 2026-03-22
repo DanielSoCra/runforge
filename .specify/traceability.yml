@@ -386,9 +386,11 @@ STACK-AC-SUPABASE-SYNC:
   children: []
   spec: docs/superpowers/specs/2026-03-20-supabase-sync-design.md
   code_paths:
+    - packages/daemon/src/supabase/client.ts
     - packages/daemon/src/supabase/config-reader.ts
     - packages/daemon/src/supabase/run-writer.ts
   test_paths:
+    - packages/daemon/src/supabase/client.test.ts
     - packages/daemon/src/supabase/config-reader.test.ts
     - packages/daemon/src/supabase/run-writer.test.ts
   status: draft
