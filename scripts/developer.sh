@@ -22,7 +22,7 @@ while true; do
     git pull --no-rebase 2>&1 || { log "ERROR: git pull failed"; sleep 300; continue; }
   fi
 
-  claude --dangerously-skip-permissions -p --max-budget-usd 10 "Use the fix-review-issues skill. Use gh CLI to find the highest priority open issue labeled review-finding that does not have in-progress or blocked labels (check P0 first, then P1, P2, P3). If none found, exit 0. Add in-progress label. Fix it: read the spec chain first (traceability.yml → L3 → L2 → L1), implement on a fix/ branch from dev, write a regression test, run pnpm -r run test and typecheck, use the requesting-code-review superpower to review changes, rebase onto dev and merge. Close the issue with gh issue close and note the commit SHA. If blocked after 3 attempts, add blocked label and move on."
+  claude --dangerously-skip-permissions -p --max-budget-usd 10 "Use the fix-review-issues skill. SEVERITY GATE: Only fix P0 and P1 issues. For P2, only fix if the issue also has the auto-fix-approved label. NEVER fix P3 issues autonomously. Use gh CLI to find the highest priority open issue labeled review-finding that does not have in-progress or blocked labels (check P0 first, then P1, then P2+auto-fix-approved). If none found, exit 0. Follow the full fix-review-issues workflow: add in-progress label, read spec chain, implement on fix/ branch, write regression test, run tests, code review, rebase, merge, self-verify, close with commit SHA."
   EXIT_CODE=$?
 
   if [ $EXIT_CODE -eq 0 ]; then
