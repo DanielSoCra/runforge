@@ -70,6 +70,32 @@ describe('StateManager', () => {
     expect(files.filter((f) => f.endsWith('.tmp'))).toHaveLength(0);
   });
 
+  it('treats completed report phase as complete', async () => {
+    const run = makeRun(1, 'report');
+    run.phaseCompletions = { report: true };
+    await mgr.saveRunState(run);
+    const incomplete = await mgr.findIncompleteRuns();
+    expect(incomplete).toHaveLength(0);
+  });
+
+  it('treats completed launch phase as complete (website pipeline)', async () => {
+    const run = makeRun(1, 'launch');
+    run.variant = 'website' as any;
+    run.phaseCompletions = { launch: true };
+    await mgr.saveRunState(run);
+    const incomplete = await mgr.findIncompleteRuns();
+    expect(incomplete).toHaveLength(0);
+  });
+
+  it('treats launch phase without completion as incomplete', async () => {
+    const run = makeRun(1, 'launch');
+    run.variant = 'website' as any;
+    run.phaseCompletions = {};
+    await mgr.saveRunState(run);
+    const incomplete = await mgr.findIncompleteRuns();
+    expect(incomplete).toHaveLength(1);
+  });
+
   it('deletes RunState', async () => {
     await mgr.saveRunState(makeRun(42));
     await mgr.deleteRunState(42);

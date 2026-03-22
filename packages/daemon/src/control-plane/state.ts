@@ -4,6 +4,7 @@ import { join } from 'path';
 import { writeJsonSafe, readJsonSafe } from '../lib/json-store.js';
 import { ok, err, type Result } from '../lib/result.js';
 import type { RunState, DaemonState } from '../types.js';
+import { isComplete } from './fsm.js';
 
 export class StateManager {
   private stateDir: string;
@@ -86,5 +87,9 @@ export class StateManager {
 }
 
 function isRunComplete(run: RunState): boolean {
-  return run.phase === 'stuck' || (run.phase === 'report' && run.phaseCompletions['report'] === true);
+  if (run.phase === 'stuck') return true;
+  if (run.phaseCompletions[run.phase] === true) {
+    return isComplete(run.phase, 'success');
+  }
+  return false;
 }
