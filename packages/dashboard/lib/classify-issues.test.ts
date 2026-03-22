@@ -83,6 +83,23 @@ describe('classifyIssues', () => {
     expect(cards[0]?.currentPhase).toBe('planning');
   });
 
+  it('excludes complete runs from repos not in the enabled repos list (#130)', () => {
+    const enabledRepo = { owner: 'owner', name: 'repo', issues: [] as GitHubIssue[] };
+    const disabledRun: RunRecord = {
+      issue_number: 99,
+      repo_owner: 'other-owner',
+      repo_name: 'disabled-repo',
+      issue_title: 'Issue 99',
+      outcome: 'complete',
+      current_phase: null,
+    };
+    const enabledRun = run(7, 'complete');
+    const cards = classifyIssues([enabledRepo], [disabledRun, enabledRun]);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.repoOwner).toBe('owner');
+    expect(cards[0]?.issueNumber).toBe(7);
+  });
+
   it('aggregates issues from multiple repos', () => {
     const cards = classifyIssues(
       [

@@ -48,6 +48,9 @@ export function classifyIssues(
   // Track emitted keys from the first loop to prevent double-counting complete runs
   const emittedKeys = new Set<string>();
 
+  // Build set of enabled repo keys so the complete-runs loop only includes enabled repos
+  const enabledRepos = new Set(repos.map((r) => `${r.owner}/${r.name}`));
+
   // Classify open GitHub issues
   for (const repo of repos) {
     for (const issue of repo.issues) {
@@ -84,9 +87,12 @@ export function classifyIssues(
   }
 
   // Add complete cards from DB runs (closed issues not in GitHub open-issue API response)
+  // Only include runs from enabled repos to avoid showing cards for disabled repos
   for (const run of runs) {
     if (run.outcome !== 'complete') continue;
-    const key = `${run.repo_owner}/${run.repo_name}#${run.issue_number}`;
+    const repoKey = `${run.repo_owner}/${run.repo_name}`;
+    if (!enabledRepos.has(repoKey)) continue;
+    const key = `${repoKey}#${run.issue_number}`;
     if (!emittedKeys.has(key)) {
       cards.push({
         column: 'complete',
