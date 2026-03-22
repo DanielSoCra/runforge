@@ -121,6 +121,7 @@ ARCH-AC-CONTROL-PLANE:
 
 ARCH-AC-SPEC-PIPELINE:
   parent: FUNC-AC-PIPELINE
+  children: [STACK-AC-SPEC-PIPELINE]
   status: draft
 
 ARCH-AC-PIPELINE-DISPATCH:
@@ -502,6 +503,20 @@ STACK-AC-DASHBOARD-BRIEFING:
     - packages/dashboard/actions/briefing.test.ts
     - packages/briefing-summarizer/**/*.test.ts
     - supabase/tests/rls-briefing.test.ts
+  status: draft
+
+STACK-AC-SPEC-PIPELINE:
+  parent: ARCH-AC-SPEC-PIPELINE
+  children: []
+  code_paths:
+    - packages/daemon/src/control-plane/spec-pipeline/
+    - packages/daemon/src/control-plane/spec-pipeline/variant.ts
+    - packages/daemon/src/control-plane/spec-pipeline/gate.ts
+    - packages/daemon/src/control-plane/spec-pipeline/spec-chain.ts
+    - packages/daemon/src/control-plane/spec-pipeline/park.ts
+    - packages/daemon/src/control-plane/spec-pipeline/context.ts
+  test_paths:
+    - packages/daemon/src/control-plane/spec-pipeline/**/*.test.ts
   status: draft
 
 STACK-AC-PIPELINE-DISPATCH:
