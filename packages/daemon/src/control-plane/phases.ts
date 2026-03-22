@@ -15,8 +15,10 @@ import { appendResult } from './results.js';
 import type { Octokit } from '@octokit/rest';
 import { createWorkDetector } from './work-detection.js';
 import { git } from '../lib/git.js';
+import { join } from 'node:path';
 import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
+import { loadSpecContent } from '../infra/spec-loader.js';
 
 // Serializes detect-phase git operations across concurrent pipeline runs.
 // Same pattern as integrationLock in integration.ts — single-process boolean suffices.
@@ -204,13 +206,22 @@ export function createPhaseHandlers(
         if (diffResult.ok) diff = diffResult.value;
       } catch { /* diff is optional context */ }
 
+      // Load actual spec content from .specify/ for reviewer (#122)
+      const specifyRoot = join(cwd, '.specify');
+      let specContent: string | undefined;
+      try {
+        specContent = await loadSpecContent(workRequest.specRefs, specifyRoot);
+      } catch (e) {
+        console.warn(`[review] Failed to load spec content:`, e);
+      }
+
       // Create all four gates
       const gate1 = createGate1(config.validation.gate1Commands);
       const gate2 = createReviewerGate(
         'spec-compliance', 'reviewer-spec',
         'Verify implementation against spec acceptance criteria.',
         runtime, workRequest.issueNumber, runWriter, runId,
-        diff, workRequest.body,
+        diff, specContent || undefined,
       );
       const gate3 = createReviewerGate(
         'quality', 'reviewer-quality',

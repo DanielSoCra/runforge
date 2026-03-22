@@ -52,6 +52,10 @@ vi.mock('../diagnosis/router.js', () => ({
   routeDiagnosis: vi.fn(),
 }));
 
+vi.mock('../infra/spec-loader.js', () => ({
+  loadSpecContent: vi.fn(),
+}));
+
 // Import after mocks are set up
 import { createPhaseHandlers, acquireDetectLock, releaseDetectLock, isDetectLocked } from './phases.js';
 import { git } from '../lib/git.js';
@@ -65,6 +69,7 @@ import { appendResult } from './results.js';
 import { createWorkDetector } from './work-detection.js';
 import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
+import { loadSpecContent } from '../infra/spec-loader.js';
 
 const mockGit = vi.mocked(git);
 const mockDiagnose = vi.mocked(diagnose);
@@ -79,6 +84,7 @@ const mockPostReport = vi.mocked(postReport);
 const mockNotify = vi.mocked(notify);
 const mockAppendResult = vi.mocked(appendResult);
 const mockCreateWorkDetector = vi.mocked(createWorkDetector);
+const mockLoadSpecContent = vi.mocked(loadSpecContent);
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
@@ -194,6 +200,8 @@ describe('createPhaseHandlers', () => {
     mockGit.mockResolvedValue({ ok: true, value: '' });
     // Default: not risk-sensitive
     mockIsRiskSensitive.mockReturnValue(false);
+    // Default: spec loader returns empty (no specs)
+    mockLoadSpecContent.mockResolvedValue('');
   });
 
   afterEach(() => {
@@ -397,6 +405,7 @@ describe('createPhaseHandlers', () => {
 
     it('creates reviewer gates for spec-compliance, quality, and security (#10)', async () => {
       setupReviewMocks();
+      mockLoadSpecContent.mockResolvedValue('');
       mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
       const { handlers } = createHandlers();
       await handlers.review!(makeRun());
@@ -406,7 +415,7 @@ describe('createPhaseHandlers', () => {
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'spec-compliance', 'reviewer-spec',
         expect.any(String), mockRuntime, 42,
-        undefined, undefined, expect.any(String), 'Fix something',
+        undefined, undefined, expect.any(String), undefined,
       );
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'quality', 'reviewer-quality',
@@ -418,6 +427,36 @@ describe('createPhaseHandlers', () => {
         expect.any(String), mockRuntime, 42,
         undefined, undefined, expect.any(String),
       );
+    });
+
+    it('passes loaded spec content (not workRequest.body) to spec-compliance gate (#122)', async () => {
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
+      mockLoadSpecContent.mockResolvedValue('# FUNC-AC-PIPELINE\n\nAcceptance criteria here');
+
+      const workReq = makeWorkRequest();
+      workReq.specRefs = ['FUNC-AC-PIPELINE'];
+      workReq.body = 'This is the issue body, NOT spec content';
+      const { handlers } = createHandlers({}, workReq);
+      await handlers.review!(makeRun());
+
+      // Must call loadSpecContent with the spec refs
+      expect(mockLoadSpecContent).toHaveBeenCalledWith(
+        ['FUNC-AC-PIPELINE'],
+        expect.stringContaining('.specify'),
+      );
+
+      // spec-compliance gate must receive loaded spec content, not workRequest.body
+      expect(mockCreateReviewerGate).toHaveBeenCalledWith(
+        'spec-compliance', 'reviewer-spec',
+        expect.any(String), mockRuntime, 42,
+        undefined, undefined, expect.any(String),
+        '# FUNC-AC-PIPELINE\n\nAcceptance criteria here',
+      );
+
+      // Verify workRequest.body is NOT passed as specs
+      const specComplianceCall = mockCreateReviewerGate.mock.calls[0];
+      expect(specComplianceCall![8]).not.toBe('This is the issue body, NOT spec content');
     });
 
     it('calls selectGates with complexity and risk sensitivity (#10)', async () => {
@@ -487,6 +526,21 @@ describe('createPhaseHandlers', () => {
       expect(mockRunReview).toHaveBeenCalledWith(
         expect.any(Array), '/custom/repo/root',
         expect.any(Object),
+      );
+    });
+
+    it('passes undefined specs when loadSpecContent returns empty string (#122)', async () => {
+      mockLoadSpecContent.mockResolvedValue('');
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({ passed: true, gateResults: [], fixCycles: 0, escalated: false });
+      const { handlers } = createHandlers();
+      await handlers.review!(makeRun());
+
+      // Empty string should become undefined (no specs to pass)
+      expect(mockCreateReviewerGate).toHaveBeenCalledWith(
+        'spec-compliance', 'reviewer-spec',
+        expect.any(String), mockRuntime, 42,
+        undefined, undefined, expect.any(String), undefined,
       );
     });
   });
