@@ -1,6 +1,6 @@
 // src/control-plane/results.test.ts
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtemp } from 'fs/promises';
+import { mkdtemp, mkdir } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { appendResult, readResults } from './results.js';
@@ -62,10 +62,22 @@ describe('results ledger', () => {
   });
 
   it('uses default state/results.jsonl path when stateDir not provided', async () => {
-    // Just ensure the functions are callable without stateDir (path shape test)
-    // We don't call them here to avoid polluting the real state dir —
-    // the path-construction logic is covered by the stateDir-parameterised tests above.
-    expect(typeof appendResult).toBe('function');
-    expect(typeof readResults).toBe('function');
+    // Use a temp dir as CWD so we don't pollute the real state dir
+    const tempDir = await mkdtemp(join(tmpdir(), 'results-default-'));
+    const origCwd = process.cwd();
+    process.chdir(tempDir);
+
+    try {
+      await mkdir(join(tempDir, 'state'), { recursive: true });
+
+      const record = makeRecord(99);
+      await appendResult(record);
+      const results = await readResults();
+
+      expect(results).toHaveLength(1);
+      expect(results[0]).toEqual(record);
+    } finally {
+      process.chdir(origCwd);
+    }
   });
 });
