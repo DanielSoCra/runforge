@@ -613,6 +613,15 @@ describe('createPhaseHandlers', () => {
       expect(result).toBe('success');
     });
 
+    it('returns success with fallback report when formatReport throws (#107)', async () => {
+      mockFormatReport.mockImplementation(() => { throw new Error('unexpected run state'); });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers.report!(run);
+      expect(result).toBe('success');
+      expect(run.report).toContain('report generation failed');
+    });
+
     it('continues remaining steps when an earlier step fails (#107)', async () => {
       // postReport fails, but completeWork, appendResult, notify should still run
       mockPostReport.mockRejectedValue(new Error('GitHub API 500'));

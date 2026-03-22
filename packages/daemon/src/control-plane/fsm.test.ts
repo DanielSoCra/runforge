@@ -42,8 +42,8 @@ describe('FSM', () => {
       expect(isComplete('report', 'success')).toBe(true);
     });
 
-    it('report → failure retries report (defense-in-depth, #107)', () => {
-      expect(transition(table, 'report', 'failure')?.next).toBe('report');
+    it('report → failure → stuck (defense-in-depth, #107)', () => {
+      expect(transition(table, 'report', 'failure')?.next).toBe('stuck');
     });
   });
 
@@ -74,8 +74,8 @@ describe('FSM', () => {
       expect(transition(table, 'review', 'success')?.next).toBe('integrate');
     });
 
-    it('report → failure retries report (#107)', () => {
-      expect(transition(table, 'report', 'failure')?.next).toBe('report');
+    it('report → failure → stuck (#107)', () => {
+      expect(transition(table, 'report', 'failure')?.next).toBe('stuck');
     });
   });
 

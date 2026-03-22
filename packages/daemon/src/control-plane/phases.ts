@@ -222,7 +222,13 @@ export function createPhaseHandlers(
 
     report: async (run: RunState): Promise<PhaseEvent> => {
       const outcome = 'complete';
-      const reportBody = formatReport(run, outcome);
+      let reportBody: string;
+      try {
+        reportBody = formatReport(run, outcome);
+      } catch (err) {
+        console.error(`[report] formatReport failed (non-fatal):`, err);
+        reportBody = `Issue #${workRequest.issueNumber} completed (report generation failed)`;
+      }
       run.report = reportBody;
 
       // Report phase is best-effort: the implementation work is already done.

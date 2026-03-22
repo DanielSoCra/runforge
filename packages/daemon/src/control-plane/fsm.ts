@@ -26,7 +26,7 @@ const featureTransitions: TransitionTable = {
   integrate: { success: { next: 'deploy' }, failure: { next: 'stuck' } },
   deploy: { success: { next: 'test' }, failure: { next: 'stuck' } },
   test: { success: { next: 'report' }, failure: { next: 'implement' } },
-  report: { success: { next: 'report' }, failure: { next: 'report' } }, // terminal — report success means done; failure retries (defense-in-depth)
+  report: { success: { next: 'report' }, failure: { next: 'stuck' } }, // terminal — report success means done; failure → stuck (defense-in-depth, not retryable)
 };
 
 // Feature-simple: skips decompose
@@ -43,7 +43,7 @@ const featureSimpleTransitions: TransitionTable = {
   integrate: { success: { next: 'deploy' }, failure: { next: 'stuck' } },
   deploy: { success: { next: 'test' }, failure: { next: 'stuck' } },
   test: { success: { next: 'report' }, failure: { next: 'implement' } },
-  report: { success: { next: 'report' }, failure: { next: 'report' } },
+  report: { success: { next: 'report' }, failure: { next: 'stuck' } },
 };
 
 // Bug: detect → diagnose → implement (skips classify, decompose, holdout)
@@ -55,7 +55,7 @@ const bugTransitions: TransitionTable = {
   integrate: { success: { next: 'deploy' }, failure: { next: 'stuck' } },
   deploy: { success: { next: 'test' }, failure: { next: 'stuck' } },
   test: { success: { next: 'report' }, failure: { next: 'implement' } },
-  report: { success: { next: 'report' }, failure: { next: 'report' } },
+  report: { success: { next: 'report' }, failure: { next: 'stuck' } },
 };
 
 const websiteTransitions: TransitionTable = {
