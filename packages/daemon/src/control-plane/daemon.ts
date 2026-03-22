@@ -1,4 +1,5 @@
 // src/control-plane/daemon.ts
+import { isIP } from 'node:net';
 import { Octokit } from '@octokit/rest';
 import { loadConfig, type Config } from '../config.js';
 import { SessionRuntime } from '../session-runtime/runtime.js';
@@ -157,7 +158,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
 
   // 6. Start control server
   const envHost = process.env.DAEMON_HOST;
-  if (envHost !== undefined && !/^\d{1,3}(\.\d{1,3}){3}$/.test(envHost)) {
+  if (envHost !== undefined && isIP(envHost) !== 4) {
     return err(new Error(`Invalid DAEMON_HOST: "${envHost}" — must be a valid IPv4 address`));
   }
   const daemonHost = envHost ?? config.controlHost;
