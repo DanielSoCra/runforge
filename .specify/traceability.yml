@@ -317,9 +317,11 @@ STACK-AC-HANDOFF-RUNTIME:
   children: []
   code_paths:
     - packages/daemon/src/session-runtime/timeout-hook.ts
+    - packages/daemon/src/session-runtime/timeout-hook-script.ts
     - .claude/hooks/timeout-warning.sh
   test_paths:
     - packages/daemon/src/session-runtime/timeout-hook.test.ts
+    - packages/daemon/src/session-runtime/timeout-hook-script.test.ts
   status: draft
 
 STACK-AC-HANDOFF-COORDINATOR:
