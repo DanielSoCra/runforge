@@ -160,6 +160,29 @@ describe('fix', () => {
     }
   });
 
+  it('returns failure when git checkout of target branch fails before merge', async () => {
+    const { git } = await import('../lib/git.js');
+    const { mergeWorktree } = await import('./worktree.js');
+    // Make checkout fail (e.g., branch doesn't exist or dirty state)
+    vi.mocked(git).mockImplementation(async (args: string[]) => {
+      if (args[0] === 'checkout') {
+        return { ok: false, error: new Error('error: pathspec \'bad-branch\' did not match any file(s)') } as any;
+      }
+      return { ok: true, value: '' };
+    });
+
+    const runtime = createMockRuntime();
+    const result = await fix(mockFindings, 'bad-branch', runtime, '/tmp/repo');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.success).toBe(false);
+      expect(result.value.output).toContain('Checkout failed');
+    }
+    // mergeWorktree must NOT be called if checkout failed
+    expect(mergeWorktree).not.toHaveBeenCalled();
+  });
+
   it('returns cost 0 when spawnSession returns non-SessionError', async () => {
     const runtime = {
       spawnSession: vi.fn().mockResolvedValue(err(new Error('generic failure'))),

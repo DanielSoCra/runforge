@@ -82,7 +82,10 @@ export async function fix(
     }
 
     // 4. Merge fix into target branch
-    await git(['checkout', targetBranch], repoRoot);
+    const checkoutResult = await git(['checkout', targetBranch], repoRoot);
+    if (!checkoutResult.ok) {
+      return ok({ success: false, cost: result.cost, output: `Checkout failed: ${checkoutResult.error.message}` });
+    }
     const mergeResult = await mergeWorktree(fixId, targetBranch, repoRoot);
     if (!mergeResult.ok) {
       return ok({ success: false, cost: result.cost, output: `Merge failed: ${mergeResult.error.message}` });
