@@ -33,29 +33,37 @@
 - [ ] **Step 1: Create all pipeline labels via `gh` CLI**
 
 ```bash
-# Run from auto-claude repo directory
-gh label create "feature-pipeline" --color "1D76DB" --description "Spec-driven pipeline work" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh label create "l1-approved" --color "0E8A16" --description "L1 spec approved by Operator" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh label create "l2-in-progress" --color "FBCA04" --description "Agent generating L2 spec" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh label create "l2-review" --color "D93F0B" --description "L2 spec ready for Operator review" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh label create "l2-approved" --color "0E8A16" --description "Operator approved L2 spec" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh label create "l3-in-progress" --color "FBCA04" --description "Agent generating L3 spec" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh label create "l3-review" --color "D93F0B" --description "L3 spec under automated review" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh label create "l3-approved" --color "0E8A16" --description "L3 spec passed compliance" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh label create "ready-to-implement" --color "0E8A16" --description "Spec chain complete, ready for implementation" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh label create "implementing" --color "FBCA04" --description "Implementation in progress" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh label create "spec-change-suggested" --color "E4E669" --description "Agent suggests spec change" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh label create "l1-suggestion" --color "E4E669" --description "Suggested change to L1 spec" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh label create "l2-suggestion" --color "E4E669" --description "Suggested change to L2 spec" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh label create "self-modification-suggestion" --color "B60205" --description "Pipeline suggests change to own specs" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh label create "phase-2" --color "C5DEF5" --description "Earmarked for Phase 2" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh label create "phase-3" --color "C5DEF5" --description "Earmarked for Phase 3" --repo DANIELSOCRAHANDLEZZ/auto-claude
+# Run from auto-claude repo directory. Uses || true for idempotency (safe to re-run).
+gh label create "feature-pipeline" --color "1D76DB" --description "Spec-driven pipeline work" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label create "l1-approved" --color "0E8A16" --description "L1 spec approved by Operator" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label create "l2-in-progress" --color "FBCA04" --description "Agent generating L2 spec" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label create "l2-review" --color "D93F0B" --description "L2 spec ready for Operator review" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label create "l2-approved" --color "0E8A16" --description "Operator approved L2 spec" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label create "l3-in-progress" --color "FBCA04" --description "Agent generating L3 spec" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label create "l3-review" --color "D93F0B" --description "L3 spec under automated review" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label create "l3-approved" --color "0E8A16" --description "L3 spec passed compliance" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label create "ready-to-implement" --color "0E8A16" --description "Spec chain complete, ready for implementation" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label create "implementing" --color "FBCA04" --description "Implementation in progress" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label create "spec-change-suggested" --color "E4E669" --description "Agent suggests spec change" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label create "l1-suggestion" --color "E4E669" --description "Suggested change to L1 spec" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label create "l2-suggestion" --color "E4E669" --description "Suggested change to L2 spec" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label create "self-modification-suggestion" --color "B60205" --description "Pipeline suggests change to own specs" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label create "phase-2" --color "C5DEF5" --description "Earmarked for Phase 2" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label create "phase-3" --color "C5DEF5" --description "Earmarked for Phase 3" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+# Note: `blocked` label already exists on the repo and is reused by the pipeline.
+# Update its description to reflect pipeline use:
+gh label edit "blocked" --description "Needs human input (maintenance + pipeline)" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
 ```
 
-- [ ] **Step 2: Verify labels exist**
+- [ ] **Step 2: Verify labels exist (including pre-existing `blocked`)**
 
-Run: `gh label list --repo DANIELSOCRAHANDLEZZ/auto-claude --json name | jq '[.[] | .name] | sort'`
-Expected: All 16 new labels present alongside existing labels.
+```bash
+LABELS=$(gh label list --repo DANIELSOCRAHANDLEZZ/auto-claude --json name --jq '.[].name')
+for label in feature-pipeline l1-approved l2-in-progress l2-review l2-approved l3-in-progress l3-review l3-approved ready-to-implement implementing spec-change-suggested l1-suggestion l2-suggestion self-modification-suggestion phase-2 phase-3 blocked; do
+  echo "$LABELS" | grep -q "^${label}$" && echo "✓ $label" || echo "✗ $label MISSING"
+done
+```
+Expected: All 17 labels (16 new + `blocked`) show ✓.
 
 - [ ] **Step 3: Commit (nothing to commit — labels are on GitHub)**
 
@@ -66,7 +74,13 @@ Expected: All 16 new labels present alongside existing labels.
 **Files:**
 - Create: `~/.claude/skills/spec-brainstorm-l2/SKILL.md`
 
-- [ ] **Step 1: Create the skill file**
+- [ ] **Step 1: Create skill directory and file**
+
+```bash
+mkdir -p ~/.claude/skills/spec-brainstorm-l2
+```
+
+Then write `~/.claude/skills/spec-brainstorm-l2/SKILL.md`:
 
 ```markdown
 ---
@@ -127,7 +141,7 @@ write the L2 spec, and submit for Operator review via PR.
    git add .specify/
    git commit -m "spec(l2): add <spec-id> architecture spec for issue #<N>"
    git push origin spec/l2/<issue-number>-<short-name>
-   gh pr create --title "L2: <spec title>" --body "Closes #<N> (L2 phase)\n\n## Design Summary\n<3-5 bullets>" --repo DANIELSOCRAHANDLEZZ/auto-claude
+   gh pr create --title "L2: <spec title>" --body "Part of #<N> (L2 phase)\n\n## Design Summary\n<3-5 bullets>" --repo DANIELSOCRAHANDLEZZ/auto-claude
    ```
 
 6. **Submit for review**
@@ -164,15 +178,17 @@ write the L2 spec, and submit for Operator review via PR.
 ## Spec Change Suggestions
 
 If during brainstorming you discover that the L1 spec makes implementation **impossible** (not just harder):
-1. Create a suggestion issue:
+1. Determine labels: use `spec-change-suggested,l1-suggestion`. If the suggestion affects the pipeline's own specs (FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY), also add `self-modification-suggestion`.
+2. Create a suggestion issue:
    ```bash
    gh issue create --title "L1 suggestion: <description>" \
      --label "spec-change-suggested,l1-suggestion" \
      --body "## BLOCKING_REASON\n\n<proof that L1 makes implementation impossible>\n\nRelated to #<parent-issue>" \
      --repo DANIELSOCRAHANDLEZZ/auto-claude
+   # If self-targeting: gh issue edit <new-issue> --add-label "self-modification-suggestion"
    ```
-2. Do NOT modify the L1 spec yourself.
-3. Continue brainstorming with the current L1 as-is, noting the limitation.
+3. Do NOT modify the L1 spec yourself.
+4. Continue brainstorming with the current L1 as-is, noting the limitation.
 
 ## Guard Rails
 - Never modify L1 specs
@@ -187,13 +203,9 @@ If during brainstorming you discover that the L1 spec makes implementation **imp
 Run: `head -5 ~/.claude/skills/spec-brainstorm-l2/SKILL.md`
 Expected: YAML frontmatter with `name: spec-brainstorm-l2`
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Verify skill is outside repo (no git commit needed)**
 
-```bash
-git add ~/.claude/skills/spec-brainstorm-l2/SKILL.md  # Note: this is outside repo, no git commit needed
-```
-
-Note: Skills at `~/.claude/skills/` are outside the repo — no git commit. They take effect immediately.
+Skills at `~/.claude/skills/` are outside the repo — no git commit. They take effect immediately.
 
 ---
 
@@ -202,7 +214,13 @@ Note: Skills at `~/.claude/skills/` are outside the repo — no git commit. They
 **Files:**
 - Create: `~/.claude/skills/spec-generate-l3/SKILL.md`
 
-- [ ] **Step 1: Create the skill file**
+- [ ] **Step 1: Create skill directory and file**
+
+```bash
+mkdir -p ~/.claude/skills/spec-generate-l3
+```
+
+Then write `~/.claude/skills/spec-generate-l3/SKILL.md`:
 
 ```markdown
 ---
@@ -312,7 +330,13 @@ Expected: YAML frontmatter with `name: spec-generate-l3`
 **Files:**
 - Create: `~/.claude/skills/spec-review-compliance/SKILL.md`
 
-- [ ] **Step 1: Create the skill file**
+- [ ] **Step 1: Create skill directory and file**
+
+```bash
+mkdir -p ~/.claude/skills/spec-review-compliance
+```
+
+Then write `~/.claude/skills/spec-review-compliance/SKILL.md`:
 
 ```markdown
 ---
@@ -398,7 +422,13 @@ Expected: YAML frontmatter with `name: spec-review-compliance`
 **Files:**
 - Create: `~/.claude/skills/spec-implement/SKILL.md`
 
-- [ ] **Step 1: Create the skill file**
+- [ ] **Step 1: Create skill directory and file**
+
+```bash
+mkdir -p ~/.claude/skills/spec-implement
+```
+
+Then write `~/.claude/skills/spec-implement/SKILL.md`:
 
 ```markdown
 ---
@@ -425,11 +455,12 @@ write tests first (TDD), implement, get code review, merge to dev, and close the
    gh issue edit <N> --remove-label "ready-to-implement" --add-label "implementing" --repo DANIELSOCRAHANDLEZZ/auto-claude
    ```
 
-2. **Read the spec chain**
+2. **Read the spec chain** (L3→L2→L1→L0 per CLAUDE.md)
    - Read issue body for spec references
    - Read the L3 spec (`.specify/stack/`) — this is your implementation guide
    - Read the L2 spec (`.specify/architecture/`) — system boundaries
    - Read the L1 spec (`.specify/functional/`) — business requirements
+   - Read `.specify/L0-vision.md` — vision and non-negotiable boundaries (higher layer wins on contradictions)
    - Read `traceability.yml` for `code_paths` and `test_paths`
 
 3. **Plan the implementation**
@@ -520,12 +551,12 @@ If during implementation you discover the L3 spec is wrong but L2 is fine:
 - Continue implementation
 
 If L2 must change:
-- Create a suggestion issue with `EVIDENCE`
+- Create a suggestion issue with `EVIDENCE` (add `self-modification-suggestion` if it touches pipeline's own specs)
 - Block the feature issue
 - Exit
 
 If L1 must change (extremely rare):
-- Create a suggestion issue with `BLOCKING_REASON`
+- Create a suggestion issue with `BLOCKING_REASON` (add `self-modification-suggestion` if it touches pipeline's own specs)
 - Block the feature issue
 - Exit
 
@@ -628,7 +659,11 @@ find_work() {
 while true; do
   rotate_log ~/logs/claude-pipeline.log
 
-  if ! git checkout dev -q 2>/dev/null || ! git pull --ff-only -q 2>/dev/null; then
+  # Reset to clean state (handles dirty working tree from crashed sessions)
+  git checkout dev -f -q 2>/dev/null
+  git clean -fd -q 2>/dev/null
+
+  if ! git pull --ff-only -q 2>/dev/null; then
     log "WARN: git pull failed, attempting merge pull"
     GIT_MERGE_AUTOEDIT=no git pull --no-rebase --no-edit -q 2>/dev/null || {
       log "ERROR: git pull failed"
@@ -647,7 +682,8 @@ while true; do
       FAIL_COUNT=0
       date '+%Y-%m-%d %H:%M:%S' > ~/logs/claude-pipeline.heartbeat
       log "Pipeline cycle complete for issue #$ISSUE_NUM"
-      git push origin HEAD -q 2>/dev/null
+      # Skills push their own branches; safety-net push dev only
+      git push origin dev -q 2>/dev/null
       sleep 10
     else
       FAIL_COUNT=$((FAIL_COUNT + 1))
@@ -657,6 +693,7 @@ while true; do
       sleep $BACKOFF
     fi
   else
+    date '+%Y-%m-%d %H:%M:%S' > ~/logs/claude-pipeline.heartbeat
     log "No eligible pipeline work found, sleeping 10 minutes"
     sleep 600
   fi
@@ -690,19 +727,21 @@ git commit -m "feat: add pipeline.sh orchestrator for spec-driven pipeline"
 
 Run: `cat scripts/health.sh`
 
-- [ ] **Step 2: Add pipeline heartbeat check and stale mid-phase detection**
+- [ ] **Step 2: Apply two exact edits to health.sh**
 
-Add after the existing reviewer/developer checks:
+**Edit 1:** On line 4, change the heartbeat loop to include `pipeline`:
+
+Change: `for role in reviewer developer; do`
+To: `for role in reviewer developer pipeline; do`
+
+**Edit 2:** Append the following block at the end of the file (after line 24):
 
 ```bash
-# Pipeline heartbeat
-for role in reviewer developer pipeline; do
-  # ... existing heartbeat check logic
-done
-
-# Stale mid-phase detection for pipeline
 echo ""
-echo "=== Pipeline Mid-Phase Issues ==="
+echo "=== Pipeline Status ==="
+gh issue list --label "feature-pipeline" --state open --repo DANIELSOCRAHANDLEZZ/auto-claude --json number,title,labels --template '{{range .}}#{{.number}} [{{range .labels}}{{.name}} {{end}}] {{.title}}{{"\n"}}{{end}}'
+echo ""
+echo "=== Stale Pipeline Issues (>1hr) ==="
 for label in l3-in-progress l3-review implementing; do
   STALE=$(gh issue list --repo DANIELSOCRAHANDLEZZ/auto-claude \
     --label "feature-pipeline,$label" \
@@ -730,35 +769,42 @@ git commit -m "feat: add pipeline heartbeat and stale mid-phase detection to hea
 
 ---
 
-### Task 8: Smoke Test — Create a Test Issue and Verify Orchestrator Picks It Up
+### Task 8: Smoke Test — Verify Orchestrator and Run One Pipeline Cycle
 
 **Files:**
 - None (manual verification)
 
-- [ ] **Step 1: Create a test issue**
+- [ ] **Step 1: Verify L1 spec file exists**
 
 ```bash
+ls .specify/functional/ | grep -i pipeline
+```
+
+Expected: `pipeline-orchestration.md` (or similar). Use the exact filename in the next step.
+
+- [ ] **Step 2: Create a test issue**
+
+```bash
+# Use the exact filename from Step 1
 gh issue create \
   --title "TEST: Pipeline smoke test — FUNC-AC-PIPELINE L2 generation" \
   --label "feature-pipeline,l1-approved" \
-  --body "## L1 Spec Reference\n\n\`.specify/functional/pipeline-orchestration.md\` (FUNC-AC-PIPELINE)\n\n## Acceptance Criteria\n\n- L2 architecture spec generated for pipeline orchestration\n- Spec passes l2-spec-guardian validation\n- PR opened for Operator review\n\n**This is a smoke test issue. Close after verifying the pipeline picks it up.**" \
+  --body "## L1 Spec Reference\n\n\`.specify/functional/pipeline-orchestration.md\` (FUNC-AC-PIPELINE)\n\n## Acceptance Criteria\n\n- L2 architecture spec generated for pipeline orchestration\n- Spec passes l2-spec-guardian validation\n- PR opened for Operator review\n\n**This is a smoke test issue.**" \
   --repo DANIELSOCRAHANDLEZZ/auto-claude
 ```
 
-- [ ] **Step 2: Verify the orchestrator finds it**
-
-Run the `find_work` function manually:
+- [ ] **Step 3: Verify the orchestrator finds it**
 
 ```bash
 cd ~/code/auto-claude
-source <(sed -n '/^REPO=/p; /^check_stage/,/^}/p; /^find_work/,/^}/p' scripts/pipeline.sh)
-REPO="DANIELSOCRAHANDLEZZ/auto-claude"
-find_work && echo "Found: issue #$ISSUE_NUM → skill $SKILL" || echo "No work found"
+# Quick check without sourcing the full script
+ELIGIBLE=$(gh issue list --repo DANIELSOCRAHANDLEZZ/auto-claude --label "feature-pipeline,l1-approved" --state open --json number,title 2>/dev/null)
+echo "$ELIGIBLE" | jq '.[0] | "Found: issue #\(.number) → \(.title)"'
 ```
 
-Expected: `Found: issue #<N> → skill spec-brainstorm-l2`
+Expected: Shows the test issue number.
 
-- [ ] **Step 3: Run one pipeline cycle (optional — only if ready for autonomous run)**
+- [ ] **Step 4: Run one pipeline cycle**
 
 ```bash
 cd ~/code/auto-claude
@@ -772,7 +818,7 @@ Watch for:
 - PR gets created
 - Issue gets relabeled from `l1-approved` to `l2-review`
 
-- [ ] **Step 4: Verify issue state changed**
+- [ ] **Step 5: Verify issue state changed**
 
 ```bash
 gh issue view <N> --json labels --jq '.labels[].name' --repo DANIELSOCRAHANDLEZZ/auto-claude
@@ -780,11 +826,59 @@ gh issue view <N> --json labels --jq '.labels[].name' --repo DANIELSOCRAHANDLEZZ
 
 Expected: `feature-pipeline`, `l2-review` (not `l1-approved`)
 
-- [ ] **Step 5: Close test issue if this was just a smoke test**
+- [ ] **Step 6: Do NOT close the test issue — leave it for end-to-end pilot (Task 8b)**
+
+The smoke test only validates L2 pickup. Leave the issue open to continue through the full pipeline.
+
+---
+
+### Task 8b: End-to-End Pilot — Full Pipeline Flow
+
+**Files:**
+- None (verification only)
+
+**Prerequisite:** Task 8 completed and the test issue is in `l2-review` state.
+
+- [ ] **Step 1: Approve the L2 spec (Operator action)**
+
+Review the PR created by the smoke test. If acceptable:
+```bash
+gh issue edit <N> --remove-label "l2-review" --add-label "l2-approved" --repo DANIELSOCRAHANDLEZZ/auto-claude
+gh pr merge <PR-NUMBER> --squash --repo DANIELSOCRAHANDLEZZ/auto-claude
+```
+
+- [ ] **Step 2: Run pipeline again — should pick up L3 generation**
 
 ```bash
-gh issue close <N> --comment "Smoke test complete. Pipeline picked up issue and executed spec-brainstorm-l2." --repo DANIELSOCRAHANDLEZZ/auto-claude
+bash scripts/pipeline.sh  # Ctrl+C after L3 cycle completes
 ```
+
+Watch for: Issue moves from `l2-approved` → `l3-in-progress` → `l3-approved` + `ready-to-implement`
+
+- [ ] **Step 3: Run pipeline again — should pick up implementation**
+
+```bash
+bash scripts/pipeline.sh  # Ctrl+C after implementation cycle completes
+```
+
+Watch for: Issue moves from `ready-to-implement` → `implementing` → closed with commit SHA
+
+- [ ] **Step 4: Verify end-to-end success**
+
+```bash
+gh issue view <N> --json state,labels,comments --repo DANIELSOCRAHANDLEZZ/auto-claude
+```
+
+Expected: Issue is closed. Comments show L2 summary, L3 approval, implementation plan, and commit SHA.
+
+- [ ] **Step 5: Verify code on dev**
+
+```bash
+git checkout dev && git pull --ff-only
+pnpm -r run test
+```
+
+Expected: All tests pass. New code from the pipeline is on `dev`.
 
 ---
 
@@ -840,12 +934,14 @@ Expected: Test issue + 4 placeholder issues visible.
 **Files:**
 - None
 
-- [ ] **Step 1: Verify all skills are loadable**
+- [ ] **Step 1: Verify all skills are loadable and have valid frontmatter**
 
 ```bash
 for skill in spec-brainstorm-l2 spec-generate-l3 spec-review-compliance spec-implement; do
-  if [ -f "$HOME/.claude/skills/$skill/SKILL.md" ]; then
-    echo "✓ $skill"
+  FILE="$HOME/.claude/skills/$skill/SKILL.md"
+  if [ -f "$FILE" ]; then
+    # Check frontmatter has name field
+    head -5 "$FILE" | grep -q "name:" && echo "✓ $skill" || echo "✗ $skill (missing frontmatter)"
   else
     echo "✗ $skill MISSING"
   fi
@@ -854,22 +950,32 @@ done
 
 Expected: All 4 skills show ✓
 
-- [ ] **Step 2: Verify pipeline.sh is executable**
+- [ ] **Step 2: Verify Superpowers plugin is available (prerequisite for spec-generate-l3)**
+
+```bash
+REVIEWER_PROMPT="$HOME/.claude/plugins/cache/claude-plugins-official/superpowers/*/skills/brainstorming/spec-document-reviewer-prompt.md"
+ls $REVIEWER_PROMPT 2>/dev/null && echo "✓ spec-document-reviewer prompt available" || echo "⚠ spec-document-reviewer prompt NOT FOUND — spec-generate-l3 will use l3-spec-guardian only"
+```
+
+Expected: ✓ (if Superpowers plugin is installed). If not found, L3 generation still works but with reduced review quality.
+
+- [ ] **Step 3: Verify pipeline.sh is executable**
 
 Run: `test -x scripts/pipeline.sh && echo "OK" || echo "NOT EXECUTABLE"`
 Expected: `OK`
 
-- [ ] **Step 3: Verify all labels exist**
+- [ ] **Step 4: Verify all labels exist (single API call)**
 
 ```bash
-for label in feature-pipeline l1-approved l2-in-progress l2-review l2-approved l3-in-progress l3-review l3-approved ready-to-implement implementing spec-change-suggested l1-suggestion l2-suggestion self-modification-suggestion phase-2 phase-3; do
-  gh label list --repo DANIELSOCRAHANDLEZZ/auto-claude --json name --jq ".[].name" | grep -q "^${label}$" && echo "✓ $label" || echo "✗ $label MISSING"
+LABELS=$(gh label list --repo DANIELSOCRAHANDLEZZ/auto-claude --json name --jq '.[].name')
+for label in feature-pipeline l1-approved l2-in-progress l2-review l2-approved l3-in-progress l3-review l3-approved ready-to-implement implementing spec-change-suggested l1-suggestion l2-suggestion self-modification-suggestion phase-2 phase-3 blocked; do
+  echo "$LABELS" | grep -q "^${label}$" && echo "✓ $label" || echo "✗ $label MISSING"
 done
 ```
 
-Expected: All 16 labels show ✓
+Expected: All 17 labels show ✓
 
-- [ ] **Step 4: Commit plan document**
+- [ ] **Step 5: Commit plan document**
 
 ```bash
 git add docs/superpowers/plans/2026-03-22-spec-driven-pipeline.md
