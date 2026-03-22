@@ -118,6 +118,11 @@ export async function runPipeline(
       console.error(`[pipeline] Phase ${run.phase} threw:`, err);
     }
 
+    // Sync run.cost from costTracker after every phase — costTracker is the
+    // single source of truth (updated by runtime.spawnSession for ALL session
+    // types: diagnose, implement, review).
+    run.cost = costTracker.getRunCost(run.issueNumber);
+
     // Check for global overrides (budget-exceeded, rate-limited)
     const globalNext = applyGlobalTransition(event);
     if (globalNext) {

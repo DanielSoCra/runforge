@@ -300,6 +300,41 @@ describe('runPipeline', () => {
     expect(result.outcome).toBe('complete');
   });
 
+  it('syncs run.cost from costTracker after every phase (#132)', async () => {
+    // Simulate sessions recording costs during diagnose + implement + review phases.
+    // Before this fix, only implement costs were accumulated in run.cost.
+    const handlers: PhaseHandlerMap = {
+      detect: async () => 'success' as PhaseEvent,
+      classify: async () => 'success:simple' as PhaseEvent,
+      diagnose: async () => {
+        // Simulates runtime.spawnSession recording diagnosis cost
+        costTracker.recordCost(1, 0.50);
+        return 'success' as PhaseEvent;
+      },
+      implement: async () => {
+        // Simulates runtime.spawnSession recording implementation cost
+        costTracker.recordCost(1, 2.00);
+        return 'success' as PhaseEvent;
+      },
+      review: async () => {
+        // Simulates runtime.spawnSession recording review cost
+        costTracker.recordCost(1, 0.75);
+        return 'success' as PhaseEvent;
+      },
+      holdout: async () => 'success' as PhaseEvent,
+      integrate: async () => 'success' as PhaseEvent,
+      deploy: async () => 'success' as PhaseEvent,
+      test: async () => 'success' as PhaseEvent,
+      report: async () => 'success' as PhaseEvent,
+    };
+    const run = makeRun('bug');
+    const table = getPipeline('bug');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('complete');
+    // run.cost must include ALL phase costs, not just implement
+    expect(run.cost).toBe(3.25); // 0.50 + 2.00 + 0.75
+  });
+
   it('calls runWriter.upsertRun on phase transitions', async () => {
     const upsertRun = vi.fn().mockResolvedValue(undefined);
     const runWriter = { upsertRun, writeCostEvent: vi.fn() } as any;
