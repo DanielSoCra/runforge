@@ -229,6 +229,13 @@ The existing reviewer/developer loop continues handling `review-finding` issues.
 - Same GitHub Issues coordination
 - Same cost guardrails (`--max-budget-usd`)
 
+**Concurrent execution model:**
+All agents (reviewer, developer, pipeline) work on **separate branches** from `dev`. Each creates an isolated branch (`fix/*`, `feat/*`, `spec/*`) before making changes. Merges to `dev` are serialized: the skill rebases onto latest `dev` before merging. If rebase fails due to a conflict, the skill retries once; if it fails again, it marks the issue `blocked`.
+
+In Phase 1, only one pipeline session runs at a time (the script is a sequential loop). The maintenance developer also runs one issue at a time. The reviewer is read-only (no branch conflicts). This means at most 2 writers (pipeline + developer) merge to `dev`, each on different branches. Git's fast-forward merge model handles this safely — the second to merge rebases first.
+
+Phase 2 adds proper concurrency control via the control plane's semaphore and instance lock.
+
 ## Self-Accelerating Evolution
 
 The pipeline uses itself to evolve. Phase 1 is scoped tightly to validate the workflow. Phases 2 and 3 are documented separately as future L1 issues.
@@ -256,7 +263,9 @@ The pipeline uses itself to evolve. Phase 1 is scoped tightly to validate the wo
 - Implementation from L3 produces working, tested code
 - Pipeline status visible via `gh issue list` and GitHub labels
 
-**First target:** Core pipeline specs (FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY). Note: Phase 1 validates the *workflow* on these specs — it doesn't implement the full scope of these specs (complexity classification, holdout, etc.). That implementation happens through the pipeline itself once the workflow is proven.
+**First target:** Core pipeline specs (FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY). The pipeline generates L2/L3 specs and implements code for these areas. This is self-targeting: the pipeline modifies its own L3 specs and code, which is allowed. The guard rail ("never modify its own L1/L2") means the pipeline cannot autonomously change the L1/L2 specs that define its own behavior — it can only suggest changes for Operator approval. Generating new L2/L3 specs from existing L1 is the intended workflow, not a violation.
+
+Note: Phase 1 validates the *workflow* on these specs — it doesn't implement the full scope of these specs (complexity classification, holdout, etc.). That implementation happens through the pipeline itself once the workflow is proven.
 
 ### Phase 2 and Phase 3 (Future — Separate Specs)
 
