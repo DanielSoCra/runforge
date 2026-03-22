@@ -289,25 +289,25 @@ describe('getActivityFeed', () => {
 
 describe('formatDuration', () => {
   it('formats minutes', async () => {
-    const { formatDuration } = await import('./briefing');
+    const { formatDuration } = await import('../lib/format');
     const thirtyMinsAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
     expect(formatDuration(thirtyMinsAgo)).toBe('30m');
   });
 
   it('formats hours', async () => {
-    const { formatDuration } = await import('./briefing');
+    const { formatDuration } = await import('../lib/format');
     const fiveHoursAgo = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
     expect(formatDuration(fiveHoursAgo)).toBe('5h');
   });
 
   it('formats days', async () => {
-    const { formatDuration } = await import('./briefing');
+    const { formatDuration } = await import('../lib/format');
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
     expect(formatDuration(threeDaysAgo)).toBe('3d');
   });
 
   it('shows <1m for very recent timestamps', async () => {
-    const { formatDuration } = await import('./briefing');
+    const { formatDuration } = await import('../lib/format');
     const justNow = new Date(Date.now() - 10 * 1000).toISOString();
     expect(formatDuration(justNow)).toBe('<1m');
   });

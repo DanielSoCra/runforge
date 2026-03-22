@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { formatDuration } from '@/lib/format';
 import type { Database } from '@/lib/types';
 
 type Briefing = Database['public']['Tables']['briefings']['Row'];
@@ -27,16 +28,7 @@ export type UpNextItem = {
  * Compute a human-readable duration from a timestamp to now.
  * Examples: "<1m", "30m", "2h", "3d"
  */
-export function formatDuration(start: string): string {
-  const ms = Date.now() - new Date(start).getTime();
-  const minutes = Math.floor(ms / (1000 * 60));
-  if (minutes < 1) return '<1m';
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `${days}d`;
-}
+// formatDuration moved to lib/format.ts (Next.js 16 requires all 'use server' exports to be async)
 
 const URGENCY_ORDER: Record<AttentionItem['reason'], number> = {
   blocked: 0,
