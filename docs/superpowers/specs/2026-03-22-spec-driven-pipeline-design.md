@@ -41,7 +41,7 @@ Every feature starts as a GitHub Issue and progresses through label-driven stage
 ```
 [l1-approved] → [l2-in-progress] → [l2-review] → [l2-approved] →
 [l3-in-progress] → [l3-review] → [l3-approved] →
-[ready-to-implement] → [implementing] → [review] → [complete]
+[ready-to-implement] → [implementing] → [in-review] → [complete (issue closed)]
 ```
 
 ### Entry Points
@@ -70,6 +70,7 @@ Every feature starts as a GitHub Issue and progresses through label-driven stage
 | `l3-approved` | L3 spec passed compliance review |
 | `ready-to-implement` | Spec chain complete, implementation can begin |
 | `implementing` | Implementation in progress |
+| `in-review` | Implementation complete, code review in progress |
 | `spec-change-suggested` | Agent suggests a spec change (requires evidence) |
 | `l1-suggestion` | Suggested change is to L1 |
 | `l2-suggestion` | Suggested change is to L2 |
@@ -243,6 +244,8 @@ L1 issues created upfront, labeled `phase-3`:
 - It CAN modify its own L3 specs and code
 - Suggested L1/L2 changes during self-evolution get `self-modification-suggestion` label — requires explicit human approval
 - Tests must pass before AND after — the pipeline cannot break itself
+- Never reads `.specify/scenarios/` — holdout test isolation must be preserved (AGENTS.md rule 2)
+- Never modifies `.specify/methodology/` — protected governance specs (AGENTS.md rule 1)
 
 ## Local-First Mac Setup
 
@@ -279,10 +282,10 @@ The first run targets the core pipeline: **FUNC-AC-PIPELINE**, **FUNC-AC-IMPLEME
 4. On approval, L3 generated and auto-reviewed
 5. Implementation proceeds autonomously with TDD
 
-**"Done" for the core pipeline:**
+**"Done" for the core pipeline (Phase 1):**
 - Every L1 requirement has a traced path through L2→L3→code→tests
 - End-to-end tests prove the pipeline works
-- The dashboard shows live pipeline status
+- Pipeline status visible via `gh issue list` and GitHub labels (dashboard integration is Phase 2+)
 - Auto-claude can be pointed at a new repo and it works
 
 ## Orchestrator Script
