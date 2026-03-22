@@ -54,32 +54,22 @@ test_paths:
 ## Examples
 
 ```typescript
-// FSM transition table (excerpt)
+// FSM transition table — Record<Phase, Record<Event, { next, action }>>
 const transitions: TransitionTable = {
   classify: {
     success: { next: 'decompose', action: runDecompose },
     'success:simple': { next: 'implement', action: runImplement },
-    failure: { next: 'stuck', action: handleStuck },
   },
-  implement: {
-    success: { next: 'review', action: runReview },
-    failure: { next: 'implement', action: retryOrEscalate },
-  },
-  // ...
 };
 ```
 
 ```typescript
-// Work detection polling with concurrency limit
+// Work detection — setInterval + concurrency gate
 const poller = setInterval(async () => {
   if (activeRuns >= config.maxConcurrentRuns) return;
   const issues = await octokit.issues.listForRepo({
-    owner, repo, labels: 'ready', state: 'open', per_page: 100,
+    owner, repo, labels: 'ready', per_page: 100,
   });
-  for (const issue of issues.data) {
-    if (activeRuns >= config.maxConcurrentRuns) break;
-    claimAndProcess(issue); // fire-and-forget, tracked by activeRuns counter
-  }
 }, config.pollIntervalMs);
 ```
 
