@@ -36,9 +36,10 @@ export async function removeWorktree(
 
   // Delete the branch
   const branchName = `unit/${unitId}`;
-  await git(['branch', '-D', branchName], repoRoot);
+  const branchResult = await git(['branch', '-D', branchName], repoRoot);
 
   if (!removeResult.ok) return err(removeResult.error);
+  if (!branchResult.ok) return err(branchResult.error);
   return ok(undefined);
 }
 
