@@ -13,9 +13,6 @@ describe('getSupabaseClient', () => {
   beforeEach(async () => {
     // Reset module between tests so the singleton resets
     vi.resetModules();
-    vi.mock('@supabase/supabase-js', () => ({
-      createClient: mockCreateClient,
-    }));
     mockCreateClient.mockClear();
     const mod = await import('./client.js');
     getSupabaseClient = mod.getSupabaseClient;
