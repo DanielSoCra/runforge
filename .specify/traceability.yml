@@ -247,6 +247,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/components/stats-cards.tsx
     - packages/dashboard/components/sidebar.tsx
     - packages/dashboard/components/run-table.tsx
+    - packages/dashboard/components/run-filters.tsx
     - packages/dashboard/components/realtime-provider.tsx
     - packages/dashboard/actions/repos.ts
     - packages/dashboard/actions/repos.test.ts
