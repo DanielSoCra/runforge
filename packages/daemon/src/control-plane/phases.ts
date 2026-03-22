@@ -71,7 +71,11 @@ export function createPhaseHandlers(
       }
       try {
         console.log(`[detect] Creating branch ${featureBranch} from ${config.branches.staging}`);
-        await git(['checkout', config.branches.staging], repoRoot);
+        const stagingCheckout = await git(['checkout', config.branches.staging], repoRoot);
+        if (!stagingCheckout.ok) {
+          console.error(`[detect] Checkout staging failed:`, stagingCheckout.error.message);
+          return 'failure';
+        }
         const branchResult = await git(['checkout', '-b', featureBranch, config.branches.staging], repoRoot);
         if (!branchResult.ok) {
           console.log(`[detect] Branch exists, checking out`);

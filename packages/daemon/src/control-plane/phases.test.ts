@@ -261,6 +261,23 @@ describe('createPhaseHandlers', () => {
       expect(result).toBe('failure');
     });
 
+    it('returns failure when staging checkout fails before branch creation (#255)', async () => {
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('error: pathspec \'staging\' did not match') }); // checkout staging fails
+      const { handlers } = createHandlers();
+      const result = await handlers.detect!(makeRun());
+      expect(result).toBe('failure');
+      // Branch creation should never be attempted if staging checkout failed
+      expect(mockGit).toHaveBeenCalledTimes(1);
+      expect(mockGit).toHaveBeenCalledWith(['checkout', 'staging'], undefined);
+    });
+
+    it('releases detect lock when staging checkout fails (#255)', async () => {
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('checkout staging failed') });
+      const { handlers } = createHandlers();
+      await handlers.detect!(makeRun());
+      expect(isDetectLocked()).toBe(false);
+    });
+
     it('returns failure when detect lock is held by another run', async () => {
       acquireDetectLock();
       const { handlers } = createHandlers();
