@@ -97,7 +97,7 @@ function detectRunTransitions(
       const severity: ActivitySeverity =
         run.outcome === 'stuck' ? 'error' : run.outcome === 'success' ? 'info' : 'warning';
       const eventType: ActivityEventType =
-        run.outcome === 'success' ? 'completion' : 'state-transition';
+        run.outcome === 'stuck' ? 'error' : run.outcome === 'success' ? 'completion' : 'state-transition';
 
       events.push({
         occurred_at: (run.updated_at as string) ?? now,
