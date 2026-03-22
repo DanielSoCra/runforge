@@ -14,7 +14,9 @@ Single `docker-compose.yml` with Docker Compose profiles and environment-driven 
 
 One `docker-compose.yml` replaces the current `docker-compose.prod.yml`. Four services:
 
-**dashboard** — Next.js standalone, always runs. Port binding controlled by `DASHBOARD_PORT` env var. On the Mac Mini, exposed on all interfaces for LAN access (`0.0.0.0:3000:3000`). On Hetzner, internal only (Caddy fronts it).
+**dashboard** — Next.js standalone, always runs. Port binding controlled by `DASHBOARD_PORT` env var. On the Mac Mini, exposed on all interfaces for LAN access (`0.0.0.0:3000:3000`). On Hetzner, bound to loopback only (`127.0.0.1:3000:3000`) so only Caddy can reach it.
+
+All existing service definitions from `docker-compose.prod.yml` are preserved: bridge network (`app`), named volumes (`caddy_data`, `caddy_config`, `daemon-state`), build contexts with Dockerfile paths, volume mounts for prompts/fitness/plugins/config, and `depends_on` relationships. The only structural change is the addition of the `profiles` directive on the Caddy service and the `DASHBOARD_PORT` variable for port binding.
 
 **daemon** — Node.js, always runs. Port 3847, never exposed externally in either environment. Dashboard reaches it via Docker service name `http://daemon:3847`. Binds `0.0.0.0` inside the container so the dashboard container can connect.
 
@@ -44,7 +46,7 @@ docker compose --env-file .env.prod --profile public up -d
 
 ### .env.prod
 
-- `DASHBOARD_PORT=3000` — internal only, Caddy handles public traffic
+- `DASHBOARD_PORT=127.0.0.1:3000:3000` — loopback only, Caddy handles public traffic on 443
 - `NEXT_PUBLIC_SITE_URL=https://app.example.com`
 - `AUTH_DISABLED` not set (auth enforced)
 - `DAEMON_URL=http://daemon:3847` — same Docker service name
@@ -66,7 +68,7 @@ The `AUTH_DISABLED` flag only affects the dashboard's auth middleware. Supabase 
 
 | Concern | Mac Mini (.env.mac) | Hetzner (.env.prod) |
 |---|---|---|
-| Dashboard access | `0.0.0.0:3000` on LAN | Caddy reverse proxy on 443 |
+| Dashboard access | `0.0.0.0:3000` on LAN | `127.0.0.1:3000` + Caddy on 443 |
 | TLS | None | Caddy ACME |
 | Authentication | Disabled | Supabase + GitHub OAuth |
 | Site URL | `http://localhost:3000` | `https://app.example.com` |
