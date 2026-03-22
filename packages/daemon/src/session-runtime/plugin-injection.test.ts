@@ -63,4 +63,72 @@ describe('buildCompositeContext', () => {
     expect(ctx.skills).toHaveLength(0);
     expect(ctx.promptInjection).toContain('a-injection');
   });
+
+  it('accumulates gates from multiple plugins in activatedAt order', () => {
+    const plugins = [
+      makePlugin('b', '2024-01-02T00:00:00Z', { gates: ['lint', 'typecheck'] }),
+      makePlugin('a', '2024-01-01T00:00:00Z', { gates: ['test'] }),
+    ];
+    const ctx = buildCompositeContext(plugins);
+    // Sorted by activatedAt: a first, then b
+    expect(ctx.gates).toEqual(['test', 'lint', 'typecheck']);
+  });
+
+  it('gates are additive — duplicates are NOT deduped (unlike skills/agents/mcpConfigs)', () => {
+    const plugins = [
+      makePlugin('a', '2024-01-01T00:00:00Z', { gates: ['lint'] }),
+      makePlugin('b', '2024-01-02T00:00:00Z', { gates: ['lint'] }),
+    ];
+    const ctx = buildCompositeContext(plugins);
+    expect(ctx.gates).toEqual(['lint', 'lint']);
+  });
+
+  it('returns empty gates array when no plugins provide gates', () => {
+    const plugins = [
+      makePlugin('a', '2024-01-01T00:00:00Z'),
+      makePlugin('b', '2024-01-02T00:00:00Z'),
+    ];
+    const ctx = buildCompositeContext(plugins);
+    expect(ctx.gates).toEqual([]);
+  });
+
+  it('drops agents after all skills are exhausted when budget still exceeded', () => {
+    const longAgent = { name: 'big-agent.md', content: 'a'.repeat(100000), pluginId: 'a' };
+    const plugins = [makePlugin('a', '2024-01-01T00:00:00Z', { agents: [longAgent] })];
+    const ctx = buildCompositeContext(plugins, { tokenBudget: 50 });
+    expect(ctx.agents).toHaveLength(0);
+    expect(ctx.skills).toHaveLength(0);
+    expect(ctx.promptInjection).toContain('a-injection');
+  });
+
+  it('drops skills first, then agents when both exceed budget', () => {
+    const longSkill = { name: 'big-skill.md', content: 's'.repeat(50000), pluginId: 'a' };
+    const longAgent = { name: 'big-agent.md', content: 'a'.repeat(50000), pluginId: 'a' };
+    const plugins = [makePlugin('a', '2024-01-01T00:00:00Z', { skills: [longSkill], agents: [longAgent] })];
+    const ctx = buildCompositeContext(plugins, { tokenBudget: 50 });
+    expect(ctx.skills).toHaveLength(0);
+    expect(ctx.agents).toHaveLength(0);
+    expect(ctx.promptInjection).toContain('a-injection');
+  });
+
+  it('breaks when both skills and agents are empty but budget still exceeded', () => {
+    // promptInjection alone exceeds budget — should not infinite loop
+    const plugins = [makePlugin('a', '2024-01-01T00:00:00Z', { promptInjection: 'x'.repeat(100000) })];
+    const ctx = buildCompositeContext(plugins, { tokenBudget: 50 });
+    expect(ctx.skills).toHaveLength(0);
+    expect(ctx.agents).toHaveLength(0);
+    expect(ctx.promptInjection).toBe('x'.repeat(100000));
+  });
+
+  it('drops last-activated agents first under budget pressure', () => {
+    const agentA = { name: 'agent-a.md', content: 'a'.repeat(40000), pluginId: 'a' };
+    const agentB = { name: 'agent-b.md', content: 'b'.repeat(40000), pluginId: 'b' };
+    const plugins = [
+      makePlugin('a', '2024-01-01T00:00:00Z', { agents: [agentA] }),
+      makePlugin('b', '2024-01-02T00:00:00Z', { agents: [agentB] }),
+    ];
+    const ctx = buildCompositeContext(plugins, { tokenBudget: 12000 });
+    expect(ctx.agents).toHaveLength(1);
+    expect(ctx.agents[0].pluginId).toBe('a');
+  });
 });
