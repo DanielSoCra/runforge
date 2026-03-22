@@ -8,15 +8,21 @@ import CostPage from './page';
 import { createClient } from '@/lib/supabase/server';
 
 function mockSupabase(events: Record<string, unknown>[]) {
+  const gteFn = vi.fn().mockReturnValue({
+    order: vi.fn().mockResolvedValue({ data: events, error: null }),
+  });
   vi.mocked(createClient).mockResolvedValue({
     from: vi.fn().mockReturnValue({
       select: vi.fn().mockReturnValue({
-        gte: vi.fn().mockReturnValue({
-          order: vi.fn().mockResolvedValue({ data: events, error: null }),
-        }),
+        gte: gteFn,
       }),
     }),
   } as never);
+  return { gteFn };
+}
+
+function searchParams(params: Record<string, string> = {}) {
+  return { searchParams: Promise.resolve(params) };
 }
 
 describe('CostPage', () => {
@@ -27,7 +33,7 @@ describe('CostPage', () => {
       { cost: 0.5, recorded_at: '2026-03-20T12:00:00Z', session_type: 'planning', runs: { repo_name: 'api-server' } },
     ]);
 
-    const jsx = await CostPage();
+    const jsx = await CostPage(searchParams());
     render(jsx);
 
     expect(screen.getByText('By Repository')).toBeInTheDocument();
@@ -44,7 +50,7 @@ describe('CostPage', () => {
       { cost: 1.0, recorded_at: '2026-03-20T10:00:00Z', session_type: 'planning', runs: null },
     ]);
 
-    const jsx = await CostPage();
+    const jsx = await CostPage(searchParams());
     render(jsx);
 
     expect(screen.getByText('By Repository')).toBeInTheDocument();
@@ -57,7 +63,7 @@ describe('CostPage', () => {
       { cost: 5.0, recorded_at: '2026-03-20T11:00:00Z', session_type: 'implementation', runs: { repo_name: 'big-repo' } },
     ]);
 
-    const jsx = await CostPage();
+    const jsx = await CostPage(searchParams());
     const { container } = render(jsx);
 
     // Scope to the By Repository card via data-testid
@@ -65,5 +71,64 @@ describe('CostPage', () => {
     const repoNames = repoCard.querySelectorAll('.text-muted-foreground');
     const names = Array.from(repoNames).map((el) => el.textContent);
     expect(names).toEqual(['big-repo', 'small-repo']);
+  });
+
+  it('uses selected time range from searchParams (#87)', async () => {
+    const { gteFn } = mockSupabase([
+      { cost: 1.0, recorded_at: '2026-03-20T10:00:00Z', session_type: 'planning', runs: { repo_name: 'repo-a' } },
+    ]);
+
+    const jsx = await CostPage(searchParams({ range: '7' }));
+    render(jsx);
+
+    // Verify the query uses ~7-day window (gte arg should be ~7 days ago)
+    expect(gteFn).toHaveBeenCalledWith('recorded_at', expect.any(String));
+    const isoDate = gteFn.mock.calls[0][1] as string;
+    const queryDate = new Date(isoDate);
+    const now = new Date();
+    const diffDays = (now.getTime() - queryDate.getTime()) / (1000 * 60 * 60 * 24);
+    expect(diffDays).toBeGreaterThan(6.9);
+    expect(diffDays).toBeLessThan(7.1);
+
+    // UI reflects selected range
+    expect(screen.getByText(/Last 7 days/)).toBeInTheDocument();
+  });
+
+  it('renders range selector with active state (#87)', async () => {
+    mockSupabase([]);
+
+    const jsx = await CostPage(searchParams({ range: '90' }));
+    const { container } = render(jsx);
+
+    const selector = container.querySelector('[data-testid="range-selector"]')!;
+    expect(selector).toBeInTheDocument();
+
+    const links = selector.querySelectorAll('a');
+    expect(links).toHaveLength(3);
+
+    // 90d link should have the active class
+    const link90 = Array.from(links).find((l) => l.textContent === '90d')!;
+    expect(link90.className).toContain('bg-primary');
+
+    // 7d link should not have the active class
+    const link7 = Array.from(links).find((l) => l.textContent === '7d')!;
+    expect(link7.className).not.toContain('bg-primary');
+  });
+
+  it('defaults to 30 days when range param is invalid (#87)', async () => {
+    const { gteFn } = mockSupabase([]);
+
+    const jsx = await CostPage(searchParams({ range: '999' }));
+    render(jsx);
+
+    expect(gteFn).toHaveBeenCalledWith('recorded_at', expect.any(String));
+    const isoDate = gteFn.mock.calls[0][1] as string;
+    const queryDate = new Date(isoDate);
+    const now = new Date();
+    const diffDays = (now.getTime() - queryDate.getTime()) / (1000 * 60 * 60 * 24);
+    expect(diffDays).toBeGreaterThan(29.9);
+    expect(diffDays).toBeLessThan(30.1);
+
+    expect(screen.getByText(/Last 30 days/)).toBeInTheDocument();
   });
 });
