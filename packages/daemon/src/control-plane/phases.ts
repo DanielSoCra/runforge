@@ -19,6 +19,7 @@ import { join } from 'node:path';
 import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
 import { loadSpecContent } from '../infra/spec-loader.js';
+import { classify as runClassify } from './classifier.js';
 
 // Serializes detect-phase git operations across concurrent pipeline runs.
 // Same pattern as integrationLock in integration.ts — single-process boolean suffices.
@@ -77,8 +78,8 @@ export function createPhaseHandlers(
     },
 
     classify: async (_run: RunState): Promise<PhaseEvent> => {
-      console.log(`[classify] MVP: returning simple`);
-      return 'success:simple';
+      console.log(`[classify] Classifying work request #${workRequest.issueNumber}`);
+      return runClassify(runtime, workRequest, runWriter, runId, repoRoot);
     },
 
     diagnose: async (run: RunState): Promise<PhaseEvent> => {

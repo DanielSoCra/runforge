@@ -56,6 +56,10 @@ vi.mock('../infra/spec-loader.js', () => ({
   loadSpecContent: vi.fn(),
 }));
 
+vi.mock('./classifier.js', () => ({
+  classify: vi.fn(),
+}));
+
 // Import after mocks are set up
 import { createPhaseHandlers, acquireDetectLock, releaseDetectLock, isDetectLocked } from './phases.js';
 import { git } from '../lib/git.js';
@@ -70,8 +74,10 @@ import { createWorkDetector } from './work-detection.js';
 import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
 import { loadSpecContent } from '../infra/spec-loader.js';
+import { classify as runClassify } from './classifier.js';
 
 const mockGit = vi.mocked(git);
+const mockClassify = vi.mocked(runClassify);
 const mockDiagnose = vi.mocked(diagnose);
 const mockRouteDiagnosis = vi.mocked(routeDiagnosis);
 const mockCreateGate1 = vi.mocked(createGate1);
@@ -278,10 +284,32 @@ describe('createPhaseHandlers', () => {
   });
 
   describe('classify', () => {
-    it('returns success:simple (MVP stub)', async () => {
+    it('delegates to classifier module and returns its result (#145)', async () => {
+      mockClassify.mockResolvedValue('success');
+      const { handlers } = createHandlers();
+      const result = await handlers.classify!(makeRun());
+      expect(result).toBe('success');
+      expect(mockClassify).toHaveBeenCalledWith(
+        mockRuntime, expect.objectContaining({ issueNumber: 42 }),
+        undefined, undefined, undefined,
+      );
+    });
+
+    it('returns success:simple when classifier returns simple (#145)', async () => {
+      mockClassify.mockResolvedValue('success:simple');
       const { handlers } = createHandlers();
       const result = await handlers.classify!(makeRun());
       expect(result).toBe('success:simple');
+    });
+
+    it('passes repoRoot to classifier (#145)', async () => {
+      mockClassify.mockResolvedValue('success:simple');
+      const { handlers } = createHandlers({}, undefined, '/custom/repo/root');
+      await handlers.classify!(makeRun());
+      expect(mockClassify).toHaveBeenCalledWith(
+        mockRuntime, expect.anything(),
+        undefined, undefined, '/custom/repo/root',
+      );
     });
   });
 
