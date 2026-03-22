@@ -57,6 +57,12 @@ export function checkContainment(call: ToolCall, policy: ContainmentPolicy): Con
       return { allowed: false, reason: `Blocked command pattern (variable indirection): ${assignmentBypass}` };
     }
 
+    // Check for subshell expansion bypass: `$(which curl)` or `` `which curl` ``
+    const subshellBypass = detectSubshellBypass(normalized, policy.blockedCommands);
+    if (subshellBypass) {
+      return { allowed: false, reason: `Blocked command pattern (subshell expansion): ${subshellBypass}` };
+    }
+
     // 4. Extract path references from Bash commands and check against blocked/readOnly paths
     const commandPaths = extractCommandPaths(command);
     const commandIsWrite = WRITE_INDICATOR_RE.test(command);
@@ -158,6 +164,35 @@ function detectCommandAssignmentBypass(
         if (command.includes(`$${varName}`) || command.includes(`\${${varName}}`)) {
           return blocked;
         }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Detect subshell expansion bypass: patterns like `$(which curl)` or `` `which curl` ``
+ * where a blocked command name appears inside a subshell expression.
+ * Returns the matched blocked command or null.
+ */
+function detectSubshellBypass(
+  command: string,
+  blockedCommands: string[],
+): string | null {
+  // Extract contents of $(...) — does not handle nested $(); nested blocked commands
+  // are expected to be caught by the earlier substring check on the full command
+  const dollarSubs = [...command.matchAll(/\$\(([^)]+)\)/g)].map(m => m[1] ?? '');
+  // Extract contents of `...` (backtick subshells)
+  const backtickSubs = [...command.matchAll(/`([^`]+)`/g)].map(m => m[1] ?? '');
+  const allSubs = [...dollarSubs, ...backtickSubs];
+
+  for (const sub of allSubs) {
+    for (const blocked of blockedCommands) {
+      const cmd = blocked.trimEnd();
+      // Check if the blocked command name appears as a word in the subshell content
+      const wordRe = new RegExp(`\\b${cmd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+      if (wordRe.test(sub)) {
+        return blocked;
       }
     }
   }

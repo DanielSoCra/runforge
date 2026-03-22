@@ -134,6 +134,24 @@ function detectCommandAssignmentBypass(command, blockedCommands) {
   return null;
 }
 
+function detectSubshellBypass(command, blockedCommands) {
+  var subs = [];
+  var dre = /\\$\\(([^)]+)\\)/g;
+  var dm;
+  while ((dm = dre.exec(command)) !== null) subs.push(dm[1]);
+  var bre = /\`([^\`]+)\`/g;
+  var bm;
+  while ((bm = bre.exec(command)) !== null) subs.push(bm[1]);
+  for (var i = 0; i < subs.length; i++) {
+    for (var j = 0; j < blockedCommands.length; j++) {
+      var cmd = blockedCommands[j].trimEnd();
+      var wordRe = new RegExp('\\\\b' + cmd.replace(/[^a-zA-Z0-9]/g, '\\\\$&') + '\\\\b');
+      if (wordRe.test(subs[i])) return blockedCommands[j];
+    }
+  }
+  return null;
+}
+
 function checkContainment(toolName, toolInput) {
   const extracted = extractPaths(toolInput);
   if (extracted.blocked) {
@@ -171,6 +189,11 @@ function checkContainment(toolName, toolInput) {
     const assignmentBypass = detectCommandAssignmentBypass(normalized, policy.blockedCommands);
     if (assignmentBypass) {
       return { allowed: false, reason: 'Blocked command pattern (variable indirection): ' + assignmentBypass };
+    }
+
+    const subshellBypass = detectSubshellBypass(normalized, policy.blockedCommands);
+    if (subshellBypass) {
+      return { allowed: false, reason: 'Blocked command pattern (subshell expansion): ' + subshellBypass };
     }
 
     const cmdExtracted = extractCommandPaths(command);
