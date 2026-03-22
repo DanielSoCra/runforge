@@ -63,7 +63,7 @@ Every feature starts as a GitHub Issue and progresses through label-driven stage
 | `blocked` (from `l3-review`) | Operator | Resolves blocker | Reset to L3 start | `blocked` | `l2-approved` | Delete `spec/l3/` branch if exists |
 | `blocked` (from `implementing`) | Operator | Resolves blocker | Reset to implement start | `blocked` | `ready-to-implement` | Delete `feat/` branch if exists |
 
-**Blocked = reset-from-phase-start.** Consistent with FUNC-AC-PIPELINE's retry model: when a phase fails repeatedly, the issue resets to the entry state of that phase (not mid-phase). The Operator removes `blocked` and adds the appropriate entry label. The orchestrator only needs to poll entry-state labels (`ready-to-implement`, `l2-approved`, `l2-in-progress`, `l1-approved`), never mid-phase states.
+**Blocked = reset-from-phase-start.** This is a Phase 1 simplification. FUNC-AC-PIPELINE defines stuck retries as restart-from-scratch; Phase 1 approximates this by resetting to the entry state of the failed phase (e.g., `l2-approved` for L3 failures, `ready-to-implement` for implementation failures). This is less aggressive than full restart but achieves the same goal of clearing stale state. Phase 2 will align fully with FUNC-AC-PIPELINE's restart model when the native control plane handles state. The Operator removes `blocked` and adds the appropriate entry label. The orchestrator only needs to poll entry-state labels (`ready-to-implement`, `l2-approved`, `l2-in-progress`, `l1-approved`), never mid-phase states.
 
 **Note:** `in-review` is eliminated as a separate label. Code review happens within the `spec-implement` skill session — if it passes, the skill merges and closes; if it fails 3x, the skill adds `blocked`. The orchestrator never needs to poll `in-review`.
 
@@ -129,9 +129,9 @@ Note: `l3-review` is handled within the `spec-generate-l3` skill session (compli
 
 ### 1. `spec-brainstorm-l2` (Self-Brainstorming Agent)
 
-**Trigger:** Issue has `feature-pipeline` + `l1-approved` labels.
+**Trigger:** Issue has `feature-pipeline` + either `l1-approved` (new work) or `l2-in-progress` (feedback re-run).
 
-**Workflow:**
+**Workflow (new work — triggered by `l1-approved`):**
 1. Add `l2-in-progress` label, remove `l1-approved`
 2. Read the L1 spec referenced in the issue body
 3. Read L0 vision and existing L2 specs for context and patterns
@@ -144,7 +144,14 @@ Note: `l3-review` is handled within the `spec-generate-l3` skill session (compli
 10. Relabel: remove `l2-in-progress`, add `l2-review`
 11. Exit cleanly — Operator reviews asynchronously
 
-**On re-invocation (feedback received):** If the issue has `l2-review` and new comments exist since last run, read comments, update the L2 spec on the same branch, push, and update the PR.
+**Workflow (feedback re-run — triggered by `l2-in-progress`):**
+1. Read issue comments and PR review comments since last run
+2. Update the L2 spec on the existing `spec/l2/` branch based on feedback
+3. Re-validate with `l2-spec-guardian`
+4. Push updated branch, update PR
+5. Update issue summary with changes made
+6. Relabel: remove `l2-in-progress`, add `l2-review`
+7. Exit cleanly — Operator re-reviews
 
 **Evolution path:** Start as a single self-brainstorming agent. Later upgrade to adversarial two-agent conversation (one proposes, one challenges using L1 as ground truth).
 
@@ -160,7 +167,7 @@ Note: `l3-review` is handled within the `spec-generate-l3` skill session (compli
 5. Validate generated spec using `l3-spec-guardian` skill (local skill at `plugins/auto-claude-dev/skills/spec-guardian.md`)
 6. Run compliance check: does L3 contradict L2 or L1? Fix or create `l2-suggestion` issue with evidence.
 7. Relabel: remove `l3-in-progress`, add `l3-review`
-8. Run `spec-review-compliance` check against L1/L2/existing code
+8. Run `spec-review-compliance` in **inline mode** (upstream consistency + traceability only, no code-gap check)
 9. If compliance passes: merge PR to `dev`, relabel to `l3-approved` + `ready-to-implement`
 10. If issues found: fix and re-review (max 3 iterations, then add `blocked`, remove `l3-review`)
 
