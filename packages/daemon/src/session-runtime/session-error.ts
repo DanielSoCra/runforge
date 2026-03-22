@@ -17,4 +17,19 @@ export class SessionError extends Error {
     this.rateLimited = rateLimited;
     this.containmentBreach = containmentBreach;
   }
+
+  static budgetExceeded(reason: string): SessionError {
+    return new SessionError(`Budget exceeded: ${reason}`, 0);
+  }
+
+  static rateLimited(cost: number, remainingMs?: number): SessionError {
+    const msg = remainingMs !== undefined
+      ? `Rate limited: cooling down for ${Math.ceil(remainingMs / 1000)}s`
+      : 'Rate limited';
+    return new SessionError(msg, cost, true);
+  }
+
+  static containmentBreached(details: string, cost: number): SessionError {
+    return new SessionError(`Containment breach detected: ${details}`, cost, false, true);
+  }
 }

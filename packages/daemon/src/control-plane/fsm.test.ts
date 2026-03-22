@@ -106,6 +106,10 @@ describe('FSM', () => {
       expect(applyGlobalTransition('rate-limited')).toBe('paused');
     });
 
+    it('containment-breach → stuck (#208)', () => {
+      expect(applyGlobalTransition('containment-breach')).toBe('stuck');
+    });
+
     it('success has no global override', () => {
       expect(applyGlobalTransition('success')).toBeUndefined();
     });

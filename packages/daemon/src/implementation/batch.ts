@@ -3,6 +3,7 @@ import type { Unit, SessionResult, ExitStatus, PitfallMarker, PipelineVariant } 
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import type { GotchaStore } from '../knowledge/gotcha-store.js';
+import { SessionError } from '../session-runtime/session-error.js';
 import { createWorktree, getWorktreeDiffSize } from './worktree.js';
 import { git } from '../lib/git.js';
 
@@ -14,6 +15,7 @@ export interface UnitResult {
   pitfallMarkers: PitfallMarker[];
   error?: string;
   handoffNote?: string;
+  containmentBreach?: boolean;
 }
 
 export interface BatchResult {
@@ -141,13 +143,16 @@ async function executeUnit(
 
     if (!sessionResult.ok) {
       console.error(`[batch] Session failed for ${unit.id}:`, sessionResult.error.message);
+      const isContainmentBreach = sessionResult.error instanceof SessionError
+        && sessionResult.error.containmentBreach;
       return {
         unitId: unit.id,
         exitStatus: 'failed',
-        cost: 0,
+        cost: sessionResult.error instanceof SessionError ? sessionResult.error.cost : 0,
         output: '',
         pitfallMarkers: [],
         error: sessionResult.error.message,
+        containmentBreach: isContainmentBreach || undefined,
       };
     }
     console.log(`[batch] Session result for ${unit.id}: ${sessionResult.value.exitStatus}`);

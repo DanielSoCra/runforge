@@ -64,18 +64,26 @@ describe('SessionRuntime', () => {
     if (!result.ok) expect(result.error.message).toContain('No agent definition');
   });
 
-  it('rejects when daily budget exceeded', async () => {
+  it('rejects when daily budget exceeded with SessionError', async () => {
     costTracker.recordCost(1, 51);
     const result = await runtime.spawnSession('worker', { variables: {} }, 2);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.message).toContain('Budget exceeded');
+    if (!result.ok) {
+      expect(result.error.message).toContain('Budget exceeded');
+      expect(result.error).toBeInstanceOf(SessionError);
+      expect((result.error as SessionError).cost).toBe(0);
+    }
   });
 
-  it('rejects when per-run budget exceeded', async () => {
+  it('rejects when per-run budget exceeded with SessionError', async () => {
     costTracker.recordCost(1, 11);
     const result = await runtime.spawnSession('worker', { variables: {} }, 1);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.message).toContain('Budget exceeded');
+    if (!result.ok) {
+      expect(result.error.message).toContain('Budget exceeded');
+      expect(result.error).toBeInstanceOf(SessionError);
+      expect((result.error as SessionError).cost).toBe(0);
+    }
   });
 
   it('assembles prompt with context variables', async () => {

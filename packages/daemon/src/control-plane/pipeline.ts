@@ -123,7 +123,7 @@ export async function runPipeline(
     // types: diagnose, implement, review).
     run.cost = costTracker.getRunCost(run.issueNumber);
 
-    // Check for global overrides (budget-exceeded, rate-limited)
+    // Check for global overrides (budget-exceeded, rate-limited, containment-breach)
     const globalNext = applyGlobalTransition(event);
     if (globalNext) {
       run.phase = globalNext;

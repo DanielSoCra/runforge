@@ -18,6 +18,7 @@ test_paths:
   - packages/daemon/src/session-runtime/cost.test.ts
   - packages/daemon/src/session-runtime/rate-limiter.test.ts
   - packages/daemon/src/session-runtime/runtime.test.ts
+  - packages/daemon/src/session-runtime/session-error.test.ts
   - packages/daemon/src/control-plane/daemon.test.ts
   - packages/daemon/src/control-plane/pipeline.test.ts
 ---

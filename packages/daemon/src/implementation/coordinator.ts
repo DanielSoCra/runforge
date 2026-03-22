@@ -16,6 +16,7 @@ export interface ImplementResult {
   batchesCompleted: number;
   error?: string;
   handoffNotes?: Map<string, string>;
+  containmentBreach?: boolean;
 }
 
 export class ImplementationCoordinator {
@@ -116,6 +117,9 @@ export class ImplementationCoordinator {
         (r) => r.exitStatus === 'blocked' || r.exitStatus === 'needs-context',
       );
 
+      // Check for containment breach — terminal, no retries (STACK-AC-OPERATIONAL-SAFETY)
+      const breached = batchResult.results.some((r) => r.containmentBreach);
+
       if (blocked.length > 0) {
         // Clean up all branches in this batch before returning (#133)
         for (const r of batchResult.results) {
@@ -128,6 +132,7 @@ export class ImplementationCoordinator {
           batchesCompleted: i,
           error: `Units blocked: ${blocked.map((r) => r.unitId).join(', ')}`,
           handoffNotes: collectHandoffNotes(allResults),
+          containmentBreach: breached || undefined,
         });
       }
 
@@ -143,6 +148,7 @@ export class ImplementationCoordinator {
           batchesCompleted: i,
           error: `All units in batch ${i} failed`,
           handoffNotes: collectHandoffNotes(allResults),
+          containmentBreach: breached || undefined,
         });
       }
 
@@ -161,6 +167,7 @@ export class ImplementationCoordinator {
             batchesCompleted: i,
             error: `Merge failed for ${unitResult.unitId}: ${mergeResult.error.message}`,
             handoffNotes: collectHandoffNotes(allResults),
+            containmentBreach: breached || undefined,
           });
         }
         // Clean up unit branch after successful merge (#133)

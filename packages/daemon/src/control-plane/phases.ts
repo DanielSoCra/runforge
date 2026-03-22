@@ -192,6 +192,11 @@ export function createPhaseHandlers(
       });
       if (!result.ok) { console.error(`[implement] Error:`, result.error.message); return 'failure'; }
       if (!result.value.success) {
+        // Containment breach is terminal — signal pipeline to go stuck (STACK-AC-OPERATIONAL-SAFETY)
+        if (result.value.containmentBreach) {
+          console.error(`[implement] Containment breach detected:`, result.value.error);
+          return 'containment-breach';
+        }
         // Persist handoff notes to RunState so they survive daemon crashes (STACK-AC-HANDOFF-COORDINATOR)
         if (result.value.handoffNotes) {
           run.handoffNotes = Object.fromEntries(result.value.handoffNotes);

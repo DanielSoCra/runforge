@@ -101,5 +101,6 @@ export function applyGlobalTransition(event: PhaseEvent): Phase | undefined {
   if (event === 'budget-exceeded') return 'paused';
   if (event === 'per-run-budget-exceeded') return 'stuck';
   if (event === 'rate-limited') return 'paused';
+  if (event === 'containment-breach') return 'stuck';
   return undefined;
 }

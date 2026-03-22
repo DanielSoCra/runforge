@@ -335,6 +335,33 @@ describe('runPipeline', () => {
     expect(run.cost).toBe(3.25); // 0.50 + 2.00 + 0.75
   });
 
+  it('transitions to stuck on containment-breach event from handler (#208)', async () => {
+    const handlers: PhaseHandlerMap = {
+      detect: async () => 'success' as PhaseEvent,
+      classify: async () => 'success:simple' as PhaseEvent,
+      implement: async () => 'containment-breach' as PhaseEvent,
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('stuck');
+    expect(run.phase).toBe('stuck');
+  });
+
+  it('containment-breach bypasses retry logic — no second attempt (#208)', async () => {
+    let attempts = 0;
+    const handlers: PhaseHandlerMap = {
+      detect: async () => 'success' as PhaseEvent,
+      classify: async () => 'success:simple' as PhaseEvent,
+      implement: async () => { attempts++; return 'containment-breach' as PhaseEvent; },
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('stuck');
+    expect(attempts).toBe(1); // terminal — no retries
+  });
+
   it('calls runWriter.upsertRun on phase transitions', async () => {
     const upsertRun = vi.fn().mockResolvedValue(undefined);
     const runWriter = { upsertRun, writeCostEvent: vi.fn() } as any;

@@ -181,16 +181,16 @@ export class SessionRuntime {
       return err(new Error(`No agent definition for session type: ${type}`));
     }
 
-    // 2. Check budget
+    // 2. Check budget — fail-safe guard clause (STACK-AC-OPERATIONAL-SAFETY)
     const budget = this.costTracker.checkBudget(issueNumber);
     if (!budget.available) {
-      return err(new Error(`Budget exceeded: ${budget.reason}`));
+      return err(SessionError.budgetExceeded(budget.reason));
     }
 
     // 3. Check rate limit (ARCH-AC-SESSION-RUNTIME step 3)
     const rateCheck = this.rateLimiter.checkRateLimit();
     if (!rateCheck.clear) {
-      return err(new SessionError(`Rate limited: cooling down for ${Math.ceil(rateCheck.remainingMs / 1000)}s`, 0, true));
+      return err(SessionError.rateLimited(0, rateCheck.remainingMs));
     }
 
     // 4. Stagger delay

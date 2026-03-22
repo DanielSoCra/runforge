@@ -9,7 +9,7 @@ export type Phase =
   | 'init' | 'intelligence' | 'brand' | 'design'
   | 'seo' | 'content' | 'assets' | 'build' | 'qa' | 'launch';
 
-export type PhaseEvent = 'success' | 'success:simple' | 'failure' | 'budget-exceeded' | 'per-run-budget-exceeded' | 'rate-limited';
+export type PhaseEvent = 'success' | 'success:simple' | 'failure' | 'budget-exceeded' | 'per-run-budget-exceeded' | 'rate-limited' | 'containment-breach';
 
 export type PipelineVariant = 'feature' | 'feature-simple' | 'bug' | 'website';
 
