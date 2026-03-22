@@ -46,7 +46,28 @@ export default async function IssuesPage() {
   const repoList = (repos ?? []) as RepoRow[];
   const runList = (runs ?? []) as RunRecord[];
 
-  // Fetch token + issues per repo in parallel
+  // Spec: "If no enabled repos have a GitHub token, the board shows an empty-state prompt pointing to Settings."
+  if (repoList.length === 0) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold mb-1">Issues</h1>
+          <p className="text-muted-foreground text-sm">Open issues across enabled repos</p>
+        </div>
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border p-12 text-center">
+          <p className="text-sm text-muted-foreground mb-3">No enabled repos found.</p>
+          <a
+            href="/settings"
+            className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            Go to Settings
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  // Fetch token + issues per repo in parallel, tracking whether each repo has a token
   const repoIssueResults = await Promise.all(
     repoList.map(async (repo) => {
       let token: string | undefined;
@@ -56,10 +77,34 @@ export default async function IssuesPage() {
       } else {
         token = process.env.GITHUB_TOKEN;
       }
+      const hasToken = !!token;
       const { issues, error } = await fetchIssuesForRepo(repo.owner, repo.name, token);
-      return { owner: repo.owner, name: repo.name, issues, error };
+      return { owner: repo.owner, name: repo.name, issues, error, hasToken };
     }),
   );
+
+  const allReposLackToken = repoIssueResults.every((r) => !r.hasToken);
+  if (allReposLackToken) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold mb-1">Issues</h1>
+          <p className="text-muted-foreground text-sm">Open issues across enabled repos</p>
+        </div>
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border p-12 text-center">
+          <p className="text-sm text-muted-foreground mb-3">
+            None of your enabled repos have a GitHub token configured.
+          </p>
+          <a
+            href="/settings"
+            className="inline-flex items-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            Go to Settings
+          </a>
+        </div>
+      </div>
+    );
+  }
 
   const fetchErrors = repoIssueResults.filter((r) => r.error !== null).map((r) => r.error!);
   const repoIssues = repoIssueResults.map(({ owner, name, issues }) => ({ owner, name, issues }));
