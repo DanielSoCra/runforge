@@ -14,13 +14,28 @@ describe('notify', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    vi.useFakeTimers();
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
+
+  /** Run notify and advance fake timers so retry delays resolve. */
+  async function notifyWithTimers(
+    urls: string[],
+    payload: NotificationPayload,
+  ) {
+    const promise = notify(urls, payload);
+    // Advance past retry delays (5s per URL that fails)
+    for (let i = 0; i < urls.length; i++) {
+      await vi.advanceTimersByTimeAsync(5000);
+    }
+    return promise;
+  }
 
   it('sends a POST request to each webhook URL', async () => {
     fetchMock.mockResolvedValue({ ok: true });
@@ -69,7 +84,7 @@ describe('notify', () => {
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    await notify(
+    await notifyWithTimers(
       ['https://hooks.example.com/fail', 'https://hooks.example.com/ok'],
       makePayload(),
     );
@@ -84,7 +99,7 @@ describe('notify', () => {
       .mockResolvedValueOnce({ ok: false, status: 500 })
       .mockResolvedValueOnce({ ok: true });
 
-    await notify(['https://hooks.example.com/test'], makePayload());
+    await notifyWithTimers(['https://hooks.example.com/test'], makePayload());
 
     // Should have been called twice (initial + retry)
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -97,12 +112,29 @@ describe('notify', () => {
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    await notify(['https://hooks.example.com/fail'], makePayload());
+    await notifyWithTimers(['https://hooks.example.com/fail'], makePayload());
 
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('https://hooks.example.com/fail'),
     );
     warnSpy.mockRestore();
+  });
+
+  it('waits 5 seconds before retrying per STACK-AC-CONTROL-PLANE spec (#94)', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('network error'));
+    fetchMock.mockResolvedValueOnce({ ok: true });
+
+    const promise = notify(['https://hooks.example.com/test'], makePayload());
+
+    // The retry should not have fired yet (only 1s elapsed)
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Advance to 5s — retry should fire
+    await vi.advanceTimersByTimeAsync(4000);
+    await promise;
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('does nothing when webhookUrls is empty', async () => {
@@ -131,9 +163,67 @@ describe('notify', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     await expect(
-      notify(['https://hooks.example.com/a', 'https://hooks.example.com/b'], makePayload()),
-    ).resolves.toBeUndefined();
+      notifyWithTimers(['https://hooks.example.com/a', 'https://hooks.example.com/b'], makePayload()),
+    ).resolves.toBeDefined();
 
+    warnSpy.mockRestore();
+  });
+
+  it('returns failedUrls so callers can detect notification failures', async () => {
+    fetchMock.mockRejectedValue(new Error('total failure'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await notifyWithTimers(
+      ['https://hooks.example.com/a', 'https://hooks.example.com/b'],
+      makePayload(),
+    );
+
+    expect(result.failedUrls).toEqual([
+      'https://hooks.example.com/a',
+      'https://hooks.example.com/b',
+    ]);
+    warnSpy.mockRestore();
+  });
+
+  it('returns empty failedUrls when all webhooks succeed', async () => {
+    fetchMock.mockResolvedValue({ ok: true });
+
+    const result = await notify(
+      ['https://hooks.example.com/a', 'https://hooks.example.com/b'],
+      makePayload(),
+    );
+
+    expect(result.failedUrls).toEqual([]);
+  });
+
+  it('reports failure when retry returns HTTP error status', async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: false, status: 502 })   // initial fails
+      .mockResolvedValueOnce({ ok: false, status: 503 });   // retry also fails
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await notifyWithTimers(
+      ['https://hooks.example.com/flaky'],
+      makePayload(),
+    );
+
+    expect(result.failedUrls).toEqual(['https://hooks.example.com/flaky']);
+    warnSpy.mockRestore();
+  });
+
+  it('returns only the URLs that failed, not those that succeeded', async () => {
+    fetchMock
+      .mockResolvedValueOnce({ ok: true })                  // URL a succeeds
+      .mockRejectedValueOnce(new Error('network error'))     // URL b fails
+      .mockRejectedValueOnce(new Error('retry also fails')); // URL b retry fails
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await notifyWithTimers(
+      ['https://hooks.example.com/a', 'https://hooks.example.com/b'],
+      makePayload(),
+    );
+
+    expect(result.failedUrls).toEqual(['https://hooks.example.com/b']);
     warnSpy.mockRestore();
   });
 });
