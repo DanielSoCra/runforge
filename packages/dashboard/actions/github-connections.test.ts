@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Chain helper: eq().eq() for removeRepo, eq() for removeConnection/others
 const makeEqChain = (result: { error: null | { message: string } }) => {
@@ -65,8 +65,16 @@ describe('removeRepo', () => {
 });
 
 describe('importRepos', () => {
+  const originalFetch = globalThis.fetch;
+
   beforeEach(() => {
     vi.resetModules();
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok'));
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    delete process.env.DAEMON_URL;
   });
 
   it('rejects owner containing shell metacharacters', async () => {
@@ -106,5 +114,34 @@ describe('importRepos', () => {
       expect.objectContaining({ enabled: false }),
       expect.any(Object),
     );
+  });
+
+  it('fires POST to DAEMON_URL/repos/reload after upserts (#166)', async () => {
+    process.env.DAEMON_URL = 'http://localhost:7532';
+    const mockUpsert = vi.fn().mockResolvedValue({ error: null });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockFrom.mockImplementation((() => ({ upsert: mockUpsert })) as any);
+    const { importRepos } = await import('./github-connections.js');
+    await importRepos('conn-1', [{ owner: 'acme', name: 'repo' }]);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:7532/repos/reload',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'X-Requested-By': 'dashboard' },
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it('silently swallows fetch failure when daemon is unreachable (#166)', async () => {
+    process.env.DAEMON_URL = 'http://localhost:9999';
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+    const mockUpsert = vi.fn().mockResolvedValue({ error: null });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockFrom.mockImplementation((() => ({ upsert: mockUpsert })) as any);
+    const { importRepos } = await import('./github-connections.js');
+    // Should not throw despite fetch failure
+    await expect(importRepos('conn-1', [{ owner: 'acme', name: 'repo' }])).resolves.not.toThrow();
+    expect(globalThis.fetch).toHaveBeenCalled();
   });
 });
