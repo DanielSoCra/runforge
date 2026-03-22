@@ -12,15 +12,13 @@ Single `docker-compose.yml` with Docker Compose profiles and environment-driven 
 
 ## Compose File
 
-One `docker-compose.yml` replaces the current `docker-compose.prod.yml`. Four services:
+One `docker-compose.yml` replaces the current `docker-compose.prod.yml`. The daemon runs in Docker only on Hetzner (where `ANTHROPIC_API_KEY` provides headless auth). On Mac Mini, the daemon runs natively to preserve Max subscription OAuth access — Docker containers cannot refresh expired OAuth tokens interactively.
 
-**dashboard** — Next.js standalone, always runs. Port binding controlled by `DASHBOARD_PORT` env var. On the Mac Mini, exposed on all interfaces for LAN access (`0.0.0.0:3000:3000`). On Hetzner, bound to loopback only (`127.0.0.1:3000:3000`) so only Caddy can reach it.
+**dashboard** — Next.js standalone, always runs in Docker. Port binding controlled by `DASHBOARD_PORT` env var. On the Mac Mini, exposed on all interfaces for LAN access (`0.0.0.0:3000:3000`). On Hetzner, bound to loopback only (`127.0.0.1:3000:3000`) so only Caddy can reach it. Uses `extra_hosts` to resolve `host.docker.internal` for reaching the native daemon on Mac Mini.
 
-All existing service definitions from `docker-compose.prod.yml` are preserved: bridge network (`app`), named volumes (`caddy_data`, `caddy_config`, `daemon-state`), build contexts with Dockerfile paths, volume mounts for prompts/fitness/plugins/config, and `depends_on` relationships. The only structural change is the addition of the `profiles` directive on the Caddy service and the `DASHBOARD_PORT` variable for port binding.
+**daemon** — Gated behind Docker Compose profile `containerized-daemon`. On Mac Mini, the daemon runs natively (via launchd or direct process) and the dashboard reaches it via `http://host.docker.internal:3847`. On Hetzner, the daemon runs in Docker (activated with `--profile containerized-daemon`) and the dashboard reaches it via `http://daemon:3847`.
 
-**daemon** — Node.js, always runs. Port 3847, never exposed externally in either environment. Dashboard reaches it via Docker service name `http://daemon:3847`. Binds `0.0.0.0` inside the container so the dashboard container can connect.
-
-**briefing-summarizer** — Always runs, no exposed ports. Connects to daemon via `http://daemon:3847` and writes to Supabase.
+**briefing-summarizer** — Always runs in Docker, no exposed ports. Connects to daemon via `DAEMON_URL` from the env file (either `host.docker.internal:3847` on Mac Mini or `daemon:3847` on Hetzner). Writes to Supabase.
 
 **caddy** — Gated behind Docker Compose profile `public`. Only starts on Hetzner. Handles TLS termination and reverse proxies to the dashboard container. Uses automatic ACME certificate provisioning.
 
@@ -43,14 +41,14 @@ services:
 ### Starting the stack
 
 ```bash
-# Mac Mini — local network access, no TLS, no auth
+# Mac Mini — dashboard + briefing-summarizer in Docker, daemon runs natively
 ENV_FILE=.env.mac docker compose --env-file .env.mac up -d
 
-# Hetzner — public, TLS via Caddy, GitHub OAuth
-docker compose --env-file .env.prod --profile public up -d
+# Hetzner — all services in Docker, public access via Caddy
+docker compose --env-file .env.prod --profile public --profile containerized-daemon up -d
 ```
 
-The `ENV_FILE` shell variable controls which env file is loaded into containers. On Hetzner, the default (`.env.prod`) applies without setting `ENV_FILE`.
+The `ENV_FILE` shell variable controls which env file is loaded into containers. On Hetzner, the default (`.env.prod`) applies without setting `ENV_FILE`. The `containerized-daemon` profile is only used on Hetzner where `ANTHROPIC_API_KEY` provides headless auth.
 
 ## Environment Files
 
@@ -129,19 +127,19 @@ The `AUTH_DISABLED` flag does not affect the daemon or briefing summarizer — t
 - `infra/main.tf`, `infra/cloud-init.yml` — Hetzner provisioning unchanged.
 - `auto-claude.config.json` — unchanged.
 
-### Superseded (not deleted)
+### Unchanged on Mac Mini
 
-- `scripts/com.autoclaude.reviewer.plist` — replaced by daemon running in Docker.
-- `scripts/com.autoclaude.developer.plist` — replaced by daemon running in Docker.
+- `scripts/com.autoclaude.reviewer.plist` — daemon continues running natively on Mac Mini.
+- `scripts/com.autoclaude.developer.plist` — daemon continues running natively on Mac Mini.
 
-**Cutover sequence** (to avoid dual daemon operation):
+The daemon runs natively on the Mac Mini because it spawns Claude Code CLI sessions that require Max subscription OAuth tokens. These tokens expire and cannot be refreshed inside a Docker container (no interactive browser access). The launchd plists remain active.
 
-1. Unload launchd services: `launchctl unload ~/Library/LaunchAgents/com.autoclaude.*.plist`
-2. Verify no auto-claude processes running: `ps aux | grep pipeline.sh`
-3. Start Docker stack: `ENV_FILE=.env.mac docker compose --env-file .env.mac up -d`
-4. Verify healthy: `docker compose ps` — all services should be `running`
+**Mac Mini startup sequence:**
 
-The launchd plists are not deleted yet because the daemon's native FSM migration (issues #200, #201) is still in progress. Once the FSM replaces the shell scripts, these plists and their corresponding shell scripts can be removed.
+1. Ensure daemon is running natively (via launchd or `cd packages/daemon && pnpm start`)
+2. Start Docker stack: `ENV_FILE=.env.mac docker compose --env-file .env.mac up -d`
+3. Verify: `docker compose ps` — dashboard and briefing-summarizer should be `running`
+4. Verify: `curl http://localhost:3000/api/daemon/status` — dashboard can reach native daemon
 
 ## Spec Updates Required
 
