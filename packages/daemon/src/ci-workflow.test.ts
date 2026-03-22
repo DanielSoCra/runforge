@@ -12,6 +12,12 @@ describe('auto-claude CI workflow', () => {
     expect(raw).toContain('pnpm install --frozen-lockfile');
   });
 
+  it('has concurrency control to prevent parallel runs on shared runner (#187)', () => {
+    expect(raw).toContain('concurrency:');
+    expect(raw).toContain('group: auto-claude-processor');
+    expect(raw).toContain('cancel-in-progress: false');
+  });
+
   it('should reference existing .ts file paths in run commands', () => {
     // Extract all .ts file paths referenced in tsx/node run commands
     const tsFileRefs = raw.matchAll(/(?:npx\s+tsx|node)\s+(\S+\.ts)/g);

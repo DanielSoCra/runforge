@@ -4,6 +4,10 @@ on:
   issues:
     types: [labeled]
 
+concurrency:
+  group: auto-claude-processor
+  cancel-in-progress: false
+
 jobs:
   process-issue:
     if: github.event.label.name == 'ready'
