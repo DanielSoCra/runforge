@@ -59,6 +59,7 @@ export async function processSingleIssue(issueNumber: number, configPath: string
     phase: getStartPhase(variant), variant,
     phaseCompletions: {}, checkpoints: [], cost: 0,
     perRunBudget: config.perRunBudget, fixAttempts: [], errorHashes: {},
+    body: request.body, labels: request.labels, specRefs: request.specRefs,
     startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   };
   await stateMgr.saveRunState(run);

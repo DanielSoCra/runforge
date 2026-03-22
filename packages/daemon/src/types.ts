@@ -86,6 +86,9 @@ export interface RunState {
   errorHashes: Record<string, number>;
   repoOwner?: string;
   repoName?: string;
+  body?: string;
+  labels?: string[];
+  specRefs?: string[];
   startedAt: string;
   updatedAt: string;
   report?: string;

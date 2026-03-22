@@ -9,7 +9,7 @@ import type { WorkRequest } from '../types.js';
 const {
   mockStateMgr, mockCostTracker, mockRemoteControl, mockDetector,
   mockServer, mockServerStart, mockRunPipeline, mockNotify,
-  mockRunWriter, mockConfigReader, mockLoadConfig,
+  mockRunWriter, mockConfigReader, mockLoadConfig, phaseHandlerCalls,
 } = vi.hoisted(() => ({
   mockStateMgr: {
     initialize: vi.fn().mockResolvedValue(undefined),
@@ -43,6 +43,7 @@ const {
     getRepoConfig: vi.fn().mockReturnValue(null),
   },
   mockLoadConfig: vi.fn(),
+  phaseHandlerCalls: [] as unknown[][],
 }));
 
 // --- Module mocks (use classes for constructors to work with `new`) ---
@@ -72,7 +73,7 @@ vi.mock('./server.js', () => ({
   })),
 }));
 vi.mock('./phases.js', () => ({
-  createPhaseHandlers: () => ({}),
+  createPhaseHandlers: (...args: unknown[]) => { phaseHandlerCalls.push(args); return {}; },
 }));
 vi.mock('./phases-website.js', () => ({
   createWebsitePhaseHandlers: () => ({}),
@@ -199,6 +200,7 @@ describe('daemon', () => {
     ]) {
       mock.mockClear();
     }
+    phaseHandlerCalls.length = 0;
     for (const key in signalHandlers) delete signalHandlers[key];
   });
 
@@ -336,6 +338,71 @@ describe('daemon', () => {
       expect(mockRunPipeline).toHaveBeenCalled();
       const callArgs = mockRunPipeline.mock.calls[0]!;
       expect(callArgs[0]).toMatchObject({ issueNumber: 66 });
+    });
+
+    it('uses persisted body/labels/specRefs from RunState on crash resume (#108)', async () => {
+      const incompleteRun = {
+        id: 'run-108',
+        issueNumber: 108,
+        title: 'Feature with spec refs',
+        phase: 'implement',
+        variant: 'feature',
+        phaseCompletions: { detect: true },
+        checkpoints: [],
+        cost: 1,
+        perRunBudget: 10,
+        fixAttempts: [],
+        errorHashes: {},
+        repoOwner: 'test-owner',
+        repoName: 'test-repo',
+        body: 'Original issue body with details',
+        labels: ['ready', 'enhancement'],
+        specRefs: ['FUNC-AC-PIPELINE', 'ARCH-AC-CONTROL-PLANE'],
+        startedAt: '2026-03-21T00:00:00Z',
+        updatedAt: '2026-03-21T01:00:00Z',
+      };
+      mockStateMgr.findIncompleteRuns.mockResolvedValue([incompleteRun]);
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(phaseHandlerCalls.length).toBeGreaterThan(0);
+      const workRequest = phaseHandlerCalls[0]![6] as WorkRequest;
+      expect(workRequest.body).toBe('Original issue body with details');
+      expect(workRequest.labels).toEqual(['ready', 'enhancement']);
+      expect(workRequest.specRefs).toEqual(['FUNC-AC-PIPELINE', 'ARCH-AC-CONTROL-PLANE']);
+    });
+
+    it('falls back to empty defaults when RunState lacks body/labels/specRefs (#108)', async () => {
+      const incompleteRun = {
+        id: 'run-legacy',
+        issueNumber: 55,
+        title: 'Legacy run without body',
+        phase: 'implement',
+        variant: 'feature',
+        phaseCompletions: {},
+        checkpoints: [],
+        cost: 0,
+        perRunBudget: 10,
+        fixAttempts: [],
+        errorHashes: {},
+        repoOwner: 'test-owner',
+        repoName: 'test-repo',
+        startedAt: '2026-03-21T00:00:00Z',
+        updatedAt: '2026-03-21T01:00:00Z',
+      };
+      mockStateMgr.findIncompleteRuns.mockResolvedValue([incompleteRun]);
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(phaseHandlerCalls.length).toBeGreaterThan(0);
+      const workRequest = phaseHandlerCalls[0]![6] as WorkRequest;
+      expect(workRequest.body).toBe('');
+      expect(workRequest.labels).toEqual([]);
+      expect(workRequest.specRefs).toEqual([]);
     });
 
     it('decrements activeRuns after resumed run completes', async () => {
@@ -519,6 +586,31 @@ describe('daemon', () => {
           errorHashes: {},
           phaseCompletions: {},
           checkpoints: [],
+        }),
+      );
+    });
+
+    it('persists body/labels/specRefs in RunState (#108)', async () => {
+      const request = makeWorkRequest({
+        issueNumber: 108,
+        title: 'Feature',
+        body: 'Detailed body text',
+        labels: ['ready', 'feature'],
+        specRefs: ['FUNC-AC-PIPELINE'],
+      });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockStateMgr.saveRunState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: 'Detailed body text',
+          labels: ['ready', 'feature'],
+          specRefs: ['FUNC-AC-PIPELINE'],
         }),
       );
     });

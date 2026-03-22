@@ -199,9 +199,16 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
 
     const notifyOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
     const agencyConfig = await readAgencyConfig(null, '');
+    const resumedRequest: WorkRequest = {
+      issueNumber: run.issueNumber,
+      title: run.title,
+      body: run.body ?? '',
+      labels: run.labels ?? [],
+      specRefs: run.specRefs ?? [],
+    };
     const handlers = run.variant === 'website'
       ? createWebsitePhaseHandlers(agencyConfig, null, notifyOctokit, runOwner, runRepoName, run.issueNumber, null)
-      : createPhaseHandlers(config, runOwner, runRepoName, runtime, coordinator, notifyOctokit, { issueNumber: run.issueNumber, title: run.title, body: '', labels: [], specRefs: [] }, stateDir, runWriter ?? undefined, run.id, repoRoot);
+      : createPhaseHandlers(config, runOwner, runRepoName, runtime, coordinator, notifyOctokit, resumedRequest, stateDir, runWriter ?? undefined, run.id, repoRoot);
     const table = getPipeline(run.variant);
 
     const resumeDetector = legacyDetector ?? createWorkDetector(new Octokit({ auth: process.env.GITHUB_TOKEN }), runOwner, runRepoName);
@@ -334,6 +341,9 @@ async function processWorkRequest(
     errorHashes: {},
     repoOwner: owner,
     repoName: repoName,
+    body: request.body,
+    labels: request.labels,
+    specRefs: request.specRefs,
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
