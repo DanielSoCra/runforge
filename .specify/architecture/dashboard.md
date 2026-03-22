@@ -3,7 +3,7 @@ id: ARCH-AC-DASHBOARD
 type: architecture
 domain: auto-claude
 status: draft
-version: 2
+version: 3
 layer: 2
 references: FUNC-AC-DASHBOARD
 ---
@@ -38,7 +38,7 @@ The Dashboard Service is a web application that provides a UI for managing repos
 
 ### Dashboard Web Application
 
-The Dashboard is a server-rendered web application. It uses **Server Actions** for all Database Service mutations (repos, settings, invitations, team members, API keys) — no REST API routes are needed for these. Explicit API routes exist only for operations that cannot use Server Actions: daemon proxy commands and any webhook receivers.
+The Dashboard is a server-rendered web application. It uses **server-side mutation handlers** for all Database Service mutations (repos, settings, invitations, team members, API keys) — no REST API routes are needed for these. Explicit API routes exist only for operations that cannot use server-side handlers: daemon proxy commands and any webhook receivers.
 
 **Auth Service (external)** — handles authentication flows. The Dashboard redirects users to the auth provider for sign-in and receives identity tokens on callback.
 
@@ -52,7 +52,7 @@ Dashboard API routes (daemon proxy only):
 - `POST /api/daemon/resume` — resume the daemon (admin only, proxied to daemon)
 - `GET /api/daemon/status` — daemon status: `{ state: "running" | "paused" | "offline", active_runs: number, version: string }` (proxied to daemon)
 
-All other operations (CRUD for repos, settings, team, invitations, API keys) are implemented as Server Actions that query the Database Service directly from Next.js server context.
+All other operations (CRUD for repos, settings, team, invitations, API keys) are implemented as server-side mutation handlers that query the Database Service directly from the Backend's server context.
 
 ### Daemon Configuration Sync
 
@@ -60,7 +60,7 @@ The Daemon fetches its configuration from the Database Service instead of a loca
 
 **Sync flow (Daemon reads config):**
 1. On startup and periodically (interval defined in L3), the Daemon queries the Database Service for all enabled, non-deleted repos and GlobalSettings.
-2. The response includes: owner, name, branch config, budget, concurrency limit, and decrypted credentials. Credentials are decrypted via a `SECURITY DEFINER` Postgres function callable only by the daemon's service-role — the dashboard runtime never calls this function (see L3 for the RPC pattern).
+2. The response includes: owner, name, branch config, budget, concurrency limit, and decrypted credentials. Credentials are decrypted via a privileged database function callable only by the daemon's service-role — the dashboard runtime never calls this function (see L3 for the implementation pattern).
 3. The Daemon caches the result locally as JSON. If the Database Service is unreachable, the cache is used.
 
 **Sync flow (Daemon writes results):**
@@ -68,11 +68,11 @@ The Daemon fetches its configuration from the Database Service instead of a loca
 2. On run completion, the Daemon finalizes the Run record (outcome, report, total cost) and writes CostEvent records for each session within the run.
 3. The Database Service broadcasts a realtime event on each upsert.
 
-**Source of truth:** Supabase is the canonical store for all config and run history. Local JSONL is a write-ahead buffer — if the Database Service is unreachable, run events are buffered to JSONL. On startup, the Daemon replays any unsynced JSONL entries (idempotent via run ID) before beginning normal operation.
+**Source of truth:** The Database Service is the canonical store for all config and run history. Local JSONL is a write-ahead buffer — if the Database Service is unreachable, run events are buffered to JSONL. On startup, the Daemon replays any unsynced JSONL entries (idempotent via run ID) before beginning normal operation.
 
 ## System Boundaries
 
-- Dashboard Service OWNS: the web UI, Server Actions, auth flow, and team management logic.
+- Dashboard Service OWNS: the web UI, server-side mutation handlers, auth flow, and team management logic.
 - Database Service (external) OWNS: persistent storage for repos, runs, cost events, team members, invitations, and encrypted API keys.
 - Auth Service (external) OWNS: identity verification and session tokens.
 - Daemon OWNS: pipeline execution, worker dispatch, and local write-ahead state. It READS repo config from the Database Service and WRITES run results back.
@@ -102,6 +102,13 @@ The Daemon fetches its configuration from the Database Service instead of a loca
 3. Database Service broadcasts a realtime event on each upsert. Dashboard updates the UI without a page refresh.
 4. On completion, Daemon finalizes the Run record and writes CostEvent records.
 
+**Budget enforcement visibility:**
+1. For each active run, the Dashboard computes the ratio of the run's current cost to the repo's per-run budget limit.
+2. When cost reaches 80% of the budget limit, the Dashboard displays a warning state on the run and the repo.
+3. When cost reaches 100% of the budget limit, the Dashboard displays an exceeded state.
+4. Budget limits are advisory in this version — the daemon does not abort runs that exceed the limit. The 80% warning threshold is the default; making it configurable is deferred to a future iteration.
+5. The Dashboard derives budget status client-side from Run.total_cost and Repo.budget_limit — no additional data model is required.
+
 **Daemon control flow:**
 1. Admin clicks "Pause" in the Dashboard.
 2. Dashboard sends `POST /api/daemon/pause` to its own API route.
@@ -125,13 +132,3 @@ The Daemon fetches its configuration from the Database Service instead of a loca
 **Run sync failure (Database Service unreachable):** The Daemon buffers run events to local JSONL. On next startup or successful reconnection, buffered entries are replayed idempotently via run ID. The Dashboard shows slightly stale data until sync succeeds.
 
 **Repo deletion with run history:** Repos are soft-deleted (`deleted_at` set, `enabled` forced false). Run records retain a snapshot of the repo's owner and name, so history remains intact and displayable after the repo is removed.
-
-## Integration Path
-
-The current daemon is single-repo and reads config from local files. Migration is phased:
-
-1. **Schema first** — deploy Supabase schema (tables, RLS, migrations). Dashboard is read-only from existing JSONL-exported data.
-2. **Dashboard read-write** — Dashboard manages repos and config. Daemon still reads from local config.
-3. **Daemon reads from Supabase** — refactor daemon config loading to query Database Service; local config becomes fallback only.
-4. **Daemon writes to Supabase** — add run upsert and CostEvent writes on phase transitions and completion.
-5. **Multi-repo** — daemon scheduler handles multiple repos from Supabase config; per-repo concurrency enforced.
