@@ -15,6 +15,11 @@ describe('Daemon Dockerfile', () => {
     );
   });
 
+  it('should scope pnpm install to daemon package only (#189)', () => {
+    // Must use --filter to avoid installing dashboard dependencies
+    expect(DOCKERFILE).toMatch(/pnpm install.*--filter.*@auto-claude\/daemon/);
+  });
+
   it('should NOT install claude-code without a version pin', () => {
     // Ensure there's no unpinned install line
     const lines = DOCKERFILE.split('\n');
