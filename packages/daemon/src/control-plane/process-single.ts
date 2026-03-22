@@ -16,6 +16,12 @@ import { ok, err, type Result } from '../lib/result.js';
 export async function processSingleIssue(issueNumber: number, configPath: string): Promise<Result<void>> {
   console.log(`[process] Processing issue #${issueNumber}`);
 
+  if (!process.env.GITHUB_TOKEN) {
+    return err(new Error(
+      'GITHUB_TOKEN environment variable is not set. Required for GitHub API access.',
+    ));
+  }
+
   const configResult = await loadConfig(configPath);
   if (!configResult.ok) return configResult;
   const config = configResult.value;
