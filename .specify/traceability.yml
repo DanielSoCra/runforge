@@ -189,8 +189,17 @@ STACK-AC-CONTROL-PLANE:
 STACK-AC-IMPLEMENTATION:
   parent: ARCH-AC-IMPLEMENTATION
   children: []
-  code_paths: [packages/daemon/src/implementation/]
-  test_paths: [packages/daemon/src/implementation/**/*.test.ts]
+  code_paths:
+    - packages/daemon/src/implementation/
+    - packages/daemon/src/implementation/coordinator.ts
+    - packages/daemon/src/implementation/decompose.ts
+    - packages/daemon/src/implementation/batch.ts
+    - packages/daemon/src/implementation/merge.ts
+    - packages/daemon/src/implementation/fix.ts
+    - packages/daemon/src/implementation/context.ts
+    - packages/daemon/src/implementation/exit-status.ts
+  test_paths:
+    - packages/daemon/src/implementation/**/*.test.ts
   status: draft
 
 STACK-AC-VALIDATION:
