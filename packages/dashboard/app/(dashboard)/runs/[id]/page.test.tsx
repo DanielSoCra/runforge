@@ -46,6 +46,7 @@ const baseRun = {
   total_cost: 1.2345,
   fix_attempts: 0,
   report: null,
+  active_plugins: [],
 };
 
 describe('RunDetailPage', () => {
@@ -86,6 +87,24 @@ describe('RunDetailPage', () => {
     render(jsx);
 
     expect(screen.getByText('80%+ budget')).toBeInTheDocument();
+  });
+
+  it('displays active plugins when present (#127)', async () => {
+    mockSupabase({ ...baseRun, active_plugins: ['nextjs-conventions', 'eslint-enforcer'] });
+    const jsx = await RunDetailPage({ params: Promise.resolve({ id: 'run-1' }) });
+    render(jsx);
+
+    expect(screen.getByText('Active Plugins')).toBeInTheDocument();
+    expect(screen.getByText('nextjs-conventions')).toBeInTheDocument();
+    expect(screen.getByText('eslint-enforcer')).toBeInTheDocument();
+  });
+
+  it('hides active plugins section when empty (#127)', async () => {
+    mockSupabase({ ...baseRun, active_plugins: [] });
+    const jsx = await RunDetailPage({ params: Promise.resolve({ id: 'run-1' }) });
+    render(jsx);
+
+    expect(screen.queryByText('Active Plugins')).not.toBeInTheDocument();
   });
 
   it('shows no budget badge when under 80% (#84)', async () => {

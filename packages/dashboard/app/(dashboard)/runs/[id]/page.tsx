@@ -74,6 +74,20 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
         </CardContent>
       </Card>
 
+      {/* Active plugins */}
+      {Array.isArray(run.active_plugins) && run.active_plugins.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle>Active Plugins</CardTitle></CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {run.active_plugins.map((plugin: string) => (
+                <Badge key={plugin} variant="secondary">{plugin}</Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Final report */}
       {run.report && (
         <Card>
