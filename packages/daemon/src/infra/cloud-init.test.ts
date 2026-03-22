@@ -12,13 +12,18 @@ describe('cloud-init.yml', () => {
     expect(cloudInit).toContain('https://get.docker.com');
   });
 
-  it('adds autoclaud user to docker group', () => {
-    expect(cloudInit).toContain('usermod -aG docker autoclaud');
+  it('adds autoclaude user to docker group', () => {
+    expect(cloudInit).toContain('usermod -aG docker autoclaude');
+  });
+
+  it('uses correct username "autoclaude" (not "autoclaud")', () => {
+    expect(cloudInit).not.toMatch(/autoclaud(?!e)/);
+    expect(cloudInit).toContain('useradd -m -s /bin/bash autoclaude');
   });
 
   it('installs Docker before adding user to docker group', () => {
     const dockerInstallIndex = cloudInit.indexOf('https://get.docker.com');
-    const usermodIndex = cloudInit.indexOf('usermod -aG docker autoclaud');
+    const usermodIndex = cloudInit.indexOf('usermod -aG docker autoclaude');
     expect(dockerInstallIndex).toBeLessThan(usermodIndex);
   });
 });

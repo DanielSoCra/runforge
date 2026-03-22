@@ -33,11 +33,11 @@ docker compose version
 
 ## 3. Create the Deploy User
 
-The `autoclaud` user is created automatically by `cloud-init.yml` (with Docker group membership). If provisioning manually:
+The `autoclaude` user is created automatically by `cloud-init.yml` (with Docker group membership). If provisioning manually:
 
 ```bash
-useradd -m -s /bin/bash autoclaud
-usermod -aG docker autoclaud
+useradd -m -s /bin/bash autoclaude
+usermod -aG docker autoclaude
 ```
 
 > **Note:** All `docker compose` commands below are run as **root** (or via `sudo`). Even with the `docker` group, some volume-mount permission issues require root on this server.
@@ -45,9 +45,9 @@ usermod -aG docker autoclaud
 ## 4. Clone the Repository
 
 ```bash
-git clone https://github.com/DANIELSOCRAHANDLEZZ/auto-claude.git /home/autoclaud/auto-claude
-chown -R autoclaud:autoclaud /home/autoclaud/auto-claude
-cd /home/autoclaud/auto-claude
+git clone https://github.com/DANIELSOCRAHANDLEZZ/auto-claude.git /home/autoclaude/auto-claude
+chown -R autoclaude:autoclaude /home/autoclaude/auto-claude
+cd /home/autoclaude/auto-claude
 ```
 
 ## 5. Create the Environment File
@@ -110,7 +110,7 @@ Migrations live in `packages/daemon/migrations/`. Run them in the Supabase SQL e
 ## 9. Deploy
 
 ```bash
-cd /home/autoclaud/auto-claude
+cd /home/autoclaude/auto-claude
 docker compose -f docker-compose.prod.yml up --build -d
 ```
 
@@ -140,7 +140,7 @@ The daemon's control port (3847) is **not** exposed externally — it is interna
 ### Update to latest
 
 ```bash
-cd /home/autoclaud/auto-claude
+cd /home/autoclaude/auto-claude
 git pull
 docker compose -f docker-compose.prod.yml up --build -d
 ```
@@ -173,7 +173,7 @@ docker compose -f docker-compose.prod.yml down
 **`git pull` fails with "unsafe directory"**
 
 ```bash
-chown -R autoclaud:autoclaud /home/autoclaud/auto-claude
+chown -R autoclaude:autoclaude /home/autoclaude/auto-claude
 ```
 
 **`git pull` blocked by untracked files**

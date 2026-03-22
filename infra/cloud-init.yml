@@ -27,20 +27,20 @@ runcmd:
   - npm install -g @anthropic-ai/claude-code
 
   # Create auto-claude user
-  - useradd -m -s /bin/bash autoclaud
-  - usermod -aG docker autoclaud
-  - mkdir -p /home/autoclaud/.ssh
-  - cp /root/.ssh/authorized_keys /home/autoclaud/.ssh/authorized_keys
-  - chown -R autoclaud:autoclaud /home/autoclaud/.ssh
-  - chmod 700 /home/autoclaud/.ssh
-  - chmod 600 /home/autoclaud/.ssh/authorized_keys
+  - useradd -m -s /bin/bash autoclaude
+  - usermod -aG docker autoclaude
+  - mkdir -p /home/autoclaude/.ssh
+  - cp /root/.ssh/authorized_keys /home/autoclaude/.ssh/authorized_keys
+  - chown -R autoclaude:autoclaude /home/autoclaude/.ssh
+  - chmod 700 /home/autoclaude/.ssh
+  - chmod 600 /home/autoclaude/.ssh/authorized_keys
 
   # Clone the repo
-  - su - autoclaud -c "git clone https://github.com/DANIELSOCRAHANDLEZZ/auto-claude.git /home/autoclaud/auto-claude"
-  - su - autoclaud -c "cd /home/autoclaud/auto-claude && pnpm install"
+  - su - autoclaude -c "git clone https://github.com/DANIELSOCRAHANDLEZZ/auto-claude.git /home/autoclaude/auto-claude"
+  - su - autoclaude -c "cd /home/autoclaude/auto-claude && pnpm install"
 
   # Create state directory
-  - su - autoclaud -c "mkdir -p /home/autoclaud/auto-claude/state/runs"
+  - su - autoclaude -c "mkdir -p /home/autoclaude/auto-claude/state/runs"
 
   # Write a ready marker
   - echo "auto-claude server ready" > /root/READY
