@@ -2,6 +2,7 @@
 import { ok, err, type Result } from '../lib/result.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { ReviewFinding } from '../types.js';
+import { SessionError } from '../session-runtime/session-error.js';
 import { createWorktree, mergeWorktree, deleteUnitBranch } from './worktree.js';
 import { git } from '../lib/git.js';
 
@@ -70,7 +71,8 @@ export async function fix(
     );
 
     if (!sessionResult.ok) {
-      return ok({ success: false, cost: 0, output: sessionResult.error.message });
+      const cost = sessionResult.error instanceof SessionError ? sessionResult.error.cost : 0;
+      return ok({ success: false, cost, output: sessionResult.error.message });
     }
 
     const result = sessionResult.value;
@@ -90,7 +92,7 @@ export async function fix(
   } catch (e) {
     return ok({
       success: false,
-      cost: 0,
+      cost: e instanceof SessionError ? e.cost : 0,
       output: e instanceof Error ? e.message : String(e),
     });
   } finally {
