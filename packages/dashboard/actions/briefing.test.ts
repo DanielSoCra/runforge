@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock Supabase client
 const mockFrom = vi.fn();
@@ -8,8 +8,30 @@ vi.mock('@/lib/supabase/server', () => ({
   }),
 }));
 
+// Mock service client for getUpNext (needs service-role to decrypt tokens)
+const mockServiceFrom = vi.fn();
+const mockServiceRpc = vi.fn();
+vi.mock('@/lib/supabase/service', () => ({
+  createServiceClient: vi.fn().mockReturnValue({
+    from: mockServiceFrom,
+    rpc: mockServiceRpc,
+  }),
+}));
+
+// Mock fetch for GitHub API calls
+const originalFetch = globalThis.fetch;
+const mockFetch = vi.fn();
+
 beforeEach(() => {
   mockFrom.mockReset();
+  mockServiceFrom.mockReset();
+  mockServiceRpc.mockReset();
+  mockFetch.mockReset();
+  globalThis.fetch = mockFetch;
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
 });
 
 describe('getLatestBriefing', () => {
@@ -206,11 +228,137 @@ describe('getNeedsAttention', () => {
 });
 
 describe('getUpNext', () => {
-  it('returns empty array (pending daemon integration)', async () => {
+  function setupReposQuery(repos: Array<{ id: string; owner: string; name: string; connection_id: string | null }>) {
+    mockServiceFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          is: vi.fn().mockResolvedValue({ data: repos, error: null }),
+        }),
+      }),
+    });
+  }
+
+  function setupActiveRunsQuery(runs: Array<{ issue_number: number; repo_owner: string; repo_name: string }>) {
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: runs, error: null }),
+      }),
+    });
+  }
+
+  function setupGitHubIssuesResponse(issues: Array<{ number: number; title: string; html_url: string; labels: Array<{ name: string }> }>) {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => issues,
+    } as Response);
+  }
+
+  it('returns issues with pipeline labels sorted by priority', async () => {
+    setupReposQuery([{ id: 'r1', owner: 'acme', name: 'web', connection_id: null }]);
+    setupActiveRunsQuery([]);
+    // Mock GITHUB_TOKEN env
+    process.env.GITHUB_TOKEN = 'test-token';
+
+    setupGitHubIssuesResponse([
+      { number: 10, title: 'L1 approved', html_url: 'https://github.com/acme/web/issues/10', labels: [{ name: 'feature-pipeline' }, { name: 'l1-approved' }] },
+      { number: 20, title: 'Ready to implement', html_url: 'https://github.com/acme/web/issues/20', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }] },
+      { number: 30, title: 'L3 approved', html_url: 'https://github.com/acme/web/issues/30', labels: [{ name: 'feature-pipeline' }, { name: 'l3-approved' }] },
+    ]);
+
+    const { getUpNext } = await import('./briefing');
+    const result = await getUpNext();
+
+    // Should be sorted: ready-to-implement > l3-approved > l2-approved > l1-approved
+    expect(result).toHaveLength(3);
+    expect(result[0].pipelineLabel).toBe('ready-to-implement');
+    expect(result[0].issueNumber).toBe(20);
+    expect(result[1].pipelineLabel).toBe('l3-approved');
+    expect(result[1].issueNumber).toBe(30);
+    expect(result[2].pipelineLabel).toBe('l1-approved');
+    expect(result[2].issueNumber).toBe(10);
+
+    delete process.env.GITHUB_TOKEN;
+  });
+
+  it('excludes issues that have in-progress runs', async () => {
+    setupReposQuery([{ id: 'r1', owner: 'acme', name: 'web', connection_id: null }]);
+    setupActiveRunsQuery([{ issue_number: 20, repo_owner: 'acme', repo_name: 'web' }]);
+    process.env.GITHUB_TOKEN = 'test-token';
+
+    setupGitHubIssuesResponse([
+      { number: 20, title: 'Already running', html_url: 'https://github.com/acme/web/issues/20', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }] },
+      { number: 30, title: 'Queued', html_url: 'https://github.com/acme/web/issues/30', labels: [{ name: 'feature-pipeline' }, { name: 'l3-approved' }] },
+    ]);
+
+    const { getUpNext } = await import('./briefing');
+    const result = await getUpNext();
+
+    expect(result).toHaveLength(1);
+    expect(result[0].issueNumber).toBe(30);
+
+    delete process.env.GITHUB_TOKEN;
+  });
+
+  it('returns empty array when no repos are enabled', async () => {
+    setupReposQuery([]);
+    setupActiveRunsQuery([]);
+
     const { getUpNext } = await import('./briefing');
     const result = await getUpNext();
 
     expect(result).toEqual([]);
+  });
+
+  it('skips repos without a GitHub token', async () => {
+    setupReposQuery([{ id: 'r1', owner: 'acme', name: 'web', connection_id: null }]);
+    setupActiveRunsQuery([]);
+    // No GITHUB_TOKEN env var, no connection_id → no token
+    delete process.env.GITHUB_TOKEN;
+
+    const { getUpNext } = await import('./briefing');
+    const result = await getUpNext();
+
+    expect(result).toEqual([]);
+    // Should not have called GitHub API
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('excludes issues without feature-pipeline label', async () => {
+    setupReposQuery([{ id: 'r1', owner: 'acme', name: 'web', connection_id: null }]);
+    setupActiveRunsQuery([]);
+    process.env.GITHUB_TOKEN = 'test-token';
+
+    setupGitHubIssuesResponse([
+      { number: 10, title: 'Not pipeline', html_url: 'https://github.com/acme/web/issues/10', labels: [{ name: 'bug' }] },
+      { number: 20, title: 'Pipeline issue', html_url: 'https://github.com/acme/web/issues/20', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }] },
+    ]);
+
+    const { getUpNext } = await import('./briefing');
+    const result = await getUpNext();
+
+    expect(result).toHaveLength(1);
+    expect(result[0].issueNumber).toBe(20);
+
+    delete process.env.GITHUB_TOKEN;
+  });
+
+  it('excludes issues with implementing label (already being worked on)', async () => {
+    setupReposQuery([{ id: 'r1', owner: 'acme', name: 'web', connection_id: null }]);
+    setupActiveRunsQuery([]);
+    process.env.GITHUB_TOKEN = 'test-token';
+
+    setupGitHubIssuesResponse([
+      { number: 10, title: 'Being implemented', html_url: 'https://github.com/acme/web/issues/10', labels: [{ name: 'feature-pipeline' }, { name: 'implementing' }] },
+      { number: 20, title: 'Queued', html_url: 'https://github.com/acme/web/issues/20', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }] },
+    ]);
+
+    const { getUpNext } = await import('./briefing');
+    const result = await getUpNext();
+
+    expect(result).toHaveLength(1);
+    expect(result[0].issueNumber).toBe(20);
+
+    delete process.env.GITHUB_TOKEN;
   });
 });
 
