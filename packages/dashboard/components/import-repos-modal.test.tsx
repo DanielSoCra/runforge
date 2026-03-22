@@ -80,4 +80,39 @@ describe('ImportReposModal', () => {
     await waitFor(() => expect(screen.getByText('new-app')).toBeInTheDocument());
     expect(screen.queryByText('existing')).not.toBeInTheDocument();
   });
+
+  it('disables Remove button for enabled repos (#172)', async () => {
+    // Mock scrollIntoView for Radix Select interaction in JSDOM
+    Element.prototype.scrollIntoView = vi.fn();
+    render(
+      <ImportReposModal connectionId="conn-1" connectionName="My Connection" importedRepos={importedRepos} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /import repositories/i }));
+    await waitFor(() => expect(screen.getByText('My Org')).toBeInTheDocument());
+    // Switch status filter to "All" so imported repos are visible
+    const statusSelect = screen.getAllByRole('combobox')[1];
+    fireEvent.click(statusSelect);
+    const allOption = await screen.findByRole('option', { name: 'All' });
+    fireEvent.click(allOption);
+    await waitFor(() => expect(screen.getByText('existing')).toBeInTheDocument());
+    const removeBtn = screen.getByRole('button', { name: /^remove$/i });
+    expect(removeBtn).toBeDisabled();
+  });
+
+  it('enables Remove button for disabled repos (#172)', async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const disabledImported = [{ id: 'db-1', owner: 'myorg', name: 'existing', enabled: false }];
+    render(
+      <ImportReposModal connectionId="conn-1" connectionName="My Connection" importedRepos={disabledImported} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: /import repositories/i }));
+    await waitFor(() => expect(screen.getByText('My Org')).toBeInTheDocument());
+    const statusSelect = screen.getAllByRole('combobox')[1];
+    fireEvent.click(statusSelect);
+    const allOption = await screen.findByRole('option', { name: 'All' });
+    fireEvent.click(allOption);
+    await waitFor(() => expect(screen.getByText('existing')).toBeInTheDocument());
+    const removeBtn = screen.getByRole('button', { name: /^remove$/i });
+    expect(removeBtn).not.toBeDisabled();
+  });
 });

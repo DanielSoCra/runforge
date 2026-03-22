@@ -373,6 +373,8 @@ export function ImportReposModal({
                                 variant="ghost"
                                 size="sm"
                                 className="h-6 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                                disabled={importedById.get(repo.full_name)?.enabled === true}
+                                title={importedById.get(repo.full_name)?.enabled ? 'Disable this repo before removing' : undefined}
                                 onClick={() => setConfirmRemove(repo.full_name)}
                               >
                                 Remove

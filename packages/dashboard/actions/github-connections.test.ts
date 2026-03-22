@@ -41,10 +41,25 @@ describe('removeConnection', () => {
 });
 
 describe('removeRepo', () => {
+  function setupRemoveRepoMock(opts: { enabled: boolean; fetchError?: boolean; updateError?: boolean }) {
+    // select('enabled').eq('id',...).eq('connection_id',...).single()
+    const singleFn = vi.fn().mockResolvedValue(
+      opts.fetchError
+        ? { data: null, error: { message: 'not found' } }
+        : { data: { enabled: opts.enabled }, error: null },
+    );
+    const selectEqInner = vi.fn().mockReturnValue({ single: singleFn });
+    const selectEqOuter = vi.fn().mockReturnValue({ eq: selectEqInner });
+    (mockRepos as Record<string, unknown>).select = vi.fn().mockReturnValue({ eq: selectEqOuter });
+
+    // update().eq().eq()
+    const { outer } = makeEqChain({ error: opts.updateError ? { message: 'db error' } : null });
+    mockRepos.update.mockReturnValue({ eq: outer });
+  }
+
   beforeEach(() => {
     vi.resetModules();
-    const { outer } = makeEqChain({ error: null });
-    mockRepos.update.mockReturnValue({ eq: outer });
+    setupRemoveRepoMock({ enabled: false });
   });
 
   it('soft-deletes the repo by setting deleted_at and enabled=false', async () => {
@@ -57,10 +72,29 @@ describe('removeRepo', () => {
 
   it('throws a generic error if the update fails', async () => {
     vi.resetModules();
-    const { outer } = makeEqChain({ error: { message: 'db error' } });
-    mockRepos.update.mockReturnValue({ eq: outer });
+    setupRemoveRepoMock({ enabled: false, updateError: true });
     const { removeRepo } = await import('./github-connections.js');
     await expect(removeRepo('repo-1', 'conn-1')).rejects.toThrow('Failed to remove repository');
+  });
+
+  it('rejects removal of an enabled repo (#172)', async () => {
+    vi.resetModules();
+    setupRemoveRepoMock({ enabled: true });
+    mockRepos.update.mockClear();
+    const { removeRepo } = await import('./github-connections.js');
+    await expect(removeRepo('repo-1', 'conn-1')).rejects.toThrow(
+      'Cannot remove an enabled repository'
+    );
+    expect(mockRepos.update).not.toHaveBeenCalled();
+  });
+
+  it('throws when repo is not found (#172)', async () => {
+    vi.resetModules();
+    setupRemoveRepoMock({ enabled: false, fetchError: true });
+    mockRepos.update.mockClear();
+    const { removeRepo } = await import('./github-connections.js');
+    await expect(removeRepo('repo-1', 'conn-1')).rejects.toThrow('Repository not found');
+    expect(mockRepos.update).not.toHaveBeenCalled();
   });
 });
 
@@ -95,32 +129,59 @@ describe('importRepos', () => {
       .rejects.toThrow('Owner must contain only alphanumeric characters');
   });
 
-  it('accepts valid owner and name with dots, underscores, hyphens', async () => {
+  // Helper: mock that supports both upsert (step 1) and update().eq().eq() (step 2)
+  function setupImportMock() {
     const mockUpsert = vi.fn().mockResolvedValue({ error: null });
+    const mockUpdatePayload = vi.fn();
+    const eqName = vi.fn().mockResolvedValue({ error: null });
+    const eqOwner = vi.fn().mockReturnValue({ eq: eqName });
+    mockUpdatePayload.mockReturnValue({ eq: eqOwner });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockFrom.mockImplementation((() => ({ upsert: mockUpsert })) as any);
+    mockFrom.mockImplementation((() => ({ upsert: mockUpsert, update: mockUpdatePayload })) as any);
+    return { mockUpsert, mockUpdatePayload };
+  }
+
+  it('accepts valid owner and name with dots, underscores, hyphens', async () => {
+    const { mockUpsert } = setupImportMock();
     const { importRepos } = await import('./github-connections.js');
     await importRepos('conn-1', [{ owner: 'my-org.test', name: 'repo_name-1' }]);
     expect(mockUpsert).toHaveBeenCalled();
   });
 
-  it('upserts repos with enabled=false per credential-first workflow (SPEC-4 regression)', async () => {
-    const mockUpsert = vi.fn().mockResolvedValue({ error: null });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockFrom.mockImplementation((() => ({ upsert: mockUpsert })) as any);
+  it('inserts new repos with enabled=false per credential-first workflow (SPEC-4 regression)', async () => {
+    const { mockUpsert } = setupImportMock();
     const { importRepos } = await import('./github-connections.js');
     await importRepos('conn-1', [{ owner: 'acme', name: 'repo' }]);
     expect(mockUpsert).toHaveBeenCalledWith(
       expect.objectContaining({ enabled: false }),
-      expect.any(Object),
+      expect.objectContaining({ ignoreDuplicates: true }),
     );
+  });
+
+  it('update step does not include enabled field, preserving existing state (#176)', async () => {
+    const { mockUpdatePayload } = setupImportMock();
+    const { importRepos } = await import('./github-connections.js');
+    await importRepos('conn-1', [{ owner: 'acme', name: 'repo' }]);
+    const updateArg = mockUpdatePayload.mock.calls[0][0];
+    expect(updateArg).toEqual({ connection_id: 'conn-1', deleted_at: null });
+    expect(updateArg).not.toHaveProperty('enabled');
+  });
+
+  it('throws when update step fails (#176)', async () => {
+    const mockUpsert = vi.fn().mockResolvedValue({ error: null });
+    const eqName = vi.fn().mockResolvedValue({ error: { message: 'update failed' } });
+    const eqOwner = vi.fn().mockReturnValue({ eq: eqName });
+    const mockUpdatePayload = vi.fn().mockReturnValue({ eq: eqOwner });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockFrom.mockImplementation((() => ({ upsert: mockUpsert, update: mockUpdatePayload })) as any);
+    const { importRepos } = await import('./github-connections.js');
+    await expect(importRepos('conn-1', [{ owner: 'acme', name: 'repo' }]))
+      .rejects.toThrow('Failed to import repository');
   });
 
   it('fires POST to DAEMON_URL/repos/reload after upserts (#166)', async () => {
     process.env.DAEMON_URL = 'http://localhost:7532';
-    const mockUpsert = vi.fn().mockResolvedValue({ error: null });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockFrom.mockImplementation((() => ({ upsert: mockUpsert })) as any);
+    setupImportMock();
     const { importRepos } = await import('./github-connections.js');
     await importRepos('conn-1', [{ owner: 'acme', name: 'repo' }]);
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -136,9 +197,7 @@ describe('importRepos', () => {
   it('silently swallows fetch failure when daemon is unreachable (#166)', async () => {
     process.env.DAEMON_URL = 'http://localhost:9999';
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
-    const mockUpsert = vi.fn().mockResolvedValue({ error: null });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockFrom.mockImplementation((() => ({ upsert: mockUpsert })) as any);
+    setupImportMock();
     const { importRepos } = await import('./github-connections.js');
     // Should not throw despite fetch failure
     await expect(importRepos('conn-1', [{ owner: 'acme', name: 'repo' }])).resolves.not.toThrow();

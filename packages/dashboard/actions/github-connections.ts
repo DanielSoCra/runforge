@@ -39,14 +39,26 @@ export async function importRepos(
     }
   }
 
-  // Upsert by owner+name — for new repos insert disabled; for existing only update connection_id
+  // Two-step import: insert new repos as disabled, then update connection_id for all.
+  // This preserves the enabled state of already-existing repos (#176).
   for (const { owner, name } of repos) {
-    const { error: upsertErr } = await supabase.from('repos').upsert(
+    // Step 1: Insert new repos only (ignoreDuplicates skips existing rows)
+    const { error: insertErr } = await supabase.from('repos').upsert(
       { owner, name, connection_id: connectionId, deleted_at: null, enabled: false },
-      { onConflict: 'owner,name', ignoreDuplicates: false },
+      { onConflict: 'owner,name', ignoreDuplicates: true },
     );
-    if (upsertErr) {
-      console.error('[github-connections] importRepos upsert failed:', upsertErr);
+    if (insertErr) {
+      console.error('[github-connections] importRepos insert failed:', insertErr);
+      throw new Error('Failed to import repository');
+    }
+
+    // Step 2: Update connection_id for all matching repos (preserves enabled state)
+    const { error: updateErr } = await supabase.from('repos')
+      .update({ connection_id: connectionId, deleted_at: null })
+      .eq('owner', owner)
+      .eq('name', name);
+    if (updateErr) {
+      console.error('[github-connections] importRepos update failed:', updateErr);
       throw new Error('Failed to import repository');
     }
   }
@@ -64,6 +76,20 @@ export async function importRepos(
 export async function removeRepo(repoId: string, connectionId: string) {
   const supabase = await createClient();
   await requireAdmin(supabase);
+
+  // Spec: only a disabled repo can be removed (FUNC-AC-DASHBOARD line 63-66)
+  const { data: repo, error: fetchError } = await supabase
+    .from('repos')
+    .select('enabled')
+    .eq('id', repoId)
+    .eq('connection_id', connectionId)
+    .single();
+  if (fetchError || !repo) {
+    throw new Error('Repository not found');
+  }
+  if (repo.enabled) {
+    throw new Error('Cannot remove an enabled repository — disable it first');
+  }
 
   const { error } = await supabase
     .from('repos')
