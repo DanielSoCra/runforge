@@ -228,6 +228,118 @@ describe('triggerRecommendation', () => {
     expect(vi.mocked(loadDashboardRegistry)).not.toHaveBeenCalled();
     expect(vi.mocked(Anthropic)).not.toHaveBeenCalled();
   });
+
+  // Helper: the fire-and-forget IIFE resolves via microtasks (all I/O is mocked).
+  // Multiple ticks ensure chained await continuations all settle.
+  // NOTE: The tick count (10) exceeds the IIFE's ~5 await points. If the production
+  // code adds more awaits, increase this count or switch to vi.waitFor().
+  const flushFireAndForget = async () => {
+    for (let i = 0; i < 10; i++) {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+  };
+
+  // Setup helper for tests that exercise the LLM code path inside the IIFE.
+  function setupLLMTest(llmResponse: { content: Array<{ type: string; text: string }> }) {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
+    const upsert = vi.fn().mockResolvedValue({ error: null });
+    vi.mocked(createClient).mockResolvedValue({ from: () => ({ upsert }) } as never);
+    const mockCreate = vi.fn().mockResolvedValue(llmResponse);
+    // Must use mockImplementation (not mockReturnValue) — the factory's
+    // mockImplementation takes precedence over mockReturnValue.
+    vi.mocked(Anthropic).mockImplementation(function (this: unknown) {
+      return { messages: { create: mockCreate } } as never;
+    });
+    return { mockCreate, upsert };
+  }
+
+  it('parses LLM JSON response and upserts recommendations matching the registry', async () => {
+    const { mockCreate, upsert } = setupLLMTest({
+      content: [{ type: 'text', text: '{ "recommendations": [{ "pluginId": "web-stack", "confidence": "high", "reason": "Has package.json" }] }' }],
+    });
+
+    await triggerRecommendation('repo-id', 'owner', 'repo');
+    await flushFireAndForget();
+
+    expect(mockCreate).toHaveBeenCalledOnce();
+    expect(upsert).toHaveBeenCalledOnce();
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repo_id: 'repo-id',
+        plugin_id: 'web-stack',
+        recommended: true,
+        recommendation_reason: '[high] Has package.json',
+      }),
+      { onConflict: 'repo_id,plugin_id' },
+    );
+  });
+
+  it('strips markdown code fences before parsing JSON', async () => {
+    const fencedJson = '```json\n{ "recommendations": [{ "pluginId": "web-stack", "confidence": "medium", "reason": "Detected web files" }] }\n```';
+    const { upsert } = setupLLMTest({
+      content: [{ type: 'text', text: fencedJson }],
+    });
+
+    await triggerRecommendation('repo-id', 'owner', 'repo');
+    await flushFireAndForget();
+
+    expect(upsert).toHaveBeenCalledOnce();
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ plugin_id: 'web-stack', recommendation_reason: '[medium] Detected web files' }),
+      { onConflict: 'repo_id,plugin_id' },
+    );
+  });
+
+  it('filters out recommendations for plugin IDs not in the registry', async () => {
+    const { upsert } = setupLLMTest({
+      content: [{ type: 'text', text: '{ "recommendations": [{ "pluginId": "unknown-plugin", "confidence": "high", "reason": "Hallucinated" }, { "pluginId": "web-stack", "confidence": "low", "reason": "Maybe" }] }' }],
+    });
+
+    await triggerRecommendation('repo-id', 'owner', 'repo');
+    await flushFireAndForget();
+
+    expect(upsert).toHaveBeenCalledOnce();
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ plugin_id: 'web-stack' }),
+      { onConflict: 'repo_id,plugin_id' },
+    );
+  });
+
+  it('does not upsert when LLM returns invalid JSON', async () => {
+    const { upsert } = setupLLMTest({
+      content: [{ type: 'text', text: 'not valid json at all' }],
+    });
+
+    await triggerRecommendation('repo-id', 'owner', 'repo');
+    await flushFireAndForget();
+
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('does not upsert when LLM response content array is empty (falls through to JSON parse failure)', async () => {
+    const { upsert } = setupLLMTest({ content: [] });
+
+    await triggerRecommendation('repo-id', 'owner', 'repo');
+    await flushFireAndForget();
+
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('fails silently when Anthropic API throws', async () => {
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
+    const upsert = vi.fn();
+    vi.mocked(createClient).mockResolvedValue({ from: () => ({ upsert }) } as never);
+    vi.mocked(Anthropic).mockImplementation(function (this: unknown) {
+      return { messages: { create: vi.fn().mockRejectedValue(new Error('API rate limit')) } } as never;
+    });
+
+    await triggerRecommendation('repo-id', 'owner', 'repo');
+    await flushFireAndForget();
+
+    expect(upsert).not.toHaveBeenCalled();
+  });
 });
 
 describe('exportPlugin', () => {
