@@ -137,6 +137,13 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
     maxTestFixAttempts: 3,
     failureExcerptLines: 50,
   },
+  coordination: {
+    maxAgents: 10, reviewerInterval: 3600000, poInterval: 3600000,
+    plannerTimeout: 60000, maxAttemptsPerIssue: 3, diskSpaceThreshold: 2_000_000_000,
+    gcInterval: 600000, conflictFileThreshold: 3, conflictLineThreshold: 100,
+    mergeDependencyTimeout: 1800000, mergeValidationTimeout: 600000,
+    mergePollInterval: 5000, mergePollMaxInterval: 60000,
+  },
   diagnosis: { confidenceThreshold: 0.7 },
   warmup: { threshold: 10, regressionThreshold: 3, samplingRate: 0.1, minSamplingRate: 0.01 },
   maxConsecutiveStuck: 3,
