@@ -1,6 +1,5 @@
 // src/validation/reviewer-session.ts
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { GateType, GateResult, ReviewFinding } from '../types.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
@@ -17,7 +16,7 @@ export const ReviewFindingsSchema = z.object({
 
 export type ReviewFindings = z.infer<typeof ReviewFindingsSchema>;
 
-const jsonSchema = JSON.stringify(zodToJsonSchema(ReviewFindingsSchema));
+const jsonSchema = JSON.stringify(z.toJSONSchema(ReviewFindingsSchema));
 
 export function createReviewerGate(
   type: GateType,

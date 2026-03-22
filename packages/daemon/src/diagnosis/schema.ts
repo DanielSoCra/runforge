@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
 
 export const BugDiagnosisSchema = z
   .object({
@@ -16,4 +15,6 @@ export const BugDiagnosisSchema = z
   );
 
 export type BugDiagnosisOutput = z.infer<typeof BugDiagnosisSchema>;
-export const bugDiagnosisJsonSchema = JSON.stringify(zodToJsonSchema(BugDiagnosisSchema));
+// Note: z.toJSONSchema strips the .refine() constraint (not representable in JSON Schema).
+// The "at least one affected spec or artifact" rule is enforced at parse time, not in the schema.
+export const bugDiagnosisJsonSchema = JSON.stringify(z.toJSONSchema(BugDiagnosisSchema));

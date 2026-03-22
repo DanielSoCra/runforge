@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import { loadConfig, ConfigSchema } from './config.js';
 import { mkdtemp, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
@@ -42,6 +43,32 @@ describe('ConfigSchema', () => {
   it('rejects invalid adapter', () => {
     const result = ConfigSchema.safeParse({ ...validConfig, adapter: 'invalid' });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('zod v4 compatibility', () => {
+  it('uses zod v4 (major version alignment with dashboard)', () => {
+    // Regression: daemon used zod v3 while dashboard used v4 (#113)
+    // z.toJSONSchema is a v4-only API — its existence proves we run v4
+    expect(typeof z.toJSONSchema).toBe('function');
+  });
+
+  it('ConfigSchema produces valid JSON schema via z.toJSONSchema', () => {
+    const jsonSchema = z.toJSONSchema(ConfigSchema);
+    expect(jsonSchema).toHaveProperty('type', 'object');
+    expect(jsonSchema).toHaveProperty('properties');
+  });
+
+  it('applies nested defaults when outer object is omitted', () => {
+    // Regression: zod v4 requires explicit default values for .default()
+    const result = ConfigSchema.safeParse({ dailyBudget: 50, perRunBudget: 10 });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.branches).toEqual({ staging: 'staging', production: 'main' });
+      expect(result.data.validation.maxFixCycles).toBe(3);
+      expect(result.data.diagnosis.confidenceThreshold).toBe(0.7);
+      expect(result.data.warmup.threshold).toBe(10);
+    }
   });
 });
 

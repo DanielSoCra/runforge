@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { readFile } from 'fs/promises';
 import { ok, err, type Result } from './lib/result.js';
 
+// zod v4 requires .default() on nested objects to include explicit values
+// matching the inner field defaults. Keep these in sync when changing defaults.
 export const ConfigSchema = z.object({
   repo: z.object({
     owner: z.string().min(1),
@@ -16,7 +18,7 @@ export const ConfigSchema = z.object({
   branches: z.object({
     staging: z.string().default('staging'),
     production: z.string().default('main'),
-  }).default({}),
+  }).default({ staging: 'staging', production: 'main' }),
   webhooks: z.array(z.string().url()).default([]),
   validation: z.object({
     gate1Commands: z.array(z.string()).default(['vitest run', 'tsc --noEmit', 'eslint --max-warnings 0 src/']),
@@ -26,17 +28,21 @@ export const ConfigSchema = z.object({
       maxComplexity: z.number().int().default(15),
       maxFunctionLength: z.number().int().default(50),
       maxFileSize: z.number().int().default(500),
-    }).default({}),
-  }).default({}),
+    }).default({ maxComplexity: 15, maxFunctionLength: 50, maxFileSize: 500 }),
+  }).default({
+    gate1Commands: ['vitest run', 'tsc --noEmit', 'eslint --max-warnings 0 src/'],
+    maxFixCycles: 3,
+    staticAnalysis: { maxComplexity: 15, maxFunctionLength: 50, maxFileSize: 500 },
+  }),
   diagnosis: z.object({
     confidenceThreshold: z.number().min(0).max(1).default(0.7),
-  }).default({}),
+  }).default({ confidenceThreshold: 0.7 }),
   warmup: z.object({
     threshold: z.number().int().min(1).default(10),
     regressionThreshold: z.number().int().min(1).default(3),
     samplingRate: z.number().min(0.01).max(1).default(0.1),
     minSamplingRate: z.number().min(0.01).max(1).default(0.01),
-  }).default({}),
+  }).default({ threshold: 10, regressionThreshold: 3, samplingRate: 0.1, minSamplingRate: 0.01 }),
   maxConsecutiveStuck: z.number().int().min(1).default(3),
   gracePeriodMs: z.number().int().default(30000),
   activePlugins: z.array(z.string()).default([]),
