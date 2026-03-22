@@ -125,6 +125,7 @@ ARCH-AC-SPEC-PIPELINE:
 
 ARCH-AC-PIPELINE-DISPATCH:
   parent: FUNC-AC-PIPELINE
+  children: [STACK-AC-PIPELINE-DISPATCH]
   status: draft
 
 ARCH-AC-IMPLEMENTATION:
@@ -501,4 +502,16 @@ STACK-AC-DASHBOARD-BRIEFING:
     - packages/dashboard/actions/briefing.test.ts
     - packages/briefing-summarizer/**/*.test.ts
     - supabase/tests/rls-briefing.test.ts
+  status: draft
+
+STACK-AC-PIPELINE-DISPATCH:
+  parent: ARCH-AC-PIPELINE-DISPATCH
+  children: []
+  code_paths:
+    - packages/daemon/src/pipeline-dispatch/
+    - packages/daemon/src/pipeline-dispatch/dispatch.ts
+    - packages/daemon/src/pipeline-dispatch/session-types.ts
+    - packages/daemon/src/pipeline-dispatch/fallback.ts
+  test_paths:
+    - packages/daemon/src/pipeline-dispatch/**/*.test.ts
   status: draft
