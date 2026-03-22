@@ -12,6 +12,7 @@ export async function diagnose(
   specContent: string,
   runWriter?: SupabaseRunWriter,
   runId?: string,
+  workspacePath?: string,
 ): Promise<Result<BugDiagnosis>> {
   const context = {
     variables: {
@@ -19,6 +20,7 @@ export async function diagnose(
       implementation: implementationContent,
       specs: specContent,
     },
+    workspacePath,
   };
 
   // First attempt

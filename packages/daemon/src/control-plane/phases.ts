@@ -91,6 +91,7 @@ export function createPhaseHandlers(
         workRequest.specRefs.join('\n'),
         runWriter,
         runId,
+        repoRoot,
       );
 
       if (!result.ok) {
@@ -175,7 +176,8 @@ export function createPhaseHandlers(
       }
       // Clear stale handoff notes after successful completion (STACK-AC-HANDOFF-COORDINATOR: clear after success)
       run.handoffNotes = undefined;
-      run.cost += result.value.totalCost;
+      // Cost is synced from costTracker in pipeline.ts after every phase —
+      // no manual run.cost += here (avoids double-counting).
       console.log(`[implement] Done, cost: $${result.value.totalCost.toFixed(2)}`);
       return 'success';
     },

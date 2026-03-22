@@ -278,7 +278,7 @@ describe('createPhaseHandlers', () => {
   });
 
   describe('implement', () => {
-    it('returns success and accumulates cost on successful implementation', async () => {
+    it('returns success without modifying run.cost (pipeline.ts syncs from costTracker) (#132)', async () => {
       const { handlers, coordinator } = createHandlers();
       coordinator.implement.mockResolvedValue({
         ok: true,
@@ -287,7 +287,9 @@ describe('createPhaseHandlers', () => {
       const run = makeRun();
       const result = await handlers.implement!(run);
       expect(result).toBe('success');
-      expect(run.cost).toBe(4.0); // 1.5 + 2.5
+      // Cost is no longer accumulated here — pipeline.ts syncs run.cost from
+      // costTracker after every phase to include diagnose + review costs (#132)
+      expect(run.cost).toBe(1.5); // unchanged from initial value
     });
 
     it('returns failure when coordinator returns error result', async () => {
@@ -517,9 +519,19 @@ describe('createPhaseHandlers', () => {
       expect(run.diagnosisType).toBe('A');
       expect(run.diagnosisConfidence).toBe(0.9);
       expect(mockDiagnose).toHaveBeenCalledWith(
-        mockRuntime, 42, 'Fix something', '', '', undefined, undefined,
+        mockRuntime, 42, 'Fix something', '', '', undefined, undefined, undefined,
       );
       expect(mockRouteDiagnosis).toHaveBeenCalledWith(typeADiagnosis, 0.7);
+    });
+
+    it('passes repoRoot as workspacePath to diagnose() (#134)', async () => {
+      mockDiagnose.mockResolvedValue({ ok: true, value: typeADiagnosis });
+      mockRouteDiagnosis.mockReturnValue({ route: 'bug-pipeline', diagnosis: typeADiagnosis });
+      const { handlers } = createHandlers({}, undefined, '/custom/repo/root');
+      await handlers.diagnose!(makeRun({ variant: 'bug' }));
+      expect(mockDiagnose).toHaveBeenCalledWith(
+        mockRuntime, 42, 'Fix something', '', '', undefined, undefined, '/custom/repo/root',
+      );
     });
 
     it('returns failure and labels needs-spec-update for Type B', async () => {

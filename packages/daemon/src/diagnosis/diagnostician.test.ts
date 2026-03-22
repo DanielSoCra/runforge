@@ -163,4 +163,30 @@ describe('diagnose', () => {
     expect(context.variables.implementation).toBe('my implementation');
     expect(context.variables.specs).toBe('my specs');
   });
+
+  it('passes workspacePath through to spawnSession context for hook installation', async () => {
+    const runtime = makeMockRuntime([ok(makeSessionResult(validDiagnosis))]);
+
+    await diagnose(runtime, 42, 'bug', 'impl', 'spec', undefined, undefined, '/repo/root');
+
+    const spawnMock = runtime.spawnSession as ReturnType<typeof vi.fn>;
+    const [, context] = spawnMock.mock.calls[0] as [
+      string,
+      { variables: Record<string, string>; workspacePath?: string },
+    ];
+    expect(context.workspacePath).toBe('/repo/root');
+  });
+
+  it('leaves workspacePath undefined when not provided', async () => {
+    const runtime = makeMockRuntime([ok(makeSessionResult(validDiagnosis))]);
+
+    await diagnose(runtime, 42, 'bug', 'impl', 'spec');
+
+    const spawnMock = runtime.spawnSession as ReturnType<typeof vi.fn>;
+    const [, context] = spawnMock.mock.calls[0] as [
+      string,
+      { variables: Record<string, string>; workspacePath?: string },
+    ];
+    expect(context.workspacePath).toBeUndefined();
+  });
 });
