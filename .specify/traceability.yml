@@ -184,8 +184,12 @@ STACK-AC-IMPLEMENTATION:
 STACK-AC-VALIDATION:
   parent: ARCH-AC-VALIDATION
   children: []
-  code_paths: [packages/daemon/src/validation/]
-  test_paths: [packages/daemon/src/validation/**/*.test.ts]
+  code_paths:
+    - packages/daemon/src/validation/
+    - packages/daemon/src/infra/spec-loader.ts
+  test_paths:
+    - packages/daemon/src/validation/**/*.test.ts
+    - packages/daemon/src/infra/spec-loader.test.ts
   status: draft
 
 STACK-AC-SESSION-RUNTIME:
