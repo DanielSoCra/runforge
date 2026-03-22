@@ -257,6 +257,67 @@ describe('SessionRuntime', () => {
     const check = rateLimiter.checkRateLimit();
     expect(check.clear).toBe(true);
   });
+
+  it('returns containmentBreach error when post-session audit detects prohibited path (#222)', async () => {
+    // Simulate adapter returning output that references a blocked path
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: 'I read the file .specify/scenarios/secret.md and found test data', cost: 0.03 },
+    });
+
+    const result = await runtime.spawnSession(
+      'worker',
+      { variables: { task: 'do it' }, workspacePath: '/tmp/ws' },
+      50,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(SessionError);
+      expect((result.error as SessionError).containmentBreach).toBe(true);
+      expect(result.error.message).toContain('Containment breach detected');
+      expect(result.error.message).toContain('.specify/scenarios');
+    }
+  });
+
+  it('does not flag containment breach when session output is clean (#222)', async () => {
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: 'Successfully implemented the feature in src/index.ts', cost: 0.02 },
+    });
+
+    const result = await runtime.spawnSession(
+      'worker',
+      { variables: { task: 'do it' }, workspacePath: '/tmp/ws' },
+      51,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.output).toContain('Successfully implemented');
+    }
+  });
+
+  it('containment breach error carries the session cost (#222)', async () => {
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: 'Accessed state/runs/42.json for debugging', cost: 0.07 },
+    });
+
+    const result = await runtime.spawnSession(
+      'worker',
+      { variables: { task: 'do it' }, workspacePath: '/tmp/ws' },
+      52,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(SessionError);
+      expect((result.error as SessionError).cost).toBe(0.07);
+      expect((result.error as SessionError).containmentBreach).toBe(true);
+      expect((result.error as SessionError).rateLimited).toBe(false);
+    }
+  });
 });
 
 describe('loadPromptTemplate', () => {
