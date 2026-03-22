@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { createWorktree, removeWorktree, listWorktrees, mergeWorktree, getWorktreeDiffSize } from './worktree.js';
+import { createWorktree, removeWorktree, listWorktrees, mergeWorktree, getWorktreeDiffSize, deleteUnitBranch } from './worktree.js';
 import { git } from '../lib/git.js';
 
 describe('worktree management', () => {
@@ -92,6 +92,31 @@ describe('worktree management', () => {
     expect(diffResult.ok).toBe(true);
     if (diffResult.ok) {
       expect(diffResult.value).toBe(0);
+    }
+  });
+
+  it('deleteUnitBranch deletes an existing unit branch', async () => {
+    // Create a worktree (which creates branch unit/unit-del)
+    await createWorktree('unit-del', 'main', repoDir);
+    // Remove the worktree first (deleteUnitBranch assumes worktree already removed)
+    await git(['worktree', 'remove', join(repoDir, 'workspaces', 'unit-del'), '--force'], repoDir);
+
+    const result = await deleteUnitBranch('unit-del', repoDir);
+    expect(result.ok).toBe(true);
+
+    // Verify branch is gone
+    const branchCheck = await git(['branch', '--list', 'unit/unit-del'], repoDir);
+    expect(branchCheck.ok).toBe(true);
+    if (branchCheck.ok) {
+      expect(branchCheck.value.trim()).toBe('');
+    }
+  });
+
+  it('deleteUnitBranch returns error when branch does not exist', async () => {
+    const result = await deleteUnitBranch('nonexistent-branch', repoDir);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBeTruthy();
     }
   });
 });
