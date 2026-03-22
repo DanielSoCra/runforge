@@ -81,7 +81,9 @@ program.parse();
 
 async function callApi(port: number, method: string, path: string): Promise<void> {
   try {
-    const res = await fetch(`http://127.0.0.1:${port}${path}`, { method });
+    const headers: Record<string, string> = {};
+    if (method === 'POST') headers['X-Requested-By'] = 'cli';
+    const res = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers });
     const body = await res.json();
     console.log(JSON.stringify(body, null, 2));
     if (!res.ok) process.exitCode = 1;
