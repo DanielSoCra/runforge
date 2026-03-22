@@ -229,6 +229,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/lib/supabase/client.ts
     - packages/dashboard/lib/supabase/server.ts
     - packages/dashboard/lib/supabase/middleware.ts
+    - packages/dashboard/lib/supabase/env.ts
     - packages/dashboard/proxy.ts
     - packages/dashboard/app/layout.tsx
     - packages/dashboard/app/(dashboard)/layout.tsx
@@ -308,6 +309,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/components/budget-badge.test.tsx
     - packages/dashboard/app/api/daemon/daemon-routes.test.ts
     - packages/dashboard/app/(dashboard)/runs/[id]/page.test.tsx
+    - packages/dashboard/lib/supabase/env.test.ts
   status: draft
 
 STACK-AC-HANDOFF-RUNTIME:
