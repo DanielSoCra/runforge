@@ -174,16 +174,16 @@ describe('ControlServer', () => {
     expect(res.status).toBe(200);
   });
 
-  it('logs error to console.error when /api/runs handler fails', async () => {
+  it('returns 500 with error body when /api/runs handler fails (#150)', async () => {
     const runsError = new Error('disk full');
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const readSpy = vi.spyOn(results, 'readResults').mockRejectedValueOnce(runsError);
     await startServer();
     try {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/runs`);
-      expect(res.status).toBe(200);
+      expect(res.status).toBe(500);
       const body = await res.json();
-      expect(body).toEqual([]);
+      expect(body).toEqual({ error: 'read failed' });
       expect(spy).toHaveBeenCalledWith(
         '[control-plane] GET /api/runs failed:',
         runsError,

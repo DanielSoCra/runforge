@@ -40,7 +40,7 @@ export function createControlServer(
         json(res, 200, runs);
       }).catch((e: unknown) => {
         console.error('[control-plane] GET /api/runs failed:', e);
-        json(res, 200, []);
+        json(res, 500, { error: 'read failed' });
       });
     } else if (method === 'GET' && url.pathname === '/health') {
       json(res, 200, { ok: true });
