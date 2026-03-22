@@ -3,7 +3,7 @@ id: ARCH-AC-DASHBOARD
 type: architecture
 domain: auto-claude
 status: draft
-version: 3
+version: 4
 layer: 2
 references: FUNC-AC-DASHBOARD
 ---
@@ -34,6 +34,12 @@ The Dashboard Service is a web application that provides a UI for managing repos
 
 **CostEvent** represents a single cost entry. It contains: a unique identifier, a reference to the run, a session type (one of: `planning`, `implementation`, `validation`, `diagnosis`, `fix`), a cost amount, and a timestamp. Cost events enable per-day, per-repo, and per-session-type cost breakdowns.
 
+**Briefing** represents an AI-generated status summary. It contains: a unique identifier, a status line (one sentence), a changes array (what happened since the previous briefing), an attention array (items needing human action, each with: issue number, reason, wait duration, action links), a forecast (what happens next with and without human action), a generated-at timestamp, and a signal snapshot (the raw data the summarizer consumed, retained for debugging). The Dashboard queries the most recent Briefing on page load.
+
+**ActivityEvent** represents a single chronological event in the activity feed. It contains: a unique identifier, a timestamp, an event type (one of: `state-transition`, `merge`, `error`, `heartbeat`, `completion`), a severity (one of: `info`, `warning`, `error`), a summary (one-line human-readable description), and a links array (each with: label, URL). Activity events are written by the briefing summarizer from the signals it processes.
+
+**NotificationChannelConfig** represents a configured notification delivery method. It contains: a unique identifier, a channel type (one of: `web-push`, `slack`, `macos`, `webhook`), a target (channel-specific destination — URL, channel name, or empty for local), and an events array (which event types to deliver: `attention-required`, `work-completed`, `error`, `digest`). This model is defined but no channel implementations exist in this version.
+
 ## API Contract
 
 ### Dashboard Web Application
@@ -53,6 +59,33 @@ Dashboard API routes (daemon proxy only):
 - `GET /api/daemon/status` — daemon status: `{ state: "running" | "paused" | "offline", active_runs: number, version: string }` (proxied to daemon)
 
 All other operations (CRUD for repos, settings, team, invitations, API keys) are implemented as server-side mutation handlers that query the Database Service directly from the Backend's server context.
+
+### Briefing API
+
+The briefing page queries the Database Service directly (no daemon proxy needed):
+
+- `GET /briefing` — Dashboard page that renders the latest Briefing, live panels (Active Now, Needs Attention, Up Next), and the Activity Feed
+- The live panels are assembled server-side from: Run records (in-progress runs), work request states (from issue tracker integration or daemon status), and the priority queue (issue labels matching pipeline stages)
+- The AI briefing and activity feed are read from the Briefing and ActivityEvent tables
+
+### Briefing Summarizer
+
+A background process runs on a configurable interval (default: 5 minutes). It is not part of the Dashboard web application — it is a standalone scheduled job.
+
+**Signal sources:**
+1. Work request tracker (issue states, labels, timestamps) — what is in progress, queued, blocked, or waiting for review
+2. Daemon state (via status endpoint or Database Service) — active runs, phases, cost
+3. Version control log (recent commits on the integration branch) — what code merged
+4. Pipeline heartbeat (filesystem timestamp) — is the orchestrator alive and cycling
+
+**Summarizer output:**
+1. Read all four signal sources
+2. Produce a Briefing record: status line, changes since previous briefing, attention items with action links, forecast
+3. Produce ActivityEvent records for each state transition detected since the previous briefing
+4. Write both to the Database Service
+5. If notification channels are configured (future), evaluate attention items against channel routing rules and dispatch notifications
+
+**Cost model:** The summarizer uses a low-cost model (sufficient for structured summarization). At 5-minute intervals, estimated cost is bounded (see L3 for model selection and budget cap).
 
 ### Daemon Configuration Sync
 
@@ -78,6 +111,8 @@ The Daemon fetches its configuration from the Database Service instead of a loca
 - Daemon OWNS: pipeline execution, worker dispatch, and local write-ahead state. It READS repo config from the Database Service and WRITES run results back.
 - Dashboard Service PROXIES daemon commands (pause, resume, status) to the Daemon over the internal container network.
 - Dashboard Service DOES NOT execute pipelines, spawn workers, or access repositories directly.
+- Briefing Summarizer OWNS: periodic signal collection, AI-generated briefing production, and activity event extraction. It READS from all four signal sources and WRITES Briefing and ActivityEvent records to the Database Service. It is a standalone scheduled job, not part of the Dashboard web application or the Daemon.
+- Notification Channels (future) OWNS: delivery of notifications to external systems. Channels are dispatched by the Briefing Summarizer after producing a Briefing. Channel implementations are deferred.
 
 ## Event Flows
 
@@ -109,6 +144,27 @@ The Daemon fetches its configuration from the Database Service instead of a loca
 4. Budget limits are advisory in this version — the daemon does not abort runs that exceed the limit. The 80% warning threshold is the default; making it configurable is deferred to a future iteration.
 5. The Dashboard derives budget status client-side from Run.total_cost and Repo.budget_limit — no additional data model is required.
 
+**Briefing generation flow:**
+1. Scheduled job wakes up (configurable interval, default 5 minutes).
+2. Reads the previous Briefing's generated-at timestamp from the Database Service to determine the time window.
+3. Queries all four signal sources in parallel: issue tracker state, daemon status / Run records, version control log, pipeline heartbeat.
+4. Sends the raw signal data to a low-cost model with a structured prompt requesting: status line, changes array, attention array (with action links), and forecast.
+5. Writes the resulting Briefing record and ActivityEvent records to the Database Service.
+6. If notification channel configs exist (future), evaluates attention items against routing rules and dispatches.
+
+**Briefing page load flow:**
+1. User navigates to /briefing.
+2. Dashboard queries the latest Briefing record from the Database Service (single row, most recent).
+3. Dashboard queries live panel data in parallel: in-progress Run records (Active Now), issue states matching attention criteria (Needs Attention), issue states matching pipeline priority queue (Up Next).
+4. Dashboard queries recent ActivityEvent records (last N events, configurable in L3).
+5. Page renders all sections. Auto-refresh interval (default 30 seconds) re-queries live panels and checks for newer Briefing.
+
+**Notification dispatch flow (future):**
+1. After the summarizer produces a Briefing, it inspects the attention array.
+2. For each attention item, it checks NotificationChannelConfig records for channels subscribed to the `attention-required` event type.
+3. For each matching channel, it formats the notification according to the channel type and dispatches.
+4. Dispatch failures are logged but do not block briefing storage.
+
 **Daemon control flow:**
 1. Admin clicks "Pause" in the Dashboard.
 2. Dashboard sends `POST /api/daemon/pause` to its own API route.
@@ -132,3 +188,9 @@ The Daemon fetches its configuration from the Database Service instead of a loca
 **Run sync failure (Database Service unreachable):** The Daemon buffers run events to local JSONL. On next startup or successful reconnection, buffered entries are replayed idempotently via run ID. The Dashboard shows slightly stale data until sync succeeds.
 
 **Repo deletion with run history:** Repos are soft-deleted (`deleted_at` set, `enabled` forced false). Run records retain a snapshot of the repo's owner and name, so history remains intact and displayable after the repo is removed.
+
+**Briefing summarizer failure:** If the summarizer fails (model error, signal source unavailable), the Dashboard displays the most recent successful Briefing with a "stale" indicator showing when it was generated. The live panels continue to function independently — they query structured data directly, not the AI summary.
+
+**Signal source partially unavailable:** If one of the four signal sources is unreachable during summarization, the summarizer proceeds with available sources and notes the gap in the Briefing (e.g., "Git log unavailable — commit data may be incomplete"). The Briefing is still generated with partial data rather than failing entirely.
+
+**Notification dispatch failure (future):** Failed notification deliveries are logged with the channel type, target, and error. Dispatch failures do not block briefing storage or subsequent notification attempts. The Dashboard does not retry failed notifications — the next briefing cycle will surface the same attention items if they are still unresolved.

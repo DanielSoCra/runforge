@@ -3,7 +3,7 @@ id: FUNC-AC-DASHBOARD
 type: functional
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 1
 ---
 
@@ -161,6 +161,66 @@ An autonomous system that processes work across multiple repositories needs a ce
 - Given an admin with a paused daemon
 - When they resume it
 - Then the daemon begins accepting new work again
+
+### Briefing Page
+
+**Scenario: View current system status at a glance**
+- Given an authenticated user visits the briefing page
+- When the page loads
+- Then they see which agents are actively working, on which issues, in which phase, with elapsed time and cost so far
+- And they see a prioritized list of items needing human attention (reviews pending, blocked issues, failures)
+- And they see the priority-ordered queue of upcoming work
+
+**Scenario: AI-generated briefing summary**
+- Given a background summarizer runs on a configurable interval (default: every 5 minutes)
+- When the summarizer reads current system signals (issue states, daemon status, git activity, pipeline heartbeat)
+- Then it produces a structured briefing containing: a one-line status, what changed since the last briefing, items requiring attention, and a forecast of what happens next with and without human action
+- And the briefing is stored for the dashboard to display
+
+**Scenario: Briefing reflects recent changes**
+- Given the user checks the briefing page after being away
+- When the page loads
+- Then the AI briefing summarizes what happened since the previous briefing — issues that moved state, code that merged, costs incurred — so the user can catch up in under 30 seconds
+
+**Scenario: Actionable links on every item**
+- Given the briefing page displays issues, PRs, commits, and attention items
+- When the user sees an item they want to act on
+- Then the item links directly to the relevant resource (GitHub Issue, PR, commit diff, spec file, or pipeline log) so the user can take action without searching
+
+**Scenario: Needs-attention prioritization**
+- Given multiple items need human attention
+- When the briefing page displays them
+- Then they are sorted by urgency: blocked issues first, then items waiting for review, then failures
+- And each item explains why it needs attention and how long it has been waiting
+
+**Scenario: Empty state**
+- Given no work is active, queued, or needing attention
+- When the user views the briefing page
+- Then it clearly indicates the system is idle with no pending work
+
+**Scenario: Activity feed**
+- Given the system has been processing work
+- When the user views the briefing page
+- Then a chronological feed shows recent events (state transitions, merges, errors, heartbeats) with timestamps and contextual links
+
+### Notifications
+
+**Scenario: Pluggable notification channels**
+- Given the system supports multiple notification delivery methods
+- When an event occurs that matches a configured notification rule
+- Then the notification is delivered through the configured channel
+- Note: the notification channel interface is defined in this version but no channels are implemented. The briefing page itself serves as the primary notification surface. Channel implementations (web push, Slack, macOS native, webhook) are deferred to a future iteration.
+
+**Scenario: Configurable notification routing**
+- Given an operator configures notification preferences
+- When they specify which event types route to which channels
+- Then only matching events are delivered to each channel
+- And event types include: attention-required (human action needed), work-completed (issue fully resolved), error (pipeline failure), and digest (periodic briefing summary)
+
+**Scenario: Notifications derived from briefing data**
+- Given the AI briefing summarizer detects items needing attention
+- When notification channels are configured for attention-required events
+- Then notifications are generated from the same analysis pass that produces the briefing — not a separate system
 
 ### Concurrency Configuration
 
