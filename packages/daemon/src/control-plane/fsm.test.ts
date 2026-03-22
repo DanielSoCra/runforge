@@ -41,6 +41,10 @@ describe('FSM', () => {
     it('report → success is terminal (complete)', () => {
       expect(isComplete('report', 'success')).toBe(true);
     });
+
+    it('report → failure → stuck (defense-in-depth, #107)', () => {
+      expect(transition(table, 'report', 'failure')?.next).toBe('stuck');
+    });
   });
 
   describe('feature-simple pipeline', () => {
@@ -68,6 +72,10 @@ describe('FSM', () => {
 
     it('review → success → integrate (skip holdout)', () => {
       expect(transition(table, 'review', 'success')?.next).toBe('integrate');
+    });
+
+    it('report → failure → stuck (#107)', () => {
+      expect(transition(table, 'report', 'failure')?.next).toBe('stuck');
     });
   });
 
