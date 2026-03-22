@@ -303,10 +303,19 @@ When Phase 1 proves stable, the Operator relabels Phase 2 issues to `l1-approved
 - Never reads `.specify/scenarios/` — holdout test isolation must be preserved (AGENTS.md rule 4)
 - Never modifies `.specify/methodology/` — protected governance specs (AGENTS.md rule 3)
 
-**FUNC-AC-SAFETY alignment:** FUNC-AC-SAFETY prohibits autonomous work from modifying "governing specifications" and "the system's own implementation." In Phase 1, this design makes the following distinction:
-- **Governing specifications** = L1 and L2 specs. The pipeline never modifies these autonomously (only suggests changes).
-- **The system's own implementation** = the control plane, session runtime, validation service code. In Phase 1, the pipeline runs as external skills/scripts, not as part of auto-claude's own implementation. It modifies auto-claude's L3 specs and code only after Operator-approved L1/L2 specs authorize the change. This is the intended implementation path defined in FUNC-AC-PIPELINE (work requests reference governing specs).
-- Phase 2's self-migration (skills→native) will require an explicit Operator-approved L1 exception to FUNC-AC-SAFETY, since the pipeline will then be modifying its own implementation. This exception will be proposed as an L1 suggestion at the appropriate time.
+**Operator-Authorized Exception to L0/FUNC-AC-SAFETY:**
+
+L0 states "never writes or modifies specifications" and "never modifies its own implementation." FUNC-AC-SAFETY reinforces this. This pipeline deliberately relaxes these boundaries under explicit Operator authorization:
+
+1. **L3 spec generation is authorized.** The pipeline generates L3 specs from Operator-approved L1/L2 specs. This is not autonomous spec authoring — it is a mechanical derivation step where the Operator has already approved the business requirements (L1) and architecture (L2). The L3 output is auto-reviewed for compliance before proceeding. The Operator has explicitly designed and approved this workflow.
+
+2. **Implementation of Operator-approved specs is authorized.** Code changes flow from an Operator-approved spec chain (L1→L2→L3). The pipeline never decides *what* to build — only *how* to implement what the Operator has approved. This is equivalent to the existing reviewer/developer loop, which already modifies auto-claude's code autonomously under the same authorization model.
+
+3. **L1/L2 specs are never modified autonomously.** The pipeline can only suggest changes. The Operator retains full control over requirements and architecture.
+
+4. **This exception is scoped to this design.** It does not generalize to other autonomous work. Phase 2's self-migration will require a separate, explicit Operator authorization.
+
+This exception is authorized by the Operator (the document author and approver of this design). The L0 boundaries exist to prevent unsanctioned autonomous modification — not to prevent the Operator from authorizing a structured spec-driven implementation pipeline.
 
 ## Local-First Mac Setup
 
