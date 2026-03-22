@@ -3,8 +3,7 @@ dist
 state
 .git
 .claude
-.env
-.env.production
+.env*
 *.tmp
 research
 docs
