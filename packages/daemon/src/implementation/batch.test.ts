@@ -2,7 +2,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { executeBatch, type UnitResult } from './batch.js';
 import type { Unit, SessionResult } from '../types.js';
-import { ok } from '../lib/result.js';
+import { ok, err } from '../lib/result.js';
+import { createWorktree, getWorktreeDiffSize } from './worktree.js';
 
 // Mock the worktree module
 vi.mock('./worktree.js', () => ({
@@ -151,5 +152,51 @@ describe('executeBatch', () => {
 
     expect(result.results[0]?.exitStatus).toBe('completed');
     expect(gotchaStore.store).toHaveBeenCalled();
+  });
+
+  it('returns failed when worktree creation fails (#64)', async () => {
+    vi.mocked(createWorktree).mockResolvedValueOnce(
+      err(new Error('index.lock exists')),
+    );
+    const runtime = createMockRuntime();
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    expect(result.results[0]?.exitStatus).toBe('failed');
+    expect(result.results[0]?.error).toContain('Worktree creation failed');
+    expect(result.results[0]?.cost).toBe(0);
+    // Session should never be spawned when worktree fails
+    expect(runtime.spawnSession).not.toHaveBeenCalled();
+  });
+
+  it('returns failed when diff size exceeds maxDiffLines (#64)', async () => {
+    vi.mocked(getWorktreeDiffSize).mockResolvedValueOnce({ ok: true, value: 500 });
+    const runtime = createMockRuntime();
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', {
+      staggerMs: 0,
+      maxDiffLines: 300,
+    });
+
+    expect(result.results[0]?.exitStatus).toBe('failed');
+    expect(result.results[0]?.error).toContain('Diff size 500 exceeds limit of 300');
+    // Cost should still be tracked even though the unit was rejected
+    expect(result.results[0]?.cost).toBe(0.5);
+  });
+
+  it('propagates timed-out exit status through UnitResult (#64)', async () => {
+    const timedOutResult: SessionResult = {
+      output: 'timed out waiting', structuredData: null, cost: 1.2,
+      pitfallMarkers: [], exitStatus: 'timed-out',
+    };
+    const runtime = createMockRuntime(timedOutResult);
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    expect(result.results[0]?.exitStatus).toBe('timed-out');
+    expect(result.results[0]?.cost).toBe(1.2);
   });
 });
