@@ -3,7 +3,7 @@ id: STACK-AC-DASHBOARD
 type: stack-specific
 domain: auto-claude
 status: draft
-version: 2
+version: 3
 layer: 3
 stack: typescript
 references: ARCH-AC-DASHBOARD
@@ -50,22 +50,10 @@ test_paths:
 
 **Daemon sync: Supabase JS client in daemon.** The daemon uses `@supabase/supabase-js` with a service-role key to read repo configs and write run results. The service-role key bypasses RLS — stored only as a server-side environment variable, never exposed to the browser.
 
-## Key Versions
-
-- Next.js: 16.x
-- Tailwind CSS: 4.x
-- `@supabase/ssr`: latest stable
-- `@supabase/supabase-js`: latest stable
-- shadcn/ui: latest stable
-- Recharts: latest stable
-
 ## Examples
 
 ```typescript
-// Supabase server client (Next.js server component / Server Action)
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
-
+// Supabase server client — cookie-based auth for server components
 export async function createClient() {
   const cookieStore = await cookies();
   return createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -75,10 +63,7 @@ export async function createClient() {
 ```
 
 ```typescript
-// Next.js 16: entry file is proxy.ts, exported function is proxy (not middleware)
-import { createServerClient } from '@supabase/ssr';
-import { NextResponse } from 'next/server';
-
+// Next.js 16: proxy.ts (not middleware.ts), exported as proxy (not middleware)
 export async function proxy(request) {
   const { supabase, response } = createServerClient(/* ... */);
   await supabase.auth.getUser(); // refresh session
@@ -87,16 +72,11 @@ export async function proxy(request) {
 ```
 
 ```typescript
-// Server Action for Supabase mutations (no API route needed)
+// Server Action pattern — no API route needed for Supabase mutations
 'use server';
 export async function createRepo(formData: FormData) {
   const supabase = await createClient();
-  const { error } = await supabase.from('repos').insert({
-    owner: formData.get('owner'),
-    name: formData.get('name'),
-    enabled: false, // always starts disabled
-  });
-  if (error) throw new Error(error.message);
+  await supabase.from('repos').insert({ owner, name, enabled: false });
   revalidatePath('/repos');
 }
 ```
@@ -120,70 +100,22 @@ export async function POST() {
 ```
 
 ```sql
--- Atomic first-user-is-admin + invitation acceptance: Postgres function called on auth callback
+-- Atomic first-user-is-admin: SECURITY DEFINER + LOCK prevents race conditions
 -- Returns: 'admin' | 'viewer' | 'denied'
-CREATE OR REPLACE FUNCTION bootstrap_user_access(
-  p_user_id uuid,
-  p_provider_handle text
-) RETURNS text LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE
-  v_role team_role;
-BEGIN
-  LOCK TABLE team_members IN EXCLUSIVE MODE;
-
-  -- First user: always admin
-  IF NOT EXISTS (SELECT 1 FROM team_members) THEN
-    INSERT INTO team_members (user_id, role) VALUES (p_user_id, 'admin');
-    RETURN 'admin';
-  END IF;
-
-  -- Already a member (re-login)
-  IF EXISTS (SELECT 1 FROM team_members WHERE user_id = p_user_id) THEN
-    SELECT role INTO v_role FROM team_members WHERE user_id = p_user_id;
-    RETURN v_role::text;
-  END IF;
-
-  -- Check for pending invitation (deterministic: oldest first; update only that row)
-  DECLARE v_inv_id uuid;
-  SELECT id, role INTO v_inv_id, v_role FROM invitations
-  WHERE provider_handle = p_provider_handle
-    AND status = 'pending'
-    AND expires_at > now()
-  ORDER BY created_at ASC
-  LIMIT 1;
-
-  IF v_role IS NULL THEN
-    RETURN 'denied';
-  END IF;
-
-  INSERT INTO team_members (user_id, role) VALUES (p_user_id, v_role);
-  UPDATE invitations SET status = 'accepted' WHERE id = v_inv_id;
-  RETURN v_role::text;
-END;
+CREATE OR REPLACE FUNCTION bootstrap_user_access(p_user_id uuid, p_provider_handle text)
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER AS $$
+  -- LOCK TABLE team_members; check first user → admin, else match invitation
 $$;
 ```
 
 ```sql
--- Dashboard WRITES via SECURITY DEFINER RPC (never direct table write)
--- The Server Action calls supabase.rpc('upsert_api_key_encrypted', {...})
-CREATE OR REPLACE FUNCTION upsert_api_key_encrypted(
-  p_repo_id uuid, p_key_type text, p_plaintext text
-) RETURNS void LANGUAGE sql SECURITY DEFINER AS $$
-  INSERT INTO api_keys (repo_id, key_type, encrypted_value, updated_at)
-  VALUES (p_repo_id, p_key_type, pgp_sym_encrypt(p_plaintext, current_setting('app.encryption_key')), now())
-  ON CONFLICT (repo_id, key_type) DO UPDATE
-    SET encrypted_value = EXCLUDED.encrypted_value, updated_at = now();
+-- Credential encryption: SECURITY DEFINER keeps encryption key out of app runtime
+-- Dashboard writes via supabase.rpc('upsert_api_key_encrypted', {...})
+CREATE OR REPLACE FUNCTION upsert_api_key_encrypted(p_repo_id uuid, p_key_type text, p_plaintext text)
+RETURNS void LANGUAGE sql SECURITY DEFINER AS $$
+  INSERT INTO api_keys ... VALUES (... pgp_sym_encrypt(p_plaintext, current_setting('app.encryption_key')))
+  ON CONFLICT (repo_id, key_type) DO UPDATE SET encrypted_value = EXCLUDED.encrypted_value;
 $$;
--- Revoke from public; grant only to dashboard anon/service role
-
--- Daemon READS via SECURITY DEFINER function (never raw pgp_sym_decrypt)
-CREATE OR REPLACE FUNCTION decrypt_api_key(p_repo_id uuid, p_key_type text)
-RETURNS text LANGUAGE sql SECURITY DEFINER AS $$
-  SELECT pgp_sym_decrypt(encrypted_value, current_setting('app.encryption_key'))
-  FROM api_keys WHERE repo_id = p_repo_id AND key_type = p_key_type;
-$$;
--- Daemon calls: SELECT decrypt_api_key($1, $2)
--- The app.encryption_key setting is loaded by the DB at session start via ALTER DATABASE SET
 ```
 
 ## Gotchas
@@ -200,60 +132,3 @@ $$;
 - RLS test coverage: the `supabase/tests/` directory must include integration tests that verify admin can read/write all tables, viewer can only read, and unauthenticated requests are rejected.
 - Repos always start with `enabled: false`. The UI should guide the admin through: create repo → add credentials → enable. Do not auto-enable on creation.
 - The `app.encryption_key` Postgres setting must be set at the database level: `ALTER DATABASE postgres SET app.encryption_key = 'your-secret'`. This is done once in a migration and is not a per-connection setting.
-
-## Project Structure
-
-```
-dashboard/                       # Next.js project (separate from daemon)
-  app/
-    layout.tsx                   # Root layout with auth provider
-    page.tsx                     # Dashboard home (server component)
-    login/page.tsx               # Login page
-    repos/
-      page.tsx                   # Repo list
-      [id]/page.tsx              # Repo detail + settings
-      new/page.tsx               # Add repo form
-    runs/
-      page.tsx                   # Run history
-      [id]/page.tsx              # Run detail
-    cost/page.tsx                # Cost charts
-    settings/page.tsx            # Global settings (concurrency, etc.)
-    team/page.tsx                # Team management + invitations
-    api/
-      daemon/
-        pause/route.ts           # Proxy: POST /api/daemon/pause
-        resume/route.ts          # Proxy: POST /api/daemon/resume
-        status/route.ts          # Proxy: GET /api/daemon/status
-  actions/
-    repos.ts                     # Server Actions: create, update, delete, enable/disable
-    api-keys.ts                  # Server Actions: upsert encrypted API key
-    team.ts                      # Server Actions: invite, change role, remove
-    settings.ts                  # Server Actions: update global settings
-  components/
-    sidebar.tsx                  # Navigation sidebar
-    stats-cards.tsx              # Dashboard stat cards
-    run-table.tsx                # Reusable run table
-    cost-chart.tsx               # Cost over time chart
-    realtime-provider.tsx        # Supabase realtime wrapper
-  lib/
-    supabase/
-      server.ts                  # Server-side Supabase client
-      client.ts                  # Browser-side Supabase client
-      middleware.ts              # Auth middleware helper (updateSession)
-    types.ts                     # Database types (generated from Supabase)
-  proxy.ts                       # Next.js proxy (auth check) — renamed from middleware.ts in Next.js 16
-  next.config.ts
-  tailwind.config.ts
-  package.json
-
-supabase/
-  migrations/
-    001_initial.sql              # Tables, RLS policies, pgcrypto, functions
-  tests/
-    rls.test.ts                  # RLS policy integration tests
-  config.toml                   # Supabase project config
-
-docker-compose.prod.yml          # Production: Caddy + Next.js + Daemon (shared network)
-Caddyfile                        # Reverse proxy config
-.env.prod.example                # Template for secrets (gitignored .env.prod)
-```
