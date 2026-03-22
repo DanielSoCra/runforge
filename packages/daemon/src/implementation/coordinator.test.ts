@@ -217,9 +217,9 @@ describe('ImplementationCoordinator', () => {
       specContent: 'spec',
     });
 
-    // Worker session should NOT have pitfalls in variables
+    // Worker session should have empty pitfalls (batch.ts always sets pitfalls key per #144)
     const workerCall = runtime.spawnSession.mock.calls[1];
-    expect(workerCall[1].variables.pitfalls).toBeUndefined();
+    expect(workerCall[1].variables.pitfalls).toBe('');
   });
 });
 

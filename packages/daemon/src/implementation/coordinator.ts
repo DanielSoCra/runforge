@@ -5,7 +5,9 @@ import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import type { GotchaStore } from '../knowledge/gotcha-store.js';
 import { createSingleUnitGraph, getUnitsByBatch } from './task-graph.js';
 import { executeBatch, type UnitResult } from './batch.js';
-import { mergeWorktree, deleteUnitBranch } from './worktree.js';
+import { deleteUnitBranch } from './worktree.js';
+import { mergeUnitsSequentially } from './merge.js';
+import { isMergeable } from './exit-status.js';
 import { decompose } from './decompose.js';
 import { git } from '../lib/git.js';
 
@@ -152,34 +154,27 @@ export class ImplementationCoordinator {
         });
       }
 
-      // 3. Merge successful units sequentially into feature branch
+      // 3. Merge successful units sequentially into feature branch (STACK-AC-IMPLEMENTATION: merge.ts)
       await git(['checkout', featureBranch], this.repoRoot);
-      const successfulUnits = batchResult.results.filter(
-        (r) => r.exitStatus === 'completed' || r.exitStatus === 'completed-with-concerns',
-      );
-      for (const unitResult of successfulUnits) {
-        const mergeResult = await mergeWorktree(unitResult.unitId, featureBranch, this.repoRoot);
-        if (!mergeResult.ok) {
-          return ok({
-            success: false,
-            unitResults: allResults,
-            totalCost,
-            batchesCompleted: i,
-            error: `Merge failed for ${unitResult.unitId}: ${mergeResult.error.message}`,
-            handoffNotes: collectHandoffNotes(allResults),
-            containmentBreach: breached || undefined,
-          });
-        }
-        // Clean up unit branch after successful merge (#133)
-        await deleteUnitBranch(unitResult.unitId, this.repoRoot).catch(() => {});
-      }
+      const successfulUnits = batchResult.results.filter((r) => isMergeable(r.exitStatus));
+      const nonMergedUnits = batchResult.results.filter((r) => !isMergeable(r.exitStatus));
 
-      // Clean up branches for failed/blocked units that won't be merged (#133)
-      const nonMergedUnits = batchResult.results.filter(
-        (r) => r.exitStatus !== 'completed' && r.exitStatus !== 'completed-with-concerns',
+      const mergeResult = await mergeUnitsSequentially(
+        successfulUnits.map((r) => r.unitId),
+        featureBranch,
+        this.repoRoot,
+        nonMergedUnits.map((r) => r.unitId),
       );
-      for (const unitResult of nonMergedUnits) {
-        await deleteUnitBranch(unitResult.unitId, this.repoRoot).catch(() => {});
+      if (!mergeResult.ok) {
+        return ok({
+          success: false,
+          unitResults: allResults,
+          totalCost,
+          batchesCompleted: i,
+          error: mergeResult.error.message,
+          handoffNotes: collectHandoffNotes(allResults),
+          containmentBreach: breached || undefined,
+        });
       }
 
       // Clear stale handoffs for successful units (STACK-AC-HANDOFF-COORDINATOR: clear after success)
