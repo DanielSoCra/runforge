@@ -86,7 +86,7 @@ FUNC-AC-DASHBOARD:
   status: draft
 
 FUNC-AC-COORDINATION:
-  children: []
+  children: [ARCH-AC-COORDINATION]
   status: draft
 
 FUNC-AC-HANDOFF:
@@ -109,6 +109,10 @@ ARCH-AC-PLUGINS:
   status: draft
 
 # --- Auto-Claude L2 specs ---
+
+ARCH-AC-COORDINATION:
+  parent: FUNC-AC-COORDINATION
+  status: draft
 
 ARCH-AC-CONTROL-PLANE:
   parent: FUNC-AC-PIPELINE
