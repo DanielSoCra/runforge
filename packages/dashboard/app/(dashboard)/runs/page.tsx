@@ -1,5 +1,7 @@
+import { Suspense } from 'react';
 import { createClient } from '@/lib/supabase/server';
 import { RunTable } from '@/components/run-table';
+import { RunFilters } from '@/components/run-filters';
 import { PageError } from '@/components/page-error';
 import Link from 'next/link';
 
@@ -42,7 +44,7 @@ export default async function RunsPage({
 
   const [{ data: runs, error: runsError }, { data: repos }] = await Promise.all([
     query,
-    supabase.from('repos').select('id, budget_limit').is('deleted_at', null),
+    supabase.from('repos').select('id, name, owner, budget_limit').is('deleted_at', null),
   ]);
   if (runsError) {
     console.error('[runs] failed to load runs:', runsError);
@@ -85,6 +87,9 @@ export default async function RunsPage({
           })}
         </div>
       </div>
+      <Suspense fallback={null}>
+        <RunFilters repos={(repos ?? []).map((r) => ({ id: r.id, name: r.name, owner: r.owner }))} />
+      </Suspense>
       <RunTable runs={runs ?? []} budgetByRepoId={budgetByRepoId} />
     </div>
   );
