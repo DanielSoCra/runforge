@@ -1,6 +1,15 @@
 // src/control-plane/notify.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { notify, validateWebhookUrl, type NotificationPayload } from './notify.js';
+import * as notifyModule from './notify.js';
+const { notify, validateWebhookUrl, validateResolvedIP, isPrivateIP } = notifyModule;
+import type { NotificationPayload } from './notify.js';
+
+// Mock dns/promises so we can control resolved IPs in tests.
+// Default: resolve to a safe public IP. Tests override per-case.
+vi.mock('node:dns/promises', () => ({
+  lookup: vi.fn().mockResolvedValue([{ address: '203.0.113.1', family: 4 }]),
+}));
+import { lookup as mockLookup } from 'node:dns/promises';
 
 const makePayload = (overrides?: Partial<NotificationPayload>): NotificationPayload => ({
   event: 'phase.complete',
@@ -292,6 +301,136 @@ describe('validateWebhookUrl', () => {
   });
 });
 
+describe('DNS rebinding protection (#153)', () => {
+  beforeEach(() => {
+    // Reset DNS mock to safe default before each test
+    vi.mocked(mockLookup).mockResolvedValue([{ address: '203.0.113.1', family: 4 }]);
+  });
+
+  it('isPrivateIP detects all private/internal address ranges', () => {
+    // IPv4 loopback
+    expect(isPrivateIP('127.0.0.1')).toBe(true);
+    expect(isPrivateIP('127.0.0.2')).toBe(true);
+    // RFC 1918
+    expect(isPrivateIP('10.0.0.1')).toBe(true);
+    expect(isPrivateIP('172.16.0.1')).toBe(true);
+    expect(isPrivateIP('192.168.1.1')).toBe(true);
+    // Link-local / cloud metadata
+    expect(isPrivateIP('169.254.169.254')).toBe(true);
+    // Unspecified
+    expect(isPrivateIP('0.0.0.0')).toBe(true);
+    // IPv6 loopback
+    expect(isPrivateIP('::1')).toBe(true);
+    // IPv6 ULA (fc00::/7)
+    expect(isPrivateIP('fc00::1')).toBe(true);
+    expect(isPrivateIP('fd12:3456::1')).toBe(true);
+    // IPv6 link-local (fe80::/10)
+    expect(isPrivateIP('fe80::1')).toBe(true);
+    // CGNAT (100.64.0.0/10)
+    expect(isPrivateIP('100.64.0.1')).toBe(true);
+    expect(isPrivateIP('100.127.255.255')).toBe(true);
+    // IPv6-mapped IPv4 dotted notation
+    expect(isPrivateIP('::ffff:127.0.0.1')).toBe(true);
+    expect(isPrivateIP('::ffff:10.0.0.1')).toBe(true);
+  });
+
+  it('isPrivateIP allows public addresses', () => {
+    expect(isPrivateIP('8.8.8.8')).toBe(false);
+    expect(isPrivateIP('203.0.113.1')).toBe(false);
+    expect(isPrivateIP('172.32.0.1')).toBe(false);
+    expect(isPrivateIP('100.63.255.255')).toBe(false); // just below CGNAT
+    expect(isPrivateIP('100.128.0.0')).toBe(false);    // just above CGNAT
+    expect(isPrivateIP('2001:db8::1')).toBe(false);
+  });
+
+  it('validateResolvedIP rejects when DNS resolves to a private IP', async () => {
+    vi.mocked(mockLookup).mockResolvedValueOnce([{ address: '127.0.0.1', family: 4 }]);
+    const result = await validateResolvedIP('https://evil.example.com/hook');
+    expect(result).toContain('blocked');
+    expect(result).toContain('DNS rebinding');
+  });
+
+  it('validateResolvedIP rejects when any resolved address is private (dual-stack)', async () => {
+    vi.mocked(mockLookup).mockResolvedValueOnce([
+      { address: '203.0.113.1', family: 4 },
+      { address: 'fd00::1', family: 6 },
+    ]);
+    const result = await validateResolvedIP('https://dual-stack.example.com/hook');
+    expect(result).toContain('blocked');
+  });
+
+  it('validateResolvedIP returns error when DNS resolution fails', async () => {
+    vi.mocked(mockLookup).mockRejectedValueOnce(new Error('ENOTFOUND'));
+    const result = await validateResolvedIP('https://no-such-host.invalid/hook');
+    expect(result).toContain('DNS resolution failed');
+  });
+
+  it('validateResolvedIP passes for IP-literal URLs that are public', async () => {
+    const result = await validateResolvedIP('https://8.8.8.8/hook');
+    expect(result).toBeNull();
+  });
+
+  it('validateResolvedIP rejects IP-literal URLs that are private', async () => {
+    const result = await validateResolvedIP('https://127.0.0.1/hook');
+    expect(result).toContain('blocked');
+  });
+
+  it('notify rejects URLs that pass hostname check but resolve to private IPs', async () => {
+    vi.mocked(mockLookup).mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
+
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await notify(
+      ['https://evil-rebinding.example.com/hook'],
+      makePayload(),
+    );
+
+    // fetch should never have been called — blocked at DNS check
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.failedUrls).toEqual(['https://evil-rebinding.example.com/hook']);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('DNS rebinding'),
+    );
+
+    warnSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it('notify re-validates resolved IP before retry to catch rebinding between attempts', async () => {
+    let callCount = 0;
+    vi.mocked(mockLookup).mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return [{ address: '203.0.113.1', family: 4 }];
+      }
+      // Second resolution (retry): rebinding to private
+      return [{ address: '169.254.169.254', family: 4 }];
+    });
+
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockRejectedValueOnce(new Error('network error'));
+    vi.stubGlobal('fetch', fetchMock);
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const promise = notify(
+      ['https://sneaky-rebinder.example.com/hook'],
+      makePayload(),
+    );
+    await vi.advanceTimersByTimeAsync(5000);
+    const result = await promise;
+
+    // fetch called once (initial), but retry blocked by DNS re-check
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.failedUrls).toEqual(['https://sneaky-rebinder.example.com/hook']);
+
+    warnSpy.mockRestore();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+});
+
 describe('notify SSRF protection (#29)', () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -299,6 +438,8 @@ describe('notify SSRF protection (#29)', () => {
     vi.useFakeTimers();
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
+    // Reset DNS mock to safe default
+    vi.mocked(mockLookup).mockResolvedValue([{ address: '203.0.113.1', family: 4 }]);
   });
 
   afterEach(() => {
