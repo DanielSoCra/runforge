@@ -1,6 +1,6 @@
 // src/control-plane/notify.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { notify, type NotificationPayload } from './notify.js';
+import { notify, validateWebhookUrl, type NotificationPayload } from './notify.js';
 
 const makePayload = (overrides?: Partial<NotificationPayload>): NotificationPayload => ({
   event: 'phase.complete',
@@ -224,6 +224,116 @@ describe('notify', () => {
     );
 
     expect(result.failedUrls).toEqual(['https://hooks.example.com/b']);
+    warnSpy.mockRestore();
+  });
+});
+
+describe('validateWebhookUrl', () => {
+  it('accepts https URLs with public hostnames', () => {
+    expect(validateWebhookUrl('https://hooks.example.com/abc')).toBeNull();
+    expect(validateWebhookUrl('https://api.slack.com/webhook')).toBeNull();
+  });
+
+  it('rejects http URLs', () => {
+    expect(validateWebhookUrl('http://hooks.example.com/abc')).toContain('not allowed');
+  });
+
+  it('rejects non-http schemes', () => {
+    expect(validateWebhookUrl('ftp://example.com/file')).toContain('not allowed');
+    expect(validateWebhookUrl('file:///etc/passwd')).toContain('not allowed');
+  });
+
+  it('rejects localhost', () => {
+    expect(validateWebhookUrl('https://localhost/hook')).toContain('blocked');
+    expect(validateWebhookUrl('https://LOCALHOST/hook')).toContain('blocked');
+  });
+
+  it('rejects loopback IP 127.x.x.x', () => {
+    expect(validateWebhookUrl('https://127.0.0.1/hook')).toContain('blocked');
+    expect(validateWebhookUrl('https://127.0.0.2:8080/hook')).toContain('blocked');
+  });
+
+  it('rejects cloud metadata endpoint 169.254.x.x', () => {
+    expect(validateWebhookUrl('https://169.254.169.254/latest/meta-data')).toContain('blocked');
+  });
+
+  it('rejects RFC 1918 private ranges', () => {
+    expect(validateWebhookUrl('https://10.0.0.1/hook')).toContain('blocked');
+    expect(validateWebhookUrl('https://172.16.0.1/hook')).toContain('blocked');
+    expect(validateWebhookUrl('https://172.31.255.255/hook')).toContain('blocked');
+    expect(validateWebhookUrl('https://192.168.1.1/hook')).toContain('blocked');
+  });
+
+  it('allows 172.x.x.x outside the 16-31 range', () => {
+    expect(validateWebhookUrl('https://172.15.0.1/hook')).toBeNull();
+    expect(validateWebhookUrl('https://172.32.0.1/hook')).toBeNull();
+  });
+
+  it('rejects IPv6 loopback', () => {
+    expect(validateWebhookUrl('https://[::1]/hook')).toContain('blocked');
+  });
+
+  it('rejects 0.0.0.0', () => {
+    expect(validateWebhookUrl('https://0.0.0.0/hook')).toContain('blocked');
+  });
+
+  it('rejects IPv6-mapped IPv4 private addresses', () => {
+    // URL constructor normalizes these to hex form (e.g. [::ffff:7f00:1])
+    expect(validateWebhookUrl('https://[::ffff:127.0.0.1]/hook')).toContain('blocked');
+    expect(validateWebhookUrl('https://[::ffff:10.0.0.1]/hook')).toContain('blocked');
+    expect(validateWebhookUrl('https://[::ffff:172.16.0.1]/hook')).toContain('blocked');
+    expect(validateWebhookUrl('https://[::ffff:192.168.1.1]/hook')).toContain('blocked');
+    expect(validateWebhookUrl('https://[::ffff:169.254.169.254]/hook')).toContain('blocked');
+    expect(validateWebhookUrl('https://[::ffff:0.0.0.0]/hook')).toContain('blocked');
+  });
+
+  it('rejects invalid URLs', () => {
+    expect(validateWebhookUrl('not-a-url')).toContain('invalid');
+  });
+});
+
+describe('notify SSRF protection (#29)', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects internal URLs without making fetch calls', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await notify(
+      ['http://169.254.169.254/latest/meta-data', 'https://localhost/hook'],
+      makePayload(),
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result.failedUrls).toEqual([
+      'http://169.254.169.254/latest/meta-data',
+      'https://localhost/hook',
+    ]);
+    warnSpy.mockRestore();
+  });
+
+  it('processes valid URLs normally while rejecting invalid ones', async () => {
+    fetchMock.mockResolvedValue({ ok: true });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const result = await notify(
+      ['https://hooks.example.com/ok', 'https://10.0.0.1/internal'],
+      makePayload(),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith('https://hooks.example.com/ok', expect.anything());
+    expect(result.failedUrls).toEqual(['https://10.0.0.1/internal']);
     warnSpy.mockRestore();
   });
 });
