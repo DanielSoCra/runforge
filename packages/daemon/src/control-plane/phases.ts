@@ -77,9 +77,11 @@ export function createPhaseHandlers(
       }
     },
 
-    classify: async (_run: RunState): Promise<PhaseEvent> => {
+    classify: async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[classify] Classifying work request #${workRequest.issueNumber}`);
-      return runClassify(runtime, workRequest, runWriter, runId, repoRoot);
+      const result = await runClassify(runtime, workRequest, runWriter, runId, repoRoot);
+      run.classificationComplexity = result.complexity;
+      return result.event;
     },
 
     diagnose: async (run: RunState): Promise<PhaseEvent> => {
@@ -125,9 +127,10 @@ export function createPhaseHandlers(
         return 'failure';
       }
 
-      // Record diagnosis on run state for results ledger
+      // Record diagnosis on run state for results ledger + bug-worker context
       run.diagnosisType = result.value.type;
       run.diagnosisConfidence = result.value.confidence;
+      run.diagnosisDetail = JSON.stringify(result.value);
 
       const routing = routeDiagnosis(result.value, threshold);
 
@@ -177,6 +180,8 @@ export function createPhaseHandlers(
         : undefined;
       const result = await coordinator.implement(workRequest, featureBranch, runWriter, runId, {
         handoffNotes,
+        variant: run.variant,
+        diagnosisDetail: run.diagnosisDetail,
       });
       if (!result.ok) { console.error(`[implement] Error:`, result.error.message); return 'failure'; }
       if (!result.value.success) {

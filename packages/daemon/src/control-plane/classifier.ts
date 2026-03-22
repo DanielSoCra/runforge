@@ -1,13 +1,16 @@
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { WorkRequest } from '../types.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
-import type { PhaseEvent } from '../types.js';
-import { ClassificationSchema, classificationJsonSchema } from './classifier-schema.js';
+import { ClassificationSchema, classificationJsonSchema, type ClassificationResult } from './classifier-schema.js';
+
+export interface ClassifyResult {
+  event: 'success' | 'success:simple';
+  complexity?: ClassificationResult['complexity'];
+}
 
 /**
  * Spawns a classifier session to assess work request complexity.
- * Returns the appropriate PhaseEvent: 'success:simple' for simple requests,
- * 'success' for standard/complex (which proceeds to decompose).
+ * Returns the PhaseEvent and the raw complexity for RunState storage.
  */
 export async function classify(
   runtime: SessionRuntime,
@@ -15,7 +18,7 @@ export async function classify(
   runWriter?: SupabaseRunWriter,
   runId?: string,
   workspacePath?: string,
-): Promise<PhaseEvent> {
+): Promise<ClassifyResult> {
   const context = {
     variables: {
       workRequest: `#${workRequest.issueNumber}: ${workRequest.title}\n\n${workRequest.body}`,
@@ -31,17 +34,23 @@ export async function classify(
 
   if (!result.ok) {
     console.warn(`[classify] Classifier session failed: ${result.error.message} — falling back to simple`);
-    return 'success:simple';
+    return { event: 'success:simple' };
   }
 
   const parsed = ClassificationSchema.safeParse(result.value.structuredData);
   if (!parsed.success) {
+    // No retry here (unlike diagnostician): classification failure falls back to 'simple',
+    // which is a safe conservative default. Diagnosis failure routes to human, so retry is
+    // worth the cost there. Here, under-classification adds review time but doesn't lose work.
     console.warn(`[classify] Invalid classifier output: ${parsed.error.message} — falling back to simple`);
-    return 'success:simple';
+    return { event: 'success:simple' };
   }
 
   const { complexity, reasoning } = parsed.data;
   console.log(`[classify] Classification: ${complexity} — ${reasoning}`);
 
-  return complexity === 'simple' ? 'success:simple' : 'success';
+  return {
+    event: complexity === 'simple' ? 'success:simple' : 'success',
+    complexity,
+  };
 }

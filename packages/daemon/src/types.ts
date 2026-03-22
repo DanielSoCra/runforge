@@ -94,6 +94,8 @@ export interface RunState {
   report?: string;
   diagnosisType?: BugType;
   diagnosisConfidence?: number;
+  diagnosisDetail?: string; // Serialized BugDiagnosis JSON — passed to bug-worker sessions
+  classificationComplexity?: 'simple' | 'standard' | 'complex';
   handoffNotes?: Record<string, string>;
 }
 

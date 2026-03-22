@@ -39,7 +39,8 @@ describe('classify (#145)', () => {
     });
 
     const result = await classify(mockRuntime, makeWorkRequest());
-    expect(result).toBe('success:simple');
+    expect(result.event).toBe('success:simple');
+    expect(result.complexity).toBe('simple');
     expect(mockRuntime.spawnSession).toHaveBeenCalledWith(
       'classifier',
       expect.objectContaining({
@@ -73,7 +74,8 @@ describe('classify (#145)', () => {
     });
 
     const result = await classify(mockRuntime, makeWorkRequest());
-    expect(result).toBe('success');
+    expect(result.event).toBe('success');
+    expect(result.complexity).toBe('standard');
   });
 
   it('returns success for complex classification', async () => {
@@ -94,20 +96,22 @@ describe('classify (#145)', () => {
     });
 
     const result = await classify(mockRuntime, makeWorkRequest());
-    expect(result).toBe('success');
+    expect(result.event).toBe('success');
+    expect(result.complexity).toBe('complex');
   });
 
-  it('falls back to success:simple when session fails', async () => {
+  it('falls back to success:simple with no complexity when session fails', async () => {
     mockRuntime.spawnSession.mockResolvedValue({
       ok: false,
       error: new Error('Budget exceeded'),
     });
 
     const result = await classify(mockRuntime, makeWorkRequest());
-    expect(result).toBe('success:simple');
+    expect(result.event).toBe('success:simple');
+    expect(result.complexity).toBeUndefined();
   });
 
-  it('falls back to success:simple when output is invalid', async () => {
+  it('falls back to success:simple with no complexity when output is invalid', async () => {
     mockRuntime.spawnSession.mockResolvedValue({
       ok: true,
       value: {
@@ -120,7 +124,8 @@ describe('classify (#145)', () => {
     });
 
     const result = await classify(mockRuntime, makeWorkRequest());
-    expect(result).toBe('success:simple');
+    expect(result.event).toBe('success:simple');
+    expect(result.complexity).toBeUndefined();
   });
 
   it('uses "none" for empty specRefs and default scope', async () => {

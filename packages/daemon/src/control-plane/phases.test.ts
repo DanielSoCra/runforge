@@ -284,11 +284,13 @@ describe('createPhaseHandlers', () => {
   });
 
   describe('classify', () => {
-    it('delegates to classifier module and returns its result (#145)', async () => {
-      mockClassify.mockResolvedValue('success');
+    it('delegates to classifier module and returns its event (#145)', async () => {
+      mockClassify.mockResolvedValue({ event: 'success', complexity: 'standard' });
       const { handlers } = createHandlers();
-      const result = await handlers.classify!(makeRun());
+      const run = makeRun();
+      const result = await handlers.classify!(run);
       expect(result).toBe('success');
+      expect(run.classificationComplexity).toBe('standard');
       expect(mockClassify).toHaveBeenCalledWith(
         mockRuntime, expect.objectContaining({ issueNumber: 42 }),
         undefined, undefined, undefined,
@@ -296,14 +298,25 @@ describe('createPhaseHandlers', () => {
     });
 
     it('returns success:simple when classifier returns simple (#145)', async () => {
-      mockClassify.mockResolvedValue('success:simple');
+      mockClassify.mockResolvedValue({ event: 'success:simple', complexity: 'simple' });
       const { handlers } = createHandlers();
-      const result = await handlers.classify!(makeRun());
+      const run = makeRun();
+      const result = await handlers.classify!(run);
       expect(result).toBe('success:simple');
+      expect(run.classificationComplexity).toBe('simple');
+    });
+
+    it('stores undefined complexity on fallback (#145)', async () => {
+      mockClassify.mockResolvedValue({ event: 'success:simple' });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers.classify!(run);
+      expect(result).toBe('success:simple');
+      expect(run.classificationComplexity).toBeUndefined();
     });
 
     it('passes repoRoot to classifier (#145)', async () => {
-      mockClassify.mockResolvedValue('success:simple');
+      mockClassify.mockResolvedValue({ event: 'success:simple', complexity: 'simple' });
       const { handlers } = createHandlers({}, undefined, '/custom/repo/root');
       await handlers.classify!(makeRun());
       expect(mockClassify).toHaveBeenCalledWith(
