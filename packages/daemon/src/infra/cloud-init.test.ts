@@ -7,6 +7,11 @@ const cloudInit = readFileSync(
   'utf-8',
 );
 
+const dockerfile = readFileSync(
+  resolve(__dirname, '../../Dockerfile'),
+  'utf-8',
+);
+
 describe('cloud-init.yml', () => {
   it('installs Docker', () => {
     expect(cloudInit).toContain('https://get.docker.com');
@@ -19,6 +24,18 @@ describe('cloud-init.yml', () => {
   it('uses correct username "autoclaude" (not "autoclaud")', () => {
     expect(cloudInit).not.toMatch(/autoclaud(?!e)/);
     expect(cloudInit).toContain('useradd -m -s /bin/bash autoclaude');
+  });
+
+  it('pins Claude CLI to the same version as the Dockerfile (#184)', () => {
+    const dockerfileVersion = dockerfile.match(
+      /@anthropic-ai\/claude-code@([\d.]+)/,
+    );
+    const cloudInitVersion = cloudInit.match(
+      /@anthropic-ai\/claude-code@([\d.]+)/,
+    );
+    expect(dockerfileVersion).not.toBeNull();
+    expect(cloudInitVersion).not.toBeNull();
+    expect(cloudInitVersion![1]).toBe(dockerfileVersion![1]);
   });
 
   it('installs Docker before adding user to docker group', () => {
