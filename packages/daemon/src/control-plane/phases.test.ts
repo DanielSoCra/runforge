@@ -572,10 +572,35 @@ describe('createPhaseHandlers', () => {
       expect(result).toBe('success');
       expect(run.diagnosisType).toBe('A');
       expect(run.diagnosisConfidence).toBe(0.9);
+      // specContent is loaded via loadSpecContent (returns '' by default mock)
       expect(mockDiagnose).toHaveBeenCalledWith(
         mockRuntime, 42, 'Fix something', '', '', undefined, undefined, undefined,
       );
       expect(mockRouteDiagnosis).toHaveBeenCalledWith(typeADiagnosis, 0.7);
+    });
+
+    it('loads spec content from .specify/ instead of passing spec IDs (#143)', async () => {
+      mockDiagnose.mockResolvedValue({ ok: true, value: typeADiagnosis });
+      mockRouteDiagnosis.mockReturnValue({ route: 'bug-pipeline', diagnosis: typeADiagnosis });
+      mockLoadSpecContent.mockResolvedValue('# FUNC-AC-PIPELINE\n\nFull spec markdown content');
+
+      const workReq = makeWorkRequest();
+      workReq.specRefs = ['FUNC-AC-PIPELINE'];
+      const { handlers } = createHandlers({}, workReq);
+      await handlers.diagnose!(makeRun({ variant: 'bug' }));
+
+      // Must call loadSpecContent with the spec refs
+      expect(mockLoadSpecContent).toHaveBeenCalledWith(
+        ['FUNC-AC-PIPELINE'],
+        expect.stringContaining('.specify'),
+      );
+
+      // diagnose() must receive full spec content, not just IDs
+      expect(mockDiagnose).toHaveBeenCalledWith(
+        mockRuntime, 42, 'Fix something', '',
+        '# FUNC-AC-PIPELINE\n\nFull spec markdown content',
+        undefined, undefined, undefined,
+      );
     });
 
     it('passes repoRoot as workspacePath to diagnose() (#134)', async () => {
@@ -583,8 +608,14 @@ describe('createPhaseHandlers', () => {
       mockRouteDiagnosis.mockReturnValue({ route: 'bug-pipeline', diagnosis: typeADiagnosis });
       const { handlers } = createHandlers({}, undefined, '/custom/repo/root');
       await handlers.diagnose!(makeRun({ variant: 'bug' }));
+      // specContent loaded via loadSpecContent (returns '' by default mock)
       expect(mockDiagnose).toHaveBeenCalledWith(
         mockRuntime, 42, 'Fix something', '', '', undefined, undefined, '/custom/repo/root',
+      );
+      // loadSpecContent should use repoRoot-based .specify path
+      expect(mockLoadSpecContent).toHaveBeenCalledWith(
+        [],
+        expect.stringContaining('/custom/repo/root'),
       );
     });
 

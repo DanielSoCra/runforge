@@ -85,12 +85,22 @@ export function createPhaseHandlers(
       console.log(`[diagnose] Running diagnosis for #${workRequest.issueNumber}`);
       const threshold = config.diagnosis.confidenceThreshold;
 
+      // Load actual spec content from .specify/ (not just spec IDs) (#143)
+      const cwd = repoRoot ?? process.cwd();
+      const specifyRoot = join(cwd, '.specify');
+      let specContent = '';
+      try {
+        specContent = await loadSpecContent(workRequest.specRefs, specifyRoot);
+      } catch (e) {
+        console.warn(`[diagnose] Failed to load spec content:`, e);
+      }
+
       const result = await diagnose(
         runtime,
         workRequest.issueNumber,
         workRequest.body,
         '',  // implementation content — not yet available at this phase
-        workRequest.specRefs.join('\n'),
+        specContent,
         runWriter,
         runId,
         repoRoot,
