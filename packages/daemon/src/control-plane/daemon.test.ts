@@ -157,6 +157,8 @@ describe('daemon', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    // Ensure GITHUB_TOKEN is set for all tests (validated at daemon startup)
+    process.env.GITHUB_TOKEN = 'ghp_test_token';
     // Capture signal handlers — cast to any to avoid process.on overload complexity
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.spyOn(process, 'on').mockImplementation(((event: string, handler: () => Promise<void>) => {
@@ -205,6 +207,22 @@ describe('daemon', () => {
   });
 
   describe('startDaemon', () => {
+    it('returns error when GITHUB_TOKEN is not set', async () => {
+      const originalToken = process.env.GITHUB_TOKEN;
+      delete process.env.GITHUB_TOKEN;
+      try {
+        const { startDaemon } = await loadDaemon();
+        const result = await startDaemon('config.json');
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error.message).toContain('GITHUB_TOKEN');
+        }
+        expect(mockLoadConfig).not.toHaveBeenCalled();
+      } finally {
+        process.env.GITHUB_TOKEN = originalToken;
+      }
+    });
+
     it('returns error when config loading fails', async () => {
       mockLoadConfig.mockResolvedValue(err(new Error('bad config')));
 
@@ -765,6 +783,46 @@ describe('daemon', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(0);
+    });
+
+    it('resets consecutive stuck count on paused outcome (#109)', async () => {
+      const config = makeConfig({ maxConsecutiveStuck: 3 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      // First run: stuck
+      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail' });
+      const request1 = makeWorkRequest({ issueNumber: 1 });
+      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request1]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
+
+      // Second run: paused (budget/rate-limit) → should reset count
+      mockRunPipeline.mockResolvedValueOnce({ outcome: 'paused' });
+      const request2 = makeWorkRequest({ issueNumber: 2 });
+      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request2]));
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(0);
+
+      // Third run: stuck → count starts fresh at 1, not 2
+      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail again' });
+      const request3 = makeWorkRequest({ issueNumber: 3 });
+      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request3]));
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
     });
 
     it('exposes consecutiveStuckCount in status endpoint', async () => {

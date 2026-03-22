@@ -25,6 +25,13 @@ import { GotchaStore } from '../knowledge/gotcha-store.js';
 import { join } from 'path';
 
 export async function startDaemon(configPath: string): Promise<Result<void>> {
+  // 0. Validate GITHUB_TOKEN — required for Octokit (labeling, commenting, notifications)
+  if (!process.env.GITHUB_TOKEN) {
+    return err(new Error(
+      'GITHUB_TOKEN environment variable is not set. The daemon requires a GitHub token to interact with issues and pull requests.',
+    ));
+  }
+
   // 1. Load config
   const configResult = await loadConfig(configPath);
   if (!configResult.ok) return configResult;
@@ -107,7 +114,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
                     message: `Daemon auto-paused after ${consecutiveStuckCount} consecutive stuck runs`,
                   });
                 }
-              } else if (outcome === 'complete') {
+              } else {
                 consecutiveStuckCount = 0;
               }
             })
@@ -231,7 +238,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
             phase: run.phase,
             message: `Issue #${run.issueNumber} stuck: ${result.error ?? 'unknown'}`,
           });
-        } else if (result.outcome === 'complete') {
+        } else {
           consecutiveStuckCount = 0;
         }
       })
@@ -275,7 +282,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
                   message: `Daemon auto-paused after ${consecutiveStuckCount} consecutive stuck runs`,
                 });
               }
-            } else if (outcome === 'complete') {
+            } else {
               consecutiveStuckCount = 0;
             }
           })
