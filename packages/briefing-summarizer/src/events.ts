@@ -41,13 +41,19 @@ export function extractActivityEvents(
   const now = new Date().toISOString();
 
   // --- Run state transitions ---
-  events.push(...detectRunTransitions(signals.runs, previousSnapshot?.runs ?? [], now));
+  const transitionRunIds = new Set<string>();
+  const transitions = detectRunTransitions(signals.runs, previousSnapshot?.runs ?? [], now);
+  for (const t of transitions) {
+    const match = t.summary.match(/^Run (\S+)/);
+    if (match) transitionRunIds.add(match[1]);
+  }
+  events.push(...transitions);
 
   // --- Merges from git log ---
   events.push(...detectMerges(signals.gitLog, previousSnapshot?.gitLog ?? [], now));
 
-  // --- Errors from stuck runs ---
-  events.push(...detectErrors(signals.runs, now));
+  // --- Errors from stuck runs (skip those already captured as transitions) ---
+  events.push(...detectErrors(signals.runs, now, transitionRunIds));
 
   return events;
 }
@@ -153,11 +159,13 @@ function detectMerges(
 function detectErrors(
   currentRuns: Record<string, unknown>[],
   now: string,
+  skipRunIds?: Set<string>,
 ): ActivityEventInsert[] {
   const events: ActivityEventInsert[] = [];
 
   for (const run of currentRuns) {
     if (run.outcome !== 'stuck') continue;
+    if (skipRunIds?.has(String(run.id))) continue;
 
     events.push({
       occurred_at: (run.updated_at as string) ?? now,

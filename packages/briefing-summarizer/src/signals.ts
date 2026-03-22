@@ -92,22 +92,20 @@ async function collectRuns(
   const { data, error } = await supabase
     .from('runs')
     .select('*')
-    .gte('updated_at', since);
+    .gte('started_at', since);
 
   if (error) throw new Error(`Supabase runs query failed: ${error.message}`);
   return (data ?? []) as Record<string, unknown>[];
 }
 
-async function collectDaemonStatus(daemonUrl: string): Promise<DaemonStatus | null> {
+async function collectDaemonStatus(daemonUrl: string): Promise<DaemonStatus> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
 
   try {
     const res = await fetch(`${daemonUrl}/status`, { signal: controller.signal });
-    if (!res.ok) return null;
+    if (!res.ok) throw new Error(`Daemon status returned ${res.status}`);
     return (await res.json()) as DaemonStatus;
-  } catch {
-    return null;
   } finally {
     clearTimeout(timeout);
   }
