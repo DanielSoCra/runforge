@@ -58,20 +58,20 @@ Every feature starts as a GitHub Issue and progresses through label-driven stage
 | `l3-review` | `spec-generate-l3` skill | Compliance check passes | Mark ready | `l3-review` | `l3-approved`, `ready-to-implement` | Merge PR to `dev` |
 | `l3-review` | `spec-generate-l3` skill | Compliance check fails 3x | Block | `l3-review` | `blocked` | — |
 | `ready-to-implement` | `spec-implement` skill | No `implementing` or `blocked` | Start implementation | `ready-to-implement` | `implementing` | Create `feat/<N>-<name>` |
-| `implementing` | `spec-implement` skill | Tests + review pass | Submit for final review | `implementing` | `in-review` | Push to `feat/` branch |
-| `in-review` | `spec-implement` skill | Code review passes | Complete | `in-review` | — | Merge to `dev`, push, close issue |
-| `in-review` | `spec-implement` skill | Code review fails 3x | Block | `in-review` | `blocked` | — |
-| `blocked` + `was-l3-review` | Operator | Resolves blocker | Resume L3 review | `blocked`, `was-l3-review` | `l3-review` | — |
-| `blocked` + `was-implementing` | Operator | Resolves blocker | Resume implementation | `blocked`, `was-implementing` | `implementing` | — |
-| `blocked` + `was-in-review` | Operator | Resolves blocker | Resume review | `blocked`, `was-in-review` | `in-review` | — |
+| `implementing` | `spec-implement` skill | Tests + review pass | Complete | `implementing` | — | Merge to `dev`, push, close issue |
+| `implementing` | `spec-implement` skill | Fails 3x | Block | `implementing` | `blocked` | — |
+| `blocked` (from `l3-review`) | Operator | Resolves blocker | Reset to L3 start | `blocked` | `l2-approved` | Delete `spec/l3/` branch if exists |
+| `blocked` (from `implementing`) | Operator | Resolves blocker | Reset to implement start | `blocked` | `ready-to-implement` | Delete `feat/` branch if exists |
 
-**Blocked state persistence:** When a skill adds the `blocked` label, it also adds a `was-<previous-state>` label (e.g., `was-implementing`). This allows the Operator to resume by removing `blocked` + `was-*` and the orchestrator to know which stage to re-enter. The `was-*` labels are: `was-l3-review`, `was-implementing`, `was-in-review`.
+**Blocked = reset-from-phase-start.** Consistent with FUNC-AC-PIPELINE's retry model: when a phase fails repeatedly, the issue resets to the entry state of that phase (not mid-phase). The Operator removes `blocked` and adds the appropriate entry label. The orchestrator only needs to poll entry-state labels (`ready-to-implement`, `l2-approved`, `l2-in-progress`, `l1-approved`), never mid-phase states.
+
+**Note:** `in-review` is eliminated as a separate label. Code review happens within the `spec-implement` skill session — if it passes, the skill merges and closes; if it fails 3x, the skill adds `blocked`. The orchestrator never needs to poll `in-review`.
 
 ### Entry Points
 
 1. **Operator-initiated:** Operator brainstorms L1 interactively with Claude, then creates a GitHub Issue with `feature-pipeline` + `l1-approved` labels, linking to the L1 spec file in `.specify/functional/`.
 2. **Agent-suggested (L1):** Agent creates an issue with `spec-change-suggested` + `l1-suggestion`. Operator reviews and either relabels to `feature-pipeline` + `l1-approved`, or closes. Requires `BLOCKING_REASON` in body.
-3. **Agent-suggested (L2):** Agent creates an issue with `spec-change-suggested` + `l2-suggestion`. Operator reviews and either relabels to `feature-pipeline` + `l2-approved` (if the L2 change is acceptable), or closes. Requires `EVIDENCE` in body.
+3. **Agent-suggested (L2):** Agent creates an issue with `spec-change-suggested` + `l2-suggestion`. Operator reviews and either relabels to `feature-pipeline` + `l2-in-progress` (agent will update the L2 spec based on the suggestion, then submit for review via normal `l2-review` flow), or closes. Requires `EVIDENCE` in body. Note: L2 suggestions route through `l2-in-progress`, not `l2-approved`, because the L2 spec change still needs to be authored and reviewed.
 
 ### Issue Structure
 
@@ -93,16 +93,12 @@ Every feature starts as a GitHub Issue and progresses through label-driven stage
 | `l3-review` | L3 spec under automated review |
 | `l3-approved` | L3 spec passed compliance review |
 | `ready-to-implement` | Spec chain complete, implementation can begin |
-| `implementing` | Implementation in progress |
-| `in-review` | Implementation complete, code review in progress |
+| `implementing` | Implementation in progress (includes code review within session) |
 | `spec-change-suggested` | Agent suggests a spec change (requires evidence) |
 | `l1-suggestion` | Suggested change is to L1 (requires BLOCKING_REASON) |
 | `l2-suggestion` | Suggested change is to L2 (requires EVIDENCE) |
 | `self-modification-suggestion` | Change to the pipeline's own specs (extra scrutiny) |
 | `blocked` | Needs human input |
-| `was-l3-review` | Pre-blocked state was `l3-review` |
-| `was-implementing` | Pre-blocked state was `implementing` |
-| `was-in-review` | Pre-blocked state was `in-review` |
 | `phase-2` | Earmarked for Phase 2 (not yet active) |
 | `phase-3` | Earmarked for Phase 3 (not yet active) |
 
@@ -166,7 +162,7 @@ Note: `l3-review` is handled within the `spec-generate-l3` skill session (compli
 7. Relabel: remove `l3-in-progress`, add `l3-review`
 8. Run `spec-review-compliance` check against L1/L2/existing code
 9. If compliance passes: merge PR to `dev`, relabel to `l3-approved` + `ready-to-implement`
-10. If issues found: fix and re-review (max 3 iterations, then add `blocked` + `was-l3-review`, remove `l3-review`)
+10. If issues found: fix and re-review (max 3 iterations, then add `blocked`, remove `l3-review`)
 
 **Note on `spec-document-reviewer`:** This is a subagent prompt template from the Superpowers plugin (not checked into the repo). The `spec-generate-l3` skill dispatches it as a general-purpose Agent with the reviewer prompt. **Prerequisite:** The Superpowers plugin must be installed in Claude Code for this to work.
 
@@ -174,18 +170,19 @@ Note: `l3-review` is handled within the `spec-generate-l3` skill session (compli
 
 **Runs as:** Part of `spec-generate-l3` workflow (steps 8-10) and can be invoked independently for periodic audits.
 
-**Checks:**
-- L3 specs against actual code on `dev` — gaps where code doesn't match spec
-- L3 against L2 and L1 for contradictions
-- `traceability.yml` completeness — code files without spec coverage
+**Two modes:**
 
-**Outputs when run independently:**
-- Code gaps: creates **new** implementation issues with `feature-pipeline` + `ready-to-implement` labels (separate from the triggering issue)
+**Inline mode (within `spec-generate-l3`):**
+- Checks L3 against L2 and L1 for contradictions (upstream consistency)
+- Checks `traceability.yml` has correct linkages for new spec
+- Does NOT check code gaps (code doesn't exist yet for new features — that's expected)
+- Returns pass/fail to the calling skill
+
+**Standalone mode (periodic audit):**
+- All inline checks PLUS code gap detection (L3 says X but code does Y)
+- Code gaps: creates **new** implementation issues with `feature-pipeline` + `ready-to-implement` labels
 - Spec contradictions: creates suggestion issues at the appropriate layer with `spec-change-suggested`
 - Traceability gaps: logs warnings, creates issues if significant
-
-**Outputs when run as part of `spec-generate-l3`:**
-- Returns pass/fail to the calling skill (does not create separate issues — the calling skill handles iteration or blocking)
 
 ### 4. `spec-implement` (Implementation from Approved L3)
 
@@ -195,17 +192,16 @@ Note: `l3-review` is handled within the `spec-generate-l3` skill session (compli
 1. Add `implementing` label, remove `ready-to-implement`
 2. Read L3 spec, understand the full spec chain (L3→L2→L1)
 3. Create implementation plan (as issue comment)
-4. Scope guard: >20 steps or >10 files → add `blocked` + `was-implementing` labels, remove `implementing`, request Operator decomposition
+4. Scope guard: >20 steps or >10 files → add `blocked` label, remove `implementing`, request Operator decomposition
 5. Branch `feat/<issue-number>-<name>` from `dev`
 6. TDD: write tests first based on L3's `test_paths`
 7. Implement until tests pass + typecheck passes
 8. Run `pnpm -r run test` — zero regressions
-9. Relabel: remove `implementing`, add `in-review`
-10. Dispatch `requesting-code-review` superpower (this is a built-in superpower available in all Claude Code sessions, not a local skill)
-11. If review fails, relabel back to `implementing`, iterate (max 3 attempts, then add `blocked` + `was-in-review`, remove `in-review`)
-12. Merge `feat/` branch to `dev`, push to remote
-13. Self-verify: check the fix works on merged `dev`
-14. Remove `in-review` label, close issue with comment noting commit SHA
+9. Dispatch `requesting-code-review` superpower (this is a built-in superpower available in all Claude Code sessions, not a local skill)
+10. If review fails, iterate (max 3 attempts, then add `blocked`, remove `implementing`)
+11. Merge `feat/` branch to `dev`, push to remote
+12. Self-verify: check the fix works on merged `dev`
+13. Remove `implementing` label, close issue with comment noting commit SHA
 
 **Quality bar:** Same as existing developer skill — tests, typecheck, regression test, code review, clean merge, push to remote, self-verify.
 
