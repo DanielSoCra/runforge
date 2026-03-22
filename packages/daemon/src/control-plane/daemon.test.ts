@@ -900,6 +900,29 @@ describe('daemon', () => {
       expect(status['uptime']).toBeDefined();
     });
 
+    it('strips remote_control_url from status response (#154)', async () => {
+      const { startDaemon } = await loadDaemon();
+      const { createControlServer } = await import('./server.js');
+
+      // Mock getState to return all fields including the sensitive URL
+      mockRemoteControl.getState.mockReturnValue({
+        remote_control_state: 'active',
+        remote_control_url: 'https://claude.ai/remote/secret',
+        remote_control_error: null,
+      });
+
+      await startDaemon('config.json');
+
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      const status = handlers.getStatus() as Record<string, unknown>;
+
+      // remote_control_state and remote_control_error are safe to expose
+      expect(status).toHaveProperty('remote_control_state', 'active');
+      expect(status).toHaveProperty('remote_control_error', null);
+      // remote_control_url could enable session takeover — must not be exposed
+      expect(status).not.toHaveProperty('remote_control_url');
+    });
+
     it('pause/resume toggles paused state visible in status', async () => {
       const { startDaemon } = await loadDaemon();
       const { createControlServer } = await import('./server.js');

@@ -162,14 +162,17 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   }
   const daemonHost = envHost ?? config.controlHost;
   const { server, start } = createControlServer(config.controlPort, {
-    getStatus: () => ({
-      activeRuns,
-      dailyCost: costTracker.getDailyCost(),
-      paused,
-      consecutiveStuckCount,
-      uptime: process.uptime(),
-      ...remoteControl.getState(),
-    }),
+    getStatus: () => {
+      const { remote_control_url: _, ...safeState } = remoteControl.getState() ?? {};
+      return {
+        activeRuns,
+        dailyCost: costTracker.getDailyCost(),
+        paused,
+        consecutiveStuckCount,
+        uptime: process.uptime(),
+        ...safeState,
+      };
+    },
     pause: () => { paused = true; },
     resume: () => { paused = false; },
     retry: (_issueNumber) => err(new Error('retry not yet implemented')),
