@@ -60,6 +60,9 @@ export async function runReview(
       };
     }
 
+    // Diminishing returns: prevFindingCount starts at 0, so the first cycle
+    // always sets the baseline without evaluating improvement. Combined with
+    // minCycles and the 2-consecutive-stall requirement, earliest escalation is cycle 3.
     // Diminishing returns check (after minCycles)
     if (options?.diminishingReturns && fixCycles >= options.diminishingReturns.minCycles) {
       if (prevFindingCount > 0) {

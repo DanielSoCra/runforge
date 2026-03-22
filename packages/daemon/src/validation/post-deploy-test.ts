@@ -4,6 +4,7 @@ import { validateGate1Command } from './gates.js';
 
 export interface PostDeployTestConfig {
   testCommands: string[];
+  testCommandTimeoutMs?: number;
   maxFixAttempts: number;
   failureExcerptLines: number;
   cwd: string;
@@ -21,7 +22,7 @@ export interface PostDeployTestResult {
 
 /**
  * Truncates verbose test output to the relevant failure excerpt.
- * Scans backwards for failure markers (FAIL, Error, AssertionError),
+ * Scans backwards for failure markers (FAIL, Error),
  * then takes surrounding context.
  */
 export function truncateFailureOutput(output: string, maxLines: number): string {
@@ -30,7 +31,7 @@ export function truncateFailureOutput(output: string, maxLines: number): string 
 
   let failIdx = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
-    if (/FAIL|Error|AssertionError/.test(lines[i]!)) {
+    if (/FAIL|Error/.test(lines[i]!)) {
       failIdx = i;
       break;
     }
@@ -66,7 +67,7 @@ export async function runPostDeployTests(config: PostDeployTestConfig): Promise<
     for (const cmd of config.testCommands) {
       const result = await runCommand('sh', ['-c', cmd], {
         cwd: config.cwd,
-        timeoutMs: 300_000, // 5 min per command
+        timeoutMs: config.testCommandTimeoutMs ?? 300_000,
       });
 
       if (!result.ok) {
