@@ -238,6 +238,44 @@ describe('ControlServer', () => {
     }
   });
 
+  it('binds to custom host when provided (Docker compatibility)', async () => {
+    // Regression test for #147: daemon must accept a configurable bind host
+    // so it can bind 0.0.0.0 in Docker for cross-container access
+    const { server, start } = createControlServer(PORT + 8, handlers, '0.0.0.0');
+    const result = await start();
+    expect(result.ok).toBe(true);
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT + 8}/health`);
+      expect(res.status).toBe(200);
+      // Verify the server actually bound to 0.0.0.0, not the default
+      const addr = server.address();
+      if (typeof addr === 'object' && addr !== null) {
+        expect(addr.address).toBe('0.0.0.0');
+      }
+    } finally {
+      server.close();
+    }
+  });
+
+  it('defaults to 127.0.0.1 when no host provided (secure default)', async () => {
+    // Regression test for #147: without explicit host, server should bind loopback only
+    const { server, start } = createControlServer(PORT + 9, handlers);
+    const result = await start();
+    expect(result.ok).toBe(true);
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT + 9}/health`);
+      expect(res.status).toBe(200);
+      // Verify address is loopback
+      const addr = server.address();
+      expect(addr).not.toBeNull();
+      if (typeof addr === 'object' && addr !== null) {
+        expect(addr.address).toBe('127.0.0.1');
+      }
+    } finally {
+      server.close();
+    }
+  });
+
   it('GET /status includes remote_control fields', async () => {
     const { server: s2, start: start2 } = createControlServer(PORT + 1, {
       getStatus: () => ({

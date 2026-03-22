@@ -17,6 +17,7 @@ export interface ControlHandlers {
 export function createControlServer(
   port: number,
   handlers: ControlHandlers,
+  host: string = '127.0.0.1',
 ): { server: Server; start: () => Promise<Result<void>> } {
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', `http://localhost:${port}`);
@@ -110,7 +111,7 @@ export function createControlServer(
         });
         // exclusive: true prevents port sharing; SO_REUSEADDR is set by default (libuv)
         // allowing immediate rebind after crash without TIME_WAIT delay
-        server.listen({ port, host: '127.0.0.1', exclusive: true }, () => {
+        server.listen({ port, host, exclusive: true }, () => {
           console.log(`[daemon] Instance lock acquired (port ${port})`);
           resolve(ok(undefined));
         });

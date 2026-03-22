@@ -117,6 +117,7 @@ vi.mock('../config.js', () => ({
 
 const makeConfig = (overrides?: Partial<Config>): Config => ({
   controlPort: 3847,
+  controlHost: '127.0.0.1',
   pollIntervalMs: 30000,
   maxConcurrentRuns: 1,
   dailyBudget: 50,

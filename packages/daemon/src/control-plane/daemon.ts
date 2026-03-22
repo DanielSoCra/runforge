@@ -156,6 +156,11 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   }
 
   // 6. Start control server
+  const envHost = process.env.DAEMON_HOST;
+  if (envHost !== undefined && !/^\d{1,3}(\.\d{1,3}){3}$/.test(envHost)) {
+    return err(new Error(`Invalid DAEMON_HOST: "${envHost}" — must be a valid IPv4 address`));
+  }
+  const daemonHost = envHost ?? config.controlHost;
   const { server, start } = createControlServer(config.controlPort, {
     getStatus: () => ({
       activeRuns,
@@ -175,7 +180,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     scanIssues: repoManager
       ? async () => repoManager!.scanNow()
       : undefined,
-  });
+  }, daemonHost);
   const serverResult = await start();
   if (!serverResult.ok) {
     repoManager?.stop();
@@ -184,7 +189,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     return serverResult;
   }
 
-  console.log(`Auto-Claude daemon started on port ${config.controlPort}`);
+  console.log(`Auto-Claude daemon started on ${daemonHost}:${config.controlPort}`);
 
   // 6b. Crash resumption — resume incomplete runs from prior crash
   const incompleteRuns = await stateMgr.findIncompleteRuns();
