@@ -116,6 +116,29 @@ describe('CostTracker', () => {
       expect(tracker.checkBudget(42)).toEqual({ available: true, remaining: 50 });
       vi.restoreAllMocks();
     });
+
+    it('advances resetAt after reset so subsequent call returns false', () => {
+      const baseNow = Date.now();
+      const past25h = baseNow + 25 * 60 * 60 * 1000;
+      const spy = vi.spyOn(Date, 'now').mockReturnValue(past25h);
+      // First call triggers reset
+      expect(tracker.maybeResetDaily()).toBe(true);
+      // resetAt should now be ~24h after past25h, so same timestamp returns false
+      expect(tracker.maybeResetDaily()).toBe(false);
+      spy.mockRestore();
+    });
+
+    it('resets daily cost to zero and allows fresh cost accumulation', () => {
+      tracker.recordCost(1, 45);
+      expect(tracker.getDailyCost()).toBe(45);
+      const spy = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 25 * 60 * 60 * 1000);
+      tracker.maybeResetDaily();
+      expect(tracker.getDailyCost()).toBe(0);
+      // Fresh costs accumulate from zero
+      tracker.recordCost(1, 3);
+      expect(tracker.getDailyCost()).toBe(3);
+      spy.mockRestore();
+    });
   });
 
   // Regression tests for #101: restoreFromSnapshot zero test coverage
