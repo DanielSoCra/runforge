@@ -157,9 +157,24 @@ export function createPhaseHandlers(
 
     implement: async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[implement] Starting for #${workRequest.issueNumber} on ${featureBranch}`);
-      const result = await coordinator.implement(workRequest, featureBranch, runWriter, runId);
+      // Restore persisted handoff notes from RunState for retry attempts (ARCH-AC-HANDOFF step 6)
+      const handoffNotes = run.handoffNotes
+        ? new Map(Object.entries(run.handoffNotes))
+        : undefined;
+      const result = await coordinator.implement(workRequest, featureBranch, runWriter, runId, {
+        handoffNotes,
+      });
       if (!result.ok) { console.error(`[implement] Error:`, result.error.message); return 'failure'; }
-      if (!result.value.success) { console.error(`[implement] Failed:`, result.value.error); return 'failure'; }
+      if (!result.value.success) {
+        // Persist handoff notes to RunState so they survive daemon crashes (STACK-AC-HANDOFF-COORDINATOR)
+        if (result.value.handoffNotes) {
+          run.handoffNotes = Object.fromEntries(result.value.handoffNotes);
+        }
+        console.error(`[implement] Failed:`, result.value.error);
+        return 'failure';
+      }
+      // Clear stale handoff notes after successful completion (STACK-AC-HANDOFF-COORDINATOR: clear after success)
+      run.handoffNotes = undefined;
       run.cost += result.value.totalCost;
       console.log(`[implement] Done, cost: $${result.value.totalCost.toFixed(2)}`);
       return 'success';

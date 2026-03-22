@@ -94,6 +94,7 @@ export interface RunState {
   report?: string;
   diagnosisType?: BugType;
   diagnosisConfidence?: number;
+  handoffNotes?: Record<string, string>;
 }
 
 // --- Daemon State ---
