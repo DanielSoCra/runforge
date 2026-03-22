@@ -59,7 +59,28 @@ describe('readPluginsForContext file size cap', () => {
     try {
       const result = await readPluginsForContext([PLUGIN_ID], new Map());
       const plugin = result.find(p => p.id === PLUGIN_ID);
-      expect(plugin?.promptInjection.length).toBe(20_000);
+      expect(Buffer.byteLength(plugin!.promptInjection, 'utf-8')).toBe(20_000);
+    } finally {
+      if (orig === undefined) delete process.env['PLUGINS_DIR'];
+      else process.env['PLUGINS_DIR'] = orig;
+    }
+  });
+
+  it('truncates multi-byte UTF-8 prompt-injection by byte count, not character count (#119)', async () => {
+    // Each '€' is 3 bytes in UTF-8. 7000 chars × 3 bytes = 21,000 bytes > 20,000 limit.
+    // Old code checked string.length (7000) against 20,000 and would NOT truncate.
+    const multiByteContent = '€'.repeat(7_000);
+    expect(Buffer.byteLength(multiByteContent, 'utf-8')).toBe(21_000); // sanity check
+    await writeFile(join(pluginDir, 'prompt-injection.md'), multiByteContent);
+
+    const orig = process.env['PLUGINS_DIR'];
+    process.env['PLUGINS_DIR'] = pluginsDir;
+    try {
+      const result = await readPluginsForContext([PLUGIN_ID], new Map());
+      const plugin = result.find(p => p.id === PLUGIN_ID);
+      const resultBytes = Buffer.byteLength(plugin!.promptInjection, 'utf-8');
+      // 6,666 complete € characters × 3 bytes = 19,998 (largest multiple of 3 ≤ 20,000)
+      expect(resultBytes).toBe(19_998);
     } finally {
       if (orig === undefined) delete process.env['PLUGINS_DIR'];
       else process.env['PLUGINS_DIR'] = orig;

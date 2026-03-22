@@ -119,10 +119,15 @@ export async function readPluginsForContext(
     const skills = (await readMarkdownFiles(join(dir, 'skills'))).map(s => ({ ...s, pluginId: id }));
     const agents = (await readMarkdownFiles(join(dir, 'agents'))).map(a => ({ ...a, pluginId: id }));
     const injectionRaw = await readFile(join(dir, 'prompt-injection.md'), 'utf-8').catch(() => '');
-    const injection = injectionRaw.length > MAX_INJECTION_BYTES
+    const injectionByteLen = Buffer.byteLength(injectionRaw, 'utf-8');
+    const injection = injectionByteLen > MAX_INJECTION_BYTES
       ? (() => {
-          console.warn(`[plugins] prompt-injection.md for ${id} truncated (${injectionRaw.length} chars > ${MAX_INJECTION_BYTES} limit)`);
-          return injectionRaw.slice(0, MAX_INJECTION_BYTES);
+          console.warn(`[plugins] prompt-injection.md for ${id} truncated (${injectionByteLen} bytes > ${MAX_INJECTION_BYTES} limit)`);
+          const buf = Buffer.from(injectionRaw, 'utf-8');
+          // Walk back from cut point to avoid splitting a multi-byte character
+          let end = MAX_INJECTION_BYTES;
+          while (end > 0 && (buf[end]! & 0xC0) === 0x80) end--;
+          return buf.subarray(0, end).toString('utf-8');
         })()
       : injectionRaw;
     results.push({
