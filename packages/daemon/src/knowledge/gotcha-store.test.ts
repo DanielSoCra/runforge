@@ -405,6 +405,34 @@ describe('GotchaStore', () => {
 
     });
 
+    it('auto-compacts when JSONL bloat exceeds threshold (#135)', async () => {
+      // Create 26 unique gotchas (26 raw lines)
+      for (let i = 0; i < 26; i++) {
+        await store.store(
+          [{ artifactPatterns: [`src/${i}/**/*.ts`], description: `Gotcha ${i}` }],
+          i,
+        );
+      }
+      // Each match appends 1 hit-increment line. 26 matches → 52+ raw lines with 26 unique = 2x ratio
+      for (let i = 0; i < 26; i++) {
+        await store.match([`src/${i}/foo.ts`]);
+      }
+
+      // compactIfNeeded runs after match when ratio >= 2x and raw >= 50
+      // Verify by reading raw JSONL — should have exactly 26 lines (one per unique gotcha)
+      const { readFile } = await import('fs/promises');
+      const raw = await readFile(storePath, 'utf-8');
+      const lines = raw.split('\n').filter((l: string) => l.trim());
+      expect(lines.length).toBe(26);
+
+      // Data integrity: re-read from disk, all 26 gotchas accessible
+      const freshStore = new GotchaStore(storePath);
+      for (let i = 0; i < 26; i++) {
+        const result = await freshStore.match([`src/${i}/foo.ts`]);
+        expect(result.length).toBeGreaterThanOrEqual(1);
+      }
+    });
+
     it('removes archived entries during compaction', async () => {
       await store.store(
         [

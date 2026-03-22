@@ -5,6 +5,8 @@ import type { Gotcha } from '../types.js';
 import { randomUUID } from 'crypto';
 
 export class GotchaStore {
+  private compacting = false;
+
   constructor(private path: string) {}
 
   async store(markers: Array<{ artifactPatterns: string[]; description: string }>, sourceIssue: number, originType: 'autonomous' | 'operator' = 'autonomous'): Promise<number> {
@@ -36,6 +38,7 @@ export class GotchaStore {
         stored++;
       }
     }
+    await this.compactIfNeeded();
     return stored;
   }
 
@@ -51,6 +54,7 @@ export class GotchaStore {
       gotcha.hitCount++;
       await appendJsonl(this.path, gotcha);
     }
+    await this.compactIfNeeded();
     matched.sort((a, b) => {
       const tierOrder = (t: string) => t === 'elevated' ? 1 : 0;
       return tierOrder(b.priorityTier) - tierOrder(a.priorityTier) || b.hitCount - a.hitCount;
@@ -64,6 +68,7 @@ export class GotchaStore {
     if (gotcha) {
       gotcha.hitCount++;
       await appendJsonl(this.path, gotcha);
+      await this.compactIfNeeded();
     }
   }
 
@@ -85,6 +90,7 @@ export class GotchaStore {
     if (gotcha) {
       gotcha.promoted = true;
       await appendJsonl(this.path, gotcha);
+      await this.compactIfNeeded();
     }
   }
 
@@ -94,6 +100,7 @@ export class GotchaStore {
     if (gotcha) {
       gotcha.archived = true;
       await appendJsonl(this.path, gotcha);
+      await this.compactIfNeeded();
     }
   }
 
@@ -101,6 +108,20 @@ export class GotchaStore {
     const all = await this.loadAll();
     const active = all.filter((g) => !g.archived);
     await writeTextSafe(this.path, active.map((g) => JSON.stringify(g)).join('\n') + '\n');
+  }
+
+  private async compactIfNeeded(): Promise<void> {
+    if (this.compacting) return;
+    const entries = await readJsonl<Gotcha>(this.path);
+    const unique = new Set(entries.map((e) => e.id)).size;
+    if (entries.length >= 50 && entries.length >= unique * 2) {
+      this.compacting = true;
+      try {
+        await this.compact();
+      } finally {
+        this.compacting = false;
+      }
+    }
   }
 
   private async loadAll(): Promise<Gotcha[]> {
