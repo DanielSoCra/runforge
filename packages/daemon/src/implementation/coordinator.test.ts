@@ -528,6 +528,109 @@ describe('ImplementationCoordinator — multi-unit', () => {
     expect(deleteUnitBranch).toHaveBeenCalledTimes(1);
   });
 
+  it('merges successful units when needs-context is in the same batch — not grouped with blocked (#235)', async () => {
+    const { mergeWorktree } = await import('./worktree.js');
+    vi.mocked(mergeWorktree).mockClear();
+
+    const needsContextResult: SessionResult = {
+      output: 'I need more spec context',
+      structuredData: null,
+      cost: 0.2,
+      pitfallMarkers: [],
+      exitStatus: 'needs-context',
+    };
+
+    const validUnits = [
+      {
+        id: 'unit-ok', title: 'Succeeds', specIds: [], specContent: '',
+        expectedArtifacts: [], dependencies: [], batchNumber: 0,
+        verificationCommand: '', context: 'do ok',
+      },
+      {
+        id: 'unit-ctx', title: 'Needs context', specIds: [], specContent: '',
+        expectedArtifacts: [], dependencies: [], batchNumber: 0,
+        verificationCommand: '', context: 'needs more info',
+      },
+    ];
+
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce(ok({
+          output: 'decomposed',
+          structuredData: { units: validUnits },
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        } as SessionResult))
+        .mockResolvedValueOnce(ok(successResult))
+        .mockResolvedValueOnce(ok(needsContextResult)),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'standard',
+      specContent: 'spec',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // The successful unit should be merged — needs-context must NOT trigger the blocked early return
+      expect(result.value.success).toBe(true);
+      expect(result.value.unitResults).toHaveLength(2);
+    }
+    // Only the successful unit merges; needs-context unit does not
+    expect(mergeWorktree).toHaveBeenCalledTimes(1);
+    expect(mergeWorktree).toHaveBeenCalledWith('unit-ok', 'feature/42', '/tmp/repo');
+  });
+
+  it('returns success:false when all units need context — treated as batch failure not blocked (#235)', async () => {
+    const needsContextResult: SessionResult = {
+      output: 'I need more spec context',
+      structuredData: null,
+      cost: 0.2,
+      pitfallMarkers: [],
+      exitStatus: 'needs-context',
+    };
+
+    const validUnits = [
+      {
+        id: 'unit-ctx-only', title: 'Needs context', specIds: [], specContent: '',
+        expectedArtifacts: [], dependencies: [], batchNumber: 0,
+        verificationCommand: '', context: 'needs info',
+      },
+    ];
+
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce(ok({
+          output: 'decomposed',
+          structuredData: { units: validUnits },
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        } as SessionResult))
+        .mockResolvedValueOnce(ok(needsContextResult)),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'standard',
+      specContent: 'spec',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.success).toBe(false);
+      // Error should say "failed" (batch failure path), NOT "blocked" (escalation path)
+      expect(result.value.error).toContain('failed');
+      expect(result.value.error).not.toContain('blocked');
+      // Caller can inspect unitResults to see needs-context and decide to retry
+      expect(result.value.unitResults[0]?.exitStatus).toBe('needs-context');
+    }
+  });
+
   it('returns err when decomposition fails', async () => {
     const runtime = {
       spawnSession: vi.fn().mockResolvedValue({ ok: false, error: new Error('API timeout') }),

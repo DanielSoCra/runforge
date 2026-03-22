@@ -113,10 +113,10 @@ export class ImplementationCoordinator {
 
       // Check for failures
       const failures = batchResult.results.filter(
-        (r) => r.exitStatus === 'failed' || r.exitStatus === 'timed-out',
+        (r) => r.exitStatus === 'failed' || r.exitStatus === 'timed-out' || r.exitStatus === 'needs-context',
       );
       const blocked = batchResult.results.filter(
-        (r) => r.exitStatus === 'blocked' || r.exitStatus === 'needs-context',
+        (r) => r.exitStatus === 'blocked',
       );
 
       // Check for containment breach — terminal, no retries (STACK-AC-OPERATIONAL-SAFETY)
