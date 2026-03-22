@@ -109,10 +109,8 @@ async function executeUnit(
       task: taskContext,
       specs: unit.specContent,
       verification: unit.verificationCommand,
+      pitfalls: pitfalls || '',
     };
-    if (pitfalls) {
-      variables.pitfalls = pitfalls;
-    }
 
     const sessionResult = await runtime.spawnSession(
       'worker',

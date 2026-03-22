@@ -202,6 +202,30 @@ describe('executeBatch', () => {
     expect(result.results[0]?.cost).toBe(0.5);
   });
 
+  it('always includes pitfalls key in variables so {{pitfalls}} placeholder is replaced (#144)', async () => {
+    const runtime = createMockRuntime();
+    const units = [makeUnit('a')];
+
+    // No unitPitfalls provided — pitfalls should still be set to empty string
+    await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    const spawnCall = runtime.spawnSession.mock.calls[0];
+    const variables = spawnCall?.[1]?.variables as Record<string, string>;
+    expect(variables).toHaveProperty('pitfalls', '');
+  });
+
+  it('includes pitfalls value in variables when unitPitfalls are provided (#144)', async () => {
+    const runtime = createMockRuntime();
+    const units = [makeUnit('a')];
+    const unitPitfalls = new Map([['a', 'Watch out for X']]);
+
+    await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 }, undefined, undefined, unitPitfalls);
+
+    const spawnCall = runtime.spawnSession.mock.calls[0];
+    const variables = spawnCall?.[1]?.variables as Record<string, string>;
+    expect(variables).toHaveProperty('pitfalls', 'Watch out for X');
+  });
+
   it('propagates timed-out exit status through UnitResult (#64)', async () => {
     const timedOutResult: SessionResult = {
       output: 'timed out waiting', structuredData: null, cost: 1.2,
