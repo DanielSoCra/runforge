@@ -2,8 +2,8 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# corepack reads the pinned version from root package.json (pnpm@10.32.1)
+RUN corepack enable
 
 # Copy package files
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./

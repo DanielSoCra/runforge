@@ -19,6 +19,11 @@ describe('Briefing-summarizer Dockerfile', () => {
     );
   });
 
+  it('should NOT use pnpm@latest — must use corepack enable to read pinned version (#244)', () => {
+    expect(DOCKERFILE).not.toContain('pnpm@latest');
+    expect(DOCKERFILE).toContain('corepack enable');
+  });
+
   it('should scope pnpm install to briefing-summarizer package only', () => {
     expect(DOCKERFILE).toMatch(
       /pnpm install.*--filter.*@auto-claude\/briefing-summarizer/,
