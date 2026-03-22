@@ -112,15 +112,15 @@ export class GotchaStore {
 
   private async compactIfNeeded(): Promise<void> {
     if (this.compacting) return;
-    const entries = await readJsonl<Gotcha>(this.path);
-    const unique = new Set(entries.map((e) => e.id)).size;
-    if (entries.length >= 50 && entries.length >= unique * 2) {
-      this.compacting = true;
-      try {
+    this.compacting = true;
+    try {
+      const entries = await readJsonl<Gotcha>(this.path);
+      const unique = new Set(entries.map((e) => e.id)).size;
+      if (entries.length >= 50 && entries.length >= unique * 2) {
         await this.compact();
-      } finally {
-        this.compacting = false;
       }
+    } finally {
+      this.compacting = false;
     }
   }
 

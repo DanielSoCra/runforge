@@ -433,6 +433,36 @@ describe('GotchaStore', () => {
       }
     });
 
+    it('concurrent compactIfNeeded calls do not lose appended entries (#157)', async () => {
+      // Seed 26 unique gotchas so compaction threshold (50 raw lines, 2x ratio) is reachable
+      for (let i = 0; i < 26; i++) {
+        await store.store(
+          [{ artifactPatterns: [`race/${i}/**`], description: `Race ${i}` }],
+          i,
+        );
+      }
+
+      // Fire concurrent matches — each appends a hit-increment line AND calls compactIfNeeded.
+      // Before the fix, two concurrent compactIfNeeded calls could both read the file
+      // before either set the compacting flag, causing the second write to overwrite the first.
+      const concurrentMatches = Array.from({ length: 26 }, (_, i) =>
+        store.match([`race/${i}/foo.ts`]),
+      );
+      const results = await Promise.all(concurrentMatches);
+
+      // Every match must return at least one result — none should be lost
+      for (let i = 0; i < 26; i++) {
+        expect(results[i]!.length).toBeGreaterThanOrEqual(1);
+      }
+
+      // Verify data integrity from disk — all 26 gotchas must be readable
+      const freshStore = new GotchaStore(storePath);
+      for (let i = 0; i < 26; i++) {
+        const fromDisk = await freshStore.match([`race/${i}/foo.ts`]);
+        expect(fromDisk.length, `gotcha race/${i} lost after concurrent compaction`).toBeGreaterThanOrEqual(1);
+      }
+    });
+
     it('removes archived entries during compaction', async () => {
       await store.store(
         [
