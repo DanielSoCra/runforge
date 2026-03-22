@@ -154,7 +154,19 @@ async function executeUnit(
 
     // 4. Check diff size
     const diffSize = await getWorktreeDiffSize(unit.id, featureBranch, repoRoot);
-    if (diffSize.ok && diffSize.value > maxDiffLines) {
+    if (!diffSize.ok) {
+      console.error(`[batch] Diff size check failed for ${unit.id}:`, diffSize.error.message);
+      return {
+        unitId: unit.id,
+        exitStatus: 'failed',
+        cost: result.cost,
+        output: result.output,
+        pitfallMarkers: result.pitfallMarkers,
+        handoffNote: result.handoffNote,
+        error: `Diff size check failed: ${diffSize.error.message}`,
+      };
+    }
+    if (diffSize.value > maxDiffLines) {
       return {
         unitId: unit.id,
         exitStatus: 'failed',

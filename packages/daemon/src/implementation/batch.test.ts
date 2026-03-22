@@ -186,6 +186,22 @@ describe('executeBatch', () => {
     expect(result.results[0]?.cost).toBe(0.5);
   });
 
+  it('returns failed when getWorktreeDiffSize returns an error (#141)', async () => {
+    vi.mocked(getWorktreeDiffSize).mockResolvedValueOnce(
+      err(new Error('bad revision')),
+    );
+    const runtime = createMockRuntime();
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    expect(result.results[0]?.exitStatus).toBe('failed');
+    expect(result.results[0]?.error).toContain('Diff size check failed');
+    expect(result.results[0]?.error).toContain('bad revision');
+    // Cost should still be tracked — session ran successfully before diff check failed
+    expect(result.results[0]?.cost).toBe(0.5);
+  });
+
   it('propagates timed-out exit status through UnitResult (#64)', async () => {
     const timedOutResult: SessionResult = {
       output: 'timed out waiting', structuredData: null, cost: 1.2,
