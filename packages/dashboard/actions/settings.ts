@@ -1,18 +1,11 @@
 'use server';
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import { requireAdmin } from '@/lib/auth';
 
 export async function updateGlobalSettings(formData: FormData) {
   const supabase = await createClient();
-
-  // Auth check — only admins can change global settings
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Unauthorized');
-  const { data: member } = await supabase.from('team_members')
-    .select('role')
-    .eq('user_id', user.id)
-    .single();
-  if (member?.role !== 'admin') throw new Error('Admin access required');
+  await requireAdmin(supabase);
 
   // Validate concurrency_limit
   const raw = formData.get('concurrency_limit');
