@@ -1,5 +1,9 @@
 // src/coordination/terminal-server.ts — MCP server with coordination tools
+import { z } from 'zod';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { Proposal, IdeaSubmission, Batch, WorkerClaim, MergeQueueEntry } from './types.js';
+import { ProposalStatusSchema } from './types.js';
 import type { Result } from '../lib/result.js';
 
 // --- Handler types (testable without MCP transport) ---
@@ -81,6 +85,10 @@ export function createTerminalServerHandlers(deps: TerminalServerDeps): Terminal
         );
       }
 
+      // Note: if createWorkRequest succeeds but saveProposals fails, the GitHub
+      // issue is created but the proposal status is not persisted. This is a known
+      // limitation of JSON file persistence (no transactions). On next load the
+      // proposal will still appear as 'proposed'. The operator can re-approve.
       proposal.status = 'approved';
       proposal.decisionNotes = decisionNotes ?? null;
       proposal.decidedAt = new Date().toISOString();
@@ -158,4 +166,74 @@ export function createTerminalServerHandlers(deps: TerminalServerDeps): Terminal
       }
     },
   };
+}
+
+// --- MCP Server wiring ---
+
+function mcpTextResult(data: unknown): { content: Array<{ type: 'text'; text: string }> } {
+  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+/** Creates and starts an MCP server over stdio transport with all coordination tools. */
+export async function startTerminalServer(deps: TerminalServerDeps): Promise<void> {
+  const handlers = createTerminalServerHandlers(deps);
+  const server = new McpServer({ name: 'auto-claude-coordination', version: '1.0.0' });
+
+  server.tool('list_proposals', { statusFilter: ProposalStatusSchema.optional() }, async (params) => {
+    const result = await handlers.list_proposals({ statusFilter: params.statusFilter });
+    return mcpTextResult(result);
+  });
+
+  server.tool('submit_idea', { description: z.string().min(1) }, async (params) => {
+    const result = await handlers.submit_idea({ description: params.description });
+    return mcpTextResult(result);
+  });
+
+  server.tool('approve_proposal', { proposalId: z.string().uuid(), decisionNotes: z.string().optional() }, async (params) => {
+    const result = await handlers.approve_proposal({ proposalId: params.proposalId, decisionNotes: params.decisionNotes });
+    return mcpTextResult(result);
+  });
+
+  server.tool('reject_proposal', { proposalId: z.string().uuid(), decisionNotes: z.string().optional() }, async (params) => {
+    await handlers.reject_proposal({ proposalId: params.proposalId, decisionNotes: params.decisionNotes });
+    return mcpTextResult({ ok: true });
+  });
+
+  server.tool('get_briefing', {}, async () => {
+    const result = await handlers.get_briefing();
+    return mcpTextResult(result);
+  });
+
+  server.tool('get_active_work', {}, async () => {
+    const result = await handlers.get_active_work();
+    return mcpTextResult(result);
+  });
+
+  server.tool('get_batch_plan', {}, async () => {
+    const result = await handlers.get_batch_plan();
+    return mcpTextResult(result);
+  });
+
+  server.tool('pause_daemon', {}, async () => {
+    await handlers.pause_daemon();
+    return mcpTextResult({ ok: true });
+  });
+
+  server.tool('resume_daemon', {}, async () => {
+    await handlers.resume_daemon();
+    return mcpTextResult({ ok: true });
+  });
+
+  server.tool('cancel_batch', { batchId: z.string().uuid().optional() }, async (params) => {
+    await handlers.cancel_batch({ batchId: params.batchId });
+    return mcpTextResult({ ok: true });
+  });
+
+  server.tool('reprioritize_issue', { issueNumber: z.number().int(), priority: z.string() }, async (params) => {
+    await handlers.reprioritize_issue({ issueNumber: params.issueNumber, priority: params.priority });
+    return mcpTextResult({ ok: true });
+  });
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
 }

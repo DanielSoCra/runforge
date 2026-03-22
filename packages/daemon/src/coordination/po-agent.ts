@@ -49,8 +49,8 @@ export function createPOAgent(deps: POAgentDeps, config: POAgentConfig): POAgent
 
   function start(): () => void {
     intervalTimer = setInterval(() => {
-      runCycle().catch(() => {
-        // Cycle errors are swallowed — next cycle will retry
+      runCycle().catch((e) => {
+        console.error('[po-agent] cycle error:', e);
       });
     }, config.intervalMs);
 
@@ -86,7 +86,9 @@ export function createPOAgent(deps: POAgentDeps, config: POAgentConfig): POAgent
     }
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
-      runCycle().catch(() => {});
+      runCycle().catch((e) => {
+        console.error('[po-agent] debounced cycle error:', e);
+      });
     }, config.debounceMs);
 
     return idea;

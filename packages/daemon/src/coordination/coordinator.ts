@@ -89,8 +89,8 @@ export function createCoordinator(deps: CoordinatorDeps, config: CoordinatorConf
     }
 
     tickTimer = setInterval(() => {
-      tick().catch(() => {
-        // Tick errors are swallowed — next tick will retry
+      tick().catch((e) => {
+        console.error('[coordinator] tick error:', e);
       });
     }, config.tickIntervalMs);
 
