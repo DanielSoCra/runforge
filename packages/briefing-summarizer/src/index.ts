@@ -7,6 +7,7 @@
  * NOT part of Next.js or the daemon — this is a separate Node.js process.
  */
 
+import { execFileSync } from 'node:child_process';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { collectSignals, type SignalResult } from './signals.js';
@@ -53,6 +54,31 @@ function createSupabaseClient(): SupabaseClient {
 
 function createAnthropicClient(): Anthropic {
   return new Anthropic({ apiKey: ANTHROPIC_API_KEY });
+}
+
+// ---------------------------------------------------------------------------
+// Repo URL (for constructing full GitHub PR links)
+// ---------------------------------------------------------------------------
+
+function getRepoUrl(): string | null {
+  try {
+    const raw = execFileSync('git', ['remote', 'get-url', 'origin'], {
+      encoding: 'utf-8',
+      timeout: 5_000,
+    }).trim();
+
+    // SSH format: git@github.com:org/repo.git
+    const sshMatch = raw.match(/^git@([^:]+):(.+?)(?:\.git)?$/);
+    if (sshMatch) return `https://${sshMatch[1]}/${sshMatch[2]}`;
+
+    // HTTPS format: https://github.com/org/repo.git
+    const httpsMatch = raw.match(/^https?:\/\/([^/]+)\/(.+?)(?:\.git)?$/);
+    if (httpsMatch) return `https://${httpsMatch[1]}/${httpsMatch[2]}`;
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +229,7 @@ async function checkNotificationChannels(supabase: SupabaseClient): Promise<void
 async function runCycle(
   supabase: SupabaseClient,
   anthropic: Anthropic,
+  repoUrl: string | null,
 ): Promise<void> {
   const cycleStart = Date.now();
   log('info', 'Starting summarizer cycle');
@@ -232,7 +259,7 @@ async function runCycle(
   log('info', 'Briefing written to Supabase');
 
   // 6. Extract and write activity events
-  const events = extractActivityEvents(signals, previous?.signal_snapshot ?? null);
+  const events = extractActivityEvents(signals, previous?.signal_snapshot ?? null, repoUrl);
   await writeActivityEvents(supabase, events);
   log('info', `Wrote ${events.length} activity event(s)`);
 
@@ -252,10 +279,11 @@ async function main(): Promise<void> {
 
   const supabase = createSupabaseClient();
   const anthropic = createAnthropicClient();
+  const repoUrl = getRepoUrl();
 
-  log('info', `Briefing summarizer starting (interval=${INTERVAL_MS}ms, daemon=${DAEMON_URL})`);
+  log('info', `Briefing summarizer starting (interval=${INTERVAL_MS}ms, daemon=${DAEMON_URL}, repo=${repoUrl ?? 'unknown'})`);
 
-  const runner = createCycleRunner(() => runCycle(supabase, anthropic));
+  const runner = createCycleRunner(() => runCycle(supabase, anthropic, repoUrl));
 
   // Run first cycle immediately
   await runner.wrappedCycle();
