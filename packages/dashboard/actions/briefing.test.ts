@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+// Mock auth — requireAdmin resolves by default; tests override to reject
+const mockRequireAdmin = vi.fn().mockResolvedValue({ id: 'user-1', email: 'admin@test.com' });
+vi.mock('@/lib/auth', () => ({
+  requireAdmin: (...args: unknown[]) => mockRequireAdmin(...args),
+}));
+
 // Mock Supabase client
 const mockFrom = vi.fn();
 vi.mock('@/lib/supabase/server', () => ({
@@ -25,6 +31,7 @@ const mockFetch = vi.fn();
 let savedGithubToken: string | undefined;
 
 beforeEach(() => {
+  mockRequireAdmin.mockReset().mockResolvedValue({ id: 'user-1', email: 'admin@test.com' });
   mockFrom.mockReset();
   mockServiceFrom.mockReset();
   mockServiceRpc.mockReset();
@@ -433,6 +440,35 @@ describe('getActivityFeed', () => {
     await getActivityFeed({ pageSize: 10 });
 
     expect(limitMock).toHaveBeenCalledWith(10);
+  });
+});
+
+describe('requireAdmin guard (SEC-25 regression)', () => {
+  it('every exported server action calls requireAdmin before querying', async () => {
+    // Setup: requireAdmin rejects
+    mockRequireAdmin.mockRejectedValue(new Error('Unauthorized'));
+
+    const {
+      getLatestBriefing,
+      getActiveRuns,
+      getNeedsAttention,
+      getUpNext,
+      getActivityFeed,
+      refreshLivePanels,
+    } = await import('./briefing');
+
+    // Each action should throw Unauthorized before touching Supabase
+    await expect(getLatestBriefing()).rejects.toThrow('Unauthorized');
+    await expect(getActiveRuns()).rejects.toThrow('Unauthorized');
+    await expect(getNeedsAttention()).rejects.toThrow('Unauthorized');
+    await expect(getUpNext()).rejects.toThrow('Unauthorized');
+    await expect(getActivityFeed()).rejects.toThrow('Unauthorized');
+    await expect(refreshLivePanels()).rejects.toThrow('Unauthorized');
+
+    // requireAdmin was called 6 times (once per action), Supabase was never queried
+    expect(mockRequireAdmin).toHaveBeenCalledTimes(6);
+    expect(mockFrom).not.toHaveBeenCalled();
+    expect(mockServiceFrom).not.toHaveBeenCalled();
   });
 });
 
