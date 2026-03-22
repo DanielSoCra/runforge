@@ -95,4 +95,16 @@ describe('importRepos', () => {
     await importRepos('conn-1', [{ owner: 'my-org.test', name: 'repo_name-1' }]);
     expect(mockUpsert).toHaveBeenCalled();
   });
+
+  it('upserts repos with enabled=false per credential-first workflow (SPEC-4 regression)', async () => {
+    const mockUpsert = vi.fn().mockResolvedValue({ error: null });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockFrom.mockImplementation((() => ({ upsert: mockUpsert })) as any);
+    const { importRepos } = await import('./github-connections.js');
+    await importRepos('conn-1', [{ owner: 'acme', name: 'repo' }]);
+    expect(mockUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: false }),
+      expect.any(Object),
+    );
+  });
 });

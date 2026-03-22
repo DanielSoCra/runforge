@@ -42,7 +42,7 @@ export async function importRepos(
   // Upsert by owner+name — for new repos insert disabled; for existing only update connection_id
   for (const { owner, name } of repos) {
     const { error: upsertErr } = await supabase.from('repos').upsert(
-      { owner, name, connection_id: connectionId, deleted_at: null, enabled: true },
+      { owner, name, connection_id: connectionId, deleted_at: null, enabled: false },
       { onConflict: 'owner,name', ignoreDuplicates: false },
     );
     if (upsertErr) {
