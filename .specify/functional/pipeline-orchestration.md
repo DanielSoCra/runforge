@@ -3,7 +3,7 @@ id: FUNC-AC-PIPELINE
 type: functional
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 1
 ---
 
@@ -13,10 +13,15 @@ layer: 1
 
 Writing precise specifications is valuable only if those specifications get implemented, tested, delivered to a pre-production environment, and validated without requiring the Spec Author to shepherd the process. The gap between "spec written" and "feature available for pre-production review" is entirely mechanical — detecting work, routing it through phases, and managing state — yet today it requires continuous human attention.
 
+## Definitions
+
+**Work request** — A GitHub Issue on a monitored repository, labeled as ready for the system to pick up. The Issue body contains references to governing specifications (spec IDs). The system uses labels to track state transitions (ready → in-progress → complete or stuck). A work request is classified as either a feature request or a bug report based on its labels or content.
+
 ## Actors
 
 - **Operator** — configures the system, monitors status, and approves production releases
 - **Spec Author** — submits work requests with references to governing specifications
+- **Daemon** — the background process that implements this spec: polls for work requests, drives the pipeline FSM, and dispatches workers. The dashboard (FUNC-AC-DASHBOARD) provides the Admin interface to this process.
 
 ## Behavior
 
@@ -113,12 +118,18 @@ Writing precise specifications is valuable only if those specifications get impl
 **Scenario: Operator notification**
 - Given the system completes, fails, or encounters a safety event during processing
 - When the event occurs
-- Then the Operator is notified through configured channels with relevant details
+- Then the Operator is notified through the notification system (see FUNC-AC-DASHBOARD, Notifications section) with relevant details
 
 **Scenario: Production release**
 - Given one or more completed work requests exist in pre-production
 - When the Operator (or a schedule) triggers a release
 - Then the system prepares a release with aggregated notes and waits for the Operator to approve
+
+## Scope
+
+This spec defines the lifecycle of a **single work request** from detection through completion. Each monitored repository runs its own pipeline instance.
+
+For multi-issue coordination (batch planning, dependency ordering, merge sequencing, and product proposals), see FUNC-AC-COORDINATION. For multi-repository management (adding, enabling, configuring repositories), see FUNC-AC-DASHBOARD.
 
 ## Success Criteria
 

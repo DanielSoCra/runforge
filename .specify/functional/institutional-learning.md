@@ -3,7 +3,7 @@ id: FUNC-AC-LEARNING
 type: functional
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 1
 ---
 
@@ -128,12 +128,30 @@ Each new piece of implementation work starts with limited project memory. When a
 - When the system prepares working context for a new unit
 - Then Operator corrections are injected with higher prominence than regular observations — ensuring they are not lost among lower-priority context
 
+### Knowledge from Implementation Records
+
+**Scenario: Implementation record captures reasoning**
+- Given an implementation assignment completes
+- When the work is committed to the record
+- Then the record captures what changed, why the approach was chosen, what was discovered, and what approaches failed
+
+**Scenario: Completed run contributes to institutional knowledge**
+- Given a run completes successfully
+- When the system processes the completion
+- Then it extracts knowledge from the implementation records and adds it to the knowledge store using the standard deduplication and storage flow
+
+**Scenario: Future work benefits from past implementations**
+- Given future work touches similar areas of the codebase
+- When the system prepares context for that work
+- Then knowledge extracted from past implementation records on those same areas is included alongside other matched observations
+
 ## Success Criteria
 
 - New implementation work receives relevant institutional knowledge before starting — it does not rediscover known pitfalls
 - Recurring patterns are promoted to permanent documentation, reducing repeated ad hoc context injection
 - Proposed operating instruction improvements are grounded in empirical outcomes
 - All knowledge changes require Operator approval — the system proposes, the human disposes
+- Successful implementation runs produce records containing sufficient reasoning for knowledge extraction
 
 ## Constraints
 
@@ -142,3 +160,5 @@ Each new piece of implementation work starts with limited project memory. When a
 - The system may temporarily enrich future work context from approved knowledge stores, but permanent changes to instructions, documentation, or evaluation standards always require Operator approval
 - Learned patterns are structured data (key, description, confidence score, source), not unstructured prose
 - Operator corrections always carry more weight than autonomous observations — the human's judgment takes priority
+- Only successfully completed runs contribute knowledge from their implementation records — stuck or escalated runs do not
+- Knowledge extracted from implementation records enters the same store and follows the same lifecycle (deduplication, injection, promotion, archival) as all other observations
