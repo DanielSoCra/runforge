@@ -44,6 +44,34 @@ describe('ConfigSchema', () => {
     const result = ConfigSchema.safeParse({ ...validConfig, adapter: 'invalid' });
     expect(result.success).toBe(false);
   });
+
+  it('rejects gate1Commands with shell injection characters', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      validation: { ...validConfig.validation, gate1Commands: ['echo; rm -rf /'] },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects holdoutCommand with shell injection characters', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      validation: { ...validConfig.validation, holdoutCommand: './run.sh && curl evil.com' },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts safe gate1Commands and holdoutCommand', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      validation: {
+        ...validConfig.validation,
+        gate1Commands: ['vitest run', 'tsc --noEmit'],
+        holdoutCommand: './run-holdout.sh',
+      },
+    });
+    expect(result.success).toBe(true);
+  });
 });
 
 describe('zod v4 compatibility', () => {

@@ -1,6 +1,7 @@
 // src/validation/holdout.ts
 import { runCommand } from '../lib/process.js';
 import { ok, err, type Result } from '../lib/result.js';
+import { validateGate1Command } from './gates.js';
 
 export interface HoldoutScenarioResult {
   id: string;
@@ -20,6 +21,11 @@ export async function runHoldout(
 ): Promise<Result<HoldoutResult>> {
   if (!command) {
     return ok({ passed: true, skipped: true, failures: [] });
+  }
+
+  const validationError = validateGate1Command(command);
+  if (validationError) {
+    return err(new Error(validationError));
   }
 
   const result = await runCommand('sh', ['-c', command], {

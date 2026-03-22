@@ -103,6 +103,16 @@ describe('runHoldout', () => {
     }
   });
 
+  it('rejects holdout command with shell injection characters', async () => {
+    const result = await runHoldout('echo $(whoami)', 'refs/heads/main', '/workspace');
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('disallowed shell character');
+    }
+    expect(mockRunCommand).not.toHaveBeenCalled();
+  });
+
   it('passes BRANCH_REF and cwd to runCommand', async () => {
     const output = JSON.stringify({ scenarios: [] });
     mockRunCommand.mockResolvedValue({ ok: true, value: output });

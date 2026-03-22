@@ -7,6 +7,21 @@ export interface Gate {
   execute(cwd: string): Promise<GateResult>;
 }
 
+/**
+ * Dangerous shell metacharacters that enable command injection when passed to sh -c.
+ * Blocks: command chaining (;, &&, ||), subshells ($(), ``), redirects (>, <),
+ * backgrounding (&), pipes (|), and escape sequences (\).
+ */
+const DANGEROUS_SHELL_PATTERN = /[;|&`$(){}><\n\\]/;
+
+export function validateGate1Command(cmd: string): string | null {
+  const matched = cmd.match(DANGEROUS_SHELL_PATTERN);
+  if (matched) {
+    return `Gate1 command contains disallowed shell character '${matched[0]}': ${cmd}`;
+  }
+  return null;
+}
+
 export function createGate1(commands: string[]): Gate {
   return {
     type: 'deterministic',
@@ -14,7 +29,15 @@ export function createGate1(commands: string[]): Gate {
       const findings: ReviewFinding[] = [];
       for (const cmd of commands) {
         if (!cmd.trim()) continue;
-        // Use sh -c to handle quoted arguments and pipes correctly
+        const validationError = validateGate1Command(cmd);
+        if (validationError) {
+          findings.push({
+            severity: 'critical',
+            location: cmd,
+            description: validationError,
+          });
+          return { gate: 'deterministic', passed: false, findings };
+        }
         const result = await runCommand('sh', ['-c', cmd], { cwd, timeoutMs: 120_000 });
         if (!result.ok) {
           findings.push({
