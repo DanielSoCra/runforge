@@ -2,12 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
-// Mock @supabase/ssr
+// Mock @supabase/ssr — capture cookies config to simulate token refresh
 const mockGetUser = vi.fn();
+let capturedCookiesConfig: { setAll: (cookies: Array<{ name: string; value: string; options?: object }>) => void } | null = null;
+
 vi.mock('@supabase/ssr', () => ({
-  createServerClient: vi.fn(() => ({
-    auth: { getUser: mockGetUser },
-  })),
+  createServerClient: vi.fn((_url: string, _key: string, opts: { cookies: typeof capturedCookiesConfig }) => {
+    capturedCookiesConfig = opts.cookies;
+    return { auth: { getUser: mockGetUser } };
+  }),
 }));
 
 // Mock env to avoid missing-env errors
@@ -92,14 +95,41 @@ describe('updateSession middleware', () => {
     expect(response.headers.get('location')).toBeNull();
   });
 
-  it('preserves cookies on redirect responses', async () => {
-    mockGetUser.mockResolvedValue({ data: { user: null } });
+  it('forwards refreshed cookies onto redirect responses', async () => {
+    // Simulate Supabase triggering setAll during getUser (token refresh)
+    mockGetUser.mockImplementation(async () => {
+      capturedCookiesConfig!.setAll([
+        { name: 'sb-access-token', value: 'refreshed-access', options: { path: '/' } },
+        { name: 'sb-refresh-token', value: 'refreshed-refresh', options: { path: '/' } },
+      ]);
+      return { data: { user: null } };
+    });
 
-    // Spy on NextResponse.redirect to verify cookie forwarding
     const response = await updateSession(makeRequest('/settings'));
 
     expect(response.status).toBe(307);
-    // The redirect response should be a valid NextResponse
-    expect(response).toBeInstanceOf(NextResponse);
+    // Verify the refreshed cookies were forwarded to the redirect response
+    const cookieHeader = response.headers.get('set-cookie');
+    expect(cookieHeader).toContain('sb-access-token');
+    expect(cookieHeader).toContain('refreshed-access');
+    expect(cookieHeader).toContain('sb-refresh-token');
+    expect(cookieHeader).toContain('refreshed-refresh');
+  });
+
+  it('sets refreshed cookies on passthrough responses', async () => {
+    // Simulate token refresh for an authenticated user
+    mockGetUser.mockImplementation(async () => {
+      capturedCookiesConfig!.setAll([
+        { name: 'sb-access-token', value: 'new-token', options: { path: '/' } },
+      ]);
+      return { data: { user: { id: 'u1' } } };
+    });
+
+    const response = await updateSession(makeRequest('/dashboard'));
+
+    expect(response.status).toBe(200);
+    const cookieHeader = response.headers.get('set-cookie');
+    expect(cookieHeader).toContain('sb-access-token');
+    expect(cookieHeader).toContain('new-token');
   });
 });
