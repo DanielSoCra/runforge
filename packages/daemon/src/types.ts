@@ -98,6 +98,7 @@ export interface RunState {
   diagnosisDetail?: string; // Serialized BugDiagnosis JSON — passed to bug-worker sessions
   classificationComplexity?: 'simple' | 'standard' | 'complex';
   handoffNotes?: Record<string, string>;
+  workerClaimId?: string;
 }
 
 // --- Daemon State ---

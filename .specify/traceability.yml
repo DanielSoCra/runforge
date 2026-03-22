@@ -511,11 +511,13 @@ STACK-AC-COORDINATION:
   children: []
   code_paths:
     - packages/daemon/src/coordination/
+    - packages/daemon/src/coordination/coordinator.ts
     - packages/daemon/src/coordination/concurrency.ts
     - packages/daemon/src/coordination/batch-manager.ts
     - packages/daemon/src/coordination/work-claimer.ts
+    - packages/daemon/src/coordination/po-agent.ts
+    - packages/daemon/src/coordination/terminal-server.ts
     - packages/daemon/src/coordination/types.ts
-    # planned: coordinator.ts, po-agent.ts, terminal-server.ts — add when implemented
   test_paths:
     - packages/daemon/src/coordination/**/*.test.ts
   status: draft
