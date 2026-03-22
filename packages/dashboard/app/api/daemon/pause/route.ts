@@ -1,14 +1,15 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { requireAdmin } from '@/lib/auth';
 
 export async function POST() {
-  // Auth check — only admins can control the daemon
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const { data: member } = await supabase.from('team_members')
-    .select('role').eq('user_id', user.id).single();
-  if (member?.role !== 'admin') return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  try {
+    const supabase = await createClient();
+    await requireAdmin(supabase);
+  } catch (e: any) {
+    const status = e.message === 'Unauthorized' ? 401 : 403;
+    return NextResponse.json({ error: e.message }, { status });
+  }
 
   try {
     const res = await fetch(`${process.env.DAEMON_URL}/pause`, {
