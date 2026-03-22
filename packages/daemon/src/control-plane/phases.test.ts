@@ -579,5 +579,50 @@ describe('createPhaseHandlers', () => {
         }),
       );
     });
+
+    it('returns success even when postReport throws (#107)', async () => {
+      mockPostReport.mockRejectedValue(new Error('GitHub API 500'));
+      const { handlers } = createHandlers();
+      const result = await handlers.report!(makeRun());
+      expect(result).toBe('success');
+    });
+
+    it('returns success even when completeWork throws (#107)', async () => {
+      mockCreateWorkDetector.mockReturnValue({
+        completeWork: vi.fn(async () => { throw new Error('network timeout'); }),
+        detectReadyWork: vi.fn(),
+        claimWork: vi.fn(),
+        markStuck: vi.fn(),
+      } as any);
+      const { handlers } = createHandlers();
+      const result = await handlers.report!(makeRun());
+      expect(result).toBe('success');
+    });
+
+    it('returns success even when appendResult throws (#107)', async () => {
+      mockAppendResult.mockRejectedValue(new Error('disk full'));
+      const { handlers } = createHandlers();
+      const result = await handlers.report!(makeRun());
+      expect(result).toBe('success');
+    });
+
+    it('returns success even when notify throws (#107)', async () => {
+      mockNotify.mockRejectedValue(new Error('webhook unreachable'));
+      const { handlers } = createHandlers();
+      const result = await handlers.report!(makeRun());
+      expect(result).toBe('success');
+    });
+
+    it('continues remaining steps when an earlier step fails (#107)', async () => {
+      // postReport fails, but completeWork, appendResult, notify should still run
+      mockPostReport.mockRejectedValue(new Error('GitHub API 500'));
+      const { handlers } = createHandlers();
+      await handlers.report!(makeRun());
+
+      const detector = mockCreateWorkDetector.mock.results[0]!.value;
+      expect(detector.completeWork).toHaveBeenCalled();
+      expect(mockAppendResult).toHaveBeenCalled();
+      expect(mockNotify).toHaveBeenCalled();
+    });
   });
 });

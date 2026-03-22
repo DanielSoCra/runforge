@@ -225,32 +225,51 @@ export function createPhaseHandlers(
       const reportBody = formatReport(run, outcome);
       run.report = reportBody;
 
-      // Post report as comment
-      await postReport(octokit, owner, repo, workRequest.issueNumber, reportBody);
+      // Report phase is best-effort: the implementation work is already done.
+      // If any GitHub/notification call fails, log the error but still return
+      // 'success' so the pipeline completes rather than going stuck.
+      try {
+        // Post report as comment
+        await postReport(octokit, owner, repo, workRequest.issueNumber, reportBody);
+      } catch (err) {
+        console.error(`[report] postReport failed (non-fatal):`, err);
+      }
 
-      // Complete the work request (label + close)
-      await detector.completeWork(workRequest.issueNumber, reportBody);
+      try {
+        // Complete the work request (label + close)
+        await detector.completeWork(workRequest.issueNumber, reportBody);
+      } catch (err) {
+        console.error(`[report] completeWork failed (non-fatal):`, err);
+      }
 
-      // Append to results ledger
-      await appendResult({
-        issueNumber: workRequest.issueNumber,
-        startedAt: run.startedAt,
-        completedAt: new Date().toISOString(),
-        variant: run.variant,
-        totalCost: run.cost,
-        phasesExecuted: Object.keys(run.phaseCompletions),
-        fixAttemptCount: run.fixAttempts.length,
-        outcome,
-        diagnosisType: run.diagnosisType,
-        diagnosisConfidence: run.diagnosisConfidence,
-      }, stateDir);
+      try {
+        // Append to results ledger
+        await appendResult({
+          issueNumber: workRequest.issueNumber,
+          startedAt: run.startedAt,
+          completedAt: new Date().toISOString(),
+          variant: run.variant,
+          totalCost: run.cost,
+          phasesExecuted: Object.keys(run.phaseCompletions),
+          fixAttemptCount: run.fixAttempts.length,
+          outcome,
+          diagnosisType: run.diagnosisType,
+          diagnosisConfidence: run.diagnosisConfidence,
+        }, stateDir);
+      } catch (err) {
+        console.error(`[report] appendResult failed (non-fatal):`, err);
+      }
 
-      // Notify
-      await notify(config.webhooks, {
-        event: 'complete',
-        issueNumber: workRequest.issueNumber,
-        message: `Issue #${workRequest.issueNumber} completed ($${run.cost.toFixed(2)})`,
-      });
+      try {
+        // Notify
+        await notify(config.webhooks, {
+          event: 'complete',
+          issueNumber: workRequest.issueNumber,
+          message: `Issue #${workRequest.issueNumber} completed ($${run.cost.toFixed(2)})`,
+        });
+      } catch (err) {
+        console.error(`[report] notify failed (non-fatal):`, err);
+      }
 
       return 'success';
     },
