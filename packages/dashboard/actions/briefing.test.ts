@@ -22,16 +22,25 @@ vi.mock('@/lib/supabase/service', () => ({
 const originalFetch = globalThis.fetch;
 const mockFetch = vi.fn();
 
+let savedGithubToken: string | undefined;
+
 beforeEach(() => {
   mockFrom.mockReset();
   mockServiceFrom.mockReset();
   mockServiceRpc.mockReset();
   mockFetch.mockReset();
   globalThis.fetch = mockFetch;
+  savedGithubToken = process.env.GITHUB_TOKEN;
 });
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  // Restore GITHUB_TOKEN to prevent env leaks between tests
+  if (savedGithubToken !== undefined) {
+    process.env.GITHUB_TOKEN = savedGithubToken;
+  } else {
+    delete process.env.GITHUB_TOKEN;
+  }
 });
 
 describe('getLatestBriefing', () => {
@@ -276,8 +285,6 @@ describe('getUpNext', () => {
     expect(result[1].issueNumber).toBe(30);
     expect(result[2].pipelineLabel).toBe('l1-approved');
     expect(result[2].issueNumber).toBe(10);
-
-    delete process.env.GITHUB_TOKEN;
   });
 
   it('excludes issues that have in-progress runs', async () => {
@@ -295,8 +302,6 @@ describe('getUpNext', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].issueNumber).toBe(30);
-
-    delete process.env.GITHUB_TOKEN;
   });
 
   it('returns empty array when no repos are enabled', async () => {
@@ -338,8 +343,6 @@ describe('getUpNext', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].issueNumber).toBe(20);
-
-    delete process.env.GITHUB_TOKEN;
   });
 
   it('excludes issues with implementing label (already being worked on)', async () => {
@@ -357,8 +360,6 @@ describe('getUpNext', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].issueNumber).toBe(20);
-
-    delete process.env.GITHUB_TOKEN;
   });
 });
 

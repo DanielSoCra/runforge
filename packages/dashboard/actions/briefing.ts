@@ -187,6 +187,15 @@ export async function getUpNext(): Promise<UpNextItem[]> {
       .eq('outcome', 'in-progress'),
   ]);
 
+  if (reposResult.error) {
+    console.error('[briefing] getUpNext repos query failed:', reposResult.error);
+    return [];
+  }
+  if (runsResult.error) {
+    console.error('[briefing] getUpNext runs query failed:', runsResult.error);
+    return [];
+  }
+
   const repos = (reposResult.data ?? []) as Array<{
     id: string; owner: string; name: string; connection_id: string | null;
   }>;
@@ -200,11 +209,9 @@ export async function getUpNext(): Promise<UpNextItem[]> {
     ),
   );
 
-  // Resolve tokens and fetch issues per repo
-  const items: UpNextItem[] = [];
-
-  await Promise.all(
-    repos.map(async (repo) => {
+  // Resolve tokens and fetch issues per repo (first 100 per repo — sufficient for pipeline queues)
+  const perRepoItems = await Promise.all(
+    repos.map(async (repo): Promise<UpNextItem[]> => {
       let token: string | undefined;
       if (repo.connection_id) {
         const { data } = await service.rpc('decrypt_github_token', {
@@ -214,7 +221,7 @@ export async function getUpNext(): Promise<UpNextItem[]> {
       } else {
         token = process.env.GITHUB_TOKEN;
       }
-      if (!token) return;
+      if (!token) return [];
 
       try {
         const res = await fetch(
@@ -226,9 +233,10 @@ export async function getUpNext(): Promise<UpNextItem[]> {
             },
           },
         );
-        if (!res.ok) return;
+        if (!res.ok) return [];
 
         const issues = (await res.json()) as GitHubIssue[];
+        const repoItems: UpNextItem[] = [];
 
         for (const issue of issues) {
           // Skip PRs (GitHub issues endpoint includes them)
@@ -249,18 +257,22 @@ export async function getUpNext(): Promise<UpNextItem[]> {
           );
           if (!stageLabel) continue;
 
-          items.push({
+          repoItems.push({
             issueNumber: issue.number,
             repoOwner: repo.owner,
             repoName: repo.name,
             pipelineLabel: stageLabel,
           });
         }
+        return repoItems;
       } catch {
         // Skip repo on fetch failure — degrade gracefully
+        return [];
       }
     }),
   );
+
+  const items = perRepoItems.flat();
 
   // Sort by pipeline stage priority (ready-to-implement first)
   items.sort(
