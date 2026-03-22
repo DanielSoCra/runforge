@@ -224,6 +224,75 @@ describe('RepoManager', () => {
     mgr.stop();
   });
 
+  it('resolveToken logs warning and falls back to GITHUB_TOKEN when RPC fails', async () => {
+    const onPoll = vi.fn();
+    const originalEnv = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = 'fallback-token';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const supabase = {
+        from: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          is: vi.fn().mockResolvedValue({
+            data: [{ id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: 'conn-1' }],
+            error: null,
+          }),
+        }),
+        rpc: vi.fn().mockResolvedValue({ data: null, error: { message: 'RPC failed: missing row' } }),
+      } as any;
+
+      const mgr = new RepoManager(supabase, 60_000, onPoll);
+      await mgr.initialize();
+
+      // The poller should still be created (using fallback token)
+      expect(mgr.activePollerCount()).toBe(1);
+      // A warning should have been logged
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('decrypt_github_token RPC failed for connection conn-1'),
+      );
+
+      mgr.stop();
+    } finally {
+      warnSpy.mockRestore();
+      process.env.GITHUB_TOKEN = originalEnv;
+    }
+  });
+
+  it('resolveToken logs warning when RPC returns null data without error', async () => {
+    const onPoll = vi.fn();
+    const originalEnv = process.env.GITHUB_TOKEN;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const supabase = {
+        from: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          is: vi.fn().mockResolvedValue({
+            data: [{ id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: 'conn-2' }],
+            error: null,
+          }),
+        }),
+        rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
+      } as any;
+
+      const mgr = new RepoManager(supabase, 60_000, onPoll);
+      await mgr.initialize();
+
+      expect(mgr.activePollerCount()).toBe(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('decrypt_github_token returned null for connection conn-2'),
+      );
+
+      mgr.stop();
+    } finally {
+      warnSpy.mockRestore();
+      process.env.GITHUB_TOKEN = originalEnv;
+    }
+  });
+
   it('upsertRepo inserts a repo and returns its id', async () => {
     const onPoll = vi.fn();
     const supabase = {

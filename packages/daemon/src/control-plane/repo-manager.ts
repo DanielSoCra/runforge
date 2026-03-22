@@ -137,9 +137,16 @@ export class RepoManager {
 
   private async resolveToken(connectionId: string | null): Promise<string | undefined> {
     if (!connectionId) return process.env.GITHUB_TOKEN;
-    const { data } = await this.supabase.rpc('decrypt_github_token', {
+    const { data, error } = await this.supabase.rpc('decrypt_github_token', {
       p_connection_id: connectionId,
     });
+    if (error) {
+      console.warn(`[repo-manager] decrypt_github_token RPC failed for connection ${connectionId}: ${error.message} — falling back to GITHUB_TOKEN`);
+      return process.env.GITHUB_TOKEN;
+    }
+    if (!data) {
+      console.warn(`[repo-manager] decrypt_github_token returned null for connection ${connectionId} — falling back to GITHUB_TOKEN`);
+    }
     return (data as string | null) ?? process.env.GITHUB_TOKEN;
   }
 
