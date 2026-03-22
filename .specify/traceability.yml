@@ -382,7 +382,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/app/api/github/connections/[id]/orgs/route.ts
     - packages/dashboard/app/api/github/connections/[id]/repos/route.ts
     - supabase/migrations/008_fix_rpc_privilege_escalation.sql
-    - docker-compose.prod.yml
+    - docker-compose.yml
     - Caddyfile
     - packages/dashboard/Dockerfile
     - .env.prod.example
