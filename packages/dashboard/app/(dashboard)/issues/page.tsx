@@ -1,5 +1,6 @@
 // packages/dashboard/app/(dashboard)/issues/page.tsx
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
 import { classifyIssues, type RunRecord, type GitHubIssue } from '@/lib/classify-issues';
 import { IssuesBoard } from '@/components/issues-board';
 
@@ -68,11 +69,13 @@ export default async function IssuesPage() {
   }
 
   // Fetch token + issues per repo in parallel, tracking whether each repo has a token
+  const service = createServiceClient();
   const repoIssueResults = await Promise.all(
     repoList.map(async (repo) => {
       let token: string | undefined;
       if (repo.connection_id) {
-        const { data } = await supabase.rpc('decrypt_github_token', { p_connection_id: repo.connection_id });
+        // Service role required — decrypt_github_token has REVOKE EXECUTE FROM PUBLIC
+        const { data } = await service.rpc('decrypt_github_token', { p_connection_id: repo.connection_id });
         token = (data as string | null) ?? process.env.GITHUB_TOKEN;
       } else {
         token = process.env.GITHUB_TOKEN;

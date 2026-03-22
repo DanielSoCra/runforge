@@ -1,11 +1,15 @@
 vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(),
 }));
+vi.mock('@/lib/supabase/service', () => ({
+  createServiceClient: vi.fn(),
+}));
 
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import IssuesPage from './page';
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
 
 function mockSupabase(repos: Record<string, unknown>[] = [], runs: Record<string, unknown>[] = []) {
   const runsResolved = { data: runs, error: null };
@@ -32,7 +36,8 @@ function mockSupabase(repos: Record<string, unknown>[] = [], runs: Record<string
     return { select: vi.fn() };
   });
 
-  vi.mocked(createClient).mockResolvedValue({ from: fromFn, rpc: rpcFn } as never);
+  vi.mocked(createClient).mockResolvedValue({ from: fromFn } as never);
+  vi.mocked(createServiceClient).mockReturnValue({ rpc: rpcFn } as never);
   return { rpcFn };
 }
 
@@ -66,6 +71,30 @@ describe('IssuesPage', () => {
 
     expect(screen.getByText(/None of your enabled repos have a GitHub token/)).toBeInTheDocument();
     expect(screen.getByText('Go to Settings')).toBeInTheDocument();
+  });
+
+  it('calls decrypt_github_token via service-role client, not user-session client (#171)', async () => {
+    const repos = [
+      { id: '1', owner: 'acme', name: 'app', connection_id: 'conn-1' },
+    ];
+    const { rpcFn } = mockSupabase(repos, []);
+    rpcFn.mockResolvedValue({ data: 'ghp_faketoken123' });
+
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve([]),
+    }) as unknown as typeof fetch;
+
+    try {
+      await IssuesPage();
+
+      // Service client should have been used for decrypt_github_token
+      expect(createServiceClient).toHaveBeenCalled();
+      expect(rpcFn).toHaveBeenCalledWith('decrypt_github_token', { p_connection_id: 'conn-1' });
+    } finally {
+      global.fetch = originalFetch;
+    }
   });
 
   it('shows board when at least one repo has a GitHub token (#129)', async () => {
