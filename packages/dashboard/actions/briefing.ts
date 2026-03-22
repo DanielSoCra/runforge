@@ -56,9 +56,13 @@ export async function getLatestBriefing(): Promise<Briefing | null> {
     .limit(1)
     .single();
 
-  if (error && error.code === 'PGRST116') {
-    // No rows found
-    return null;
+  if (error) {
+    if (error.code === 'PGRST116') {
+      // No rows found
+      return null;
+    }
+    console.error('[briefing] getLatestBriefing failed:', error);
+    throw new Error('Failed to fetch latest briefing');
   }
   return data ?? null;
 }
