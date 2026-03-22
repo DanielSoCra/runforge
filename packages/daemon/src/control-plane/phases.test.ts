@@ -309,6 +309,51 @@ describe('createPhaseHandlers', () => {
       const result = await handlers.implement!(makeRun());
       expect(result).toBe('failure');
     });
+
+    it('persists handoff notes to RunState on implementation failure (#121)', async () => {
+      const { handlers, coordinator } = createHandlers();
+      const handoffMap = new Map<string, string>();
+      handoffMap.set('issue-42', 'Stopped at step 3\nNext: continue from step 3');
+      coordinator.implement.mockResolvedValue({
+        ok: true,
+        value: { success: false, error: 'timed out', handoffNotes: handoffMap },
+      });
+      const run = makeRun();
+      const result = await handlers.implement!(run);
+      expect(result).toBe('failure');
+      // Handoff notes must be persisted as Record<string, string> on RunState
+      expect(run.handoffNotes).toEqual({ 'issue-42': 'Stopped at step 3\nNext: continue from step 3' });
+    });
+
+    it('restores persisted handoff notes from RunState on retry (#121)', async () => {
+      const { handlers, coordinator } = createHandlers();
+      coordinator.implement.mockResolvedValue({
+        ok: true,
+        value: { success: true, totalCost: 1.0 },
+      });
+      // Simulate a run that already has persisted handoff notes from a prior crash
+      const run = makeRun({ handoffNotes: { 'issue-42': 'Previous work context' } });
+      await handlers.implement!(run);
+      // Coordinator should receive the handoff notes as a Map
+      expect(coordinator.implement).toHaveBeenCalledWith(
+        expect.anything(), 'feature/42', undefined, undefined,
+        expect.objectContaining({
+          handoffNotes: new Map([['issue-42', 'Previous work context']]),
+        }),
+      );
+    });
+
+    it('clears handoff notes from RunState after successful implementation (#121)', async () => {
+      const { handlers, coordinator } = createHandlers();
+      coordinator.implement.mockResolvedValue({
+        ok: true,
+        value: { success: true, totalCost: 1.0 },
+      });
+      const run = makeRun({ handoffNotes: { 'issue-42': 'stale handoff' } });
+      const result = await handlers.implement!(run);
+      expect(result).toBe('success');
+      expect(run.handoffNotes).toBeUndefined();
+    });
   });
 
   describe('review', () => {
