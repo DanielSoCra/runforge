@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createControlServer } from './server.js';
 import { ok, err } from '../lib/result.js';
 import type { Server } from 'http';
+import * as results from './results.js';
 
 const PORT = 19876; // high port unlikely to conflict
 let serverRef: Server | undefined;
@@ -171,6 +172,26 @@ describe('ControlServer', () => {
     await startServer();
     const res = await fetch(`http://127.0.0.1:${PORT}/health`);
     expect(res.status).toBe(200);
+  });
+
+  it('logs error to console.error when /api/runs handler fails', async () => {
+    const runsError = new Error('disk full');
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const readSpy = vi.spyOn(results, 'readResults').mockRejectedValueOnce(runsError);
+    await startServer();
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/api/runs`);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toEqual([]);
+      expect(spy).toHaveBeenCalledWith(
+        '[control-plane] GET /api/runs failed:',
+        runsError,
+      );
+    } finally {
+      spy.mockRestore();
+      readSpy.mockRestore();
+    }
   });
 
   it('logs error to console.error when /repos/reload handler fails', async () => {
