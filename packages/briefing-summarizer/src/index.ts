@@ -13,6 +13,7 @@ import { collectSignals, type SignalResult } from './signals.js';
 import { buildSignalPrompt, briefingTool, type PreviousBriefing } from './prompt.js';
 import { extractActivityEvents, type PreviousSnapshot } from './events.js';
 import { log } from './log.js';
+import { createCycleRunner } from './cycle-runner.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -254,49 +255,26 @@ async function main(): Promise<void> {
 
   log('info', `Briefing summarizer starting (interval=${INTERVAL_MS}ms, daemon=${DAEMON_URL})`);
 
-  let inFlight: Promise<void> | null = null;
-  let shuttingDown = false;
-
-  const wrappedCycle = async (): Promise<void> => {
-    if (shuttingDown) return;
-    try {
-      inFlight = runCycle(supabase, anthropic);
-      await inFlight;
-    } catch (err) {
-      log('error', `Cycle failed: ${String(err)}`);
-    } finally {
-      inFlight = null;
-    }
-  };
+  const runner = createCycleRunner(() => runCycle(supabase, anthropic));
 
   // Run first cycle immediately
-  await wrappedCycle();
+  await runner.wrappedCycle();
 
   // Set up interval
-  const intervalId = setInterval(() => void wrappedCycle(), INTERVAL_MS);
+  const intervalId = setInterval(() => void runner.wrappedCycle(), INTERVAL_MS);
 
   // SIGTERM handler: clear interval, wait for in-flight, exit
-  const shutdown = async (signal: string): Promise<void> => {
-    if (shuttingDown) return;
-    shuttingDown = true;
-    log('info', `Received ${signal}, shutting down gracefully...`);
+  const handleShutdown = async (signal: string): Promise<void> => {
     clearInterval(intervalId);
-
-    if (inFlight) {
-      log('info', 'Waiting for in-flight cycle to complete...');
-      try {
-        await inFlight;
-      } catch {
-        // Already logged in wrappedCycle
-      }
+    try {
+      await runner.shutdown(signal);
+    } finally {
+      process.exit(0);
     }
-
-    log('info', 'Shutdown complete');
-    process.exit(0);
   };
 
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void handleShutdown('SIGTERM'));
+  process.on('SIGINT', () => void handleShutdown('SIGINT'));
 }
 
 main().catch((err) => {

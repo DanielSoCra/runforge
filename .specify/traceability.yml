@@ -482,6 +482,7 @@ STACK-AC-DASHBOARD-BRIEFING:
     - packages/dashboard/components/briefing/
     - packages/dashboard/actions/briefing.ts
     - packages/briefing-summarizer/
+    - packages/briefing-summarizer/src/cycle-runner.ts
     - supabase/migrations/009_briefing.sql
   test_paths:
     - packages/dashboard/components/briefing/**/*.test.tsx
