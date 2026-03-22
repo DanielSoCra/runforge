@@ -1,5 +1,8 @@
 // packages/daemon/src/session-runtime/containment-hooks.test.ts
-import { describe, it, expect } from 'vitest';
+import { mkdirSync, symlinkSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   checkContainment,
   DEFAULT_POLICY,
@@ -468,6 +471,81 @@ describe('checkContainment', () => {
     };
     const result = checkContainment(call, DEFAULT_POLICY);
     expect(result.allowed).toBe(true);
+  });
+
+  // Regression tests for SEC-6: symlink bypass — realpath resolution + ln blocked
+  describe('symlink bypass prevention (SEC-6)', () => {
+    // Create a symlink inside the project that points to a real directory.
+    // In tests cwd = packages/daemon, so we use patterns relative to that cwd.
+    const symlinkDir = join(tmpdir(), `containment-test-${Date.now()}`);
+    const symlinkPath = join(symlinkDir, 'innocent-link');
+    // Policy with patterns relative to test cwd (packages/daemon)
+    const symlinkPolicy: ContainmentPolicy = {
+      blockedPaths: ['src/session-runtime/**'],
+      blockedCommands: DEFAULT_POLICY.blockedCommands,
+      readOnlyPaths: [],
+    };
+
+    beforeAll(() => {
+      mkdirSync(symlinkDir, { recursive: true });
+      // Symlink points to the session-runtime dir (a blocked target)
+      symlinkSync(
+        join(process.cwd(), 'src/session-runtime'),
+        symlinkPath,
+      );
+    });
+
+    afterAll(() => {
+      rmSync(symlinkDir, { recursive: true, force: true });
+    });
+
+    it('blocks ln -s command (defense-in-depth)', () => {
+      const call: ToolCall = {
+        tool: 'Bash',
+        input: { command: 'ln -s packages/daemon/src/session-runtime mylink' },
+      };
+      const result = checkContainment(call, DEFAULT_POLICY);
+      expect(result.allowed).toBe(false);
+      if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+    });
+
+    it('blocks ln command without -s flag', () => {
+      const call: ToolCall = {
+        tool: 'Bash',
+        input: { command: 'ln target linkname' },
+      };
+      const result = checkContainment(call, DEFAULT_POLICY);
+      expect(result.allowed).toBe(false);
+      if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+    });
+
+    it('blocks ln via variable indirection: x=ln; $x -s ...', () => {
+      const call: ToolCall = {
+        tool: 'Bash',
+        input: { command: 'x=ln; $x -s packages/daemon/src/session-runtime mylink' },
+      };
+      const result = checkContainment(call, DEFAULT_POLICY);
+      expect(result.allowed).toBe(false);
+      if (!result.allowed) expect(result.reason).toContain('variable indirection');
+    });
+
+    it('resolves symlink to blocked path and blocks Read through it', () => {
+      // symlinkPath -> src/session-runtime, so reading containment-hooks.ts
+      // through the symlink should resolve to the blocked target via realpathSync
+      const throughSymlink = join(symlinkPath, 'containment-hooks.ts');
+      const call: ToolCall = { tool: 'Read', input: { file_path: throughSymlink } };
+      const result = checkContainment(call, symlinkPolicy);
+      expect(result.allowed).toBe(false);
+      if (!result.allowed) expect(result.reason).toContain('Blocked path');
+    });
+
+    it('resolves symlink to blocked path and blocks Write through it', () => {
+      const throughSymlink = join(symlinkPath, 'containment-hooks.ts');
+      const call: ToolCall = { tool: 'Write', input: { file_path: throughSymlink } };
+      const result = checkContainment(call, symlinkPolicy);
+      expect(result.allowed).toBe(false);
+      if (!result.allowed) expect(result.reason).toContain('Blocked path');
+    });
   });
 
   // Regression tests for SPEC-38: blockedPaths must use monorepo-prefixed paths

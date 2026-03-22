@@ -1,6 +1,7 @@
 // packages/daemon/src/session-runtime/containment-hooks.ts
+import { realpathSync } from 'node:fs';
 import { minimatch } from 'minimatch';
-import { normalize } from 'path';
+import { normalize, relative } from 'node:path';
 
 export interface ContainmentPolicy {
   blockedPaths: string[];
@@ -78,11 +79,31 @@ export function checkContainment(call: ToolCall, policy: ContainmentPolicy): Con
   return { allowed: true };
 }
 
+/**
+ * Resolve a path by attempting fs.realpathSync to follow symlinks,
+ * falling back to lexical normalize when the path doesn't exist yet.
+ * Returns both the resolved and normalized forms so blocked-path checks
+ * catch symlink targets even when the symlink path itself looks innocent.
+ */
+function resolvePath(p: string): string[] {
+  const normalized = normalize(p);
+  try {
+    const resolved = realpathSync(normalized);
+    // Convert absolute realpath back to relative so it matches relative glob patterns.
+    // realpathSync returns absolute paths; blockedPaths patterns are relative to cwd.
+    const resolvedRelative = relative(process.cwd(), resolved);
+    if (resolvedRelative !== normalized) return [normalized, resolvedRelative];
+  } catch {
+    // Path doesn't exist on disk — lexical normalization only
+  }
+  return [normalized];
+}
+
 function extractPaths(input: Record<string, unknown>): string[] {
   const paths: string[] = [];
-  // Common tool input field names — normalize to prevent ../traversal bypass
+  // Common tool input field names — resolve symlinks + normalize to prevent bypass
   for (const key of ['file_path', 'path', 'filePath', 'target']) {
-    if (typeof input[key] === 'string') paths.push(normalize(input[key] as string));
+    if (typeof input[key] === 'string') paths.push(...resolvePath(input[key] as string));
   }
   return paths;
 }
@@ -96,7 +117,7 @@ function extractCommandPaths(command: string): string[] {
     if (token.includes('/') || token.includes('.')) {
       // Strip shell redirections and surrounding quotes
       const cleaned = token.replace(/^[<>]+/, '').replace(/^["']|["']$/g, '');
-      if (cleaned) paths.push(normalize(cleaned));
+      if (cleaned) paths.push(...resolvePath(cleaned));
     }
   }
   return paths;
@@ -171,6 +192,8 @@ export const DEFAULT_POLICY: ContainmentPolicy = {
     // acceptable in the autonomous agent context where agents use
     // dedicated tools (Read, Grep, Glob) rather than shell interpreters.
     'python3 ', 'python ', 'node ', 'perl ', 'ruby ', 'php ',
+    // Symlink creation — prevents bypassing path checks via symlink indirection
+    'ln ',
     // Destructive disk commands
     'rm -rf /', 'mkfs', 'dd if=',
   ],
