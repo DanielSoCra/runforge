@@ -53,12 +53,13 @@ export class RemoteControlManager {
     this.url = null;
   }
 
-  restart(): void {
+  async restart(): Promise<void> {
     // stop() sets this.stopped = true and kills any running process.
-    // We must reset stopped before calling spawn() or spawn() will return early.
+    // We must await it so the process is fully torn down before we respawn.
+    // We reset stopped before calling spawn() or spawn() will return early.
     // We call spawn() directly (not start()) to bypass start()'s proc guard
     // (which would no-op if the old process hasn't exited yet).
-    void this.stop();
+    await this.stop();
     this.stopped = false;
     this.failureCount = 0;
     this.spawn();

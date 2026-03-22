@@ -9,7 +9,7 @@ export interface ControlHandlers {
   resume: () => void;
   retry: (issueNumber: number) => Result<void>;
   reloadRepos?: () => Promise<{ active: number }>;
-  restartRemoteControl?: () => void;
+  restartRemoteControl?: () => void | Promise<void>;
   scanIssues?: () => Promise<{ scanned: number }>;
   stateDir?: string;
 }
@@ -65,8 +65,12 @@ export function createControlServer(
       }
     } else if (method === 'POST' && url.pathname === '/remote-control/restart') {
       if (handlers.restartRemoteControl) {
-        handlers.restartRemoteControl();
-        json(res, 200, { restarted: true });
+        Promise.resolve(handlers.restartRemoteControl()).then(() => {
+          json(res, 200, { restarted: true });
+        }).catch((e: unknown) => {
+          console.error('[control-plane] POST /remote-control/restart failed:', e);
+          json(res, 500, { error: 'restart failed' });
+        });
       } else {
         json(res, 501, { error: 'not configured' });
       }

@@ -155,7 +155,7 @@ describe('RemoteControlManager', () => {
     expect(spawnCount).toBe(2);
 
     // restart() should stop proc2 and spawn proc3 with a clean failure count
-    manager.restart();
+    await manager.restart();
     expect(spawnCount).toBe(3);
     expect(manager.getState().remote_control_state).toBe('offline');
 
@@ -179,7 +179,7 @@ describe('RemoteControlManager', () => {
     manager.start();
     // proc[0] running — don't exit it yet
 
-    manager.restart();
+    await manager.restart();
     // proc[1] is now running; proc[0] is still alive (hasn't exited)
     expect(procs).toHaveLength(2);
 
@@ -194,21 +194,20 @@ describe('RemoteControlManager', () => {
     expect(manager.getState().remote_control_url).toBe('https://session.example.com');
   });
 
-  it('regression #5: only one restart() method exists (no duplicate override)', () => {
-    // Prior bug: two restart() methods were defined — an async version (properly
-    // awaiting stop()) and a sync version. The sync version silently overrode
-    // the async one at runtime. This test verifies the class has exactly one
-    // restart method with the correct (sync) signature.
+  it('regression #5: only one restart() method exists (no duplicate override)', async () => {
+    // Prior bug: two restart() methods were defined. This test verifies the
+    // class has exactly one restart method that returns a Promise (async).
     const descriptor = Object.getOwnPropertyDescriptor(
       RemoteControlManager.prototype,
       'restart',
     );
     expect(descriptor).toBeDefined();
     expect(typeof descriptor!.value).toBe('function');
-    // The working restart() is sync (returns void, not Promise<void>)
+    // restart() is async — returns a Promise
     vi.mocked(spawn).mockReturnValue(makeFakeProcess());
     const result = manager.restart();
-    expect(result).toBeUndefined();
+    expect(result).toBeInstanceOf(Promise);
+    await result;
   });
 
   it('schedules immediate restart on clean active exit (code=0 after active)', async () => {
