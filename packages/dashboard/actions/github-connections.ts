@@ -18,6 +18,13 @@ export async function removeConnection(connectionId: string) {
   const { error } = await supabase.from('github_connections').delete().eq('id', connectionId);
   if (error) throw new Error(error.message);
 
+  // Notify daemon to drop stale polling for disconnected repos
+  fetch(`${process.env.DAEMON_URL}/repos/reload`, {
+    method: 'POST',
+    headers: { 'X-Requested-By': 'dashboard' },
+    signal: AbortSignal.timeout(3000),
+  }).catch(() => {});
+
   revalidatePath('/settings');
   revalidatePath('/repos');
 }

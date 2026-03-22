@@ -39,6 +39,41 @@ describe('removeConnection', () => {
     );
   });
 
+  it('fires POST to DAEMON_URL/repos/reload after removal (#179)', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok'));
+    process.env.DAEMON_URL = 'http://localhost:7532';
+    try {
+      const { removeConnection } = await import('./github-connections.js');
+      await removeConnection('conn-1');
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        'http://localhost:7532/repos/reload',
+        expect.objectContaining({
+          method: 'POST',
+          headers: { 'X-Requested-By': 'dashboard' },
+          signal: expect.any(AbortSignal),
+        }),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+      delete process.env.DAEMON_URL;
+    }
+  });
+
+  it('silently swallows fetch failure when daemon is unreachable (#179)', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+    process.env.DAEMON_URL = 'http://localhost:9999';
+    try {
+      const { removeConnection } = await import('./github-connections.js');
+      await expect(removeConnection('conn-1')).resolves.not.toThrow();
+      expect(globalThis.fetch).toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+      delete process.env.DAEMON_URL;
+    }
+  });
+
   it('throws and does not delete connection when repos update fails (#173)', async () => {
     vi.resetModules();
     mockRepos.update.mockReturnValue({
