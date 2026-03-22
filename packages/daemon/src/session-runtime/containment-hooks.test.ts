@@ -451,6 +451,16 @@ describe('checkContainment', () => {
     if (!result.allowed) expect(result.reason).toContain('read-only');
   });
 
+  it('blocks NotebookEdit on auto-claude.config.json', () => {
+    const call: ToolCall = {
+      tool: 'NotebookEdit',
+      input: { file_path: 'auto-claude.config.json' },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('read-only');
+  });
+
   it('allows Bash read of auto-claude.config.json (no write indicator)', () => {
     const call: ToolCall = {
       tool: 'Bash',
