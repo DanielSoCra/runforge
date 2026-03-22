@@ -37,4 +37,48 @@ describe('settings actions', () => {
     await updateGlobalSettings(formData);
     expect(requireAdmin).toHaveBeenCalled();
   });
+
+  describe('concurrency_limit validation (#164)', () => {
+    async function callWithLimit(value?: string) {
+      vi.mocked(requireAdmin).mockResolvedValueOnce({ id: 'admin-1' } as never);
+      const { updateGlobalSettings } = await import('./settings');
+      const formData = new FormData();
+      if (value !== undefined) formData.append('concurrency_limit', value);
+      return updateGlobalSettings(formData);
+    }
+
+    const validationError = 'Concurrency limit must be an integer between 1 and 20';
+
+    it('rejects non-numeric input', async () => {
+      await expect(callWithLimit('abc')).rejects.toThrow(validationError);
+    });
+
+    it('rejects floating point numbers', async () => {
+      await expect(callWithLimit('3.5')).rejects.toThrow(validationError);
+    });
+
+    it('rejects zero', async () => {
+      await expect(callWithLimit('0')).rejects.toThrow(validationError);
+    });
+
+    it('rejects negative numbers', async () => {
+      await expect(callWithLimit('-1')).rejects.toThrow(validationError);
+    });
+
+    it('rejects values above 20', async () => {
+      await expect(callWithLimit('21')).rejects.toThrow(validationError);
+    });
+
+    it('rejects missing concurrency_limit field', async () => {
+      await expect(callWithLimit()).rejects.toThrow(validationError);
+    });
+
+    it('accepts boundary value 1', async () => {
+      await expect(callWithLimit('1')).resolves.not.toThrow();
+    });
+
+    it('accepts boundary value 20', async () => {
+      await expect(callWithLimit('20')).resolves.not.toThrow();
+    });
+  });
 });
