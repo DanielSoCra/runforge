@@ -11,6 +11,7 @@ import type { WorkRequest, SessionResult } from '../types.js';
 vi.mock('./worktree.js', () => ({
   createWorktree: vi.fn().mockResolvedValue({ ok: true, value: '/tmp/workspace' }),
   removeWorktree: vi.fn().mockResolvedValue({ ok: true, value: undefined }),
+  deleteUnitBranch: vi.fn().mockResolvedValue({ ok: true, value: undefined }),
   getWorktreeDiffSize: vi.fn().mockResolvedValue({ ok: true, value: 50 }),
   mergeWorktree: vi.fn().mockResolvedValue({ ok: true, value: undefined }),
 }));
@@ -73,6 +74,9 @@ describe('ImplementationCoordinator', () => {
       expect(result.value.success).toBe(false);
       expect(result.value.error).toContain('failed');
     }
+    // Branch should still be cleaned up on all-failed early return (#133)
+    const { deleteUnitBranch } = await import('./worktree.js');
+    expect(deleteUnitBranch).toHaveBeenCalledWith('issue-42', '/tmp/repo');
   });
 
   it('returns success:false when worker is blocked', async () => {
@@ -224,10 +228,11 @@ describe('ImplementationCoordinator', () => {
 describe('ImplementationCoordinator — multi-unit', () => {
   beforeEach(async () => {
     // Reset all worktree mock call counts between tests
-    const { mergeWorktree, createWorktree, removeWorktree, getWorktreeDiffSize } = await import('./worktree.js');
+    const { mergeWorktree, createWorktree, removeWorktree, deleteUnitBranch, getWorktreeDiffSize } = await import('./worktree.js');
     vi.mocked(mergeWorktree).mockClear();
     vi.mocked(createWorktree).mockClear();
     vi.mocked(removeWorktree).mockClear();
+    vi.mocked(deleteUnitBranch).mockClear();
     vi.mocked(getWorktreeDiffSize).mockClear();
   });
 
@@ -405,6 +410,9 @@ describe('ImplementationCoordinator — multi-unit', () => {
       expect(result.value.error).toContain('blocked');
       expect(result.value.error).toContain('unit-blocked');
     }
+    // Branch should still be cleaned up on early return (#133)
+    const { deleteUnitBranch } = await import('./worktree.js');
+    expect(deleteUnitBranch).toHaveBeenCalledWith('unit-blocked', '/tmp/repo');
   });
 
   it('collects handoff notes from timed-out units in failure result (#11)', async () => {
@@ -463,6 +471,61 @@ describe('ImplementationCoordinator — multi-unit', () => {
     const workerCall = runtime.spawnSession.mock.calls[0];
     const taskVar = workerCall[1].variables.task as string;
     expect(taskVar).not.toContain('[PREVIOUS ATTEMPT]');
+  });
+
+  it('deletes unit branches after merge and for failed units (#133)', async () => {
+    const { deleteUnitBranch } = await import('./worktree.js');
+    vi.mocked(deleteUnitBranch).mockClear();
+
+    const validUnits = [
+      {
+        id: 'unit-pass', title: 'Passing', specIds: [], specContent: '',
+        expectedArtifacts: [], dependencies: [], batchNumber: 0,
+        verificationCommand: '', context: 'do pass',
+      },
+      {
+        id: 'unit-fail', title: 'Failing', specIds: [], specContent: '',
+        expectedArtifacts: [], dependencies: [], batchNumber: 0,
+        verificationCommand: '', context: 'do fail',
+      },
+    ];
+
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce(ok({
+          output: 'decomposed',
+          structuredData: { units: validUnits },
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        } as SessionResult))
+        .mockResolvedValueOnce(ok(successResult))
+        .mockResolvedValueOnce(ok(failResult)),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'standard',
+      specContent: 'spec',
+    });
+
+    // Both branches should be deleted — successful after merge, failed after batch
+    expect(deleteUnitBranch).toHaveBeenCalledWith('unit-pass', '/tmp/repo');
+    expect(deleteUnitBranch).toHaveBeenCalledWith('unit-fail', '/tmp/repo');
+    expect(deleteUnitBranch).toHaveBeenCalledTimes(2);
+  });
+
+  it('deletes unit branch after successful single-unit implementation (#133)', async () => {
+    const { deleteUnitBranch } = await import('./worktree.js');
+    vi.mocked(deleteUnitBranch).mockClear();
+
+    const runtime = createMockRuntime(successResult);
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    await coord.implement(mockWorkRequest, 'feature/42');
+
+    // The single unit's branch should be cleaned up after merge
+    expect(deleteUnitBranch).toHaveBeenCalledTimes(1);
   });
 
   it('returns err when decomposition fails', async () => {

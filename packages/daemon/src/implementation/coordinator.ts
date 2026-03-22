@@ -5,7 +5,7 @@ import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import type { GotchaStore } from '../knowledge/gotcha-store.js';
 import { createSingleUnitGraph, getUnitsByBatch } from './task-graph.js';
 import { executeBatch, type UnitResult } from './batch.js';
-import { mergeWorktree } from './worktree.js';
+import { mergeWorktree, deleteUnitBranch } from './worktree.js';
 import { decompose } from './decompose.js';
 import { git } from '../lib/git.js';
 
@@ -115,6 +115,10 @@ export class ImplementationCoordinator {
       );
 
       if (blocked.length > 0) {
+        // Clean up all branches in this batch before returning (#133)
+        for (const r of batchResult.results) {
+          await deleteUnitBranch(r.unitId, this.repoRoot).catch(() => {});
+        }
         return ok({
           success: false,
           unitResults: allResults,
@@ -126,7 +130,10 @@ export class ImplementationCoordinator {
       }
 
       if (failures.length === batch.length) {
-        // All units in batch failed
+        // Clean up all branches in this batch before returning (#133)
+        for (const r of batchResult.results) {
+          await deleteUnitBranch(r.unitId, this.repoRoot).catch(() => {});
+        }
         return ok({
           success: false,
           unitResults: allResults,
@@ -154,6 +161,16 @@ export class ImplementationCoordinator {
             handoffNotes: collectHandoffNotes(allResults),
           });
         }
+        // Clean up unit branch after successful merge (#133)
+        await deleteUnitBranch(unitResult.unitId, this.repoRoot).catch(() => {});
+      }
+
+      // Clean up branches for failed/blocked units that won't be merged (#133)
+      const nonMergedUnits = batchResult.results.filter(
+        (r) => r.exitStatus !== 'completed' && r.exitStatus !== 'completed-with-concerns',
+      );
+      for (const unitResult of nonMergedUnits) {
+        await deleteUnitBranch(unitResult.unitId, this.repoRoot).catch(() => {});
       }
 
       // Clear stale handoffs for successful units (STACK-AC-HANDOFF-COORDINATOR: clear after success)

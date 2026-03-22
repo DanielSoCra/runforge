@@ -42,6 +42,17 @@ export async function removeWorktree(
   return ok(undefined);
 }
 
+/** Delete a unit branch without touching the worktree (already removed by batch.ts finally block). */
+export async function deleteUnitBranch(
+  unitId: string,
+  repoRoot?: string,
+): Promise<Result<void>> {
+  const branchName = `unit/${unitId}`;
+  const result = await git(['branch', '-D', branchName], repoRoot);
+  if (!result.ok) return err(result.error);
+  return ok(undefined);
+}
+
 export async function listWorktrees(repoRoot?: string): Promise<Result<string[]>> {
   const result = await git(['worktree', 'list', '--porcelain'], repoRoot);
   if (!result.ok) return result as Result<string[], Error>;
