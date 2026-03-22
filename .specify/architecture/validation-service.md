@@ -28,7 +28,9 @@ The Validation Service provides independent verification of implementations thro
 - Artifact location: the expected artifact locations overlap with configured security-sensitive paths (e.g., authentication modules, payment handlers, permission systems).
 Any one signal is sufficient to flag the request as risk-sensitive. The Operator configures the security-sensitive path patterns and keyword lists.
 
-**FixCycle** tracks a fix-and-re-review iteration. It contains: the review round that produced findings, the fix attempt number, and a reference to the worker session that performed the fix. Fix cycles are bounded by a configured maximum.
+**FixCycle** tracks a fix-and-re-review iteration. It contains: the review round that produced findings, the fix attempt number, a reference to the worker session that performed the fix, and the finding count for this round (total number of findings across all gates). Fix cycles are bounded by a configured maximum and by diminishing returns detection.
+
+**DiminishingReturnsPolicy** defines early escalation when fix cycles stop making meaningful progress. It contains: a minimum cycle count before evaluation begins (default: 2 — at least two fix cycles must complete before diminishing returns can be assessed), and an improvement threshold (configurable percentage, default: 20% — if the finding count does not decrease by at least this percentage compared to the previous cycle, progress is considered stalled). When two consecutive cycles show improvement below the threshold, the Validation Service escalates to stuck without exhausting remaining fix cycles. This prevents the system from spending resources on a structural problem that incremental fixes cannot resolve.
 
 **HoldoutResult** represents the outcome of holdout scenario execution. It contains: a scenario identifier and a pass/fail indicator. The Validation Service never receives or stores scenario content — only identifiers and results.
 
@@ -60,8 +62,8 @@ The review operation proceeds:
 The holdout operation proceeds:
 1. If no scenario runner is configured: return skipped. The pipeline continues without holdout validation, but a warning is logged. Holdout is strongly recommended but not mandatory — projects without scenarios yet can still use the system.
 2. Execute the configured scenario runner as a deterministic process against the implementation branch. No intelligent session is involved.
-2. Collect structured output: scenario identifiers and pass/fail results.
-3. If any scenario fails: return failure with the failed scenario identifiers to the Daemon Control Plane. The Control Plane delegates diagnosis to the Bug Diagnosis Service to determine whether the failure reflects a spec gap (→ needs-spec-update), an implementation defect (→ fix cycle), or a validation gap (→ needs-human). No automatic fix or label is applied before diagnosis completes.
+3. Collect structured output: scenario identifiers and pass/fail results.
+4. If any scenario fails: return failure with the failed scenario identifiers to the Daemon Control Plane. The Control Plane delegates diagnosis to the Bug Diagnosis Service to determine whether the failure reflects a spec gap (→ needs-spec-update), an implementation defect (→ fix cycle), or a validation gap (→ needs-human). No automatic fix or label is applied before diagnosis completes.
 
 **Deploy** — Called by the Daemon Control Plane. Request: branch reference, deployment command, health verification target, health verification timeout. Response: healthy, or failed with details.
 
@@ -97,10 +99,12 @@ The test operation proceeds:
 7. After Operator approval (warmup or sampling): return success. If the Operator provides corrections, capture them via Knowledge Service as high-priority observations. Note: WarmupState completion count is incremented only after the full pipeline completes successfully (by the Daemon Control Plane during the report phase), not after review approval — a work request that passes review but fails holdout, integration, or deployment does not count toward graduation.
 
 **Fix cycle flow:**
-1. Collect findings from the failed gate.
+1. Collect findings from the failed gate. Record the total finding count for this cycle.
 2. Delegate to Implementation Coordinator to spawn a fix worker with the findings as context.
 3. After fix: re-run all gates from gate 1 (not from the failed gate — earlier gates must re-validate after changes).
-4. Increment fix cycle count. If max cycles reached: escalate to stuck.
+4. Increment fix cycle count. Check termination conditions in order:
+   a. If max cycles reached: escalate to stuck.
+   b. If the DiminishingReturnsPolicy minimum cycle count has been reached: compare the current cycle's finding count to the previous cycle's. If improvement is below the threshold for two consecutive cycles, escalate to stuck — the system is not making meaningful progress. Log the escalation reason (diminishing returns) distinctly from max-cycles-reached so the Operator can distinguish structural problems from complex-but-tractable ones.
 
 **Holdout flow:**
 1. Receive branch reference and scenario runner command.
@@ -133,6 +137,8 @@ Each reviewer session starts with a fresh context. It has no knowledge of the im
 **Test failure:** Enter targeted fix loop. Truncate verbose test output before injecting into fix context. Fix, re-deploy, re-test. Bounded by max fix attempts.
 
 **Max fix cycles exceeded:** Escalate to stuck. The Daemon Control Plane labels the work request and notifies the operator.
+
+**Diminishing returns detected:** Escalate to stuck early (before max fix cycles). The escalation includes the finding count trajectory across cycles so the Operator can see that progress stalled. This is distinct from max-cycles-exceeded — it signals a structural problem rather than exhausted budget.
 
 **Reviewer session timeout:** Treat as a gate failure. Retry the gate (the Session Runtime terminates the process; the Validation Service re-spawns a new reviewer). If retry also times out: escalate.
 
