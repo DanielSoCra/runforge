@@ -37,6 +37,8 @@ ARCH-SDD-LAYER-CONTRACT:
 
 ARCH-SDD-TRACEABILITY:
   parent: FUNC-SDD-SPEC-AUTHORING
+  test_paths:
+    - packages/daemon/src/infra/traceability-paths.test.ts
   status: approved
 
 ARCH-SDD-FLAVOR-PACKS:
