@@ -282,6 +282,10 @@ describe('validateWebhookUrl', () => {
     expect(validateWebhookUrl('https://[::1]/hook')).toContain('blocked');
   });
 
+  it('rejects IPv6 unspecified address :: (#158)', () => {
+    expect(validateWebhookUrl('https://[::]/hook')).toContain('blocked');
+  });
+
   it('rejects 0.0.0.0', () => {
     expect(validateWebhookUrl('https://0.0.0.0/hook')).toContain('blocked');
   });
@@ -321,6 +325,8 @@ describe('DNS rebinding protection (#153)', () => {
     expect(isPrivateIP('0.0.0.0')).toBe(true);
     // IPv6 loopback
     expect(isPrivateIP('::1')).toBe(true);
+    // IPv6 unspecified (all-zeros) — SSRF bypass vector (#158)
+    expect(isPrivateIP('::')).toBe(true);
     // IPv6 ULA (fc00::/7)
     expect(isPrivateIP('fc00::1')).toBe(true);
     expect(isPrivateIP('fd12:3456::1')).toBe(true);
@@ -341,6 +347,12 @@ describe('DNS rebinding protection (#153)', () => {
     expect(isPrivateIP('100.63.255.255')).toBe(false); // just below CGNAT
     expect(isPrivateIP('100.128.0.0')).toBe(false);    // just above CGNAT
     expect(isPrivateIP('2001:db8::1')).toBe(false);
+  });
+
+  it('validateResolvedIP rejects IPv6 unspecified address :: (#158)', async () => {
+    vi.mocked(mockLookup).mockResolvedValueOnce([{ address: '::', family: 6 }]);
+    const result = await validateResolvedIP('https://evil.example.com/hook');
+    expect(result).toContain('blocked');
   });
 
   it('validateResolvedIP rejects when DNS resolves to a private IP', async () => {

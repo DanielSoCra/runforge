@@ -32,6 +32,7 @@ const BLOCKED_HOSTNAME_PATTERNS = [
   /^192\.168\.\d{1,3}\.\d{1,3}$/,
   /^169\.254\.\d{1,3}\.\d{1,3}$/,
   /^\[::1\]$/,
+  /^\[::\]$/,
   /^0\.0\.0\.0$/,
   // IPv6-mapped IPv4 (URL constructor normalizes to hex: [::ffff:7f00:1])
   /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/i,       // 127.x.x.x
@@ -68,6 +69,7 @@ export function validateWebhookUrl(raw: string): string | null {
  * (which targets URL-formatted hostnames with bracket notation).
  */
 const BLOCKED_RESOLVED_IP_PATTERNS = [
+  /^::$/,                                  // IPv6 unspecified (all-zeros)
   /^fc[0-9a-f]{2}:/i,                     // IPv6 ULA fc00::/7
   /^fd[0-9a-f]{2}:/i,                     // IPv6 ULA fc00::/7
   /^fe[89ab][0-9a-f]:/i,                  // IPv6 link-local fe80::/10
