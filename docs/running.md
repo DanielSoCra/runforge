@@ -106,11 +106,17 @@ Dashboard is available at `https://app.example.com` (or your configured domain).
 
 ## Running on Mac Mini
 
+The Mac Mini uses a **hybrid deployment**: dashboard and briefing-summarizer run in Docker, but the daemon runs natively (via launchd or direct process). This is because the daemon spawns Claude Code CLI sessions that require Max subscription OAuth tokens — these expire and can't be refreshed inside a container.
+
 ```bash
+# 1. Start the daemon natively (if not already running via launchd)
+cd packages/daemon && pnpm start &
+
+# 2. Start dashboard + briefing-summarizer in Docker
 ENV_FILE=.env.mac docker compose --env-file .env.mac up --build -d
 ```
 
-Dashboard is available at `http://localhost:3000` on the local network. Auth is disabled.
+Dashboard is available at `http://localhost:3000` on the local network. Auth is disabled. The dashboard connects to the native daemon via `host.docker.internal:3847`.
 
 ## Supabase Migrations
 
