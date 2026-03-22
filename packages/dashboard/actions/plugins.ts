@@ -68,17 +68,20 @@ export async function enableAllSuggested(
 
   // Independent per-plugin upserts — no transaction wrapping the batch.
   // Partial failures are collected; successful activations are not rolled back.
-  const now = new Date().toISOString();
+  // Each plugin gets a distinct activated_at (1ms apart) so that activation order
+  // is deterministic — the L2 spec uses "earliest first" for merge conflict resolution.
+  const baseMs = Date.now();
   const succeeded: string[] = [];
   const failed: string[] = [...invalidIds];
 
-  for (const pluginId of validIds) {
+  for (let i = 0; i < validIds.length; i++) {
+    const pluginId = validIds[i];
     const { error: upsertError } = await supabase.from('repo_plugins').upsert(
       {
         repo_id: repoId,
         plugin_id: pluginId,
         active: true,
-        activated_at: now,
+        activated_at: new Date(baseMs + i).toISOString(),
       },
       { onConflict: 'repo_id,plugin_id', ignoreDuplicates: false },
     );

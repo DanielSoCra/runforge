@@ -141,6 +141,46 @@ describe('enableAllSuggested', () => {
     expect(result.failed).toHaveLength(0);
   });
 
+  it('assigns distinct activated_at timestamps to each plugin for deterministic merge order', async () => {
+    const multiRegistry = {
+      version: 1,
+      plugins: [
+        { id: 'web-stack', name: 'Web Stack', description: '', tags: [] },
+        { id: 'api-tools', name: 'API Tools', description: '', tags: [] },
+        { id: 'db-tools', name: 'DB Tools', description: '', tags: [] },
+      ],
+    };
+    vi.mocked(requireAdmin).mockResolvedValue({ id: 'u1' } as never);
+    vi.mocked(loadDashboardRegistry).mockResolvedValue(multiRegistry);
+
+    const upsertPayloads: Array<Record<string, unknown>> = [];
+    const upsert = vi.fn().mockImplementation((payload: Record<string, unknown>) => {
+      upsertPayloads.push(payload);
+      return Promise.resolve({ error: null });
+    });
+    const eqActive = vi.fn().mockResolvedValue({
+      data: [{ plugin_id: 'web-stack' }, { plugin_id: 'api-tools' }, { plugin_id: 'db-tools' }],
+      error: null,
+    });
+    const eqRecommended = vi.fn().mockReturnValue({ eq: eqActive });
+    const eqRepoId = vi.fn().mockReturnValue({ eq: eqRecommended });
+    const select = vi.fn().mockReturnValue({ eq: eqRepoId });
+    vi.mocked(createClient).mockResolvedValue({
+      from: (table: string) => (table === 'repo_plugins' ? { select, upsert } : { upsert }),
+    } as never);
+
+    await enableAllSuggested('repo-id');
+
+    expect(upsertPayloads).toHaveLength(3);
+    const timestamps = upsertPayloads.map(p => p.activated_at as string);
+    // All timestamps must be distinct
+    expect(new Set(timestamps).size).toBe(3);
+    // Timestamps must be in ascending order (preserving array order as activation order)
+    for (let i = 1; i < timestamps.length; i++) {
+      expect(timestamps[i] > timestamps[i - 1]).toBe(true);
+    }
+  });
+
   it('returns empty arrays when no recommended+inactive plugins exist', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'u1' } as never);
     const eqActive = vi.fn().mockResolvedValue({ data: [], error: null });
