@@ -66,7 +66,7 @@ Fill in all values:
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project → Settings → API → Project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase project → Settings → API → `anon` key |
 | `SUPABASE_URL` | Same as `NEXT_PUBLIC_SUPABASE_URL` |
-| `SUPABASE_SERVICE_KEY` | Supabase project → Settings → API → `service_role` key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase project → Settings → API → `service_role` key |
 | `NEXT_PUBLIC_SITE_URL` | `https://app.example.com` (your domain) |
 | `DAEMON_URL` | `http://daemon:3847` (Docker service name — do not change) |
 | `ENCRYPTION_KEY` | Any 32+ character random string |

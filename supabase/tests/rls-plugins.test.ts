@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 const URL = process.env['SUPABASE_URL']!;
-const SERVICE = process.env['SUPABASE_SERVICE_KEY']!;
+const SERVICE = process.env['SUPABASE_SERVICE_ROLE_KEY']!;
 const ANON = process.env['SUPABASE_ANON_KEY']!;
 const ADMIN_JWT = process.env['SUPABASE_TEST_ADMIN_JWT'];
 const VIEWER_JWT = process.env['SUPABASE_TEST_VIEWER_JWT'];

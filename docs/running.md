@@ -33,7 +33,7 @@ cp .env.prod.example .env.prod
 | `NEXT_PUBLIC_SUPABASE_URL` | Yes | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase `anon` key (public) |
 | `SUPABASE_URL` | Yes | Same as above (daemon-side) |
-| `SUPABASE_SERVICE_KEY` | Yes | Supabase `service_role` key (server-only) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Supabase `service_role` key (server-only) |
 | `NEXT_PUBLIC_SITE_URL` | Yes | Full URL of the dashboard (for OAuth redirects) |
 | `DAEMON_URL` | Yes | Internal URL to reach the daemon (`http://daemon:3847` in Docker) |
 | `ENCRYPTION_KEY` | Yes | 32+ character secret for encrypting stored credentials |
