@@ -91,7 +91,7 @@ Daemon control API is available at `http://localhost:3847` (internal only; use t
 See [hetzner-setup.md](./hetzner-setup.md) for full server provisioning. Once configured:
 
 ```bash
-docker compose -f docker-compose.prod.yml up --build -d
+docker compose --env-file .env.prod --profile public up --build -d
 ```
 
 Three containers start:
@@ -103,6 +103,14 @@ Three containers start:
 | `caddy` | Reverse proxy + automatic TLS |
 
 Dashboard is available at `https://app.example.com` (or your configured domain).
+
+## Running on Mac Mini
+
+```bash
+ENV_FILE=.env.mac docker compose --env-file .env.mac up --build -d
+```
+
+Dashboard is available at `http://localhost:3000` on the local network. Auth is disabled.
 
 ## Supabase Migrations
 
@@ -125,7 +133,7 @@ supabase db push
 
 ```bash
 # Production
-docker compose -f docker-compose.prod.yml down
+docker compose --env-file .env.prod --profile public down
 
 # Development daemon
 docker compose down
