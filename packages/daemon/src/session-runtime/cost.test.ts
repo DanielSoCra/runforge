@@ -80,6 +80,44 @@ describe('CostTracker', () => {
     expect(snapshot.runCosts).toEqual({ '1': 5 });
   });
 
+  // Regression test for #76: maybeResetDaily never clears runCosts
+  describe('maybeResetDaily', () => {
+    it('returns false when reset time has not elapsed', () => {
+      expect(tracker.maybeResetDaily()).toBe(false);
+    });
+
+    it('returns true and resets when reset time has elapsed', () => {
+      vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 25 * 60 * 60 * 1000);
+      expect(tracker.maybeResetDaily()).toBe(true);
+      expect(tracker.getDailyCost()).toBe(0);
+      vi.restoreAllMocks();
+    });
+
+    it('clears runCosts on daily reset', () => {
+      tracker.recordCost(42, 8);
+      tracker.recordCost(99, 3);
+      // Advance time past reset
+      vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 25 * 60 * 60 * 1000);
+      tracker.maybeResetDaily();
+      expect(tracker.getRunCost(42)).toBe(0);
+      expect(tracker.getRunCost(99)).toBe(0);
+      vi.restoreAllMocks();
+    });
+
+    it('allows previously blocked run after daily reset', () => {
+      tracker.recordCost(42, 11); // exceeds per-run budget of 10
+      expect(tracker.checkBudget(42)).toEqual({
+        available: false,
+        reason: 'per-run-budget-exceeded',
+      });
+      // Advance time past reset
+      vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 25 * 60 * 60 * 1000);
+      tracker.maybeResetDaily();
+      expect(tracker.checkBudget(42)).toEqual({ available: true, remaining: 50 });
+      vi.restoreAllMocks();
+    });
+  });
+
   // Regression tests for #101: restoreFromSnapshot zero test coverage
   describe('restoreFromSnapshot', () => {
     it('restores dailyCost from snapshot', () => {

@@ -47,15 +47,18 @@ export class CostTracker {
     this.runCosts.set(issueNumber, this.getRunCost(issueNumber) + cost);
   }
 
+  /** Automated daily-boundary reset: clears both daily total and per-run costs so stale run costs don't permanently block issues across days. */
   maybeResetDaily(): boolean {
     if (Date.now() >= this.resetAt.getTime()) {
       this.dailyCost = 0;
+      this.runCosts.clear();
       this.resetAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
       return true;
     }
     return false;
   }
 
+  /** Manual reset: clears daily total only, preserving per-run costs for continued tracking. */
   resetDaily(): void {
     this.dailyCost = 0;
     this.resetAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
