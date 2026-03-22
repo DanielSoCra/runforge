@@ -67,6 +67,8 @@ Every feature starts as a GitHub Issue and progresses through label-driven stage
 
 **Note:** `in-review` is eliminated as a separate label. Code review happens within the `spec-implement` skill session — if it passes, the skill merges and closes; if it fails 3x, the skill adds `blocked`. The orchestrator never needs to poll `in-review`.
 
+**Crash/interruption recovery for mid-phase states:** If a Claude session crashes or times out while an issue is in `l3-in-progress`, `l3-review`, or `implementing`, the issue is stranded (the orchestrator doesn't poll these states). Recovery is manual in Phase 1: the Operator checks `gh issue list --label "feature-pipeline" --label "l3-in-progress"` (or `implementing`), evaluates the state of the branch, and either relabels to the entry state (`l2-approved` or `ready-to-implement`) to retry, or adds `blocked`. The `health.sh` script can be extended to detect stale mid-phase issues (no label change for >1 hour) and alert the Operator.
+
 ### Entry Points
 
 1. **Operator-initiated:** Operator brainstorms L1 interactively with Claude, then creates a GitHub Issue with `feature-pipeline` + `l1-approved` labels, linking to the L1 spec file in `.specify/functional/`.
@@ -165,7 +167,7 @@ Note: `l3-review` is handled within the `spec-generate-l3` skill session (compli
 3. Generate L3 spec(s) in `.specify/stack/` on branch `spec/l3/<issue-number>-<name>`
 4. Update `traceability.yml` with `code_paths` and `test_paths`
 5. Validate generated spec using `l3-spec-guardian` skill (local skill at `plugins/auto-claude-dev/skills/spec-guardian.md`)
-6. Run compliance check: does L3 contradict L2 or L1? Fix or create `l2-suggestion` issue with evidence.
+6. Run compliance check: does L3 contradict L2 or L1? If fixable, fix. If L2 must change: create `l2-suggestion` issue with evidence, add `blocked` to the feature issue with comment "Blocked on L2 change — see #<suggestion-issue>", remove `l3-in-progress`. The feature issue resumes when the Operator resolves the L2 suggestion and relabels to `l2-approved`.
 7. Relabel: remove `l3-in-progress`, add `l3-review`
 8. Run `spec-review-compliance` in **inline mode** (upstream consistency + traceability only, no code-gap check)
 9. If compliance passes: merge PR to `dev`, relabel to `l3-approved` + `ready-to-implement`
@@ -300,6 +302,11 @@ When Phase 1 proves stable, the Operator relabels Phase 2 issues to `l1-approved
 - Tests must pass before AND after — the pipeline cannot break itself
 - Never reads `.specify/scenarios/` — holdout test isolation must be preserved (AGENTS.md rule 4)
 - Never modifies `.specify/methodology/` — protected governance specs (AGENTS.md rule 3)
+
+**FUNC-AC-SAFETY alignment:** FUNC-AC-SAFETY prohibits autonomous work from modifying "governing specifications" and "the system's own implementation." In Phase 1, this design makes the following distinction:
+- **Governing specifications** = L1 and L2 specs. The pipeline never modifies these autonomously (only suggests changes).
+- **The system's own implementation** = the control plane, session runtime, validation service code. In Phase 1, the pipeline runs as external skills/scripts, not as part of auto-claude's own implementation. It modifies auto-claude's L3 specs and code only after Operator-approved L1/L2 specs authorize the change. This is the intended implementation path defined in FUNC-AC-PIPELINE (work requests reference governing specs).
+- Phase 2's self-migration (skills→native) will require an explicit Operator-approved L1 exception to FUNC-AC-SAFETY, since the pipeline will then be modifying its own implementation. This exception will be proposed as an L1 suggestion at the appropriate time.
 
 ## Local-First Mac Setup
 
