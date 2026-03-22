@@ -127,6 +127,112 @@ describe('repo actions', () => {
     );
   });
 
+  it('updateRepo updates settings for a repo', async () => {
+    const { createClient } = await import('@/lib/supabase/server');
+    const { updateRepo } = await import('./repos');
+
+    const client = await (createClient as any)();
+    const eqMock = vi.fn().mockResolvedValue({ error: null });
+    const updateMock = vi.fn().mockReturnValue({ eq: eqMock });
+    client.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
+    }).mockReturnValueOnce({
+      update: updateMock,
+    });
+
+    const formData = new FormData();
+    formData.append('staging_branch', 'develop');
+    formData.append('production_branch', 'main');
+    formData.append('budget_limit', '50');
+    formData.append('concurrency_limit', '3');
+
+    await updateRepo('repo-1', formData);
+
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        staging_branch: 'develop',
+        production_branch: 'main',
+        budget_limit: 50,
+        concurrency_limit: 3,
+        updated_at: expect.any(String),
+      })
+    );
+    expect(eqMock).toHaveBeenCalledWith('id', 'repo-1');
+  });
+
+  it('updateRepo defaults branches when not provided', async () => {
+    const { createClient } = await import('@/lib/supabase/server');
+    const { updateRepo } = await import('./repos');
+
+    const client = await (createClient as any)();
+    const eqMock = vi.fn().mockResolvedValue({ error: null });
+    const updateMock = vi.fn().mockReturnValue({ eq: eqMock });
+    client.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
+    }).mockReturnValueOnce({
+      update: updateMock,
+    });
+
+    const formData = new FormData();
+
+    await updateRepo('repo-1', formData);
+
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        staging_branch: 'staging',
+        production_branch: 'main',
+        budget_limit: null,
+        concurrency_limit: undefined,
+      })
+    );
+    expect(eqMock).toHaveBeenCalledWith('id', 'repo-1');
+  });
+
+  it('disableRepo sets enabled to false', async () => {
+    const { createClient } = await import('@/lib/supabase/server');
+    const { disableRepo } = await import('./repos');
+
+    const client = await (createClient as any)();
+    const eqMock = vi.fn().mockResolvedValue({ error: null });
+    const updateMock = vi.fn().mockReturnValue({ eq: eqMock });
+    client.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
+    }).mockReturnValueOnce({
+      update: updateMock,
+    });
+
+    await disableRepo('repo-1');
+
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: false, updated_at: expect.any(String) })
+    );
+    expect(eqMock).toHaveBeenCalledWith('id', 'repo-1');
+  });
+
+  it('disableRepo throws on supabase error', async () => {
+    const { createClient } = await import('@/lib/supabase/server');
+    const { disableRepo } = await import('./repos');
+
+    const client = await (createClient as any)();
+    client.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
+    }).mockReturnValueOnce({
+      update: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ error: { message: 'db error' } }),
+      }),
+    });
+
+    await expect(disableRepo('repo-1')).rejects.toThrow('Failed to disable repository');
+  });
+
   it('deleteRepo rejects deletion of an enabled repo', async () => {
     const { createClient } = await import('@/lib/supabase/server');
     const { deleteRepo } = await import('./repos');
