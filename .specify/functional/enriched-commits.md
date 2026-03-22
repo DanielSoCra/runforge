@@ -2,12 +2,14 @@
 id: FUNC-AC-ENRICHED-COMMITS
 type: functional
 domain: auto-claude
-status: draft
+status: deprecated
 version: 1
 layer: 1
 ---
 
 # FUNC-AC-ENRICHED-COMMITS — Enriched Implementation Records
+
+> **Deprecated:** Merged into FUNC-AC-LEARNING v2 (section "Knowledge from Implementation Records"). The L2 spec ARCH-AC-ENRICHED-COMMITS and its L3 children are re-parented under FUNC-AC-LEARNING.
 
 ## Problem Statement
 
