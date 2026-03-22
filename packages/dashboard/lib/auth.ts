@@ -41,14 +41,18 @@ export async function requireAdmin(supabase: SupabaseClient) {
 
 /** Returns true if the current user is an admin. Never throws. */
 export async function isAdmin(supabase: SupabaseClient): Promise<boolean> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return false;
-  const { data: member, error } = await supabase.from('team_members')
-    .select('role')
-    .eq('user_id', user.id)
-    .single();
-  if (error && error.code !== 'PGRST116') {
-    console.error('[auth] team_members query failed:', error.message);
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return false;
+    const { data: member, error } = await supabase.from('team_members')
+      .select('role')
+      .eq('user_id', user.id)
+      .single();
+    if (error && error.code !== 'PGRST116') {
+      console.error('[auth] team_members query failed:', error.message);
+    }
+    return member?.role === 'admin';
+  } catch {
+    return false;
   }
-  return member?.role === 'admin';
 }

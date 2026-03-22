@@ -35,7 +35,6 @@ function mockSupabaseNonAdmin() {
 // Supabase client that also supports the github_connections query for personal-vs-org branching
 function mockSupabaseAdminWithConnection(githubLogin: string) {
   const base = mockSupabaseAdmin();
-  let callCount = 0;
   base.from = vi.fn().mockImplementation((table: string) => {
     if (table === 'team_members') {
       return {
@@ -162,7 +161,7 @@ describe('GET /api/github/connections/[id]/repos', () => {
 
   it('returns 500 when token decryption fails', async () => {
     const createClient = await getCreateClient();
-    createClient.mockResolvedValueOnce(mockSupabaseAdmin());
+    createClient.mockResolvedValueOnce(mockSupabaseAdminWithConnection('any'));
     const createServiceClient = await getCreateServiceClient();
     createServiceClient.mockReturnValueOnce({
       rpc: vi.fn().mockResolvedValue({ data: null, error: { message: 'decrypt failed' } }),
