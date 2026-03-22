@@ -8,11 +8,13 @@
 export class SessionError extends Error {
   readonly cost: number;
   readonly rateLimited: boolean;
+  readonly containmentBreach: boolean;
 
-  constructor(message: string, cost = 0, rateLimited = false) {
+  constructor(message: string, cost = 0, rateLimited = false, containmentBreach = false) {
     super(message);
     this.name = 'SessionError';
     this.cost = cost;
     this.rateLimited = rateLimited;
+    this.containmentBreach = containmentBreach;
   }
 }

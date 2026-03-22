@@ -13,6 +13,7 @@ import { buildCompositeContext } from './plugin-injection.js';
 import { readPluginsForContext } from './plugin-loader.js';
 import { DEFAULT_POLICY } from './containment-hooks.js';
 import { SessionError } from './session-error.js';
+import { auditSessionOutput } from './audit.js';
 
 /** Resolve the prompts/ directory at the repo root. */
 function promptsDir(): string {
@@ -228,6 +229,21 @@ export class SessionRuntime {
     // 8. Detect rate limit in adapter response (ARCH-AC-SESSION-RUNTIME rate limit detection flow)
     if (!result.ok && result.error instanceof SessionError && result.error.rateLimited) {
       this.rateLimiter.reportRateLimit();
+    }
+
+    // 9. Post-session audit — containment layer 6 (detective)
+    // Scan output for references to prohibited paths (ARCH-AC-SESSION-RUNTIME step 9)
+    // Note: currently scans path references only; "suspicious operations" audit is a known gap.
+    if (result.ok) {
+      const audit = auditSessionOutput(result.value.output, DEFAULT_POLICY);
+      if (!audit.clean) {
+        return err(new SessionError(
+          `Containment breach detected in post-session audit: ${audit.violations.join('; ')}`,
+          result.value.cost,
+          false,
+          true,
+        ));
+      }
     }
 
     return result;
