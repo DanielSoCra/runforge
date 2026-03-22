@@ -9,7 +9,7 @@
 // If a dependency API changes, these tests fail — catching what mocked tests miss (#139).
 
 import { describe, it, expect } from 'vitest';
-import { git, parseDiffStatTotal } from '../lib/git.js';
+import { git } from '../lib/git.js';
 import { createGate1, selectGates } from '../validation/gates.js';
 import { createReviewerGate } from '../validation/reviewer-session.js';
 import { isRiskSensitive } from '../validation/risk-detection.js';
