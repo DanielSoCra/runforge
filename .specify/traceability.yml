@@ -52,13 +52,13 @@ ARCH-SDD-SPEC-LIFECYCLE:
 # --- Auto-Claude L0 spec (vision — root of all Auto-Claude specs) ---
 
 L0-AC-VISION:
-  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-ENRICHED-COMMITS, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, STACK-AC-CONVENTIONS]
+  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, FUNC-AC-PLUGINS, STACK-AC-CONVENTIONS]
   status: draft
 
 # --- Auto-Claude L1 specs ---
 
 FUNC-AC-PIPELINE:
-  children: [ARCH-AC-CONTROL-PLANE, ARCH-AC-SPEC-PIPELINE]
+  children: [ARCH-AC-CONTROL-PLANE, ARCH-AC-SPEC-PIPELINE, ARCH-AC-PIPELINE-DISPATCH]
   status: draft
 
 FUNC-AC-IMPLEMENTATION:
@@ -78,7 +78,7 @@ FUNC-AC-BUG-TRIAGE:
   status: draft
 
 FUNC-AC-LEARNING:
-  children: [ARCH-AC-KNOWLEDGE]
+  children: [ARCH-AC-KNOWLEDGE, ARCH-AC-ENRICHED-COMMITS]
   status: draft
 
 FUNC-AC-DASHBOARD:
@@ -86,7 +86,7 @@ FUNC-AC-DASHBOARD:
   status: draft
 
 FUNC-AC-COORDINATION:
-  children: []
+  children: [ARCH-AC-COORDINATION]
   status: draft
 
 FUNC-AC-HANDOFF:
@@ -94,8 +94,8 @@ FUNC-AC-HANDOFF:
   status: draft
 
 FUNC-AC-ENRICHED-COMMITS:
-  children: [ARCH-AC-ENRICHED-COMMITS]
-  status: draft
+  children: []  # ARCH-AC-ENRICHED-COMMITS re-parented under FUNC-AC-LEARNING
+  status: deprecated
 
 FUNC-AC-PLUGINS:
   children: [ARCH-AC-PLUGINS]
@@ -110,6 +110,10 @@ ARCH-AC-PLUGINS:
 
 # --- Auto-Claude L2 specs ---
 
+ARCH-AC-COORDINATION:
+  parent: FUNC-AC-COORDINATION
+  status: draft
+
 ARCH-AC-CONTROL-PLANE:
   parent: FUNC-AC-PIPELINE
   children: [STACK-AC-CONTROL-PLANE]
@@ -117,6 +121,12 @@ ARCH-AC-CONTROL-PLANE:
 
 ARCH-AC-SPEC-PIPELINE:
   parent: FUNC-AC-PIPELINE
+  children: [STACK-AC-SPEC-PIPELINE]
+  status: draft
+
+ARCH-AC-PIPELINE-DISPATCH:
+  parent: FUNC-AC-PIPELINE
+  children: [STACK-AC-PIPELINE-DISPATCH]
   status: draft
 
 ARCH-AC-IMPLEMENTATION:
@@ -160,7 +170,7 @@ ARCH-AC-DASHBOARD:
   status: draft
 
 ARCH-AC-ENRICHED-COMMITS:
-  parent: FUNC-AC-ENRICHED-COMMITS
+  parent: FUNC-AC-LEARNING
   children: [STACK-AC-ENRICHED-COMMITS-WORKER, STACK-AC-ENRICHED-COMMITS-KNOWLEDGE]
   status: draft
 
@@ -372,7 +382,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/app/api/github/connections/[id]/orgs/route.ts
     - packages/dashboard/app/api/github/connections/[id]/repos/route.ts
     - supabase/migrations/008_fix_rpc_privilege_escalation.sql
-    - docker-compose.prod.yml
+    - docker-compose.yml
     - Caddyfile
     - packages/dashboard/Dockerfile
     - .env.prod.example
@@ -493,4 +503,30 @@ STACK-AC-DASHBOARD-BRIEFING:
     - packages/dashboard/actions/briefing.test.ts
     - packages/briefing-summarizer/**/*.test.ts
     - supabase/tests/rls-briefing.test.ts
+  status: draft
+
+STACK-AC-SPEC-PIPELINE:
+  parent: ARCH-AC-SPEC-PIPELINE
+  children: []
+  code_paths:
+    - packages/daemon/src/control-plane/spec-pipeline/
+    - packages/daemon/src/control-plane/spec-pipeline/variant.ts
+    - packages/daemon/src/control-plane/spec-pipeline/gate.ts
+    - packages/daemon/src/control-plane/spec-pipeline/spec-chain.ts
+    - packages/daemon/src/control-plane/spec-pipeline/park.ts
+    - packages/daemon/src/control-plane/spec-pipeline/context.ts
+  test_paths:
+    - packages/daemon/src/control-plane/spec-pipeline/**/*.test.ts
+  status: draft
+
+STACK-AC-PIPELINE-DISPATCH:
+  parent: ARCH-AC-PIPELINE-DISPATCH
+  children: []
+  code_paths:
+    - packages/daemon/src/pipeline-dispatch/
+    - packages/daemon/src/pipeline-dispatch/dispatch.ts
+    - packages/daemon/src/pipeline-dispatch/session-types.ts
+    - packages/daemon/src/pipeline-dispatch/fallback.ts
+  test_paths:
+    - packages/daemon/src/pipeline-dispatch/**/*.test.ts
   status: draft

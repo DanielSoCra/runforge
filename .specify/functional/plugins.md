@@ -3,7 +3,7 @@ id: FUNC-AC-PLUGINS
 type: functional
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 1
 ---
 
@@ -15,10 +15,34 @@ The system processes work across multiple repositories, each with different doma
 
 ## Actors
 
+> **Actor mapping:** "Admin" in this spec corresponds to "Operator" in the domain-level specs. "Viewer" is a read-only subset.
+
 - **Admin** — activates and deactivates plugins per repository, reviews and accepts suggestions, triggers re-analysis, exports plugins for interactive use
 - **Viewer** — observes which plugins are active for a repository and which were active during a specific run
 
 ## Behavior
+
+### Plugin Capabilities
+
+**Scenario: Plugin provides domain-specific session context**
+- Given a plugin is active for a repository
+- When an autonomous session starts for that repository
+- Then the session receives domain-specific instructions, conventions, and expertise from the plugin
+
+**Scenario: Plugin provides specialized validation gates**
+- Given a plugin is active for a repository
+- When the quality assurance phase runs
+- Then additional validation checks defined by the plugin are executed alongside the standard gates
+
+**Scenario: Plugin provides tool configurations**
+- Given a plugin includes tool configurations
+- When an autonomous session starts
+- Then the session has access to additional tools (e.g., domain-specific analysis services) configured by the plugin
+
+**Scenario: Plugin provides specialized agent definitions**
+- Given a plugin includes agent definitions
+- When the system needs specialized reasoning for a domain
+- Then it can use plugin-defined agent profiles alongside the default ones
 
 ### Plugin Catalog
 

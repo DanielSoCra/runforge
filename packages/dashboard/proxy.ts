@@ -1,10 +1,9 @@
-// Next.js 16.x explicitly supports `proxy.ts` as the auth middleware entry point.
-// `PROXY_FILENAME = 'proxy'` is defined in next/dist/esm/lib/constants.js alongside
-// MIDDLEWARE_FILENAME — both are auto-loaded. No separate middleware.ts is needed.
-import { type NextRequest } from 'next/server';
+import { type NextRequest, NextResponse } from 'next/server';
 import { updateSession } from '@/lib/supabase/middleware';
+import { isAuthDisabled } from '@/lib/auth';
 
 export async function proxy(request: NextRequest) {
+  if (isAuthDisabled()) return NextResponse.next();
   return await updateSession(request);
 }
 

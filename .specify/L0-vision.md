@@ -3,7 +3,7 @@ id: L0-AC-VISION
 type: vision
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 0
 ---
 
@@ -16,15 +16,17 @@ layer: 0
 **For:** An Operator who writes specifications and creates work requests. The Operator defines what gets built. The harness executes. The Operator reviews results and approves production releases. The system earns the Operator's trust through a warmup period before gaining autonomy.
 
 **What the harness provides:**
-- **Orchestration** — detects work, classifies complexity, decomposes into parallel units, drives an FSM pipeline through implementation, review, integration, and deployment
+- **Orchestration** — detects work, classifies complexity, decomposes into parallel units, drives an FSM pipeline through implementation, review, integration, and deployment; coordinates batches of concurrent work across repositories with dependency-aware merge ordering
 - **Containment** — isolated environments, structural access controls, cost circuit breakers, credential isolation from intelligent sessions
 - **Quality gates** — independent heterogeneous review (not self-certification), holdout validation with scenarios the agent never sees, static analysis enforcement
 - **Learning** — captures pitfalls, injects them into future sessions, promotes recurring patterns to permanent documentation, proposes instruction improvements — all with Operator approval
+- **Product co-ownership** — analyzes the codebase and system health to propose features and improvements, always requiring Operator approval before any work begins
 
 **What the model provides:** Reasoning within the boundaries the harness sets — decomposition, implementation, code review, conflict resolution, bug diagnosis.
 
 **Boundaries:**
 - Never deploys to production without Operator approval
+- Never acts on self-generated proposals without Operator approval
 - Never writes or modifies specifications
 - Never modifies its own implementation or evaluation criteria
 - All permanent knowledge changes require Operator approval

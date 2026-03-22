@@ -1,5 +1,6 @@
 // src/control-plane/fsm.ts
 import type { Phase, PhaseEvent, PipelineVariant } from '../types.js';
+import { specDrivenTransitions } from './spec-pipeline/variant.js';
 
 export interface Transition {
   next: Phase;
@@ -76,6 +77,7 @@ const PIPELINES: Record<PipelineVariant, TransitionTable> = {
   'feature-simple': featureSimpleTransitions,
   bug: bugTransitions,
   website: websiteTransitions,
+  'spec-driven': specDrivenTransitions,
 };
 
 export function getPipeline(variant: PipelineVariant): TransitionTable {

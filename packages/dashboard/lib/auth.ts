@@ -2,6 +2,18 @@ import { createClient } from '@/lib/supabase/server';
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
+/** Returns true when auth is disabled (private network, single operator). */
+export function isAuthDisabled(): boolean {
+  return process.env.AUTH_DISABLED === 'true';
+}
+
+/** Synthetic admin user for AUTH_DISABLED mode. */
+const SYNTHETIC_ADMIN = {
+  id: '00000000-0000-0000-0000-000000000000',
+  email: 'admin@localhost',
+  role: 'authenticated',
+} as const;
+
 /**
  * Returns a safe origin for OAuth redirects.
  *
@@ -26,6 +38,7 @@ export function getOrigin(request?: Request): string {
 }
 
 export async function requireAdmin(supabase: SupabaseClient) {
+  if (isAuthDisabled()) return SYNTHETIC_ADMIN as any;
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Unauthorized');
   const { data: member, error } = await supabase.from('team_members')
@@ -41,6 +54,7 @@ export async function requireAdmin(supabase: SupabaseClient) {
 
 /** Returns true if the current user is an admin. Never throws. */
 export async function isAdmin(supabase: SupabaseClient): Promise<boolean> {
+  if (isAuthDisabled()) return true;
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;

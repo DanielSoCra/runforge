@@ -3,7 +3,7 @@ id: FUNC-AC-QUALITY
 type: functional
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 1
 ---
 
@@ -158,6 +158,23 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 - Given the Operator configures the sampling percentage
 - When the configured value is below a minimum floor
 - Then the system enforces the minimum floor — post-warmup human oversight cannot be fully disabled
+
+### Holdout Scenario Management
+
+**Scenario: Operator maintains holdout scenarios**
+- Given the system uses holdout validation as a trust mechanism
+- When the Operator creates or updates holdout scenarios
+- Then the scenarios are stored externally and executed via a configured command that returns structured results
+
+**Scenario: Holdout scenarios are structurally inaccessible**
+- Given holdout scenarios exist for a repository
+- When autonomous work executes (implementation or review)
+- Then the scenarios are structurally excluded from the work environment — not merely hidden by instruction but inaccessible at the workspace level (see FUNC-AC-SAFETY)
+
+**Scenario: Holdout scenario evolution**
+- Given the system has been operating for some time
+- When the Operator reviews holdout effectiveness
+- Then they can add, modify, or retire scenarios without affecting in-progress work — changes apply to the next validation cycle
 
 ## Success Criteria
 

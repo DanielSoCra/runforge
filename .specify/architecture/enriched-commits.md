@@ -5,10 +5,12 @@ domain: auto-claude
 status: draft
 version: 1
 layer: 2
-references: FUNC-AC-ENRICHED-COMMITS
+references: FUNC-AC-LEARNING
 ---
 
 # ARCH-AC-ENRICHED-COMMITS — Enriched Implementation Records Architecture
+
+> **Re-parented:** This L2 spec was originally under FUNC-AC-ENRICHED-COMMITS, which has been deprecated and merged into FUNC-AC-LEARNING v2 (section "Knowledge from Implementation Records").
 
 ## Overview
 

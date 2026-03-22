@@ -110,7 +110,7 @@ The spawn operation proceeds:
 1. During session execution, the Session Runtime tracks consecutive tool calls with identical names and parameters.
 2. When the same call is made more than a configurable number of times consecutively (e.g., 5), the repetition is flagged.
 3. On flag: the repeated call is blocked, and an intervention message is injected into the session context indicating the repetition and requesting a different approach.
-4. This detects stuck loops within a single session — distinct from circular fix detection, which operates across retries at the pipeline level.
+4. This detects stuck loops within a single session — distinct from circular error detection, which operates across retries at the pipeline level.
 
 **Rate limit detection flow:**
 1. A session process reports error signals matching rate limit patterns.

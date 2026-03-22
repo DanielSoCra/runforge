@@ -3,7 +3,7 @@ id: FUNC-AC-COORDINATION
 type: functional
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 1
 ---
 
@@ -12,6 +12,10 @@ layer: 1
 ## Problem Statement
 
 An autonomous development system that processes work serially wastes capacity when multiple independent work streams exist simultaneously. Running work in parallel requires coordination to prevent conflicts, duplicated effort, and wasted budget. The system needs a planning layer that orders work by dependency, a merge layer that integrates completed work safely, and an interface that lets the operator direct product evolution without managing individual work items.
+
+## Relationship to Other Specs
+
+This spec extends FUNC-AC-PIPELINE for multi-issue orchestration. FUNC-AC-PIPELINE defines the lifecycle of a single work request (detect → classify → implement → review → deploy). This spec defines how multiple work requests are batched, prioritized, and integrated, plus the product ownership capability where the system proposes new work.
 
 ## Actors
 

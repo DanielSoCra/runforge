@@ -1,33 +1,84 @@
+networks:
+  app:
+    driver: bridge
+
 services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: ["public"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - app
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: packages/dashboard/Dockerfile
+      args:
+        - NEXT_PUBLIC_SUPABASE_URL
+        - NEXT_PUBLIC_SUPABASE_ANON_KEY
+    restart: unless-stopped
+    env_file: ${ENV_FILE:-.env.prod}
+    environment:
+      NODE_ENV: production
+      PLUGINS_DIR: /app/plugins
+    ports:
+      - "${DASHBOARD_PORT:-3000}"
+    volumes:
+      - ./plugins:/app/plugins:ro
+    networks:
+      - app
+    # On Mac Mini: daemon runs natively, dashboard reaches it via host.docker.internal
+    # On Hetzner: daemon runs in Docker, dashboard reaches it via Docker service name
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
   daemon:
     build:
       context: .
       dockerfile: packages/daemon/Dockerfile
-    container_name: auto-claude-daemon
     restart: unless-stopped
-    ports:
-      - "3847:3847"
+    profiles: ["containerized-daemon"]
+    env_file: ${ENV_FILE:-.env.prod}
     environment:
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - SUPABASE_URL=${SUPABASE_URL}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
-    volumes:
-      # Persist state across restarts
-      - daemon-state:/app/packages/daemon/state
-      # Mount config (edit auto-claude.config.json before starting)
-      - ./auto-claude.config.json:/app/packages/daemon/auto-claude.config.json:ro
-      # Mount prompts (so you can edit without rebuilding)
-      - ./prompts:/app/packages/daemon/prompts:ro
-      # Mount fitness scripts
-      - ./fitness:/app/packages/daemon/fitness:ro
-    # Git needs a user identity for commits
+      DAEMON_HOST: "0.0.0.0"
+    ports: []
     command: >
       sh -c "
         git config --global user.name 'Auto-Claude' &&
         git config --global user.email 'auto-claude@localhost' &&
-        pnpm start -- -c /app/packages/daemon/auto-claude.config.json
+        pnpm start
       "
+    volumes:
+      - ./prompts:/app/packages/daemon/prompts:ro
+      - ./fitness:/app/packages/daemon/fitness:ro
+      - ./plugins:/app/plugins:ro
+      - ./auto-claude.config.json:/app/packages/daemon/auto-claude.config.json:ro
+      - daemon-state:/app/packages/daemon/state
+    networks:
+      - app
+
+  briefing-summarizer:
+    build:
+      context: .
+      dockerfile: packages/briefing-summarizer/Dockerfile
+    restart: unless-stopped
+    env_file: ${ENV_FILE:-.env.prod}
+    environment:
+      NODE_ENV: production
+    networks:
+      - app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
+  caddy_data:
+  caddy_config:
   daemon-state:

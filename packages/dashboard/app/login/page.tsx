@@ -1,9 +1,12 @@
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
+import { isAuthDisabled } from '@/lib/auth';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 export default async function LoginPage() {
+  if (isAuthDisabled()) redirect('/');
+
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (user) redirect('/');

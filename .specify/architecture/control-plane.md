@@ -18,7 +18,7 @@ The Daemon Control Plane is the always-on orchestrator that owns the pipeline li
 
 **WorkRequest** defines the contract between the Spec Author and the system. It contains: a unique identifier, a title, a summary (what needs to be built and why), an array of referenced spec identifiers (each with a spec ID, layer, and location), a scope description (expected changes), an array of acceptance criteria (testable conditions from the specs), and configuration overrides (whether interactive testing applies, review depth preference, priority level). For bug work requests, the body contains a bug report instead of spec references: reproduction steps, observed behavior, and expected behavior. The work request is the sole input to the pipeline — it must be self-contained enough for the system to operate without clarification.
 
-**RunState** represents a single pipeline execution. It contains: the work request identifier (issue number), the current phase name, a map of phase names to their completion status, an array of sub-phase checkpoints (each with a phase name and a position marker), cumulative cost in currency units, a per-run budget limit (configurable, distinct from daily and per-session limits — three independent cost circuit breakers), an array of fix attempts (each with a phase name, attempt number, and error hash), a map of error hashes to occurrence counts for circular fix detection, and timestamps for start and last update.
+**RunState** represents a single pipeline execution. It contains: the work request identifier (issue number), the current phase name, a map of phase names to their completion status, an array of sub-phase checkpoints (each with a phase name and a position marker), cumulative cost in currency units, a per-run budget limit (configurable, distinct from daily and per-session limits — three independent cost circuit breakers), an array of fix attempts (each with a phase name, attempt number, and error hash), a map of error hashes to occurrence counts for circular error detection, and timestamps for start and last update.
 
 **DaemonState** represents the daemon's global status. It contains: process identifier, uptime start timestamp, daily cost accumulator, daily cost reset timestamp, a paused flag, consecutive stuck count, configuration path, and a configurable maximum number of concurrent work requests. The Daemon Control Plane enforces this concurrency limit (distinct from session concurrency managed by Session Runtime). When the limit is reached, newly detected work requests remain queued until an active run completes.
 
@@ -28,7 +28,7 @@ The Daemon Control Plane is the always-on orchestrator that owns the pipeline li
 - Feature-simple: detect, classify, implement, review, holdout, integrate, deploy, test, report (skips decompose).
 - Bug: detect, implement, review, integrate, deploy, test, report (skips classify, decompose, holdout).
 
-Any phase can transition to "stuck" (retries exhausted or circular fix detected) or "paused" (budget exceeded, rate limited, or operator signal). Paused resumes from the current phase.
+Any phase can transition to "stuck" (retries exhausted or circular error detected) or "paused" (budget exceeded, rate limited, or operator signal). Paused resumes from the current phase.
 
 Beyond the three built-in variants, Operators can define custom pipeline templates as declarative phase sequences. The system loads custom templates from configuration and selects them based on configurable matching criteria (e.g., work request labels or spec types). Phase names in the pipeline definition are abstract system names (e.g., "integrate," "deploy," "report") intentionally decoupled from external service terminology.
 
@@ -84,7 +84,7 @@ These thresholds are configurable by the Operator.
 2. execute: delegate to the owning service for this phase. Detect, classify, integrate, and report are owned by the Control Plane itself. Decompose and implement are delegated to Implementation Coordinator. Review, holdout, deploy, and test are delegated to Validation Service. Special case — holdout failure: if the Validation Service reports holdout failures, the Control Plane delegates to the Bug Diagnosis Service, which uses the same Type A/B/C classification: Type A (implementation defect, the implementation deviated from the spec) → targeted fix cycle via Implementation Coordinator; Type B (spec gap, the spec doesn't cover the failing scenario) → needs-spec-update; Type C or low confidence → needs-human.
 3. onExit: record cost from the phase, save checkpoint to RunState, write RunState to persistent storage using crash-safe write semantics.
 4. On success: transition to the next phase per the pipeline definition.
-5. On failure: check the error hash against the circular fix detector. If 3+ occurrences of the same logical error: transition to stuck immediately. Otherwise: retry up to the phase's max retry count, then transition to stuck.
+5. On failure: check the error hash against the circular error detector. If 3+ occurrences of the same logical error: transition to stuck immediately. Otherwise: retry up to the phase's max retry count, then transition to stuck.
 
 **Stuck handling:**
 1. Label the work request "stuck."

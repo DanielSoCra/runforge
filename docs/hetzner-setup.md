@@ -111,13 +111,13 @@ Migrations live in `packages/daemon/migrations/`. Run them in the Supabase SQL e
 
 ```bash
 cd /home/autoclaude/auto-claude
-docker compose -f docker-compose.prod.yml up --build -d
+docker compose --env-file .env.prod --profile public up --build -d
 ```
 
 Verify all three containers are running:
 
 ```bash
-docker compose -f docker-compose.prod.yml ps
+docker compose --env-file .env.prod --profile public ps
 ```
 
 The dashboard is available at `https://app.example.com` once Caddy has obtained a TLS certificate (usually within 30 seconds on first start).
@@ -142,30 +142,30 @@ The daemon's control port (3847) is **not** exposed externally — it is interna
 ```bash
 cd /home/autoclaude/auto-claude
 git pull
-docker compose -f docker-compose.prod.yml up --build -d
+docker compose --env-file .env.prod --profile public up --build -d
 ```
 
 ### View logs
 
 ```bash
 # All services
-docker compose -f docker-compose.prod.yml logs -f
+docker compose --env-file .env.prod --profile public logs -f
 
 # Single service
-docker compose -f docker-compose.prod.yml logs -f dashboard
-docker compose -f docker-compose.prod.yml logs -f daemon
+docker compose --env-file .env.prod --profile public logs -f dashboard
+docker compose --env-file .env.prod --profile public logs -f daemon
 ```
 
 ### Restart a service
 
 ```bash
-docker compose -f docker-compose.prod.yml restart dashboard
+docker compose --env-file .env.prod --profile public restart dashboard
 ```
 
 ### Stop everything
 
 ```bash
-docker compose -f docker-compose.prod.yml down
+docker compose --env-file .env.prod --profile public down
 ```
 
 ## Troubleshooting
@@ -187,5 +187,5 @@ git stash  # or git reset --hard origin/main if no local changes to keep
 Caddy is up but dashboard container is not. Check:
 
 ```bash
-docker compose -f docker-compose.prod.yml logs dashboard
+docker compose --env-file .env.prod --profile public logs dashboard
 ```

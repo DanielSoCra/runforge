@@ -3,7 +3,7 @@ id: FUNC-AC-DASHBOARD
 type: functional
 domain: auto-claude
 status: draft
-version: 2
+version: 3
 layer: 1
 ---
 
@@ -14,6 +14,8 @@ layer: 1
 An autonomous system that processes work across multiple repositories needs a central control surface where operators can configure which repositories to monitor, view active and historical runs, track costs, manage team access, and control the daemon — without editing config files or SSH-ing into a server.
 
 ## Actors
+
+> **Actor mapping:** "Admin" in this spec corresponds to "Operator" in the domain-level specs (FUNC-AC-PIPELINE, FUNC-AC-SAFETY, FUNC-AC-LEARNING, etc.). Admin has full Operator capabilities. "Viewer" is a read-only subset — they can monitor but cannot change configuration or approve work.
 
 - **Admin** — installs the system, manages repositories, API keys, team members, budgets, and global settings
 - **Viewer** — monitors runs, views cost reports, and sees repository status but cannot change configuration
@@ -120,7 +122,7 @@ An autonomous system that processes work across multiple repositories needs a ce
 - Given a repository has a budget limit
 - When the run cost reaches 80% of the limit, and again when it reaches 100%
 - Then the dashboard indicates the budget status visually with a distinct warning and exceeded state
-- Note: budget limits are advisory in this version — the daemon does not abort runs that exceed the limit. The default warning threshold is 80%; making it configurable is deferred to a future iteration.
+- Note: budget limits are enforced by the daemon (see FUNC-AC-SAFETY). The dashboard surfaces the enforcement state. The default warning threshold is 80%; making it configurable is deferred to a future iteration.
 
 ### Team Management
 
@@ -172,9 +174,9 @@ An autonomous system that processes work across multiple repositories needs a ce
 - And they see the priority-ordered queue of upcoming work
 
 **Scenario: AI-generated briefing summary**
-- Given a background summarizer runs on a configurable interval (default: every 5 minutes)
-- When the summarizer reads current system signals (issue states, daemon status, git activity, pipeline heartbeat)
-- Then it produces a structured briefing containing: a one-line status, what changed since the last briefing, items requiring attention, and a forecast of what happens next with and without human action
+- Given a background summarizer runs periodically
+- When the summarizer reads current system signals
+- Then it produces a structured briefing containing what changed since the last briefing, items requiring attention, and a forecast of what happens next
 - And the briefing is stored for the dashboard to display
 
 **Scenario: Briefing reflects recent changes**
@@ -205,6 +207,8 @@ An autonomous system that processes work across multiple repositories needs a ce
 
 ### Notifications
 
+> **Ownership note:** This spec owns the notification subsystem. Other specs (FUNC-AC-PIPELINE, FUNC-AC-SAFETY) reference "Operator notification" — the delivery mechanism is defined here.
+
 **Scenario: Pluggable notification channels**
 - Given the system supports multiple notification delivery methods
 - When an event occurs that matches a configured notification rule
@@ -221,6 +225,18 @@ An autonomous system that processes work across multiple repositories needs a ce
 - Given the AI briefing summarizer detects items needing attention
 - When notification channels are configured for attention-required events
 - Then notifications are generated from the same analysis pass that produces the briefing — not a separate system
+
+### Production Releases
+
+**Scenario: View pending releases**
+- Given completed work exists in pre-production
+- When an Admin views the releases page
+- Then they see accumulated work items ready for production with aggregated release notes
+
+**Scenario: Approve production release**
+- Given an Admin reviews a pending release
+- When they approve it
+- Then the system proceeds with the production deployment (see FUNC-AC-PIPELINE for the release workflow)
 
 ### Concurrency Configuration
 

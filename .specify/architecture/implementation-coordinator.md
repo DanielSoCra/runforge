@@ -20,7 +20,7 @@ The Implementation Coordinator decomposes work requests into parallel units, man
 
 **Unit** represents a single parallelizable work assignment. It contains: a unique identifier, a human-readable title, an array of governing spec identifiers, pre-loaded spec content (the full text of each spec, assembled by the coordinator), an array of expected artifact locations, an array of dependency identifiers (other units that must complete first, used for batch ordering), a batch number (units in the same batch run concurrently), a verification command (used by the worker to confirm its implementation), assembled context (a text block containing the unit description, spec content, and any additional context the worker needs), and an estimated change size (used for pre-flight scope validation).
 
-**UnitState** tracks execution status for a single unit. It contains: the unit identifier, a status (pending, running, completed, completed-with-concerns, blocked, needs-context, failed), the workspace path, the current attempt number, and an error description if failed.
+**UnitState** tracks execution status for a single unit. It contains: the unit identifier, a status (pending, running, completed, completed-with-concerns, blocked, needs-context, failed), the workspace path, the current attempt number, an error description if failed, and an optional handoff record (a HandoffRecord from the previous attempt, as defined in ARCH-AC-HANDOFF — absent when the session completed cleanly or produced no handoff output).
 
 **MergeSequence** tracks the order in which completed units merge into the feature branch. It contains: the feature branch name, an ordered list of unit identifiers to merge, and the current position in the sequence.
 
