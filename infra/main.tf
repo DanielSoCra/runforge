@@ -39,12 +39,12 @@ resource "hcloud_ssh_key" "auto_claude" {
 resource "hcloud_firewall" "auto_claude" {
   name = "auto-claude"
 
-  # SSH from your network only
+  # SSH (restricted to operator IPs)
   rule {
     direction  = "in"
     protocol   = "tcp"
     port       = "22"
-    source_ips = ["0.0.0.0/0", "::/0"] # tighten later once stable
+    source_ips = [var.my_ipv6, "${var.my_ipv4}/32"]
   }
 
   # HTTP — required for Caddy ACME challenge (cert provisioning)
