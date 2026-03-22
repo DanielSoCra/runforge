@@ -16,7 +16,7 @@ The Knowledge Service accumulates, structures, and distributes institutional kno
 
 ## Data Model
 
-**Gotcha** represents a captured pitfall observation. It contains: a unique identifier, an array of artifact patterns, a description (what the pitfall is and how to avoid it), the source work request identifier (where it was first observed), a confidence score (extracted from the session or defaulted), a creation timestamp, a hit count (incremented each time the gotcha is matched and injected into a session context), a promoted flag (true once the gotcha has been merged into permanent documentation), an origin type (autonomous or operator — operator-origin gotchas carry higher weight), and a priority tier (normal or elevated — elevated gotchas are injected with higher prominence and have a lower promotion threshold).
+**Gotcha** represents a captured pitfall observation. It contains: a unique identifier, an array of artifact patterns, a description (what the pitfall is and how to avoid it), the source work request identifier (where it was first observed), a confidence score (extracted from the session or defaulted), a creation timestamp, a hit count (incremented each time the gotcha is matched and injected into a session context), a promoted flag (true once the gotcha has been merged into permanent documentation), an archived flag (true once the gotcha has been removed from the active store due to staleness), an origin type (autonomous or operator — operator-origin gotchas carry higher weight), and a priority tier (normal or elevated — elevated gotchas are injected with higher prominence and have a lower promotion threshold).
 
 **GotchaStore** is the persistent collection of all gotchas. It is an append-only structured log. Each entry is a self-contained record. The store supports: appending new entries, querying by artifact pattern match, incrementing hit counts, marking entries as promoted, and archiving entries that meet staleness criteria.
 
@@ -61,6 +61,10 @@ If the type cannot be determined automatically, the unit is not exemplar-eligibl
 **Reject prompt proposal** — Called by the operator. Request: proposal identifier. Effect: the proposal is archived with "rejected" status. The current instructions remain unchanged.
 
 **Trigger optimization** — Called periodically by the Daemon Control Plane (on a configurable schedule: after a threshold of completed work requests, or after a time interval). Request: none. Effect: spawn a prompt optimizer session via Session Runtime, analyze accumulated gotchas, error patterns from recent runs, and review findings. Produce a PromptProposal for each instruction file that has actionable improvements. Proposals are stored as pending for operator review.
+
+**Get patterns** — Called by Implementation Coordinator (and other services) when assembling session context or evaluating convention updates. Request: optional filter by source spec identifiers. Response: an array of Patterns matching the filter, or all patterns if no filter is provided. Each pattern includes its key, description, confidence score, and source spec identifiers.
+
+**Store pattern** — Called internally by the pattern extraction process. Request: key, description, confidence score, array of source spec identifiers. Response: acknowledgment. If a pattern with the same key already exists, the confidence score is updated and source specs are merged. Otherwise, a new Pattern entry is created.
 
 ## System Boundaries
 
