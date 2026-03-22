@@ -223,7 +223,6 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/
     - supabase/
     - package.json
-    - package-lock.json
     - packages/dashboard/lib/types.ts
     - packages/dashboard/lib/supabase/client.ts
     - packages/dashboard/lib/supabase/server.ts
@@ -314,11 +313,9 @@ STACK-AC-HANDOFF-RUNTIME:
   children: []
   code_paths:
     - packages/daemon/src/session-runtime/timeout-hook.ts
-    - packages/daemon/src/session-runtime/index.ts
     - .claude/hooks/timeout-warning.sh
   test_paths:
     - packages/daemon/src/session-runtime/timeout-hook.test.ts
-    - packages/daemon/src/session-runtime/index.test.ts
   status: draft
 
 STACK-AC-HANDOFF-COORDINATOR:
@@ -337,8 +334,7 @@ STACK-AC-ENRICHED-COMMITS-WORKER:
   children: []
   code_paths:
     - prompts/worker.md
-  test_paths:
-    - packages/daemon/src/knowledge/parse-commits.test.ts
+  test_paths: []  # planned: parse-commits.test.ts — add when implemented
   status: draft
 
 STACK-AC-PLUGINS-DAEMON:
@@ -377,12 +373,8 @@ STACK-AC-PLUGINS-DASHBOARD:
 STACK-AC-ENRICHED-COMMITS-KNOWLEDGE:
   parent: ARCH-AC-ENRICHED-COMMITS
   children: []
-  code_paths:
-    - packages/daemon/src/knowledge/parse-commits.ts
-    - packages/daemon/src/control-plane/completion.ts
-  test_paths:
-    - packages/daemon/src/knowledge/parse-commits.test.ts
-    - packages/daemon/src/control-plane/completion.test.ts
+  code_paths: []  # planned: parse-commits.ts, completion.ts — add when implemented
+  test_paths: []  # planned: parse-commits.test.ts, completion.test.ts — add when implemented
   status: draft
 
 STACK-AC-SUPABASE-SYNC:
