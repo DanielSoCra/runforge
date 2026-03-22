@@ -151,7 +151,7 @@ ARCH-AC-HANDOFF:
 
 ARCH-AC-DASHBOARD:
   parent: FUNC-AC-DASHBOARD
-  children: [STACK-AC-DASHBOARD]
+  children: [STACK-AC-DASHBOARD, STACK-AC-DASHBOARD-BRIEFING]
   status: draft
 
 ARCH-AC-ENRICHED-COMMITS:
@@ -425,4 +425,20 @@ STACK-AC-SUPABASE-SYNC:
     - packages/daemon/src/supabase/client.test.ts
     - packages/daemon/src/supabase/config-reader.test.ts
     - packages/daemon/src/supabase/run-writer.test.ts
+  status: draft
+
+STACK-AC-DASHBOARD-BRIEFING:
+  parent: ARCH-AC-DASHBOARD
+  children: []
+  code_paths:
+    - packages/dashboard/app/(dashboard)/briefing/page.tsx
+    - packages/dashboard/components/briefing/
+    - packages/dashboard/actions/briefing.ts
+    - packages/briefing-summarizer/
+    - supabase/migrations/009_briefing.sql
+  test_paths:
+    - packages/dashboard/components/briefing/**/*.test.tsx
+    - packages/dashboard/actions/briefing.test.ts
+    - packages/briefing-summarizer/**/*.test.ts
+    - supabase/tests/rls-briefing.test.ts
   status: draft

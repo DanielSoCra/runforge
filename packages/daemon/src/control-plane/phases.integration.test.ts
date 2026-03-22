@@ -179,7 +179,7 @@ describe('phases integration (real pure-function wiring)', () => {
       // 'security' label triggers real isRiskSensitive → true
       const workReq = makeWorkRequest({ labels: ['ready', 'security'] });
       const { handlers } = createHandlers({}, workReq);
-      const result = await handlers.review!(makeRun({ variant: 'feature', classificationComplexity: 'standard' }));
+      const result = await handlers.review!(makeRun({ classificationComplexity: 'standard' }));
       expect(result).toBe('success');
 
       // Real selectGates with (standard, riskSensitive=true) should include all 4 gates
