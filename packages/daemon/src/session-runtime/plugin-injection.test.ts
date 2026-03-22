@@ -129,6 +129,6 @@ describe('buildCompositeContext', () => {
     ];
     const ctx = buildCompositeContext(plugins, { tokenBudget: 12000 });
     expect(ctx.agents).toHaveLength(1);
-    expect(ctx.agents[0].pluginId).toBe('a');
+    expect(ctx.agents[0]!.pluginId).toBe('a');
   });
 });
