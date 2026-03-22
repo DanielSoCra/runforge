@@ -305,6 +305,12 @@ describe('loadPromptTemplate', () => {
     expect(await loadPromptTemplate('foo/bar', {})).toBeNull();
     expect(await loadPromptTemplate('foo\\bar', {})).toBeNull();
   });
+
+  it('leaves unknown placeholders intact (delegates to knowledge/renderTemplate)', async () => {
+    await writeFile(join(tmpDir, 'worker.md'), 'Task: {{task}}\nPitfalls: {{pitfalls}}');
+    const result = await loadPromptTemplate('worker', { task: 'build feature' });
+    expect(result).toBe('Task: build feature\nPitfalls: {{pitfalls}}');
+  });
 });
 
 describe('SessionRuntime prompt assembly with templates', () => {

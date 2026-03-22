@@ -14,6 +14,7 @@ import { readPluginsForContext } from './plugin-loader.js';
 import { DEFAULT_POLICY } from './containment-hooks.js';
 import { SessionError } from './session-error.js';
 import { auditSessionOutput } from './audit.js';
+import { renderTemplate } from '../knowledge/templates.js';
 
 /** Resolve the prompts/ directory at the repo root. */
 function promptsDir(): string {
@@ -34,11 +35,8 @@ export async function loadPromptTemplate(
   }
   const filePath = join(promptsDir(), `${name}.md`);
   try {
-    let template = await readFile(filePath, 'utf-8');
-    for (const [key, value] of Object.entries(variables)) {
-      template = template.replaceAll(`{{${key}}}`, value);
-    }
-    return template;
+    const template = await readFile(filePath, 'utf-8');
+    return renderTemplate(template, variables);
   } catch (e: unknown) {
     // Only treat "file not found" as a graceful fallback.
     // Re-throw permission errors, encoding issues, etc. so they surface
