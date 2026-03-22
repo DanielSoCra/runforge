@@ -84,9 +84,12 @@ while true; do
 
   if find_work; then
     log "Found work: issue #$ISSUE_NUM → skill $SKILL"
+    LOGFILE=~/logs/claude-pipeline-$(date +%Y%m%d-%H%M%S)-issue${ISSUE_NUM}.log
+    log "Output log: $LOGFILE"
     claude --dangerously-skip-permissions -p --max-budget-usd 10 \
-      "Use the $SKILL skill to work on issue #$ISSUE_NUM in repo $REPO. Read the issue body for context and spec references."
-    EXIT_CODE=$?
+      "Use the $SKILL skill to work on issue #$ISSUE_NUM in repo $REPO. Read the issue body for context and spec references." \
+      2>&1 | tee "$LOGFILE"
+    EXIT_CODE=${PIPESTATUS[0]}
 
     if [ $EXIT_CODE -eq 0 ]; then
       FAIL_COUNT=0
