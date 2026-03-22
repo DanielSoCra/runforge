@@ -232,6 +232,74 @@ describe('runPipeline', () => {
     expect(Object.keys(run.errorHashes).length).toBeGreaterThan(0);
   });
 
+  it('resets retry counter when phase advances then loops back (#103)', async () => {
+    // Scenario: implement fails twice → succeeds → review fails → back to implement
+    // The implement retry counter must be reset when moving to review,
+    // so implement gets a fresh 3 retries after review sends it back.
+    let implementCalls = 0;
+    let reviewCalls = 0;
+    const handlers: PhaseHandlerMap = {
+      detect: async () => 'success' as PhaseEvent,
+      classify: async () => 'success:simple' as PhaseEvent,
+      implement: async () => {
+        implementCalls++;
+        // Fail twice, then succeed, then after review failure, fail 3 more times
+        if (implementCalls <= 2) return 'failure' as PhaseEvent;
+        if (implementCalls === 3) return 'success' as PhaseEvent;
+        // After review→implement loop, fail to eventually hit stuck
+        return 'failure' as PhaseEvent;
+      },
+      review: async () => {
+        reviewCalls++;
+        // First review always fails → sends back to implement
+        return 'failure' as PhaseEvent;
+      },
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+
+    // implement: fail(1), fail(2), success(3) → review: fail → implement: fail(4), fail(5), fail(6) → stuck
+    // If retry counter were NOT reset, implement would have stuck after call 4 (3rd retry overall).
+    // With reset, implement gets 3 fresh retries after review, so calls 4,5,6 all execute.
+    expect(implementCalls).toBe(6);
+    expect(reviewCalls).toBe(1);
+    expect(result.outcome).toBe('stuck');
+  });
+
+  it('resets retry counter across multiple review→implement cycles (#103)', async () => {
+    // implement succeeds → review fails → implement succeeds → review fails → ...
+    // Retry counter resets each time, so this never gets stuck from retries
+    let implementCalls = 0;
+    let reviewCalls = 0;
+    const handlers: PhaseHandlerMap = {
+      detect: async () => 'success' as PhaseEvent,
+      classify: async () => 'success:simple' as PhaseEvent,
+      implement: async () => {
+        implementCalls++;
+        return 'success' as PhaseEvent;
+      },
+      review: async () => {
+        reviewCalls++;
+        if (reviewCalls <= 3) return 'failure' as PhaseEvent;
+        return 'success' as PhaseEvent;
+      },
+      holdout: async () => 'success' as PhaseEvent,
+      integrate: async () => 'success' as PhaseEvent,
+      deploy: async () => 'success' as PhaseEvent,
+      test: async () => 'success' as PhaseEvent,
+      report: async () => 'success' as PhaseEvent,
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+
+    // implement(1)→review(1,fail)→implement(2)→review(2,fail)→implement(3)→review(3,fail)→implement(4)→review(4,pass)→...→complete
+    expect(implementCalls).toBe(4);
+    expect(reviewCalls).toBe(4);
+    expect(result.outcome).toBe('complete');
+  });
+
   it('calls runWriter.upsertRun on phase transitions', async () => {
     const upsertRun = vi.fn().mockResolvedValue(undefined);
     const runWriter = { upsertRun, writeCostEvent: vi.fn() } as any;
