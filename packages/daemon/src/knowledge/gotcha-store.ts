@@ -45,11 +45,16 @@ export class GotchaStore {
       .filter((g) => !g.promoted && !g.archived)
       .filter((g) => g.artifactPatterns.some((pattern) =>
         artifactPaths.some((path) => minimatch(path, pattern, { dot: true })),
-      ))
-      .sort((a, b) => {
-        const tierOrder = (t: string) => t === 'elevated' ? 1 : 0;
-        return tierOrder(b.priorityTier) - tierOrder(a.priorityTier) || b.hitCount - a.hitCount;
-      });
+      ));
+    // Increment hit counts for each matched gotcha (ARCH-AC-KNOWLEDGE §match-gotchas)
+    for (const gotcha of matched) {
+      gotcha.hitCount++;
+      await appendJsonl(this.path, gotcha);
+    }
+    matched.sort((a, b) => {
+      const tierOrder = (t: string) => t === 'elevated' ? 1 : 0;
+      return tierOrder(b.priorityTier) - tierOrder(a.priorityTier) || b.hitCount - a.hitCount;
+    });
     return matched;
   }
 

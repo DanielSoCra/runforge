@@ -40,10 +40,10 @@ describe('GotchaStore', () => {
         43,
       );
       expect(count).toBe(0);
-      // Verify hit count incremented (1 from initial store + 1 from dedup)
+      // Verify hit count: 1 (initial store) + 1 (dedup) + 1 (this match) = 3
       const all = await store.match(['src/foo.ts']);
       expect(all).toHaveLength(1);
-      expect(all[0]!.hitCount).toBe(2);
+      expect(all[0]!.hitCount).toBe(3);
 
     });
 
@@ -155,7 +155,7 @@ describe('GotchaStore', () => {
 
     });
 
-    it('does not increment hitCount on match — only store() dedup increments (#75)', async () => {
+    it('increments hitCount on each match per ARCH-AC-KNOWLEDGE spec (#116)', async () => {
       await store.store(
         [{ artifactPatterns: ['src/**/*.ts'], description: 'Gotcha A' }],
         1,
@@ -163,20 +163,34 @@ describe('GotchaStore', () => {
       // hitCount starts at 1 after store
       const firstMatch = await store.match(['src/foo.ts']);
       expect(firstMatch).toHaveLength(1);
-      expect(firstMatch[0]!.hitCount).toBe(1);
+      expect(firstMatch[0]!.hitCount).toBe(2); // 1 (store) + 1 (match)
 
-      // Second match should NOT increment — still 1
+      // Second match increments again
       const secondMatch = await store.match(['src/foo.ts']);
-      expect(secondMatch[0]!.hitCount).toBe(1);
+      expect(secondMatch[0]!.hitCount).toBe(3); // 2 + 1 (match)
 
-      // store() dedup SHOULD increment to 2
+      // store() dedup also increments
       await store.store(
         [{ artifactPatterns: ['src/**/*.ts'], description: 'gotcha a' }],
         2,
       );
       const afterDedup = await store.match(['src/foo.ts']);
-      expect(afterDedup[0]!.hitCount).toBe(2);
+      expect(afterDedup[0]!.hitCount).toBe(5); // 3 + 1 (dedup) + 1 (match)
 
+    });
+
+    it('persists hitCount increments from match to disk (#116)', async () => {
+      await store.store(
+        [{ artifactPatterns: ['src/**/*.ts'], description: 'Persist test' }],
+        1,
+      );
+      await store.match(['src/foo.ts']); // hitCount: 1→2
+
+      // Re-create store from disk to verify persistence
+      const freshStore = new GotchaStore(storePath);
+      const result = await freshStore.match(['src/foo.ts']);
+      expect(result).toHaveLength(1);
+      expect(result[0]!.hitCount).toBe(3); // 2 (from disk) + 1 (this match)
     });
 
     it('sorts by hitCount descending within same tier', async () => {
@@ -207,11 +221,11 @@ describe('GotchaStore', () => {
         [{ artifactPatterns: ['**/*.ts'], description: 'Test' }],
         1,
       );
-      const m = await store.match(['foo.ts']); // hitCount: 1 (match does not increment)
+      const m = await store.match(['foo.ts']); // hitCount: 1→2 (match increments)
       const id = m[0]!.id;
-      await store.incrementHitCount(id); // hitCount: 1→2
-      const after = await store.match(['foo.ts']); // hitCount: 2 (match does not increment)
-      expect(after[0]!.hitCount).toBe(2);
+      await store.incrementHitCount(id); // hitCount: 2→3
+      const after = await store.match(['foo.ts']); // hitCount: 3→4 (match increments)
+      expect(after[0]!.hitCount).toBe(4);
 
     });
 
@@ -339,10 +353,10 @@ describe('GotchaStore', () => {
       await store.compact();
 
       // After compact, only one entry per id
-      // hitCount: 1 (store) + 3 (incrementHitCount×3) = 4 (match does not increment)
+      // hitCount: 1 (store) + 1 (first match) + 3 (incrementHitCount×3) = 5, then +1 (this match) = 6
       const after = await store.match(['foo.ts']);
       expect(after).toHaveLength(1);
-      expect(after[0]!.hitCount).toBe(4);
+      expect(after[0]!.hitCount).toBe(6);
 
     });
 
