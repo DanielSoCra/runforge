@@ -16,7 +16,7 @@ import {
 
 export interface BatchManager {
   create(
-    items: Array<{ issueNumber: number; dependencies: string[] }>,
+    items: Array<{ issueNumber: number; repoKey?: string; dependencies: string[] }>,
     targetWorkerCount: number,
     budgetEstimate: number,
   ): Promise<Batch>;
@@ -59,6 +59,7 @@ export function createBatchManager(stateDir: string): BatchManager {
         items: items.map((item) => ({
           id: randomUUID(),
           issueNumber: item.issueNumber,
+          repoKey: item.repoKey,
           status: 'pending' as const,
           dependencies: item.dependencies,
         })),
