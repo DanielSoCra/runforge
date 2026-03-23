@@ -248,6 +248,21 @@ describe('WorkDetector', () => {
       }
     });
 
+    it('ignores issues with no severity label', async () => {
+      const octokit = mockOctokit();
+      octokit.issues.listForRepo = vi.fn().mockResolvedValue({
+        data: [
+          { number: 45, title: 'No severity', body: 'missing P label', labels: [{ name: 'review-finding' }] },
+        ],
+      });
+      const detector = createWorkDetector(octokit, 'owner', 'repo');
+      const result = await detector.detectBugFixWork();
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toBeNull();
+      }
+    });
+
     it('excludes issues with in-progress label', async () => {
       const octokit = mockOctokit();
       octokit.issues.listForRepo = vi.fn().mockResolvedValue({

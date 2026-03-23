@@ -12,6 +12,11 @@ export interface WorkDetector {
   markStuck(issueNumber: number, comment: string): Promise<Result<void>>;
 }
 
+/** Extracts label name strings from the mixed GitHub label format. */
+function getLabelNames(labels: Array<string | { name?: string }>): string[] {
+  return labels.map((l) => typeof l === 'string' ? l : l.name ?? '');
+}
+
 export function createWorkDetector(octokit: Octokit, owner: string, repo: string): WorkDetector {
   return {
     async detectReadyWork(): Promise<Result<WorkRequest[]>> {
@@ -25,7 +30,7 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
             issueNumber: issue.number,
             title: issue.title,
             body: issue.body ?? '',
-            labels: issue.labels.map((l) => typeof l === 'string' ? l : l.name ?? ''),
+            labels: getLabelNames(issue.labels),
             specRefs: extractSpecRefs(issue.body ?? ''),
             scopeDescription: extractScopeDescription(issue.body ?? ''),
           }));
@@ -43,20 +48,19 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
         const candidates = data
           .filter((issue) => !('pull_request' in issue && issue.pull_request))
           .filter((issue) => {
-            const labelNames = issue.labels.map((l) => typeof l === 'string' ? l : l.name ?? '');
-            return !labelNames.includes('in-progress') && !labelNames.includes('blocked');
+            const names = getLabelNames(issue.labels);
+            return !names.includes('in-progress') && !names.includes('blocked');
           });
 
         // Severity-gated priority: P0 > P1 > P2 (with auto-fix-approved only), never P3
         const picked = pickHighestPriority(candidates);
         if (!picked) return ok(null);
 
-        const labels = picked.labels.map((l: any) => typeof l === 'string' ? l : l.name ?? '');
         return ok({
           issueNumber: picked.number,
           title: picked.title,
           body: picked.body ?? '',
-          labels,
+          labels: getLabelNames(picked.labels),
           specRefs: extractSpecRefs(picked.body ?? ''),
           scopeDescription: extractScopeDescription(picked.body ?? ''),
           workType: 'bug-fix' as const,
@@ -126,7 +130,12 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
  * Picks the highest-priority review-finding issue by severity label.
  * P0 > P1 > P2 (only with auto-fix-approved). P3 is never returned.
  */
-function pickHighestPriority(issues: any[]): any | null {
+interface IssueWithLabels {
+  labels: Array<string | { name?: string }>;
+  [key: string]: unknown;
+}
+
+function pickHighestPriority<T extends IssueWithLabels>(issues: T[]): T | null {
   const priorities: Array<{ priority: string; requiresApproval: boolean }> = [
     { priority: 'P0', requiresApproval: false },
     { priority: 'P1', requiresApproval: false },
@@ -135,7 +144,7 @@ function pickHighestPriority(issues: any[]): any | null {
 
   for (const { priority, requiresApproval } of priorities) {
     for (const issue of issues) {
-      const labelNames = issue.labels.map((l: any) => typeof l === 'string' ? l : l.name ?? '');
+      const labelNames = getLabelNames(issue.labels);
       if (!labelNames.includes(priority)) continue;
       if (requiresApproval && !labelNames.includes('auto-fix-approved')) continue;
       return issue;
