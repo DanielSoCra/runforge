@@ -91,9 +91,11 @@ describe('runProactiveReview', () => {
     expect(variables.rubric).toContain('Security regression');
     expect(variables.rubric).toContain('Convention violations');
     expect(variables.rubric).toContain('Test coverage gaps');
+    // area no longer passed directly — mapped to category (#339)
+    expect(variables.category).toBe('src/lib');
   });
 
-  it('passes area and recentCommits as session variables', async () => {
+  it('passes template-required variables (category, maxIssues) and proactive context', async () => {
     const runtime = makeRuntime({ findings: [] });
     await runProactiveReview(runtime, {
       area: 'src/validation',
@@ -102,16 +104,21 @@ describe('runProactiveReview', () => {
       issueNumber: 42,
     });
 
+    const call = vi.mocked(runtime.spawnSession).mock.calls[0]!;
+    const variables = (call[1] as { variables: Record<string, string> }).variables;
+
+    // Template-required variables (fixes #339 — these must match codebase-reviewer.md placeholders)
+    expect(variables.category).toBe('src/validation');
+    expect(variables.maxIssues).toBe('10');
+
+    // Proactive context variables
+    expect(variables.rubric).toContain('Exploratory codebase review');
+    expect(variables.recentCommits).toBe('abc fix\ndef refactor');
+
+    // Verify full call signature
     expect(runtime.spawnSession).toHaveBeenCalledWith(
       'codebase-reviewer',
-      expect.objectContaining({
-        variables: expect.objectContaining({
-          area: 'src/validation',
-          recentCommits: 'abc fix\ndef refactor',
-          rubric: expect.stringContaining('Exploratory codebase review'),
-        }),
-        workspacePath: '/workspace',
-      }),
+      expect.objectContaining({ workspacePath: '/workspace' }),
       42,
       expect.objectContaining({ jsonSchema: expect.any(String) }),
       undefined,

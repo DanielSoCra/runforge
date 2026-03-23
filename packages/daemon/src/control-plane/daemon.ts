@@ -78,7 +78,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       spawnReviewSession: async (category, maxIssues) => {
         const result = await runtime.spawnSession(
           'codebase-reviewer',
-          { variables: { category, maxIssues: String(maxIssues) } },
+          { variables: { category, maxIssues: String(maxIssues), rubric: '', recentCommits: '' } },
           0, // no issue number — proactive review
         );
         if (!result.ok) {
