@@ -9,19 +9,33 @@ export async function removeConnection(connectionId: string) {
   const supabase = await createClient();
   await requireAdmin(supabase);
 
-  // Disconnect repos before deleting connection
-  const { error: reposError } = await supabase.from('repos')
-    .update({ enabled: false, connection_id: null, updated_at: new Date().toISOString() })
+  // Collect repo IDs before deleting connection so we can disable them after.
+  // Order matters: delete connection first so that if it fails, repos are untouched.
+  // ON DELETE SET NULL (migration 005) automatically nulls connection_id on repos.
+  const { data: linkedRepos, error: selectError } = await supabase.from('repos')
+    .select('id')
     .eq('connection_id', connectionId);
-  if (reposError) {
-    console.error('[github-connections] removeConnection disconnect repos failed:', reposError);
-    throw new Error('Failed to disconnect repos');
+  if (selectError) {
+    console.error('[github-connections] removeConnection failed to collect repos:', selectError);
   }
 
   const { error } = await supabase.from('github_connections').delete().eq('id', connectionId);
   if (error) {
     console.error('[github-connections] removeConnection delete failed:', error);
     throw new Error('Failed to remove connection');
+  }
+
+  // Disable repos after connection is deleted — connection_id already nulled by cascade.
+  // If this fails, repos are disconnected but still enabled (less severe than the reverse).
+  if (linkedRepos && linkedRepos.length > 0) {
+    const repoIds = linkedRepos.map((r) => r.id);
+    const { error: reposError } = await supabase.from('repos')
+      .update({ enabled: false, updated_at: new Date().toISOString() })
+      .in('id', repoIds);
+    if (reposError) {
+      console.error('[github-connections] removeConnection disable repos failed:', reposError);
+      // Connection is already deleted — log but don't throw to avoid misleading error
+    }
   }
 
   // Notify daemon to drop stale polling for disconnected repos
