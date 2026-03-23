@@ -494,6 +494,89 @@ describe('daemon', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(mockDetector.claimWork).toHaveBeenCalledWith(99);
     });
+
+    it('auto-pauses after maxConsecutiveStuck crash-resumed stuck runs (#291)', async () => {
+      const config = makeConfig({ maxConsecutiveStuck: 2, webhooks: ['https://hooks.example.com/test'] });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      // Two incomplete runs that will both finish stuck
+      const run1 = {
+        id: 'run-stuck-1',
+        issueNumber: 80,
+        title: 'Stuck resumed run 1',
+        phase: 'implement',
+        variant: 'feature',
+        phaseCompletions: {},
+        checkpoints: [],
+        cost: 0,
+        perRunBudget: 10,
+        fixAttempts: [],
+        errorHashes: {},
+        repoOwner: 'test-owner',
+        repoName: 'test-repo',
+        startedAt: '2026-03-21T00:00:00Z',
+        updatedAt: '2026-03-21T01:00:00Z',
+      };
+      const run2 = { ...run1, id: 'run-stuck-2', issueNumber: 81, title: 'Stuck resumed run 2' };
+      mockStateMgr.findIncompleteRuns.mockResolvedValue([run1, run2]);
+      mockRunPipeline.mockResolvedValue({ outcome: 'stuck', error: 'test failure' });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(0);
+
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(true);
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(2);
+      expect(mockNotify).toHaveBeenCalledWith(
+        ['https://hooks.example.com/test'],
+        expect.objectContaining({
+          event: 'auto-paused',
+          message: expect.stringContaining('2 consecutive stuck runs'),
+        }),
+      );
+    });
+
+    it('resets consecutive stuck count when crash-resumed run completes successfully (#291)', async () => {
+      const config = makeConfig({ maxConsecutiveStuck: 3 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      const incompleteRun = {
+        id: 'run-success',
+        issueNumber: 82,
+        title: 'Successful resumed run',
+        phase: 'implement',
+        variant: 'feature',
+        phaseCompletions: {},
+        checkpoints: [],
+        cost: 0,
+        perRunBudget: 10,
+        fixAttempts: [],
+        errorHashes: {},
+        repoOwner: 'test-owner',
+        repoName: 'test-repo',
+        startedAt: '2026-03-21T00:00:00Z',
+        updatedAt: '2026-03-21T01:00:00Z',
+      };
+      mockStateMgr.findIncompleteRuns.mockResolvedValue([incompleteRun]);
+      mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      // First, cause a stuck run via polling to set consecutiveStuckCount to 1
+      mockRunPipeline.mockResolvedValue({ outcome: 'stuck', error: 'fail' });
+      const request = makeWorkRequest({ issueNumber: 90 });
+      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request]));
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      // The crash-resumed run completed first (resetting count to 0), then poll run stuck (count = 1)
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
+    });
   });
 
   describe('legacy polling loop', () => {

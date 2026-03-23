@@ -319,8 +319,9 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           total_cost: run.cost,
         });
 
+        handleRunOutcome(result.outcome, run.issueNumber);
+
         if (result.outcome === 'stuck') {
-          consecutiveStuckCount++;
           await resumeDetector.markStuck(run.issueNumber, result.error ?? 'Unknown error');
           await notify(config.webhooks, {
             event: 'stuck',
@@ -328,8 +329,6 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
             phase: run.phase,
             message: `Issue #${run.issueNumber} stuck: ${result.error ?? 'unknown'}`,
           });
-        } else {
-          consecutiveStuckCount = 0;
         }
       })
       .catch((e) => console.error(`Resumed run failed for #${run.issueNumber}:`, e))
