@@ -298,6 +298,104 @@ describe('merge-agent', () => {
       );
     });
 
+    it('updateStatus("merged") failure on success path → returns err (#258)', async () => {
+      const entry = makeEntry();
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.getEntry.mockResolvedValue(entry);
+      // All queue calls succeed except the final updateStatus('merged')
+      queue.updateStatus.mockResolvedValue(err(new Error('disk full')));
+
+      const gitMock = deps.git as ReturnType<typeof vi.fn>;
+      gitMock
+        .mockResolvedValueOnce(ok('')) // checkout
+        .mockResolvedValueOnce(ok('')) // rebase
+        .mockResolvedValueOnce(ok('')) // checkout integration branch
+        .mockResolvedValueOnce(ok('')) // merge --no-ff
+        .mockResolvedValueOnce(ok('abc123')); // rev-parse HEAD
+
+      // validate succeeds
+      (deps.validate as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      const result = await agent.processEntry('entry-1');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('disk full');
+      }
+    });
+
+    it('incrementAttempts failure → returns err before any git ops (#258)', async () => {
+      const entry = makeEntry();
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.getEntry.mockResolvedValue(entry);
+      queue.incrementAttempts.mockResolvedValue(err(new Error('queue write failed')));
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      const result = await agent.processEntry('entry-1');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('queue write failed');
+      }
+      // No git operations should have been called
+      expect(deps.git).not.toHaveBeenCalled();
+    });
+
+    it('updatePhase("merging") failure → returns err before merge (#258)', async () => {
+      const entry = makeEntry();
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.getEntry.mockResolvedValue(entry);
+      // incrementAttempts and rebasing phase succeed, merging phase fails
+      queue.updatePhase
+        .mockResolvedValueOnce(ok(undefined)) // rebasing
+        .mockResolvedValueOnce(err(new Error('phase write failed'))); // merging
+
+      const gitMock = deps.git as ReturnType<typeof vi.fn>;
+      gitMock
+        .mockResolvedValueOnce(ok('')) // checkout
+        .mockResolvedValueOnce(ok('')); // rebase
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      const result = await agent.processEntry('entry-1');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('phase write failed');
+      }
+      // Should not have attempted checkout of integration branch
+      expect(gitMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('setMergeCommit failure → returns err before validation (#258)', async () => {
+      const entry = makeEntry();
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.getEntry.mockResolvedValue(entry);
+      queue.setMergeCommit.mockResolvedValue(err(new Error('commit write failed')));
+
+      const gitMock = deps.git as ReturnType<typeof vi.fn>;
+      gitMock
+        .mockResolvedValueOnce(ok('')) // checkout
+        .mockResolvedValueOnce(ok('')) // rebase
+        .mockResolvedValueOnce(ok('')) // checkout integration
+        .mockResolvedValueOnce(ok('')) // merge --no-ff
+        .mockResolvedValueOnce(ok('abc123')); // rev-parse HEAD
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      const result = await agent.processEntry('entry-1');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toBe('commit write failed');
+      }
+      // Validation should NOT have run
+      expect(deps.validate).not.toHaveBeenCalled();
+    });
+
     it('validation timeout → status failed', async () => {
       const entry = makeEntry();
       const deps = makeDeps();
@@ -378,6 +476,25 @@ describe('merge-agent', () => {
       await agent.recoverStuckEntries();
 
       expect(queue.updatePhase).toHaveBeenCalledWith('entry-1', 'queued');
+    });
+
+    it('updatePhase failure during recovery → skips entry (#258)', async () => {
+      const entry1 = makeEntry({ id: 'entry-1', mergePhase: 'merging', mergeCommit: 'abc123' });
+      const entry2 = makeEntry({ id: 'entry-2', mergePhase: 'reverted' });
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.list.mockResolvedValue([entry1, entry2]);
+
+      // updatePhase fails for entry-1 (validating), succeeds otherwise
+      queue.updatePhase.mockResolvedValueOnce(err(new Error('write failed')));
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      await agent.recoverStuckEntries();
+
+      // entry-1 should have been skipped (no validation run)
+      expect(deps.validate).not.toHaveBeenCalled();
+      // entry-2 should still be processed
+      expect(queue.updateStatus).toHaveBeenCalledWith('entry-2', 'failed', 'recovered after crash in reverted phase');
     });
 
     it('reverted phase → mark failed', async () => {

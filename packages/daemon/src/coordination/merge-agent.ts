@@ -42,30 +42,33 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
       return err(new Error(`Entry ${entryId} not found`));
     }
 
-    await queue.incrementAttempts(entryId);
+    const incResult = await queue.incrementAttempts(entryId);
+    if (!incResult.ok) return incResult;
 
     // Phase 1: Rebasing
-    await queue.updatePhase(entryId, 'rebasing');
+    const rebasingPhaseResult = await queue.updatePhase(entryId, 'rebasing');
+    if (!rebasingPhaseResult.ok) return rebasingPhaseResult;
 
     const checkoutResult = await git(['checkout', entry.headRef], mergeWorktreePath);
     if (!checkoutResult.ok) {
-      await queue.updateStatus(entryId, 'failed', checkoutResult.error.message);
-      return err(checkoutResult.error);
+      const statusResult = await queue.updateStatus(entryId, 'failed', checkoutResult.error.message);
+      return !statusResult.ok ? statusResult : err(checkoutResult.error);
     }
 
     const rebaseResult = await git(['rebase', integrationBranch], mergeWorktreePath);
     if (!rebaseResult.ok) {
-      await queue.updateStatus(entryId, 'failed', rebaseResult.error.message);
-      return err(rebaseResult.error);
+      const statusResult = await queue.updateStatus(entryId, 'failed', rebaseResult.error.message);
+      return !statusResult.ok ? statusResult : err(rebaseResult.error);
     }
 
     // Phase 2: Merging
-    await queue.updatePhase(entryId, 'merging');
+    const mergingPhaseResult = await queue.updatePhase(entryId, 'merging');
+    if (!mergingPhaseResult.ok) return mergingPhaseResult;
 
     const checkoutIntResult = await git(['checkout', integrationBranch], mergeWorktreePath);
     if (!checkoutIntResult.ok) {
-      await queue.updateStatus(entryId, 'failed', checkoutIntResult.error.message);
-      return err(checkoutIntResult.error);
+      const statusResult = await queue.updateStatus(entryId, 'failed', checkoutIntResult.error.message);
+      return !statusResult.ok ? statusResult : err(checkoutIntResult.error);
     }
     const mergeResult = await git(['merge', '--no-ff', entry.headRef], mergeWorktreePath);
 
@@ -78,34 +81,38 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
       const resolution = await resolveConflicts(mergeWorktreePath, conflictConfig, resolveSession);
 
       if (resolution.needsHuman) {
-        await queue.updateStatus(entryId, 'needs_human', resolution.reason);
+        const statusResult = await queue.updateStatus(entryId, 'needs_human', resolution.reason);
+        if (!statusResult.ok) return statusResult;
         return err(new Error(resolution.reason ?? 'needs human intervention'));
       }
 
       if (!resolution.resolved) {
-        await queue.updateStatus(entryId, 'failed', resolution.reason ?? 'conflict resolution failed');
+        const statusResult = await queue.updateStatus(entryId, 'failed', resolution.reason ?? 'conflict resolution failed');
+        if (!statusResult.ok) return statusResult;
         return err(new Error(resolution.reason ?? 'conflict resolution failed'));
       }
 
       // Conflict was resolved — commit
       const commitResult = await git(['commit', '--no-edit'], mergeWorktreePath);
       if (!commitResult.ok) {
-        await queue.updateStatus(entryId, 'failed', commitResult.error.message);
-        return err(commitResult.error);
+        const statusResult = await queue.updateStatus(entryId, 'failed', commitResult.error.message);
+        return !statusResult.ok ? statusResult : err(commitResult.error);
       }
     }
 
     // Get merge commit SHA
     const revParseResult = await git(['rev-parse', 'HEAD'], mergeWorktreePath);
     if (!revParseResult.ok) {
-      await queue.updateStatus(entryId, 'failed', revParseResult.error.message);
-      return err(revParseResult.error);
+      const statusResult = await queue.updateStatus(entryId, 'failed', revParseResult.error.message);
+      return !statusResult.ok ? statusResult : err(revParseResult.error);
     }
     const mergeCommit = revParseResult.value.trim();
-    await queue.setMergeCommit(entryId, mergeCommit);
+    const setCommitResult = await queue.setMergeCommit(entryId, mergeCommit);
+    if (!setCommitResult.ok) return setCommitResult;
 
     // Phase 3: Validating
-    await queue.updatePhase(entryId, 'validating');
+    const validatingPhaseResult = await queue.updatePhase(entryId, 'validating');
+    if (!validatingPhaseResult.ok) return validatingPhaseResult;
 
     const validationResult = await runValidation(entry.issueNumber, config.validationTimeoutMs);
 
@@ -114,17 +121,22 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
       const revertResult = await git(['revert', '--no-edit', mergeCommit], mergeWorktreePath);
       if (!revertResult.ok) {
         // Revert failed — integration branch is in corrupted state, needs human intervention
-        await queue.updatePhase(entryId, 'reverted');
-        await queue.updateStatus(entryId, 'needs_human', `validation failed and revert failed: ${revertResult.error.message}`);
+        const phaseResult = await queue.updatePhase(entryId, 'reverted');
+        if (!phaseResult.ok) return phaseResult;
+        const statusResult = await queue.updateStatus(entryId, 'needs_human', `validation failed and revert failed: ${revertResult.error.message}`);
+        if (!statusResult.ok) return statusResult;
         return err(revertResult.error);
       }
-      await queue.updatePhase(entryId, 'reverted');
-      await queue.updateStatus(entryId, 'failed', validationResult.error.message);
+      const revertedPhaseResult = await queue.updatePhase(entryId, 'reverted');
+      if (!revertedPhaseResult.ok) return revertedPhaseResult;
+      const failedStatusResult = await queue.updateStatus(entryId, 'failed', validationResult.error.message);
+      if (!failedStatusResult.ok) return failedStatusResult;
       return err(validationResult.error);
     }
 
-    // Success
-    await queue.updateStatus(entryId, 'merged');
+    // Success — if this fails, the entry is never marked as merged and retries infinitely
+    const mergedResult = await queue.updateStatus(entryId, 'merged');
+    if (!mergedResult.ok) return mergedResult;
     return ok(undefined);
   }
 
@@ -150,7 +162,8 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
           // Per L2 spec: check if merge commit exists on integration branch.
           // If yes, advance to validating. If no, reset to queued and retry.
           if (entry.mergeCommit) {
-            await queue.updatePhase(entry.id, 'validating');
+            const phaseResult = await queue.updatePhase(entry.id, 'validating');
+            if (!phaseResult.ok) continue;
             const validationResult = await runValidation(entry.issueNumber, config.validationTimeoutMs);
             if (!validationResult.ok) {
               await queue.updateStatus(entry.id, 'failed', validationResult.error.message);
