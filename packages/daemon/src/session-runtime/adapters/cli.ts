@@ -1,6 +1,6 @@
 // src/session-runtime/adapters/cli.ts
 import { spawn } from 'child_process';
-import { writeFileSync, mkdirSync, unlinkSync, existsSync, readFileSync } from 'fs';
+import { writeFileSync, mkdirSync, mkdtempSync, unlinkSync, existsSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { ok, err, type Result } from '../../lib/result.js';
@@ -212,19 +212,28 @@ export class CliAdapter implements ProviderAdapter {
     };
     const env = this.buildEnv(extraEnv);
 
-    // Set up hooks whenever cwd is known — timeout hooks are always needed,
-    // containment hooks only when a policy is provided
+    // Set up hooks for EVERY session — timeout hooks are always needed,
+    // containment hooks only when a policy is provided.
+    // When cwd is not provided (e.g., codebase-reviewer), create a temp directory
+    // so hooks can still be installed via .claude/settings.local.json.
+    // SEC-34: Without this, sessions spawned without workspacePath run uncontained.
     let hookPaths: { scriptPaths: string[]; settingsPath: string; markerPath?: string } | undefined;
+    let tempCwd: string | undefined;
+    let effectiveCwd: string;
     if (options?.cwd) {
-      hookPaths = this.setupHooks(options.cwd, options.containmentPolicy, def.timeoutMs, sessionStartTime, options.mcpConfigs);
+      effectiveCwd = options.cwd;
+    } else {
+      tempCwd = mkdtempSync(join(tmpdir(), 'session-cwd-'));
+      effectiveCwd = tempCwd;
     }
+    hookPaths = this.setupHooks(effectiveCwd, options?.containmentPolicy, def.timeoutMs, sessionStartTime, options?.mcpConfigs);
 
     return new Promise((resolve) => {
       const chunks: Buffer[] = [];
       const errChunks: Buffer[] = [];
 
       const proc = spawn('claude', args, {
-        cwd: options?.cwd,
+        cwd: effectiveCwd,
         env,
       });
 
@@ -246,6 +255,7 @@ export class CliAdapter implements ProviderAdapter {
         clearTimeout(timer);
         if (killTimer) clearTimeout(killTimer);
         if (hookPaths) this.cleanupHooks(hookPaths);
+        if (tempCwd) { try { rmSync(tempCwd, { recursive: true, force: true }); } catch { /* best-effort */ } }
         const stdout = Buffer.concat(chunks).toString();
         const stderr = Buffer.concat(errChunks).toString();
 
@@ -294,6 +304,7 @@ export class CliAdapter implements ProviderAdapter {
         clearTimeout(timer);
         if (killTimer) clearTimeout(killTimer);
         if (hookPaths) this.cleanupHooks(hookPaths);
+        if (tempCwd) { try { rmSync(tempCwd, { recursive: true, force: true }); } catch { /* best-effort */ } }
         const partialStdout = Buffer.concat(chunks).toString();
         const parsed = this.parseOutput(partialStdout);
         const cost = parsed.ok ? parsed.value.cost : 0;

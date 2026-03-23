@@ -694,19 +694,34 @@ describe('CliAdapter.spawn() (#102)', () => {
     }
   });
 
-  it('skips hook setup when cwd is not provided', async () => {
+  it('installs hooks in temp cwd when no cwd provided (SEC-34 regression)', async () => {
     const mockProc = createMockProcess();
-    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+    const spawnFn = vi.mocked(spawnMock);
+    spawnFn.mockClear();
+    spawnFn.mockReturnValue(mockProc as never);
 
     const adapter = new CliAdapter();
     const setupSpy = vi.spyOn(adapter, 'setupHooks');
+    const cleanupSpy = vi.spyOn(adapter, 'cleanupHooks');
 
     const promise = adapter.spawn(mockDef, 'do work');
+
+    // Hooks MUST be set up even without explicit cwd — this was the SEC-34 bug
+    expect(setupSpy).toHaveBeenCalledTimes(1);
+
+    // The effective cwd passed to setupHooks should be a temp directory
+    const hookCwd = setupSpy.mock.calls[0]?.[0] as string;
+    expect(hookCwd).toContain('session-cwd-');
+
+    // The spawned process should use the same temp cwd
+    const spawnCall = spawnFn.mock.calls[0];
+    const spawnOpts = spawnCall?.[2] as { cwd: string };
+    expect(spawnOpts.cwd).toBe(hookCwd);
 
     mockProc.stdout.emit('data', Buffer.from(JSON.stringify({ result: 'ok' })));
     mockProc.emit('close', 0);
 
     await promise;
-    expect(setupSpy).not.toHaveBeenCalled();
+    expect(cleanupSpy).toHaveBeenCalled();
   });
 });
