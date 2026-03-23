@@ -64,7 +64,11 @@ export async function GET(request: NextRequest) {
     { connection_id: connectionId, github_id: ghUser.id, login: ghUser.login, name: ghUser.name ?? ghUser.login, avatar_url: ghUser.avatar_url ?? null },
     ...ghOrgs.map((o) => ({ connection_id: connectionId, github_id: o.id, login: o.login, name: o.name ?? o.login, avatar_url: o.avatar_url ?? null })),
   ];
-  await supabase.from('github_orgs').upsert(allOrgs, { onConflict: 'connection_id,github_id' });
+  const { error: orgsErr } = await supabase.from('github_orgs').upsert(allOrgs, { onConflict: 'connection_id,github_id' });
+  if (orgsErr) {
+    console.error('github_orgs upsert failed:', orgsErr.message);
+    return NextResponse.redirect(`${settingsUrl}?error=orgs_failed`);
+  }
 
   const response = NextResponse.redirect(settingsUrl);
   response.cookies.delete('gh_oauth_state');
