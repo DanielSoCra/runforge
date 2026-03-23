@@ -510,7 +510,121 @@ describe('merge-agent', () => {
     });
   });
 
+  describe('recoverStuckEntries Result checking', () => {
+    it('updateStatus failure during validating recovery → skips entry', async () => {
+      const entry1 = makeEntry({ id: 'entry-1', mergePhase: 'validating' });
+      const entry2 = makeEntry({ id: 'entry-2', mergePhase: 'reverted' });
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.list.mockResolvedValue([entry1, entry2]);
+
+      // validate succeeds for entry-1, but updateStatus('merged') fails
+      (deps.validate as ReturnType<typeof vi.fn>).mockResolvedValue(ok(undefined));
+      queue.updateStatus
+        .mockResolvedValueOnce(err(new Error('write failed'))) // entry-1 merged fails
+        .mockResolvedValueOnce(ok(undefined)); // entry-2 should still be processed
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      await agent.recoverStuckEntries();
+
+      // entry-2 should still be processed despite entry-1's updateStatus failure
+      expect(queue.updateStatus).toHaveBeenCalledWith('entry-2', 'failed', 'recovered after crash in reverted phase');
+    });
+
+    it('updatePhase failure during queued reset → skips entry', async () => {
+      const entry1 = makeEntry({ id: 'entry-1', mergePhase: 'rebasing', mergeCommit: null });
+      const entry2 = makeEntry({ id: 'entry-2', mergePhase: 'reverted' });
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.list.mockResolvedValue([entry1, entry2]);
+
+      // updatePhase('queued') fails for entry-1
+      queue.updatePhase.mockResolvedValueOnce(err(new Error('write failed')));
+      queue.updateStatus.mockResolvedValue(ok(undefined));
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      await agent.recoverStuckEntries();
+
+      // entry-2 should still be processed
+      expect(queue.updateStatus).toHaveBeenCalledWith('entry-2', 'failed', 'recovered after crash in reverted phase');
+    });
+
+    it('updateStatus failure during reverted recovery → skips entry', async () => {
+      const entry1 = makeEntry({ id: 'entry-1', mergePhase: 'reverted' });
+      const entry2 = makeEntry({ id: 'entry-2', mergePhase: 'reverted' });
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.list.mockResolvedValue([entry1, entry2]);
+
+      queue.updateStatus
+        .mockResolvedValueOnce(err(new Error('write failed'))) // entry-1 fails
+        .mockResolvedValueOnce(ok(undefined)); // entry-2 succeeds
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      await agent.recoverStuckEntries();
+
+      // Both entries attempted
+      expect(queue.updateStatus).toHaveBeenCalledTimes(2);
+      expect(queue.updateStatus).toHaveBeenCalledWith('entry-2', 'failed', 'recovered after crash in reverted phase');
+    });
+  });
+
   describe('start/stop poll loop', () => {
+    it('calls recoverStuckEntries on each tick (#271)', async () => {
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.selectNext.mockResolvedValue(null);
+      queue.list.mockResolvedValue([]); // no stuck entries
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      const stop = agent.start();
+
+      // Advance past first tick
+      await vi.advanceTimersByTimeAsync(defaultConfig.pollIntervalMs + 10);
+
+      // recoverStuckEntries reads queue.list internally
+      expect(queue.list).toHaveBeenCalled();
+
+      // Advance past second tick
+      await vi.advanceTimersByTimeAsync(defaultConfig.pollIntervalMs + 10);
+
+      expect(queue.list).toHaveBeenCalledTimes(2);
+
+      stop();
+    });
+
+    it('recovers stuck entry before processing new entries (#271)', async () => {
+      const stuckEntry = makeEntry({ id: 'stuck-1', mergePhase: 'reverted' });
+      const newEntry = makeEntry({ id: 'new-1', mergePhase: 'queued' });
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+
+      // list returns stuck entry for recovery
+      queue.list.mockResolvedValue([stuckEntry]);
+      // selectNext returns new entry for processing
+      queue.selectNext.mockResolvedValueOnce(newEntry).mockResolvedValue(null);
+      queue.getEntry.mockResolvedValue(newEntry);
+
+      const gitMock = deps.git as ReturnType<typeof vi.fn>;
+      gitMock.mockResolvedValue(ok('abc123'));
+
+      const callOrder: string[] = [];
+      queue.updateStatus.mockImplementation(async (id: string, status: string) => {
+        callOrder.push(`updateStatus:${id}:${status}`);
+        return ok(undefined);
+      });
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      const stop = agent.start();
+
+      await vi.advanceTimersByTimeAsync(defaultConfig.pollIntervalMs + 10);
+
+      // Recovery should happen before new entry processing
+      expect(callOrder[0]).toBe('updateStatus:stuck-1:failed');
+
+      stop();
+    });
+
     it('polls for entries and processes them', async () => {
       const entry = makeEntry();
       const deps = makeDeps();

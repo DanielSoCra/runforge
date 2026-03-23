@@ -166,12 +166,15 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
             if (!phaseResult.ok) continue;
             const validationResult = await runValidation(entry.issueNumber, config.validationTimeoutMs);
             if (!validationResult.ok) {
-              await queue.updateStatus(entry.id, 'failed', validationResult.error.message);
+              const statusResult = await queue.updateStatus(entry.id, 'failed', validationResult.error.message);
+              if (!statusResult.ok) continue;
             } else {
-              await queue.updateStatus(entry.id, 'merged');
+              const statusResult = await queue.updateStatus(entry.id, 'merged');
+              if (!statusResult.ok) continue;
             }
           } else {
-            await queue.updatePhase(entry.id, 'queued');
+            const phaseResult = await queue.updatePhase(entry.id, 'queued');
+            if (!phaseResult.ok) continue;
           }
           break;
         }
@@ -179,14 +182,17 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
           // Re-run validation
           const validationResult = await runValidation(entry.issueNumber, config.validationTimeoutMs);
           if (!validationResult.ok) {
-            await queue.updateStatus(entry.id, 'failed', validationResult.error.message);
+            const statusResult = await queue.updateStatus(entry.id, 'failed', validationResult.error.message);
+            if (!statusResult.ok) continue;
           } else {
-            await queue.updateStatus(entry.id, 'merged');
+            const statusResult = await queue.updateStatus(entry.id, 'merged');
+            if (!statusResult.ok) continue;
           }
           break;
         }
         case 'reverted': {
-          await queue.updateStatus(entry.id, 'failed', 'recovered after crash in reverted phase');
+          const statusResult = await queue.updateStatus(entry.id, 'failed', 'recovered after crash in reverted phase');
+          if (!statusResult.ok) continue;
           break;
         }
         // 'queued' — nothing to recover
@@ -203,6 +209,7 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
       if (stopped) return;
 
       try {
+        await recoverStuckEntries();
         await queue.checkDependencyTimeouts(config.dependencyTimeoutMs);
 
         const next = await queue.selectNext();
