@@ -203,6 +203,81 @@ describe('KnowledgeStore', () => {
       expect(records[1]!.priorityTier).toBe('normal');
     });
 
+    it('sorts business_observation records by recency (newest first)', async () => {
+      // Store older record first
+      await store.storeRecord(
+        [makeMarker({ description: 'Old observation about patterns' })],
+        'retro-1',
+        'autonomous',
+        'business_observation',
+      );
+      // Advance time slightly for a newer record
+      await new Promise(r => setTimeout(r, 10));
+      await store.storeRecord(
+        [makeMarker({ description: 'New observation about trends' })],
+        'retro-2',
+        'autonomous',
+        'business_observation',
+      );
+      const records = await store.matchRecords(['src/foo.ts'], 'product_ownership');
+      expect(records).toHaveLength(2);
+      // Newest should come first (recency sort)
+      expect(records[0]!.description).toBe('New observation about trends');
+      expect(records[1]!.description).toBe('Old observation about patterns');
+    });
+
+    it('sorts review_finding records by severity (hitCount) then recency', async () => {
+      // Store a record and bump its hitCount by matching it multiple times
+      await store.storeRecord(
+        [makeMarker({ description: 'Low-hit finding about security' })],
+        'review-1',
+        'autonomous',
+        'review_finding',
+      );
+      await store.storeRecord(
+        [makeMarker({ description: 'High-hit finding about validation' })],
+        'review-2',
+        'autonomous',
+        'review_finding',
+      );
+      // Bump hit count on high-hit finding by storing a duplicate
+      await store.storeRecord(
+        [makeMarker({ description: 'High-hit finding about validation' })],
+        'review-3',
+        'autonomous',
+        'review_finding',
+      );
+
+      const records = await store.matchRecords(['src/foo.ts'], 'technical_leadership');
+      expect(records).toHaveLength(2);
+      // Higher hitCount first (severity_then_recency)
+      expect(records[0]!.hitCount).toBeGreaterThan(records[1]!.hitCount);
+      expect(records[0]!.description).toBe('High-hit finding about validation');
+      expect(records[1]!.description).toBe('Low-hit finding about security');
+    });
+
+    it('sorts review_finding records by recency when hitCount is equal', async () => {
+      await store.storeRecord(
+        [makeMarker({ description: 'Older finding about auth' })],
+        'review-1',
+        'autonomous',
+        'review_finding',
+      );
+      await new Promise(r => setTimeout(r, 10));
+      await store.storeRecord(
+        [makeMarker({ description: 'Newer finding about input' })],
+        'review-2',
+        'autonomous',
+        'review_finding',
+      );
+      const records = await store.matchRecords(['src/foo.ts'], 'technical_leadership');
+      expect(records).toHaveLength(2);
+      // Both records have hitCount=1 at creation; matchRecords increments both equally,
+      // so the tie-breaker is recency — newest first
+      expect(records[0]!.description).toBe('Newer finding about input');
+      expect(records[1]!.description).toBe('Older finding about auth');
+    });
+
     it('accepts explicit recordType filter', async () => {
       await store.storeRecord(
         [makeMarker({ description: 'Pitfall' })],
