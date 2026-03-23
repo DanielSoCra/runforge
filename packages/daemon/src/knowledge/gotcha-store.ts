@@ -49,6 +49,10 @@ export class GotchaStore {
       );
       if (duplicate) {
         duplicate.hitCount++;
+        if (originType === 'operator' && duplicate.originType !== 'operator') {
+          duplicate.originType = 'operator';
+          duplicate.priorityTier = 'elevated';
+        }
         await appendJsonl(this.path, duplicate);
       } else {
         const gotcha: Gotcha = {

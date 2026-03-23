@@ -116,6 +116,51 @@ describe('GotchaStore', () => {
 
     });
 
+    it('upgrades originType and priorityTier when operator correction deduplicates against autonomous gotcha (#280)', async () => {
+      // Store an autonomous gotcha first
+      await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'Validate input carefully' }],
+        1,
+        'autonomous',
+      );
+      const before = await store.match(['foo.ts']);
+      expect(before[0]!.originType).toBe('autonomous');
+      expect(before[0]!.priorityTier).toBe('normal');
+
+      // Store an operator correction that deduplicates against the autonomous one
+      const count = await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'validate input carefully' }],
+        2,
+        'operator',
+      );
+      expect(count).toBe(0); // deduped, not new
+
+      // Verify the existing gotcha was upgraded to operator/elevated
+      const after = await store.match(['foo.ts']);
+      expect(after).toHaveLength(1);
+      expect(after[0]!.originType).toBe('operator');
+      expect(after[0]!.priorityTier).toBe('elevated');
+    });
+
+    it('does not downgrade operator gotcha when autonomous dedup occurs (#280)', async () => {
+      // Store an operator gotcha first
+      await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'Check permissions' }],
+        1,
+        'operator',
+      );
+      // Store an autonomous duplicate
+      await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'check permissions' }],
+        2,
+        'autonomous',
+      );
+      const after = await store.match(['foo.ts']);
+      expect(after).toHaveLength(1);
+      expect(after[0]!.originType).toBe('operator');
+      expect(after[0]!.priorityTier).toBe('elevated');
+    });
+
     it('sets originType autonomous and priorityTier normal by default', async () => {
       await store.store(
         [{ artifactPatterns: ['**/*.ts'], description: 'Auto gotcha' }],
