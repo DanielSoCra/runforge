@@ -41,17 +41,20 @@ export async function runProactiveReview(
   runtime: SessionRuntime,
   input: ProactiveReviewInput,
 ): Promise<ProactiveReviewResult> {
+  const rubric = [
+    'Exploratory codebase review. Scan the given area for:',
+    '1. Spec-code drift — implementation diverges from spec patterns',
+    '2. Dead code — unused functions, unreachable branches',
+    '3. Security regression — new injection risks, missing validation',
+    '4. Convention violations — inconsistent naming, import patterns',
+    '5. Test coverage gaps — untested edge cases, missing assertions',
+  ].join('\n');
+
   const variables: Record<string, string> = {
-    area: input.area,
+    category: input.area,
+    maxIssues: '10',
+    rubric,
     recentCommits: input.recentCommits,
-    rubric: [
-      'Exploratory codebase review. Scan the given area for:',
-      '1. Spec-code drift — implementation diverges from spec patterns',
-      '2. Dead code — unused functions, unreachable branches',
-      '3. Security regression — new injection risks, missing validation',
-      '4. Convention violations — inconsistent naming, import patterns',
-      '5. Test coverage gaps — untested edge cases, missing assertions',
-    ].join('\n'),
   };
 
   const result = await runtime.spawnSession(

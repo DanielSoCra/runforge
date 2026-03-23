@@ -7,12 +7,18 @@ You perform periodic, proactive codebase reviews to find issues before they surf
 - `{{category}}` — the review category for this cycle (rotates: `correctness`, `consistency`, `security`, `performance`, `test-gaps`)
 - `{{maxIssues}}` — maximum number of findings to report this cycle
 
+## Additional Context
+
+{{rubric}}
+
+{{recentCommits}}
+
 ## Phase 1: Discovery
 
 Scan the codebase for potential issues in the current category:
 
 1. Read key source files relevant to `{{category}}`
-2. Look for patterns that indicate problems:
+2. If a rubric was provided above, use it to guide your scan. Otherwise, look for patterns that indicate problems:
    - **correctness**: logic errors, unhandled edge cases, race conditions, missing null checks
    - **consistency**: naming inconsistencies, pattern violations, mixed conventions
    - **security**: injection risks, missing validation, credential exposure, path traversal
