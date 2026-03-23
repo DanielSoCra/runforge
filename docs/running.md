@@ -141,9 +141,9 @@ The daemon control plane (`auto-claude start`) replaces the legacy shell scripts
 
 | Legacy script | Daemon equivalent |
 |---------------|-------------------|
-| `scripts/pipeline.sh` | Built-in feature pipeline variant (detect → classify → implement → review → deploy) |
-| `scripts/developer.sh` | Built-in bug-fix variant (detect → implement → review → deploy) |
-| `scripts/reviewer.sh` | Built-in codebase review variant (periodic review cycle) |
+| `scripts/pipeline.sh` | Built-in feature pipeline variant (full FSM) |
+| `scripts/developer.sh` | Built-in bug-fix variant |
+| `scripts/reviewer.sh` | Not yet migrated — still runs as a standalone script |
 
 ### Starting the daemon
 
@@ -198,6 +198,7 @@ auto-claude status          # Show active runs, daily cost, uptime
 auto-claude pause           # Stop claiming new work (active runs finish)
 auto-claude resume          # Resume claiming work
 auto-claude retry <issue>   # Re-run a stuck issue from the beginning
+auto-claude process <issue>  # Process a single issue (one-shot, no daemon)
 auto-claude health          # Health check (for process supervisors)
 ```
 
@@ -205,9 +206,9 @@ auto-claude health          # Health check (for process supervisors)
 
 The daemon polls the configured GitHub repo for issues and selects a pipeline variant based on labels and content:
 
-- **Feature pipeline** — issues labelled `feature-pipeline` + `ready-to-implement`. Full pipeline: detect, classify, decompose, implement, review, holdout, integrate, deploy, test, report.
-- **Bug fix** — issues labelled as bugs. Streamlined: detect, implement, review, integrate, deploy, test, report.
-- **Codebase review** — periodic review cycles triggered by configuration. Discovers issues and creates findings.
+- **Feature pipeline** — issues with a `feature-pipeline` label and spec references in the body. Full pipeline: detect, classify, decompose, implement, review, holdout, integrate, deploy, test, report.
+- **Bug fix** — issues labelled as bugs. Streamlined: detect, diagnose, implement, review, integrate, deploy, test, report.
+- **Codebase review** — not yet migrated to the daemon. Currently runs via `scripts/reviewer.sh`.
 
 ## Stopping
 
