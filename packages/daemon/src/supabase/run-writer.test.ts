@@ -9,9 +9,23 @@ describe('toDbOutcome', () => {
 });
 
 describe('toDbSessionType', () => {
+  // planning group
   it('maps coordinator → planning',       () => expect(toDbSessionType('coordinator')).toBe('planning'));
-  it('maps worker → implementation',      () => expect(toDbSessionType('worker')).toBe('implementation'));
-  it('maps reviewer-spec → validation',   () => expect(toDbSessionType('reviewer-spec')).toBe('validation'));
+  it('maps classifier → planning',        () => expect(toDbSessionType('classifier')).toBe('planning'));
+  it('maps prompt-optimizer → planning',   () => expect(toDbSessionType('prompt-optimizer')).toBe('planning'));
+
+  // implementation group
+  it('maps worker → implementation',           () => expect(toDbSessionType('worker')).toBe('implementation'));
+  it('maps conflict-resolver → implementation', () => expect(toDbSessionType('conflict-resolver')).toBe('implementation'));
+  it('maps bug-worker → implementation',        () => expect(toDbSessionType('bug-worker')).toBe('implementation'));
+
+  // validation group
+  it('maps reviewer-spec → validation',     () => expect(toDbSessionType('reviewer-spec')).toBe('validation'));
+  it('maps reviewer-quality → validation',  () => expect(toDbSessionType('reviewer-quality')).toBe('validation'));
+  it('maps reviewer-security → validation', () => expect(toDbSessionType('reviewer-security')).toBe('validation'));
+  it('maps tester → validation',            () => expect(toDbSessionType('tester')).toBe('validation'));
+
+  // diagnosis group
   it('maps diagnostician → diagnosis',    () => expect(toDbSessionType('diagnostician')).toBe('diagnosis'));
 });
 
