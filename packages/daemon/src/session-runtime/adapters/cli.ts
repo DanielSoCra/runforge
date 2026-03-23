@@ -7,6 +7,7 @@ import { ok, err, type Result } from '../../lib/result.js';
 import type { AgentDefinition, SessionContext, SessionResult, ExitStatus, PitfallMarker } from '../../types.js';
 import type { ContainmentPolicy } from '../containment-hooks.js';
 import type { ProviderAdapter } from './types.js';
+import type { McpConfig } from '../plugin-injection.js';
 import { generateContainmentScript } from '../generate-containment-script.js';
 import { generateTimeoutHookScript } from '../timeout-hook-script.js';
 import { SessionError } from '../session-error.js';
@@ -93,6 +94,7 @@ export class CliAdapter implements ProviderAdapter {
     policy: ContainmentPolicy | undefined,
     timeoutMs: number,
     sessionStartTime?: number,
+    mcpConfigs?: McpConfig[],
   ): { scriptPaths: string[]; settingsPath: string; markerPath?: string } {
     const now = sessionStartTime ?? Date.now();
     const scriptPaths: string[] = [];
@@ -135,6 +137,27 @@ export class CliAdapter implements ProviderAdapter {
       ...(settings.hooks as Record<string, unknown> ?? {}),
       PreToolUse: preToolUseHooks,
     };
+
+    // Inject plugin MCP server configs (ARCH-AC-PLUGINS Flow 4 step 3)
+    // Merge with any pre-existing mcpServers — plugin configs take precedence on name collision
+    if (mcpConfigs && mcpConfigs.length > 0) {
+      const existing = (settings.mcpServers ?? {}) as Record<string, unknown>;
+      const pluginServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
+      for (const mcp of mcpConfigs) {
+        const entry: { command: string; args: string[]; env?: Record<string, string> } = {
+          command: mcp.command,
+          args: mcp.args,
+        };
+        if (mcp.env && Object.keys(mcp.env).length > 0) {
+          entry.env = mcp.env;
+        }
+        pluginServers[mcp.name] = entry;
+      }
+      settings.mcpServers = { ...existing, ...pluginServers };
+      // Store injected names so cleanup only removes plugin-injected keys
+      settings._pluginMcpNames = Object.keys(pluginServers);
+    }
+
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
     return { scriptPaths, settingsPath, markerPath };
@@ -147,7 +170,7 @@ export class CliAdapter implements ProviderAdapter {
     if (paths.markerPath) {
       try { unlinkSync(paths.markerPath); } catch { /* may not exist */ }
     }
-    // Remove only our hooks from settings — restore previous state
+    // Remove only our hooks and plugin MCP configs from settings — restore previous state
     try {
       const content = readFileSync(paths.settingsPath, 'utf8');
       const settings = JSON.parse(content) as Record<string, unknown>;
@@ -156,6 +179,18 @@ export class CliAdapter implements ProviderAdapter {
         delete hooks.PreToolUse;
         if (Object.keys(hooks).length === 0) delete settings.hooks;
       }
+      // Remove only plugin-injected MCP servers, preserve pre-existing ones
+      const injectedNames = settings._pluginMcpNames as string[] | undefined;
+      if (injectedNames && settings.mcpServers) {
+        const servers = settings.mcpServers as Record<string, unknown>;
+        for (const name of injectedNames) {
+          delete servers[name];
+        }
+        if (Object.keys(servers).length === 0) {
+          delete settings.mcpServers;
+        }
+      }
+      delete settings._pluginMcpNames;
       if (Object.keys(settings).length === 0) {
         unlinkSync(paths.settingsPath);
       } else {
@@ -167,7 +202,7 @@ export class CliAdapter implements ProviderAdapter {
   async spawn(
     def: AgentDefinition,
     prompt: string,
-    options?: { cwd?: string; jsonSchema?: string; containmentPolicy?: ContainmentPolicy },
+    options?: { cwd?: string; jsonSchema?: string; containmentPolicy?: ContainmentPolicy; mcpConfigs?: McpConfig[] },
   ): Promise<Result<SessionResult>> {
     const args = this.buildArgs(def, prompt, options?.jsonSchema);
     const sessionStartTime = Date.now();
@@ -181,7 +216,7 @@ export class CliAdapter implements ProviderAdapter {
     // containment hooks only when a policy is provided
     let hookPaths: { scriptPaths: string[]; settingsPath: string; markerPath?: string } | undefined;
     if (options?.cwd) {
-      hookPaths = this.setupHooks(options.cwd, options.containmentPolicy, def.timeoutMs, sessionStartTime);
+      hookPaths = this.setupHooks(options.cwd, options.containmentPolicy, def.timeoutMs, sessionStartTime, options.mcpConfigs);
     }
 
     return new Promise((resolve) => {
