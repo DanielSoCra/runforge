@@ -82,7 +82,9 @@ function extractScopeDescription(body: string): string | undefined {
   if (!body.trim()) return undefined;
 
   // Look for an explicit scope section (## Scope, ### Scope, etc.)
-  const scopeMatch = body.match(/^#{1,4}\s+Scope\s*\n([\s\S]*?)(?=\n#{1,4}\s|\n$)/im);
+  // Try to stop at the next heading; if none, capture everything after the Scope header.
+  const scopeMatch = body.match(/^#{1,4}\s+Scope\s*\n([\s\S]*?)(?=\n#{1,4}\s)/im)
+    ?? body.match(/^#{1,4}\s+Scope\s*\n([\s\S]*)/im);
   if (scopeMatch?.[1]?.trim()) {
     return scopeMatch[1].trim().slice(0, 500);
   }

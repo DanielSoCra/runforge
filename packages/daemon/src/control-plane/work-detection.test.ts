@@ -75,6 +75,23 @@ describe('WorkDetector', () => {
       }
     });
 
+    it('captures full multi-paragraph scope section', async () => {
+      const octokit = mockOctokit([{
+        number: 102,
+        title: 'Multi-paragraph scope',
+        body: '## Scope\n\nFirst paragraph.\n\nSecond paragraph.\n\n## Details\n\nOther.',
+        labels: [{ name: 'ready' }],
+      }]);
+      const detector = createWorkDetector(octokit, 'owner', 'repo');
+      const result = await detector.detectReadyWork();
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value[0]!.scopeDescription).toBe(
+          'First paragraph.\n\nSecond paragraph.',
+        );
+      }
+    });
+
     it('sets scopeDescription to undefined for empty body', async () => {
       const octokit = mockOctokit([{
         number: 101,
