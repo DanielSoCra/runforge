@@ -2,7 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { loadDashboardRegistry } from '@/lib/plugins/registry';
 import { PluginCard } from '@/components/plugin-card';
 import { enableAllSuggested, triggerRecommendation } from '@/actions/plugins';
-import { Button } from '@/components/ui/button';
+import { EnableAllForm } from '@/components/enable-all-form';
 import { RealtimeRefresh } from './realtime-refresh';
 import { RepoTabNav } from '@/components/repo-tab-nav';
 import { isAdmin } from '@/lib/auth';
@@ -55,12 +55,10 @@ export default async function PluginsPage({ params }: { params: Promise<{ id: st
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-xs uppercase tracking-wider text-zinc-500">Suggested</h3>
             {admin && (
-              <form action={async () => {
+              <EnableAllForm action={async () => {
                 'use server';
-                await enableAllSuggested(id);
-              }}>
-                <Button variant="ghost" size="sm" type="submit">Enable All</Button>
-              </form>
+                return enableAllSuggested(id);
+              }} />
             )}
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

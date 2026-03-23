@@ -481,6 +481,7 @@ STACK-AC-PLUGINS-DASHBOARD:
     - packages/dashboard/app/(dashboard)/repos/[id]/plugins/page.tsx
     - packages/dashboard/app/(dashboard)/repos/[id]/plugins/realtime-refresh.tsx
     - packages/dashboard/components/plugin-card.tsx
+    - packages/dashboard/components/enable-all-form.tsx
     - packages/dashboard/components/trigger-recommendation-button.tsx
     - packages/dashboard/lib/plugins/registry.ts
     - packages/dashboard/components/repo-tab-nav.tsx
@@ -488,6 +489,7 @@ STACK-AC-PLUGINS-DASHBOARD:
   test_paths:
     - supabase/tests/rls-plugins.test.ts
     - packages/dashboard/actions/plugins.test.ts
+    - packages/dashboard/components/enable-all-form.test.tsx
     - packages/dashboard/lib/plugins/registry.test.ts
   status: draft
 
