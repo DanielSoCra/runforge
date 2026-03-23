@@ -110,6 +110,35 @@ describe('CliAdapter', () => {
       expect(parsed.error.message).toContain('(empty output)');
     }
   });
+
+  // Regression tests for BUG-16: NaN/negative/Infinity cost_usd sanitized to 0
+  it('parseOutput sanitizes NaN cost_usd to 0', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(JSON.stringify({ result: 'ok', cost_usd: NaN }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0);
+  });
+
+  it('parseOutput sanitizes negative cost_usd to 0', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(JSON.stringify({ result: 'ok', cost_usd: -5 }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0);
+  });
+
+  it('parseOutput sanitizes Infinity cost_usd to 0', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(JSON.stringify({ result: 'ok', cost_usd: Infinity }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0);
+  });
+
+  it('parseOutput sanitizes -Infinity cost_usd to 0', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(JSON.stringify({ result: 'ok', cost_usd: -Infinity }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0);
+  });
 });
 
 describe('CliAdapter.extractHandoff (#11)', () => {
