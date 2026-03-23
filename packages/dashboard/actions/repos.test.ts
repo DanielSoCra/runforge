@@ -257,6 +257,88 @@ describe('repo actions', () => {
     );
   });
 
+  describe('createRepo SAFE_PATTERN validation', () => {
+    it('rejects owner with path traversal characters', async () => {
+      const { createRepo } = await import('./repos');
+      const formData = new FormData();
+      formData.append('owner', '../etc');
+      formData.append('name', 'web');
+      await expect(createRepo(formData)).rejects.toThrow(
+        'Owner must contain only alphanumeric characters, dots, underscores, and hyphens'
+      );
+    });
+
+    it('rejects owner with spaces', async () => {
+      const { createRepo } = await import('./repos');
+      const formData = new FormData();
+      formData.append('owner', 'foo bar');
+      formData.append('name', 'web');
+      await expect(createRepo(formData)).rejects.toThrow(
+        'Owner must contain only alphanumeric characters, dots, underscores, and hyphens'
+      );
+    });
+
+    it('rejects owner with semicolons (injection)', async () => {
+      const { createRepo } = await import('./repos');
+      const formData = new FormData();
+      formData.append('owner', 'acme;rm');
+      formData.append('name', 'web');
+      await expect(createRepo(formData)).rejects.toThrow(
+        'Owner must contain only alphanumeric characters, dots, underscores, and hyphens'
+      );
+    });
+
+    it('rejects owner with backticks (injection)', async () => {
+      const { createRepo } = await import('./repos');
+      const formData = new FormData();
+      formData.append('owner', 'acme`whoami`');
+      formData.append('name', 'web');
+      await expect(createRepo(formData)).rejects.toThrow(
+        'Owner must contain only alphanumeric characters, dots, underscores, and hyphens'
+      );
+    });
+
+    it('rejects name with slashes', async () => {
+      const { createRepo } = await import('./repos');
+      const formData = new FormData();
+      formData.append('owner', 'acme');
+      formData.append('name', 'foo/bar');
+      await expect(createRepo(formData)).rejects.toThrow(
+        'Name must contain only alphanumeric characters, dots, underscores, and hyphens'
+      );
+    });
+
+    it('rejects name with spaces', async () => {
+      const { createRepo } = await import('./repos');
+      const formData = new FormData();
+      formData.append('owner', 'acme');
+      formData.append('name', 'foo bar');
+      await expect(createRepo(formData)).rejects.toThrow(
+        'Name must contain only alphanumeric characters, dots, underscores, and hyphens'
+      );
+    });
+
+    it('rejects empty owner after trim', async () => {
+      const { createRepo } = await import('./repos');
+      const formData = new FormData();
+      formData.append('owner', '   ');
+      formData.append('name', 'web');
+      await expect(createRepo(formData)).rejects.toThrow(
+        'Repository owner is required'
+      );
+    });
+
+    it('rejects empty name after trim', async () => {
+      const { createRepo } = await import('./repos');
+      const formData = new FormData();
+      formData.append('owner', 'acme');
+      formData.append('name', '   ');
+      await expect(createRepo(formData)).rejects.toThrow(
+        'Repository name is required'
+      );
+    });
+  });
+
   it('deleteRepo succeeds for a disabled repo', async () => {
     const { createClient } = await import('@/lib/supabase/server');
     const { deleteRepo } = await import('./repos');
