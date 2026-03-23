@@ -25,8 +25,8 @@ export interface ReviewCycleResult {
 }
 
 export interface ReviewSchedulerDeps {
-  /** Spawn a review session for the given category. Returns cycle result. */
-  spawnReviewSession: (category: ReviewCategory) => Promise<ReviewCycleResult>;
+  /** Spawn a review session for the given category with a max findings cap. Returns cycle result. */
+  spawnReviewSession: (category: ReviewCategory, maxIssues: number) => Promise<ReviewCycleResult>;
   /** Returns the signal ratio: verified issues / total closed review issues. 1.0 = perfect signal. */
   getSignalRatio: () => number;
 }
@@ -62,7 +62,7 @@ export function createReviewScheduler(
 
     try {
       const category = nextCategory();
-      await deps.spawnReviewSession(category);
+      await deps.spawnReviewSession(category, config.maxIssuesPerCycle);
       cyclesRun++;
 
       // Check signal ratio and adjust interval

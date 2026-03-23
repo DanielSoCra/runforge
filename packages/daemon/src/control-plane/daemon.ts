@@ -72,10 +72,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   // 3c. Start Review Scheduler
   const reviewScheduler = createReviewScheduler(
     {
-      spawnReviewSession: async (category) => {
+      spawnReviewSession: async (category, maxIssues) => {
         const result = await runtime.spawnSession(
           'codebase-reviewer',
-          { variables: { category } },
+          { variables: { category, maxIssues: String(maxIssues) } },
           0, // no issue number — proactive review
         );
         if (!result.ok) {
@@ -90,8 +90,8 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         };
       },
       getSignalRatio: () => {
-        // TODO: compute from historical review issue data (verified / total closed)
-        // Default to 1.0 (no throttling) until tracking is implemented
+        // TODO(#285): compute from historical review issue data (verified / total closed)
+        // Default to 1.0 (no throttling) until signal tracking is implemented
         return 1.0;
       },
     },

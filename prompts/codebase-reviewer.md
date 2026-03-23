@@ -5,6 +5,7 @@ You perform periodic, proactive codebase reviews to find issues before they surf
 ## Input
 
 - `{{category}}` — the review category for this cycle (rotates: `correctness`, `consistency`, `security`, `performance`, `test-gaps`)
+- `{{maxIssues}}` — maximum number of findings to report this cycle
 
 ## Phase 1: Discovery
 
@@ -39,7 +40,7 @@ After verification, apply a signal quality filter. A finding passes only if:
 
 ## Output
 
-Produce a JSON result with at most **5** verified findings:
+Produce a JSON result with at most **{{maxIssues}}** verified findings:
 
 ```json
 {
@@ -61,7 +62,7 @@ Produce a JSON result with at most **5** verified findings:
 
 ## Rules
 
-- Maximum **5** findings per cycle — quality over quantity
+- Maximum **{{maxIssues}}** findings per cycle — quality over quantity
 - Every finding MUST have concrete evidence (file, line, explanation of why it's a problem)
 - Never report style preferences, formatting issues, or missing comments
 - Never report issues that are already documented as known limitations
