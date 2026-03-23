@@ -114,16 +114,21 @@ Fix any TypeScript errors where switch statements on SessionType need a new case
 
 In `packages/daemon/src/session-runtime/runtime.ts`, add to `DEFAULT_AGENT_DEFS`:
 
+The actual `AgentDefinition` type (types.ts:31-40) requires: `name`, `description`, `systemPrompt`, `allowedTools`, `maxTurns`, `timeoutMs`, `budgetCap`. **Use the real shape:**
+
 ```typescript
 po: {
   name: 'po',
-  promptFile: 'po.md',
+  description: 'Product Owner — proposes highest-value next work',
+  systemPrompt: '',  // populated from prompts/po.md by assemblePrompt()
+  allowedTools: [],
   maxTurns: 20,
-  budgetPerSession: 0.50,
+  timeoutMs: 300_000,
+  budgetCap: 0.50,
 },
 ```
 
-Match the exact shape of existing entries (read the file to see all fields).
+Note: design spec used `promptFile`/`budgetPerSession` — those don't exist on `AgentDefinition`.
 
 - [ ] **Step 4: Create PO prompt template**
 
@@ -336,13 +341,19 @@ export function createCreateProposal(store: ProposalStore, config: { expiryDays:
     const duplicate = existing.find(p => p.title === input.title && new Date(p.createdAt).getTime() > dayAgo);
     if (duplicate) throw new Error(`Duplicate proposal: "${input.title}" was proposed within the last 24 hours`);
 
+    // Actual Proposal Zod schema (coordination/types.ts:9-23) requires all fields
     const proposal: Proposal = {
       id: uuid(),
       title: input.title,
       rationale: input.rationale,
       relatedSpecs: input.relatedSpecs || [],
-      scope: (input.scope as any) || 'medium',
+      relatedIssues: [],
+      scope: (input.scope as 'small' | 'medium' | 'large') || 'medium',
       status: 'proposed',
+      issueNumber: null,
+      approvedBy: null,
+      decisionNotes: null,
+      decidedAt: null,
       createdAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + config.expiryDays * 86400000).toISOString(),
     };
@@ -581,21 +592,17 @@ Read all three files completely. Understand every line of the startup sequence b
 
 - [ ] **Step 2: Simplify config**
 
-In `config.ts`, add the `coordination` section to the config schema. Keep all existing fields. The `coordination` section is additive:
+The `coordination` section already exists in `config.ts` (lines 105-133) with fields: `maxAgents`, `reviewerInterval`, `poInterval`, `plannerTimeout`, `maxAttemptsPerIssue`, `diskSpaceThreshold` (bytes), `gcInterval`, conflict/merge thresholds. **Do NOT create a new section.** Add these new fields to the existing schema:
 
 ```typescript
-coordination?: {
-  tickIntervalMs: number;
-  maxAgents: number;
-  diskSpaceThresholdMb: number;
-  po: {
-    intervalMs: number;
-    debounceMs: number;
-    maxProposals: number;
-    proposalExpiryDays: number;
-  };
-};
+// Add to existing coordination z.object():
+poDebounceMs: z.number().int().min(10000).default(300000),       // 5 minutes
+poMaxProposals: z.number().int().min(1).default(3),
+proposalExpiryDays: z.number().int().min(1).default(7),
+tickIntervalMs: z.number().int().min(10000).default(30000),
 ```
+
+Use existing `poInterval` for PO cycle interval. Use existing `maxAgents` and `diskSpaceThreshold` for coordinator config.
 
 - [ ] **Step 3: Remove RepoManager and DB-mode branching**
 
@@ -605,6 +612,7 @@ In `daemon.ts`:
 - Remove the legacy polling loop (around lines 355-410)
 - Remove `repoManager` from shutdown sequence
 - Remove `legacyPoller` interval
+- Remove `reloadRepos` and `scanIssues` from control server handler wiring (daemon.ts:273-279) — these reference `repoManager` which no longer exists
 
 - [ ] **Step 4: Wire coordination components**
 
@@ -651,10 +659,10 @@ const coordinator = createCoordinator({
   isShuttingDown: () => shuttingDown,
   onMergeAgentCrash: (cb) => { /* register */ },
 }, {
-  tickIntervalMs: config.coordination?.tickIntervalMs || 30000,
-  maxAgents: config.coordination?.maxAgents || config.maxConcurrentRuns || 4,
-  perRepoLimits: {},
-  diskSpaceThresholdMb: config.coordination?.diskSpaceThresholdMb || 1000,
+  tickIntervalMs: config.coordination.tickIntervalMs ?? 30000,
+  maxAgents: config.coordination.maxAgents,
+  perRepoLimits: {},  // kept for backward compat, empty in single-repo mode
+  diskSpaceThreshold: config.coordination.diskSpaceThreshold,  // bytes, not MB
 });
 ```
 
@@ -667,7 +675,7 @@ const ideaStore = createJsonStore<IdeaSubmission[]>(join(coordDir, 'ideas.json')
 // PO tools
 const scanSpecPipeline = createScanSpecPipeline(repoRoot);
 const getBacklog = createGetBacklog(octokit, owner, repoName);
-const createProposalTool = createCreateProposal(proposalStore, { expiryDays: config.coordination?.po?.proposalExpiryDays || 7 });
+const createProposalTool = createCreateProposal(proposalStore, { expiryDays: config.coordination.proposalExpiryDays ?? 7 });
 const listProposalsTool = createListProposals(proposalStore);
 
 // PO MCP server
@@ -686,10 +694,20 @@ const poAgent = createPOAgent({
     const ideas = await ideaStore.load();
     const { port } = await poMcpServer.start();
     try {
+      // SessionContext (types.ts:42-47) does NOT have mcpConfigs.
+      // MCP configs come from plugin injection via assemblePrompt().
+      // Option: add mcpConfigs to SessionContext type, then pass through
+      // to adapter in runtime.ts:194. This is a small type extension.
+      // Alternatively, register the PO MCP server as a synthetic plugin.
+      //
+      // Simplest path: extend SessionContext with optional mcpConfigs:
+      //   mcpConfigs?: Array<{ url: string }>;
+      // Then in runtime.ts assemblePrompt(), merge context.mcpConfigs
+      // with plugin mcpConfigs before passing to adapter.
       await runtime.spawnSession('po', {
         variables: {
           repoName: config.repo,
-          maxProposals: String(config.coordination?.po?.maxProposals || 3),
+          maxProposals: String(config.coordination.poMaxProposals ?? 3),
           pendingIdeas: JSON.stringify(ideas),
         },
         mcpConfigs: [{ url: `http://localhost:${port}` }],
@@ -699,8 +717,8 @@ const poAgent = createPOAgent({
     }
   },
 }, {
-  intervalMs: config.coordination?.po?.intervalMs || 1800000,
-  debounceMs: config.coordination?.po?.debounceMs || 300000,
+  intervalMs: config.coordination.poInterval,           // existing field, default 3600000
+  debounceMs: config.coordination.poDebounceMs ?? 300000, // new field
 });
 ```
 
@@ -878,7 +896,76 @@ git commit -m "feat(dashboard): strip GitHub repo connection flow and command ce
 
 ---
 
-### Task 10: End-to-end smoke test
+### Task 10: Add fleet status page and proposals to briefing
+
+**Files:**
+- Create: `packages/dashboard/app/(dashboard)/fleet/page.tsx`
+- Modify: `packages/dashboard/app/(dashboard)/briefing/page.tsx`
+- Modify: `packages/dashboard/components/sidebar.tsx` (add fleet link replacing removed command center)
+
+- [ ] **Step 1: Read the briefing page**
+
+Read `packages/dashboard/app/(dashboard)/briefing/page.tsx` to understand the existing structure.
+
+- [ ] **Step 2: Create fleet status page**
+
+Create `packages/dashboard/app/(dashboard)/fleet/page.tsx` that:
+- Reads from `daemons` table via Supabase
+- Shows each daemon: repo, status, last heartbeat (with "unresponsive" if >5 min old)
+- Shows pending proposal count per daemon
+- Read-only — no CRUD
+
+- [ ] **Step 3: Add fleet link to sidebar**
+
+Replace the removed command center link with: `{ href: '/fleet', label: 'Fleet', icon: Server }`
+
+- [ ] **Step 4: Add proposals section to briefing page**
+
+In the briefing page, add a "Pending Proposals" section that:
+- Reads from `proposals` table filtered by `status = 'proposed'`
+- Shows title, rationale, spec references, created date, expiry
+- Has Approve and Reject buttons that call the daemon REST API (`POST /proposals/:id/approve` or `/reject`)
+- The daemon URL comes from the `daemons` table entry for this repo
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/dashboard/
+git commit -m "feat(dashboard): add fleet status page and proposals to briefing"
+```
+
+---
+
+### Task 11: Daemon self-registration in Supabase
+
+**Files:**
+- Modify: `packages/daemon/src/control-plane/daemon.ts` (add registration on startup, heartbeat, clean shutdown)
+
+- [ ] **Step 1: Write self-registration function**
+
+After Supabase layer init, if Supabase is configured:
+- Upsert into `daemons` table with repo_owner, repo_name, url (from `config.controlPort`), status: 'running'
+- Start a 60-second interval for heartbeat updates (`last_heartbeat = now()`)
+- On shutdown, set status to 'stopped'
+
+- [ ] **Step 2: Wire into startup and shutdown**
+
+- Call registration after control server starts (step 7 in startup)
+- Clear heartbeat interval in shutdown function
+- Set status to 'stopped' in shutdown
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add packages/daemon/src/control-plane/daemon.ts
+git commit -m "feat(daemon): self-register in Supabase for fleet status"
+```
+
+---
+
+### Task 12: End-to-end smoke test
+
+**Depends on:** All previous tasks complete.
 
 This is manual — you + the operator.
 
