@@ -24,25 +24,38 @@ describe('getSupabaseClient', () => {
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   });
 
-  it('returns null when SUPABASE_URL is missing', () => {
+  it('returns null and warns when only SUPABASE_SERVICE_ROLE_KEY is set', () => {
     delete process.env.SUPABASE_URL;
     process.env.SUPABASE_SERVICE_ROLE_KEY = 'key';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(getSupabaseClient()).toBeNull();
     expect(mockCreateClient).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('SUPABASE_URL is not set'),
+    );
+    warnSpy.mockRestore();
   });
 
-  it('returns null when SUPABASE_SERVICE_ROLE_KEY is missing', () => {
+  it('returns null and warns when only SUPABASE_URL is set', () => {
     process.env.SUPABASE_URL = 'https://example.supabase.co';
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(getSupabaseClient()).toBeNull();
     expect(mockCreateClient).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('SUPABASE_SERVICE_ROLE_KEY is not set'),
+    );
+    warnSpy.mockRestore();
   });
 
-  it('returns null when both env vars are missing', () => {
+  it('returns null without warning when both env vars are missing', () => {
     delete process.env.SUPABASE_URL;
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(getSupabaseClient()).toBeNull();
     expect(mockCreateClient).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 
   it('returns a client when both env vars are set', () => {
