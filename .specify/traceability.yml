@@ -557,6 +557,10 @@ STACK-AC-PIPELINE-DISPATCH:
     - packages/daemon/src/pipeline-dispatch/dispatch.ts
     - packages/daemon/src/pipeline-dispatch/session-types.ts
     - packages/daemon/src/pipeline-dispatch/fallback.ts
+    - prompts/l2-designer.md
+    - prompts/l3-generator.md
+    - prompts/compliance-reviewer.md
+    - prompts/spec-implementer.md
   test_paths:
     - packages/daemon/src/pipeline-dispatch/**/*.test.ts
   status: draft
