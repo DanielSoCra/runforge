@@ -10,7 +10,7 @@ const {
   mockStateMgr, mockCostTracker, mockRemoteControl, mockDetector,
   mockServer, mockServerStart, mockRunPipeline, mockNotify,
   mockRunWriter, mockConfigReader, mockLoadConfig, mockSelectVariant, phaseHandlerCalls, mockCreateReviewScheduler,
-  mockCreatePOAgent,
+  mockCreatePOAgent, mockCreateTechLeadScheduler,
 } = vi.hoisted(() => ({
   mockStateMgr: {
     initialize: vi.fn().mockResolvedValue(undefined),
@@ -54,6 +54,12 @@ const {
   mockCreatePOAgent: vi.fn().mockReturnValue({
     start: vi.fn().mockReturnValue(vi.fn()),
     submitIdea: vi.fn().mockResolvedValue({ id: 'idea-1', submittedBy: 'operator', description: 'test', status: 'pending', proposalId: null, createdAt: '2026-03-23T00:00:00Z' }),
+  }),
+  mockCreateTechLeadScheduler: vi.fn().mockReturnValue({
+    start: vi.fn().mockReturnValue(vi.fn()),
+    stop: vi.fn(),
+    triggerEvent: vi.fn(),
+    getStatus: vi.fn().mockReturnValue({ cyclesRun: 0, running: false }),
   }),
 }));
 
@@ -129,6 +135,21 @@ vi.mock('../coordination/review-scheduler.js', () => ({
 vi.mock('../coordination/po-agent.js', () => ({
   createPOAgent: (...args: unknown[]) => mockCreatePOAgent(...args),
 }));
+vi.mock('../coordination/tech-lead-scheduler.js', () => ({
+  createTechLeadScheduler: (...args: unknown[]) => mockCreateTechLeadScheduler(...args),
+}));
+vi.mock('../coordination/tech-lead/proposal-store.js', () => ({
+  TechProposalStore: class { init = vi.fn().mockResolvedValue(undefined); loadActiveProposals = vi.fn().mockResolvedValue([]); loadRejectedProposals = vi.fn().mockResolvedValue([]); loadAllProposals = vi.fn().mockResolvedValue([]); findDuplicate = vi.fn().mockResolvedValue(undefined); saveProposal = vi.fn().mockResolvedValue(undefined); },
+}));
+vi.mock('../coordination/tech-lead/signal-digest.js', () => ({
+  assembleSignalDigest: vi.fn().mockResolvedValue({ id: 'digest-1', trigger: 'scheduled', reviewFindings: [], runOutcomes: [], driftIndicators: [], deferredWork: [], testHealth: [], dependencyRisks: [], activeProposals: [], priorRejections: [], missingSources: [], assembledAt: '2026-03-23T00:00:00Z' }),
+}));
+vi.mock('../coordination/tech-lead/proposal-lifecycle.js', () => ({
+  isTerminalStatus: vi.fn().mockReturnValue(false),
+}));
+vi.mock('../coordination/tech-lead/retrospective.js', () => ({
+  submitRetrospectivePitfalls: vi.fn().mockResolvedValue(0),
+}));
 
 // --- Helpers ---
 
@@ -160,10 +181,14 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
   },
   coordination: {
     maxAgents: 10, reviewerInterval: 3600000, poInterval: 3600000,
+    poIdeaDebounce: 300000,
     plannerTimeout: 60000, maxAttemptsPerIssue: 3, diskSpaceThreshold: 2_000_000_000,
     gcInterval: 600000, conflictFileThreshold: 3, conflictLineThreshold: 100,
     mergeDependencyTimeout: 1800000, mergeValidationTimeout: 600000,
     mergePollInterval: 5000, mergePollMaxInterval: 60000,
+    techLeadInterval: 7200000, techLeadEventDebounce: 300000,
+    techLeadProposalExpiryMs: 604800000, techLeadLookbackWindowMs: 172800000,
+    techLeadMaxEntriesPerSection: 50,
   },
   diagnosis: { confidenceThreshold: 0.7 },
   warmup: { threshold: 10, regressionThreshold: 3, samplingRate: 0.1, minSamplingRate: 0.01 },
@@ -247,6 +272,7 @@ describe('daemon', () => {
       mockSelectVariant,
       mockCreateReviewScheduler,
       mockCreatePOAgent,
+      mockCreateTechLeadScheduler,
     ]) {
       mock.mockClear();
     }
@@ -1446,11 +1472,14 @@ describe('daemon', () => {
   });
 
   describe('review scheduler config (#334)', () => {
-    it('passes config.validation.proactiveIntervalMs and proactiveThrottleThreshold to createReviewScheduler', async () => {
+    it('passes coordination.reviewerInterval to createReviewScheduler (#356)', async () => {
       const config = makeConfig({
+        coordination: {
+          ...makeConfig().coordination,
+          reviewerInterval: 7200000,  // 2 hours — non-default
+        },
         validation: {
           ...makeConfig().validation,
-          proactiveIntervalMs: 900000,       // 15 minutes — non-default
           proactiveThrottleThreshold: 0.75,  // non-default
         },
       });
@@ -1461,8 +1490,30 @@ describe('daemon', () => {
 
       expect(mockCreateReviewScheduler).toHaveBeenCalledTimes(1);
       const [, schedulerConfig] = mockCreateReviewScheduler.mock.calls[0]!;
-      expect(schedulerConfig.intervalMs).toBe(900000);
+      expect(schedulerConfig.intervalMs).toBe(7200000);
       expect(schedulerConfig.signalRatioThreshold).toBe(0.75);
+    });
+
+    it('does NOT use validation.proactiveIntervalMs for review scheduler interval (#356)', async () => {
+      const config = makeConfig({
+        coordination: {
+          ...makeConfig().coordination,
+          reviewerInterval: 5400000,  // 90 minutes
+        },
+        validation: {
+          ...makeConfig().validation,
+          proactiveIntervalMs: 900000,  // 15 minutes — must be ignored
+        },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      const [, schedulerConfig] = mockCreateReviewScheduler.mock.calls[0]!;
+      // Must use coordination.reviewerInterval, not validation.proactiveIntervalMs
+      expect(schedulerConfig.intervalMs).toBe(5400000);
+      expect(schedulerConfig.intervalMs).not.toBe(900000);
     });
   });
 });

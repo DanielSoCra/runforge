@@ -103,7 +103,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       },
     },
     {
-      intervalMs: config.validation.proactiveIntervalMs,
+      intervalMs: config.coordination.reviewerInterval,
       signalRatioThreshold: config.validation.proactiveThrottleThreshold,
       maxIssuesPerCycle: 5,
     },
