@@ -99,8 +99,8 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       },
     },
     {
-      intervalMs: 20 * 60 * 1000, // 20 minutes
-      signalRatioThreshold: 0.6,
+      intervalMs: config.validation.proactiveIntervalMs,
+      signalRatioThreshold: config.validation.proactiveThrottleThreshold,
       maxIssuesPerCycle: 5,
     },
   );

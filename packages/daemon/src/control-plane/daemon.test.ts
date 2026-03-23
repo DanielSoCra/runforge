@@ -9,7 +9,7 @@ import type { WorkRequest } from '../types.js';
 const {
   mockStateMgr, mockCostTracker, mockRemoteControl, mockDetector,
   mockServer, mockServerStart, mockRunPipeline, mockNotify,
-  mockRunWriter, mockConfigReader, mockLoadConfig, mockSelectVariant, phaseHandlerCalls,
+  mockRunWriter, mockConfigReader, mockLoadConfig, mockSelectVariant, phaseHandlerCalls, mockCreateReviewScheduler,
 } = vi.hoisted(() => ({
   mockStateMgr: {
     initialize: vi.fn().mockResolvedValue(undefined),
@@ -49,6 +49,7 @@ const {
   mockLoadConfig: vi.fn(),
   mockSelectVariant: vi.fn(),
   phaseHandlerCalls: [] as unknown[][],
+  mockCreateReviewScheduler: vi.fn().mockReturnValue({ start: () => () => {}, getStatus: () => ({}) }),
 }));
 
 // --- Module mocks (use classes for constructors to work with `new`) ---
@@ -116,6 +117,9 @@ vi.mock('@octokit/rest', () => {
 });
 vi.mock('../config.js', () => ({
   loadConfig: (...args: unknown[]) => mockLoadConfig(...args),
+}));
+vi.mock('../coordination/review-scheduler.js', () => ({
+  createReviewScheduler: (...args: unknown[]) => mockCreateReviewScheduler(...args),
 }));
 
 // --- Helpers ---
@@ -229,6 +233,7 @@ describe('daemon', () => {
       mockConfigReader.start, mockConfigReader.stop,
       mockConfigReader.getGlobalConfig, mockConfigReader.getRepoConfig,
       mockSelectVariant,
+      mockCreateReviewScheduler,
     ]) {
       mock.mockClear();
     }
@@ -1356,6 +1361,27 @@ describe('daemon', () => {
       expect(mockDetector.claimWork).toHaveBeenCalledWith(60);
       // Feature pipeline should NOT try to claim the same issue
       expect(mockDetector.claimFeaturePipelineWork).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('review scheduler config (#334)', () => {
+    it('passes config.validation.proactiveIntervalMs and proactiveThrottleThreshold to createReviewScheduler', async () => {
+      const config = makeConfig({
+        validation: {
+          ...makeConfig().validation,
+          proactiveIntervalMs: 900000,       // 15 minutes — non-default
+          proactiveThrottleThreshold: 0.75,  // non-default
+        },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      expect(mockCreateReviewScheduler).toHaveBeenCalledTimes(1);
+      const [, schedulerConfig] = mockCreateReviewScheduler.mock.calls[0]!;
+      expect(schedulerConfig.intervalMs).toBe(900000);
+      expect(schedulerConfig.signalRatioThreshold).toBe(0.75);
     });
   });
 });
