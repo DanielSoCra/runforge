@@ -5,6 +5,7 @@ import { join } from 'path';
 import { ImplementationCoordinator } from './coordinator.js';
 import { git } from '../lib/git.js';
 import { ok } from '../lib/result.js';
+import { SessionError } from '../session-runtime/session-error.js';
 import type { WorkRequest, SessionResult } from '../types.js';
 
 // Mock the worktree module so tests don't need real git worktrees
@@ -697,6 +698,69 @@ describe('ImplementationCoordinator — multi-unit', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
+      expect(result.error.message).toContain('Decomposition failed');
+    }
+  });
+
+  it('propagates SessionError from decomposition instead of wrapping in generic Error (#268)', async () => {
+    const sessionError = SessionError.rateLimited(0.5, 30000);
+    const runtime = {
+      spawnSession: vi.fn().mockResolvedValue({ ok: false, error: sessionError }),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'complex',
+      specContent: 'spec',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // Must be the original SessionError, not a generic Error wrapper
+      expect(result.error).toBeInstanceOf(SessionError);
+      expect(result.error).toBe(sessionError);
+      expect((result.error as SessionError).rateLimited).toBe(true);
+      expect((result.error as SessionError).cost).toBe(0.5);
+    }
+  });
+
+  it('propagates SessionError with containmentBreach from decomposition (#268)', async () => {
+    const sessionError = SessionError.containmentBreached('sandbox escape', 1.2);
+    const runtime = {
+      spawnSession: vi.fn().mockResolvedValue({ ok: false, error: sessionError }),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'standard',
+      specContent: 'spec',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(SessionError);
+      expect((result.error as SessionError).containmentBreach).toBe(true);
+      expect((result.error as SessionError).cost).toBe(1.2);
+    }
+  });
+
+  it('still wraps non-SessionError decomposition failures in generic Error (#268)', async () => {
+    const runtime = {
+      spawnSession: vi.fn().mockResolvedValue({ ok: false, error: new Error('Network error') }),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'complex',
+      specContent: 'spec',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).not.toBeInstanceOf(SessionError);
       expect(result.error.message).toContain('Decomposition failed');
     }
   });

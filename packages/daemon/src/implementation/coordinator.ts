@@ -1,4 +1,5 @@
 import { ok, err, type Result } from '../lib/result.js';
+import { SessionError } from '../session-runtime/session-error.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { WorkRequest, TaskGraph, Gotcha, PipelineVariant } from '../types.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
@@ -61,6 +62,9 @@ export class ImplementationCoordinator {
         options.activePlugins,
       );
       if (!decomposeResult.ok) {
+        if (decomposeResult.error instanceof SessionError) {
+          return err(decomposeResult.error);
+        }
         return err(new Error(`Decomposition failed: ${decomposeResult.error.message}`));
       }
       graph = decomposeResult.value;
