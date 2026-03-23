@@ -102,7 +102,7 @@ FUNC-AC-PLUGINS:
   status: draft
 
 FUNC-AC-PRODUCT-OWNER:
-  children: []
+  children: [ARCH-AC-PRODUCT-OWNER]
   status: draft
 
 FUNC-AC-TECH-LEAD:
@@ -176,6 +176,10 @@ ARCH-AC-HANDOFF:
 ARCH-AC-DASHBOARD:
   parent: FUNC-AC-DASHBOARD
   children: [STACK-AC-DASHBOARD, STACK-AC-DASHBOARD-BRIEFING]
+  status: draft
+
+ARCH-AC-PRODUCT-OWNER:
+  parent: FUNC-AC-PRODUCT-OWNER
   status: draft
 
 ARCH-AC-ENRICHED-COMMITS:

@@ -83,6 +83,17 @@ export const ConfigSchema = z.object({
   maxConsecutiveStuck: z.number().int().min(1).default(3),
   gracePeriodMs: z.number().int().default(30000),
   activePlugins: z.array(z.string()).default([]),
+  knowledge: z.object({
+    systemicProposalThreshold: z.number().int().min(1).default(3),
+    systemicProposalCooldownDays: z.number().int().min(1).default(30),
+    candidateTimeoutDays: z.number().int().min(1).default(14),
+    prospectiveSeverityThreshold: z.number().int().min(1).default(5),
+  }).default({
+    systemicProposalThreshold: 3,
+    systemicProposalCooldownDays: 30,
+    candidateTimeoutDays: 14,
+    prospectiveSeverityThreshold: 5,
+  }),
   coordination: z.object({
     maxAgents: z.number().int().min(1).default(10),
     reviewerInterval: z.number().int().min(60000).default(3600000),

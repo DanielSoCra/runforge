@@ -1,6 +1,6 @@
 // src/knowledge/extractor.test.ts
 import { describe, it, expect } from 'vitest';
-import { extractPitfalls } from './extractor.js';
+import { extractPitfalls, extractKnowledgeMarkers } from './extractor.js';
 
 describe('extractPitfalls', () => {
   it('extracts a valid pitfall marker from output', () => {
@@ -69,5 +69,40 @@ describe('extractPitfalls', () => {
     const markers = extractPitfalls(output);
     expect(markers).toHaveLength(1);
     expect(markers[0]!.description).toBe('Valid');
+  });
+});
+
+describe('extractKnowledgeMarkers', () => {
+  it('extracts KNOWLEDGE markers with rootCauseTag and reasoning', () => {
+    const output = '<!-- KNOWLEDGE: {"artifactPatterns":["src/**"],"description":"Race condition","rootCauseTag":"race-cond","reasoning":"Found during cleanup"} -->';
+    const markers = extractKnowledgeMarkers(output);
+    expect(markers).toHaveLength(1);
+    expect(markers[0]!.rootCauseTag).toBe('race-cond');
+    expect(markers[0]!.reasoning).toBe('Found during cleanup');
+  });
+
+  it('also includes legacy PITFALL markers', () => {
+    const output = [
+      '<!-- KNOWLEDGE: {"artifactPatterns":["src/**"],"description":"New format"} -->',
+      '<!-- PITFALL: {"artifactPatterns":["lib/**"],"description":"Legacy format"} -->',
+    ].join('\n');
+    const markers = extractKnowledgeMarkers(output);
+    expect(markers).toHaveLength(2);
+    expect(markers[0]!.description).toBe('New format');
+    expect(markers[1]!.description).toBe('Legacy format');
+  });
+
+  it('handles missing optional fields gracefully', () => {
+    const output = '<!-- KNOWLEDGE: {"artifactPatterns":["src/**"],"description":"No extras"} -->';
+    const markers = extractKnowledgeMarkers(output);
+    expect(markers).toHaveLength(1);
+    expect(markers[0]!.rootCauseTag).toBeUndefined();
+    expect(markers[0]!.reasoning).toBeUndefined();
+  });
+
+  it('skips malformed KNOWLEDGE markers', () => {
+    const output = '<!-- KNOWLEDGE: {bad json} -->';
+    const markers = extractKnowledgeMarkers(output);
+    expect(markers).toHaveLength(0);
   });
 });

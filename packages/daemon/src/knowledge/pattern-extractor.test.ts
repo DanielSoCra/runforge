@@ -1,7 +1,8 @@
 // src/knowledge/pattern-extractor.test.ts
 import { describe, it, expect } from 'vitest';
-import { extractPatterns } from './pattern-extractor.js';
+import { extractPatterns, extractPatternsFromRecords } from './pattern-extractor.js';
 import type { Gotcha } from '../types.js';
+import type { KnowledgeRecord } from './record-types.js';
 
 function makeGotcha(overrides: Partial<Gotcha>): Gotcha {
   return {
@@ -70,5 +71,44 @@ describe('extractPatterns', () => {
 
   it('returns empty array for empty input', () => {
     expect(extractPatterns([])).toHaveLength(0);
+  });
+});
+
+describe('extractPatternsFromRecords', () => {
+  function makeRecord(overrides: Partial<KnowledgeRecord>): KnowledgeRecord {
+    return {
+      id: 'test',
+      recordType: 'technical_pitfall',
+      artifactPatterns: ['src/**/*.ts'],
+      description: 'test',
+      sourceId: 'issue-1',
+      confidence: 1,
+      createdAt: new Date().toISOString(),
+      hitCount: 1,
+      lifecycleStatus: 'active',
+      originType: 'autonomous',
+      priorityTier: 'normal',
+      ...overrides,
+    };
+  }
+
+  it('groups 3+ records with overlapping patterns and similar descriptions', () => {
+    const base = 'Always validate input data before processing';
+    const records = [
+      makeRecord({ id: 'r1', description: `${base} requests`, sourceId: 'issue-1' }),
+      makeRecord({ id: 'r2', description: `${base} calls`, sourceId: 'issue-2' }),
+      makeRecord({ id: 'r3', description: `${base} handlers`, sourceId: 'issue-3' }),
+    ];
+    const patterns = extractPatternsFromRecords(records);
+    expect(patterns.length).toBeGreaterThanOrEqual(1);
+    expect(patterns[0]!.sourceSpecs).toContain('issue-1');
+  });
+
+  it('returns empty for fewer than 3 records', () => {
+    const records = [
+      makeRecord({ id: 'r1', description: 'One' }),
+      makeRecord({ id: 'r2', description: 'Two' }),
+    ];
+    expect(extractPatternsFromRecords(records)).toHaveLength(0);
   });
 });
