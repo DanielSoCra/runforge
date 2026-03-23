@@ -124,10 +124,26 @@ export class KnowledgeStore {
         await appendJsonl(this.path, record);
       }
 
-      // Sort: elevated first, then by hitCount descending
+      // Sort per each type's sortOrder policy, with elevated always first
       matched.sort((a, b) => {
+        // Elevated always comes first regardless of type
         const tierOrder = (t: string) => t === 'elevated' ? 1 : 0;
-        return tierOrder(b.priorityTier) - tierOrder(a.priorityTier) || b.hitCount - a.hitCount;
+        const tierDiff = tierOrder(b.priorityTier) - tierOrder(a.priorityTier);
+        if (tierDiff !== 0) return tierDiff;
+
+        // Within same tier, use type-specific sort order
+        const aPolicy = this.policies[a.recordType];
+        const order = aPolicy.sortOrder;
+        if (order === 'recency') {
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        }
+        if (order === 'severity_then_recency') {
+          const hitDiff = b.hitCount - a.hitCount;
+          if (hitDiff !== 0) return hitDiff;
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        }
+        // priority_then_hits (default)
+        return b.hitCount - a.hitCount;
       });
 
       await this.compactIfNeeded();
@@ -229,10 +245,12 @@ export class KnowledgeStore {
   }
 
   private async loadAllInternal(): Promise<KnowledgeRecord[]> {
-    const entries = await readJsonl<KnowledgeRecord>(this.path);
+    const entries = await readJsonl<Record<string, unknown>>(this.path);
     const latest = new Map<string, KnowledgeRecord>();
     for (const entry of entries) {
-      latest.set(entry.id, entry);
+      const result = KnowledgeRecordSchema.safeParse(entry);
+      if (!result.success) continue; // skip malformed/corrupt entries
+      latest.set(result.data.id, result.data);
     }
     return [...latest.values()];
   }

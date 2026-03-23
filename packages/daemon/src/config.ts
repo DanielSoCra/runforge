@@ -88,6 +88,14 @@ export const ConfigSchema = z.object({
     systemicProposalCooldownDays: z.number().int().min(1).default(30),
     candidateTimeoutDays: z.number().int().min(1).default(14),
     prospectiveSeverityThreshold: z.number().int().min(1).default(5),
+    knowledgePolicies: z.record(z.string(), z.object({
+      promotionThreshold: z.number().int().min(1).optional(),
+      promotionMaxAgeDays: z.number().min(1).optional(),
+      archivalMaxAgeDays: z.number().min(0).optional(),
+      archivalMinHitCount: z.number().int().min(0).optional(),
+      injectionTargets: z.array(z.string()).optional(),
+      sortOrder: z.enum(['priority_then_hits', 'recency', 'severity_then_recency']).optional(),
+    })).optional(),
   }).default({
     systemicProposalThreshold: 3,
     systemicProposalCooldownDays: 30,

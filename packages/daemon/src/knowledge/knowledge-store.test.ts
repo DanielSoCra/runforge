@@ -283,6 +283,45 @@ describe('KnowledgeStore', () => {
     });
   });
 
+  describe('scanForArchival', () => {
+    it('archives old records with low hit counts', async () => {
+      await store.storeRecord(
+        [makeMarker({ description: 'Old low-hit' })],
+        'issue-1', 'autonomous', 'technical_pitfall',
+      );
+      // Use policies with archivalMaxAgeDays = 90 (default), so maxAge=-1 trick won't work here
+      // Instead create a store with custom policies that have archivalMaxAgeDays = 0
+      const shortPolicies = { ...DEFAULT_POLICIES };
+      shortPolicies.technical_pitfall = {
+        ...shortPolicies.technical_pitfall,
+        archivalMaxAgeDays: 0, // any age triggers archival
+        archivalMinHitCount: 100, // effectively all records are "low hit"
+      };
+      const shortStore = new KnowledgeStore(join(dir, 'archival.jsonl'), shortPolicies);
+      await shortStore.storeRecord(
+        [makeMarker({ description: 'Will be archived' })],
+        'issue-1', 'autonomous', 'technical_pitfall',
+      );
+      const archived = await shortStore.scanForArchival();
+      expect(archived).toHaveLength(1);
+      const records = await shortStore.matchRecords(['src/foo.ts'], 'implementation');
+      expect(records).toHaveLength(0);
+    });
+
+    it('does not archive operator_correction records (Infinity archivalMaxAge)', async () => {
+      await store.storeRecord(
+        [makeMarker({ description: 'Op correction' })],
+        'review-1', 'operator', 'operator_correction',
+      );
+      const archived = await store.scanForArchival();
+      expect(archived).not.toContain(
+        (await store.loadAll()).find(r => r.description === 'Op correction')?.id,
+      );
+      const records = await store.matchRecords(['src/foo.ts'], 'implementation');
+      expect(records).toHaveLength(1);
+    });
+  });
+
   describe('v1 migration', () => {
     it('migrates gotchas.jsonl to knowledge.jsonl on first read', async () => {
       const gotchaPath = join(dir, 'gotchas.jsonl');
