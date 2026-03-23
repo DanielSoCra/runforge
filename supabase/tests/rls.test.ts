@@ -202,4 +202,33 @@ describe('RLS policies', () => {
     // Blocked by REVOKE at the Postgres level, not by is_admin() guard
     expect(error).not.toBeNull();
   });
+
+  // --- SEC-30: bootstrap_user_access invitation theft regression tests ---
+
+  it('unauthenticated client cannot call bootstrap_user_access RPC', async () => {
+    const anonClient = createClient(SUPABASE_URL, ANON_KEY);
+    const { error } = await anonClient.rpc('bootstrap_user_access', {
+      p_user_id: '00000000-0000-0000-0000-000000000000',
+      p_provider_handle: 'attacker',
+    });
+    // Blocked by REVOKE at the Postgres level
+    expect(error).not.toBeNull();
+  });
+
+  it.skipIf(!VIEWER_JWT)('viewer cannot spoof provider_handle in bootstrap_user_access', async () => {
+    const viewerClient = createClient(SUPABASE_URL, ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${VIEWER_JWT}` } },
+    });
+    // Decode the JWT to get the viewer's real user_id (sub claim) so we pass
+    // the p_user_id check and exercise the NEW p_provider_handle guard.
+    const payload = JSON.parse(Buffer.from(VIEWER_JWT.split('.')[1], 'base64url').toString());
+    const viewerUid = payload.sub;
+    const { error } = await viewerClient.rpc('bootstrap_user_access', {
+      p_user_id: viewerUid,
+      p_provider_handle: 'victims_github_handle',
+    });
+    // Should fail on the provider_handle identity check (not p_user_id)
+    expect(error).not.toBeNull();
+    expect(error!.message).toContain('permission denied');
+  });
 });
