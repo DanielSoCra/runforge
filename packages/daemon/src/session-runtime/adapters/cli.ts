@@ -288,7 +288,9 @@ export class CliAdapter implements ProviderAdapter {
           return;
         }
 
-        const exitStatus: ExitStatus = code === 0 ? 'completed' : 'failed';
+        const exitStatus: ExitStatus = code === 0
+          ? this.parseExitStatusFromOutput(parsed.value.output)
+          : 'failed';
 
         resolve(ok({
           output: parsed.value.output,
@@ -338,6 +340,31 @@ export class CliAdapter implements ProviderAdapter {
       lower.includes('overloaded_error') ||
       lower.includes('api is overloaded')
     );
+  }
+
+  /**
+   * Parse the agent's textual exit status from session output.
+   * Agents report DONE_WITH_CONCERNS, BLOCKED, or NEEDS_CONTEXT per prompt templates.
+   * Falls back to 'completed' if no status marker is found (agent said DONE or omitted status).
+   */
+  parseExitStatusFromOutput(output: string): ExitStatus {
+    // Search from the end of output — status is reported at the end of the session.
+    // Match the LAST occurrence of a status keyword to avoid false positives in earlier text.
+    // DONE_WITH_CONCERNS and NEEDS_CONTEXT are compound tokens unlikely to appear in prose.
+    // BLOCKED requires structured format (**BLOCKED**, - BLOCKED, or line-start BLOCKED)
+    // to avoid false positives from narrative mentions like "the PR was BLOCKED by...".
+    const reversed = output.split('\n').reverse();
+    for (const line of reversed) {
+      const upper = line.toUpperCase();
+      if (upper.includes('DONE_WITH_CONCERNS')) return 'completed-with-concerns';
+      if (upper.includes('NEEDS_CONTEXT')) return 'needs-context';
+      // Require BLOCKED in structured position: bold (**BLOCKED**), list item (- BLOCKED),
+      // or at line start (BLOCKED —). Prompt templates instruct "**BLOCKED**" format.
+      if (/(?:^|\*\*|^-\s+)\s*BLOCKED\s*(?:\*\*|$|\s*—|\s*:)/.test(upper)) {
+        return 'blocked';
+      }
+    }
+    return 'completed';
   }
 
   private extractPitfalls(output: string): PitfallMarker[] {

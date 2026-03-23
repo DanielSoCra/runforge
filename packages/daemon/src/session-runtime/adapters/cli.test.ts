@@ -212,6 +212,66 @@ describe('CliAdapter.isRateLimitError (#91)', () => {
   });
 });
 
+describe('CliAdapter.parseExitStatusFromOutput (#329)', () => {
+  const adapter = new CliAdapter();
+
+  it('returns completed when output has DONE but no concerns/blocked/needs-context', () => {
+    expect(adapter.parseExitStatusFromOutput('Task complete\n**DONE**\n')).toBe('completed');
+  });
+
+  it('returns completed when output has no status marker', () => {
+    expect(adapter.parseExitStatusFromOutput('some generic output')).toBe('completed');
+  });
+
+  it('returns completed-with-concerns for DONE_WITH_CONCERNS', () => {
+    const output = 'Work finished\n**DONE_WITH_CONCERNS** — tests pass but coverage dropped';
+    expect(adapter.parseExitStatusFromOutput(output)).toBe('completed-with-concerns');
+  });
+
+  it('returns blocked for BLOCKED status', () => {
+    const output = 'Attempted fix\n**BLOCKED** — cannot proceed safely, missing API credentials';
+    expect(adapter.parseExitStatusFromOutput(output)).toBe('blocked');
+  });
+
+  it('returns needs-context for NEEDS_CONTEXT status', () => {
+    const output = 'Started work\n**NEEDS_CONTEXT** — missing L2 spec for authentication module';
+    expect(adapter.parseExitStatusFromOutput(output)).toBe('needs-context');
+  });
+
+  it('uses the LAST status marker (agent may mention earlier statuses)', () => {
+    const output = 'I considered reporting BLOCKED but resolved the issue\n**DONE_WITH_CONCERNS** — fixed but uncertain about edge case';
+    expect(adapter.parseExitStatusFromOutput(output)).toBe('completed-with-concerns');
+  });
+
+  it('is case-insensitive for status markers', () => {
+    expect(adapter.parseExitStatusFromOutput('done_with_concerns — needs review')).toBe('completed-with-concerns');
+    expect(adapter.parseExitStatusFromOutput('needs_context — missing info')).toBe('needs-context');
+    expect(adapter.parseExitStatusFromOutput('**Blocked** — cannot proceed')).toBe('blocked');
+  });
+
+  it('does not false-positive on blockedPaths or blockedCommands', () => {
+    const output = 'Checked blockedPaths and blockedCommands — all good\n**DONE**';
+    expect(adapter.parseExitStatusFromOutput(output)).toBe('completed');
+  });
+
+  it('does not false-positive on BLOCKED in narrative prose', () => {
+    // Agent resolved a blocker and reported DONE — should not match narrative BLOCKED
+    const output = 'I was BLOCKED by a missing config but resolved it\n**DONE**';
+    expect(adapter.parseExitStatusFromOutput(output)).toBe('completed');
+  });
+
+  it('matches BLOCKED in structured formats from prompt templates', () => {
+    expect(adapter.parseExitStatusFromOutput('**BLOCKED** — cannot proceed')).toBe('blocked');
+    expect(adapter.parseExitStatusFromOutput('BLOCKED — missing credentials')).toBe('blocked');
+    expect(adapter.parseExitStatusFromOutput('- BLOCKED: scope too large')).toBe('blocked');
+    expect(adapter.parseExitStatusFromOutput('BLOCKED:')).toBe('blocked');
+  });
+
+  it('returns completed for empty output', () => {
+    expect(adapter.parseExitStatusFromOutput('')).toBe('completed');
+  });
+});
+
 describe('CliAdapter containment hook setup', () => {
   let tempDir: string;
 
@@ -691,6 +751,86 @@ describe('CliAdapter.spawn() (#102)', () => {
       // Only the valid array marker should be accepted
       expect(result.value.pitfallMarkers).toHaveLength(1);
       expect(result.value.pitfallMarkers[0]?.description).toBe('good marker');
+    }
+  });
+
+  it('parses DONE_WITH_CONCERNS from output on exit code 0 (#329)', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+      result: 'Work complete\n**DONE_WITH_CONCERNS** — tests pass but coverage dropped from 85% to 72%',
+      cost_usd: 0.05,
+    })));
+    mockProc.emit('close', 0);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.exitStatus).toBe('completed-with-concerns');
+    }
+  });
+
+  it('parses BLOCKED from output on exit code 0 (#329)', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+      result: 'Cannot proceed\n**BLOCKED** — missing API credentials',
+      cost_usd: 0.02,
+    })));
+    mockProc.emit('close', 0);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.exitStatus).toBe('blocked');
+    }
+  });
+
+  it('parses NEEDS_CONTEXT from output on exit code 0 (#329)', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+      result: 'Started but stuck\n**NEEDS_CONTEXT** — need L2 spec for auth module',
+      cost_usd: 0.01,
+    })));
+    mockProc.emit('close', 0);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.exitStatus).toBe('needs-context');
+    }
+  });
+
+  it('does not parse exit status from output on non-zero exit code (#329)', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+      result: 'Crashed\n**DONE_WITH_CONCERNS** — this should not matter',
+      cost_usd: 0.01,
+    })));
+    mockProc.emit('close', 1);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.exitStatus).toBe('failed');
     }
   });
 
