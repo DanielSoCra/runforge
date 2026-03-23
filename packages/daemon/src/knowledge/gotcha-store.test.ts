@@ -478,6 +478,58 @@ describe('GotchaStore', () => {
       }
     });
 
+    it('concurrent store+compact do not lose entries appended between loadAll and writeTextSafe (#295)', async () => {
+      // Seed 26 unique gotchas to reach compaction threshold
+      for (let i = 0; i < 26; i++) {
+        await store.store(
+          [{ artifactPatterns: [`compact-race/${i}/**`], description: `Compact race ${i}` }],
+          i,
+        );
+      }
+      // Generate enough JSONL bloat to trigger compaction (need 50+ lines, 2x ratio)
+      for (let i = 0; i < 26; i++) {
+        await store.incrementHitCount(
+          (await store.match([`compact-race/${i}/foo.ts`]))[0]!.id,
+        );
+      }
+
+      // Fire concurrent operations — some will trigger compactIfNeeded internally.
+      // Before the fix, a store() appending between compact's loadAll() and
+      // writeTextSafe() would have its entry permanently lost.
+      const concurrentOps = [
+        store.store(
+          [{ artifactPatterns: ['compact-race/new-a/**'], description: 'New entry A during compact' }],
+          100,
+        ),
+        store.store(
+          [{ artifactPatterns: ['compact-race/new-b/**'], description: 'New entry B during compact' }],
+          101,
+        ),
+        store.match(['compact-race/0/foo.ts']),
+        store.match(['compact-race/1/foo.ts']),
+        store.store(
+          [{ artifactPatterns: ['compact-race/new-c/**'], description: 'New entry C during compact' }],
+          102,
+        ),
+      ];
+      await Promise.all(concurrentOps);
+
+      // Verify all new entries survive — read from fresh store to confirm disk state
+      const freshStore = new GotchaStore(storePath);
+      const newA = await freshStore.match(['compact-race/new-a/foo.ts']);
+      const newB = await freshStore.match(['compact-race/new-b/foo.ts']);
+      const newC = await freshStore.match(['compact-race/new-c/foo.ts']);
+      expect(newA.length, 'entry A lost during concurrent compact').toBeGreaterThanOrEqual(1);
+      expect(newB.length, 'entry B lost during concurrent compact').toBeGreaterThanOrEqual(1);
+      expect(newC.length, 'entry C lost during concurrent compact').toBeGreaterThanOrEqual(1);
+
+      // Verify original entries also survive
+      for (let i = 0; i < 26; i++) {
+        const fromDisk = await freshStore.match([`compact-race/${i}/foo.ts`]);
+        expect(fromDisk.length, `original entry compact-race/${i} lost`).toBeGreaterThanOrEqual(1);
+      }
+    });
+
     it('concurrent compactIfNeeded calls do not lose appended entries (#157)', async () => {
       // Seed 26 unique gotchas so compaction threshold (50 raw lines, 2x ratio) is reachable
       for (let i = 0; i < 26; i++) {
