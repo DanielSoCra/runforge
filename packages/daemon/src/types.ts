@@ -245,3 +245,14 @@ export interface PromptVersionEntry {
   timestamp: string;
   status: 'approved' | 'rejected' | 'rollback';
 }
+
+export interface SystemicProposal {
+  id: string;
+  rootCauseTag: string;
+  description: string;
+  relatedRecordIds: string[];
+  remediation: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  cooldownUntil?: string;
+}
