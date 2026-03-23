@@ -602,6 +602,30 @@ describe('CliAdapter.spawn() (#102)', () => {
     }
   });
 
+  it('rejects non-array artifactPatterns in pitfall markers (#296)', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    // LLM outputs string instead of array for artifactPatterns
+    const output = JSON.stringify({
+      result: 'done <!-- PITFALL: {"artifactPatterns":"src/**","description":"bad marker"} --> <!-- PITFALL: {"artifactPatterns":["src/**"],"description":"good marker"} --> more',
+      cost_usd: 0.01,
+    });
+    mockProc.stdout.emit('data', Buffer.from(output));
+    mockProc.emit('close', 0);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Only the valid array marker should be accepted
+      expect(result.value.pitfallMarkers).toHaveLength(1);
+      expect(result.value.pitfallMarkers[0]?.description).toBe('good marker');
+    }
+  });
+
   it('skips hook setup when cwd is not provided', async () => {
     const mockProc = createMockProcess();
     vi.mocked(spawnMock).mockReturnValue(mockProc as never);
