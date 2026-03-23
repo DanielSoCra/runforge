@@ -9,6 +9,8 @@ import { createGate1, selectGates, type Gate } from '../validation/gates.js';
 import { createReviewerGate } from '../validation/reviewer-session.js';
 import { isRiskSensitive } from '../validation/risk-detection.js';
 import { runReview } from '../validation/review.js';
+import { injectKnowledge } from '../validation/knowledge-injector.js';
+import type { KnowledgeStore } from '../knowledge/knowledge-store.js';
 import { formatReport, postReport } from './reporter.js';
 import { notify } from './notify.js';
 import { appendResult } from './results.js';
@@ -60,6 +62,7 @@ export function createPhaseHandlers(
   runId?: string,
   repoRoot?: string,
   activePlugins?: Array<{ id: string; activatedAt: string }>,
+  knowledgeStore?: KnowledgeStore,
 ): PhaseHandlerMap {
   const repo = repoName;
   const detector = createWorkDetector(octokit, owner, repo);
@@ -279,24 +282,39 @@ export function createPhaseHandlers(
       }
 
       // Create all four gates
+      // Inject knowledge context (STACK-AC-VALIDATION: knowledge injection before reviewer spawn)
+      let knowledgeContext: string | undefined;
+      if (knowledgeStore) {
+        try {
+          const nameOnlyResult = await git(['diff', '--name-only', config.branches.staging + '..' + featureBranch], repoRoot);
+          const artifactPaths = nameOnlyResult.ok
+            ? nameOnlyResult.value.split('\n').filter(Boolean)
+            : [];
+          const ctx = await injectKnowledge(artifactPaths, knowledgeStore);
+          if (ctx) knowledgeContext = ctx;
+        } catch (e) {
+          console.warn(`[review] Knowledge injection failed:`, e);
+        }
+      }
+
       const gate1 = createGate1(config.validation.gate1Commands);
       const gate2 = createReviewerGate(
         'spec-compliance', 'reviewer-spec',
         'Verify implementation against spec acceptance criteria.',
         runtime, workRequest.issueNumber, runWriter, runId,
-        diff, specContent, activePlugins,
+        diff, specContent, activePlugins, knowledgeContext,
       );
       const gate3 = createReviewerGate(
         'quality', 'reviewer-quality',
         'Evaluate code quality, pattern consistency, and test quality.',
         runtime, workRequest.issueNumber, runWriter, runId,
-        diff, undefined, activePlugins,
+        diff, undefined, activePlugins, knowledgeContext,
       );
       const gate4 = createReviewerGate(
         'security', 'reviewer-security',
         'Evaluate injection risks, authentication, data validation, and concurrency safety.',
         runtime, workRequest.issueNumber, runWriter, runId,
-        diff, undefined, activePlugins,
+        diff, undefined, activePlugins, knowledgeContext,
       );
 
       // Select gates based on complexity and risk

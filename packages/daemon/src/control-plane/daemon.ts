@@ -23,6 +23,8 @@ import { getSupabaseClient } from '../supabase/client.js';
 import { SupabaseConfigReader } from '../supabase/config-reader.js';
 import { SupabaseRunWriter, toDbOutcome } from '../supabase/run-writer.js';
 import { GotchaStore } from '../knowledge/gotcha-store.js';
+import { KnowledgeStore } from '../knowledge/knowledge-store.js';
+import { DEFAULT_POLICIES } from '../knowledge/policy-registry.js';
 import { join } from 'path';
 import { createReviewScheduler } from '../coordination/review-scheduler.js';
 
@@ -62,6 +64,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   });
   const runtime = new SessionRuntime(config, costTracker);
   const gotchaStore = new GotchaStore(join(stateDir, 'gotchas.jsonl'));
+  const knowledgeStore = new KnowledgeStore(join(stateDir, 'knowledge.jsonl'), DEFAULT_POLICIES);
   const repoRoot = process.cwd();
   const coordinator = new ImplementationCoordinator(runtime, repoRoot, 300, 2000, gotchaStore);
 
@@ -169,7 +172,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           claimedIssues.add(request.issueNumber);
           activeRuns++;
           repoManager!.notifyRunStart(repoId);
-          processWorkRequest(config, repoId, owner, name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot)
+          processWorkRequest(config, repoId, owner, name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot, knowledgeStore)
             .then((outcome) => handleRunOutcome(outcome, request.issueNumber))
             .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
             // CRITICAL: notifyRunEnd must be in .finally(), never only in .catch() or .then().
@@ -191,7 +194,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
             claimedIssues.add(bugRequest.issueNumber);
             activeRuns++;
             repoManager!.notifyRunStart(repoId);
-            processWorkRequest(config, repoId, owner, name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot)
+            processWorkRequest(config, repoId, owner, name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot, knowledgeStore)
               .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber))
               .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
               .finally(() => {
@@ -211,7 +214,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           if (fpClaimResult.ok) {
             activeRuns++;
             repoManager!.notifyRunStart(repoId);
-            processWorkRequest(config, repoId, owner, name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot)
+            processWorkRequest(config, repoId, owner, name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot, knowledgeStore)
               .then((outcome) => handleRunOutcome(outcome, fpRequest.issueNumber))
               .catch((e) => console.error(`Run failed for #${fpRequest.issueNumber}:`, e))
               .finally(() => {
@@ -317,7 +320,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     };
     const handlers = run.variant === 'website'
       ? createWebsitePhaseHandlers(agencyConfig, null, notifyOctokit, runOwner, runRepoName, run.issueNumber, null)
-      : createPhaseHandlers(config, runOwner, runRepoName, runtime, coordinator, notifyOctokit, resumedRequest, stateDir, runWriter ?? undefined, run.id, repoRoot, configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins);
+      : createPhaseHandlers(config, runOwner, runRepoName, runtime, coordinator, notifyOctokit, resumedRequest, stateDir, runWriter ?? undefined, run.id, repoRoot, configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins, knowledgeStore);
     const table = getPipeline(run.variant);
 
     const resumeDetector = legacyDetector ?? createWorkDetector(new Octokit({ auth: process.env.GITHUB_TOKEN }), runOwner, runRepoName);
@@ -370,7 +373,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         if (!claimResult.ok) continue;
         claimedIssues.add(request.issueNumber);
         activeRuns++;
-        processWorkRequest(config, '', config.repo!.owner, config.repo!.name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot)
+        processWorkRequest(config, '', config.repo!.owner, config.repo!.name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot, knowledgeStore)
           .then((outcome) => handleRunOutcome(outcome, request.issueNumber))
           .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
           .finally(() => { activeRuns--; });
@@ -386,7 +389,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         if (bugClaimResult.ok) {
           claimedIssues.add(bugRequest.issueNumber);
           activeRuns++;
-          processWorkRequest(config, '', config.repo!.owner, config.repo!.name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot)
+          processWorkRequest(config, '', config.repo!.owner, config.repo!.name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot, knowledgeStore)
             .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber))
             .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
             .finally(() => { activeRuns--; });
@@ -402,7 +405,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         const fpClaimResult = await detector.claimFeaturePipelineWork(fpRequest.issueNumber, fpRequest.workType as FeaturePipelineWorkType);
         if (fpClaimResult.ok) {
           activeRuns++;
-          processWorkRequest(config, '', config.repo!.owner, config.repo!.name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot)
+          processWorkRequest(config, '', config.repo!.owner, config.repo!.name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot, knowledgeStore)
             .then((outcome) => handleRunOutcome(outcome, fpRequest.issueNumber))
             .catch((e) => console.error(`Run failed for #${fpRequest.issueNumber}:`, e))
             .finally(() => { activeRuns--; });
@@ -451,6 +454,7 @@ async function processWorkRequest(
   runWriter?: SupabaseRunWriter,
   configReader?: SupabaseConfigReader,
   repoRoot?: string,
+  knowledgeStore?: KnowledgeStore,
 ): Promise<string> {
   const repoConfig = configReader?.getRepoConfig(owner, repoName);
   const variant = selectVariant(request);
@@ -502,7 +506,7 @@ async function processWorkRequest(
         request.issueNumber,
         null,          // repoId — wired in follow-on
       )
-    : createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir, runWriter ?? undefined, run.id, repoRoot, repoConfig?.activePlugins);
+    : createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir, runWriter ?? undefined, run.id, repoRoot, repoConfig?.activePlugins, knowledgeStore);
   const table = getPipeline(variant);
 
   console.log(`[daemon] Pipeline start for #${request.issueNumber}: ${request.title}`);

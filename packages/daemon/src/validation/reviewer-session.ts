@@ -36,6 +36,7 @@ export function createReviewerGate(
   diff?: string,
   specs?: string,
   activePlugins?: Array<{ id: string; activatedAt: string }>,
+  knowledgeContext?: string,
 ): { type: GateType; execute: (cwd: string) => Promise<GateResult> } {
   return {
     type,
@@ -43,6 +44,9 @@ export function createReviewerGate(
       const variables: Record<string, string> = { rubric, cwd };
       variables.diff = diff ?? '(diff unavailable — git diff failed or returned no output)';
       variables.specs = specs || 'No spec content available for this review.';
+      if (knowledgeContext) {
+        variables.knownIssues = knowledgeContext;
+      }
 
       const sessionOpts = {
         variables,

@@ -504,17 +504,17 @@ describe('createPhaseHandlers', () => {
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'spec-compliance', 'reviewer-spec',
         expect.any(String), mockRuntime, 42,
-        undefined, undefined, expect.any(String), '', undefined,
+        undefined, undefined, expect.any(String), '', undefined, undefined,
       );
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'quality', 'reviewer-quality',
         expect.any(String), mockRuntime, 42,
-        undefined, undefined, expect.any(String), undefined, undefined,
+        undefined, undefined, expect.any(String), undefined, undefined, undefined,
       );
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'security', 'reviewer-security',
         expect.any(String), mockRuntime, 42,
-        undefined, undefined, expect.any(String), undefined, undefined,
+        undefined, undefined, expect.any(String), undefined, undefined, undefined,
       );
     });
 
@@ -540,7 +540,7 @@ describe('createPhaseHandlers', () => {
         'spec-compliance', 'reviewer-spec',
         expect.any(String), mockRuntime, 42,
         undefined, undefined, expect.any(String),
-        '# FUNC-AC-PIPELINE\n\nAcceptance criteria here', undefined,
+        '# FUNC-AC-PIPELINE\n\nAcceptance criteria here', undefined, undefined,
       );
 
       // Verify workRequest.body is NOT passed as specs
@@ -684,7 +684,7 @@ describe('createPhaseHandlers', () => {
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'spec-compliance', 'reviewer-spec',
         expect.any(String), mockRuntime, 42,
-        undefined, undefined, expect.any(String), '', undefined,
+        undefined, undefined, expect.any(String), '', undefined, undefined,
       );
     });
   });

@@ -262,6 +262,52 @@ describe('createReviewerGate', () => {
     expect(passedVariables.specs).toBe('No spec content available for this review.');
   });
 
+  it('includes knownIssues variable when knowledgeContext is provided (#326)', async () => {
+    const runtime = makeRuntime({
+      ok: true,
+      value: {
+        structuredData: { findings: [], summary: 'ok', approved: true },
+        output: '',
+        cost: 0.05,
+        pitfallMarkers: [],
+        exitStatus: 'completed',
+      },
+    });
+
+    const knowledgeCtx = '## Known Issues\n- Parser crashes on empty input';
+    const gate = createReviewerGate(
+      'spec-compliance', 'reviewer-spec', 'my rubric', runtime, 99,
+      undefined, undefined, 'some diff', 'some spec', undefined, knowledgeCtx,
+    );
+    await gate.execute('/workspace');
+
+    const callArgs = (runtime.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const passedVariables = (callArgs[1] as { variables: Record<string, string> }).variables;
+    expect(passedVariables.knownIssues).toBe('## Known Issues\n- Parser crashes on empty input');
+  });
+
+  it('omits knownIssues variable when knowledgeContext is not provided (#326)', async () => {
+    const runtime = makeRuntime({
+      ok: true,
+      value: {
+        structuredData: { findings: [], summary: 'ok', approved: true },
+        output: '',
+        cost: 0.05,
+        pitfallMarkers: [],
+        exitStatus: 'completed',
+      },
+    });
+
+    const gate = createReviewerGate(
+      'quality', 'reviewer-quality', 'rubric', runtime, 42,
+    );
+    await gate.execute('/workspace');
+
+    const callArgs = (runtime.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const passedVariables = (callArgs[1] as { variables: Record<string, string> }).variables;
+    expect(passedVariables).not.toHaveProperty('knownIssues');
+  });
+
   it('retries once on session failure then returns failure', async () => {
     const runtime = {
       spawnSession: vi.fn()
