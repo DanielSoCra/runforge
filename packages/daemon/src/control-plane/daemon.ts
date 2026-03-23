@@ -27,6 +27,10 @@ import { KnowledgeStore } from '../knowledge/knowledge-store.js';
 import { DEFAULT_POLICIES } from '../knowledge/policy-registry.js';
 import { join } from 'path';
 import { createReviewScheduler } from '../coordination/review-scheduler.js';
+import { createPOAgent } from '../coordination/po-agent.js';
+import { readJsonSafe, writeJsonSafe } from '../lib/json-store.js';
+import { mkdir } from 'fs/promises';
+import type { Proposal, IdeaSubmission } from '../coordination/types.js';
 
 export async function startDaemon(configPath: string): Promise<Result<void>> {
   // 0. Validate GITHUB_TOKEN — required for Octokit (labeling, commenting, notifications)
@@ -105,6 +109,42 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     },
   );
   const stopReviewScheduler = reviewScheduler.start();
+
+  // 3d. Start PO Agent
+  const poStateDir = join(stateDir, 'coordination', 'product-owner');
+  await mkdir(poStateDir, { recursive: true });
+  const proposalsPath = join(poStateDir, 'proposals.json');
+  const ideasPath = join(poStateDir, 'ideas.json');
+
+  const poAgent = createPOAgent(
+    {
+      loadProposals: async () => {
+        const result = await readJsonSafe<Proposal[]>(proposalsPath);
+        return result.ok ? result.value : [];
+      },
+      saveProposals: async (proposals) => {
+        await writeJsonSafe(proposalsPath, proposals);
+      },
+      loadIdeas: async () => {
+        const result = await readJsonSafe<IdeaSubmission[]>(ideasPath);
+        return result.ok ? result.value : [];
+      },
+      saveIdeas: async (ideas) => {
+        await writeJsonSafe(ideasPath, ideas);
+      },
+      spawnPOSession: async () => {
+        const result = await runtime.spawnSession('product-owner', { variables: {} }, 0);
+        if (!result.ok) {
+          console.error('[po-agent] session failed:', result.error.message);
+        }
+      },
+    },
+    {
+      intervalMs: config.coordination.poInterval,
+      debounceMs: config.coordination.poIdeaDebounce,
+    },
+  );
+  const stopPOAgent = poAgent.start();
 
   // 4. State tracking
   let paused = false;
@@ -280,6 +320,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     scanIssues: repoManager
       ? async () => repoManager!.scanNow()
       : undefined,
+    submitIdea: async (submittedBy, description) => {
+      const idea = await poAgent.submitIdea(submittedBy, description);
+      return { id: idea.id };
+    },
   }, daemonHost);
   const serverResult = await start();
   if (!serverResult.ok) {
@@ -421,6 +465,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     console.log('Shutting down...');
     if (legacyPoller) clearInterval(legacyPoller);
     stopReviewScheduler();
+    stopPOAgent();
     repoManager?.stop();
     configReader?.stop();
     const deadline = Date.now() + config.gracePeriodMs;

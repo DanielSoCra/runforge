@@ -10,6 +10,7 @@ const {
   mockStateMgr, mockCostTracker, mockRemoteControl, mockDetector,
   mockServer, mockServerStart, mockRunPipeline, mockNotify,
   mockRunWriter, mockConfigReader, mockLoadConfig, mockSelectVariant, phaseHandlerCalls, mockCreateReviewScheduler,
+  mockCreatePOAgent,
 } = vi.hoisted(() => ({
   mockStateMgr: {
     initialize: vi.fn().mockResolvedValue(undefined),
@@ -50,6 +51,10 @@ const {
   mockSelectVariant: vi.fn(),
   phaseHandlerCalls: [] as unknown[][],
   mockCreateReviewScheduler: vi.fn().mockReturnValue({ start: () => () => {}, getStatus: () => ({}) }),
+  mockCreatePOAgent: vi.fn().mockReturnValue({
+    start: vi.fn().mockReturnValue(vi.fn()),
+    submitIdea: vi.fn().mockResolvedValue({ id: 'idea-1', submittedBy: 'operator', description: 'test', status: 'pending', proposalId: null, createdAt: '2026-03-23T00:00:00Z' }),
+  }),
 }));
 
 // --- Module mocks (use classes for constructors to work with `new`) ---
@@ -120,6 +125,9 @@ vi.mock('../config.js', () => ({
 }));
 vi.mock('../coordination/review-scheduler.js', () => ({
   createReviewScheduler: (...args: unknown[]) => mockCreateReviewScheduler(...args),
+}));
+vi.mock('../coordination/po-agent.js', () => ({
+  createPOAgent: (...args: unknown[]) => mockCreatePOAgent(...args),
 }));
 
 // --- Helpers ---
@@ -212,6 +220,10 @@ describe('daemon', () => {
     mockRemoteControl.stop.mockResolvedValue(undefined);
     mockCostTracker.getDailyCost.mockReturnValue(0);
     mockRunWriter.upsertRun.mockResolvedValue(undefined);
+    mockCreatePOAgent.mockReturnValue({
+      start: vi.fn().mockReturnValue(vi.fn()),
+      submitIdea: vi.fn().mockResolvedValue({ id: 'idea-1', submittedBy: 'operator', description: 'test', status: 'pending', proposalId: null, createdAt: '2026-03-23T00:00:00Z' }),
+    });
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -234,6 +246,7 @@ describe('daemon', () => {
       mockConfigReader.getGlobalConfig, mockConfigReader.getRepoConfig,
       mockSelectVariant,
       mockCreateReviewScheduler,
+      mockCreatePOAgent,
     ]) {
       mock.mockClear();
     }
@@ -1361,6 +1374,74 @@ describe('daemon', () => {
       expect(mockDetector.claimWork).toHaveBeenCalledWith(60);
       // Feature pipeline should NOT try to claim the same issue
       expect(mockDetector.claimFeaturePipelineWork).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('PO agent wiring (#343)', () => {
+    it('creates PO agent with config intervals on startup', async () => {
+      const config = makeConfig({
+        coordination: {
+          ...makeConfig().coordination,
+          poInterval: 1800000,
+          poIdeaDebounce: 300000,
+        },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      expect(mockCreatePOAgent).toHaveBeenCalledTimes(1);
+      const [, poConfig] = mockCreatePOAgent.mock.calls[0]!;
+      expect((poConfig as { intervalMs: number }).intervalMs).toBe(1800000);
+      expect((poConfig as { debounceMs: number }).debounceMs).toBe(300000);
+    });
+
+    it('starts PO agent and calls start()', async () => {
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      const agent = mockCreatePOAgent.mock.results[0]!.value;
+      expect(agent.start).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops PO agent on shutdown', async () => {
+      const mockStopPO = vi.fn();
+      mockCreatePOAgent.mockReturnValue({
+        start: vi.fn().mockReturnValue(mockStopPO),
+        submitIdea: vi.fn(),
+      });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await signalHandlers['SIGTERM']!();
+
+      expect(mockStopPO).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes submitIdea handler to control server', async () => {
+      const { startDaemon } = await loadDaemon();
+      const { createControlServer } = await import('./server.js');
+
+      await startDaemon('config.json');
+
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      expect(handlers.submitIdea).toBeDefined();
+    });
+
+    it('submitIdea handler delegates to PO agent', async () => {
+      const { startDaemon } = await loadDaemon();
+      const { createControlServer } = await import('./server.js');
+
+      await startDaemon('config.json');
+
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      const result = await handlers.submitIdea!('operator', 'Build dark mode');
+
+      const agent = mockCreatePOAgent.mock.results[0]!.value;
+      expect(agent.submitIdea).toHaveBeenCalledWith('operator', 'Build dark mode');
+      expect(result.id).toBe('idea-1');
     });
   });
 
