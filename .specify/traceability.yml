@@ -106,7 +106,7 @@ FUNC-AC-PRODUCT-OWNER:
   status: draft
 
 FUNC-AC-TECH-LEAD:
-  children: []
+  children: [ARCH-AC-TECH-LEAD]
   status: draft
 
 # --- Auto-Claude Plugins L2 spec ---
@@ -176,6 +176,10 @@ ARCH-AC-HANDOFF:
 ARCH-AC-DASHBOARD:
   parent: FUNC-AC-DASHBOARD
   children: [STACK-AC-DASHBOARD, STACK-AC-DASHBOARD-BRIEFING]
+  status: draft
+
+ARCH-AC-TECH-LEAD:
+  parent: FUNC-AC-TECH-LEAD
   status: draft
 
 ARCH-AC-ENRICHED-COMMITS:
