@@ -63,4 +63,19 @@ describe('selectVariant', () => {
     expect(selectVariant(req)).toBe('spec-driven');
     expect(req.workType).toBe('implementation');
   });
+
+  it('returns bug for workType bug-fix (review-finding issues)', () => {
+    const req: WorkRequest = {
+      issueNumber: 10, title: 'Fix null check', body: 'Missing null check', labels: ['review-finding', 'P1'], specRefs: [], workType: 'bug-fix',
+    };
+    expect(selectVariant(req)).toBe('bug');
+  });
+
+  it('workType bug-fix takes priority over feature-simple fallback', () => {
+    const req: WorkRequest = {
+      issueNumber: 10, title: 'Fix', body: '', labels: ['review-finding'], specRefs: [], workType: 'bug-fix',
+    };
+    // Without workType check, review-finding label would fall through to feature-simple
+    expect(selectVariant(req)).toBe('bug');
+  });
 });

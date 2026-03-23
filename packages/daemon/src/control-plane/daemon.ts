@@ -109,6 +109,26 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   let shuttingDown = false;
   let consecutiveStuckCount = 0;
 
+  /** Shared handler for run outcomes — tracks stuck count and auto-pause. */
+  const handleRunOutcome = (outcome: string, issueNumber: number) => {
+    if (outcome === 'stuck') {
+      consecutiveStuckCount++;
+      console.log(`[daemon] Consecutive stuck count: ${consecutiveStuckCount}/${config.maxConsecutiveStuck}`);
+      if (consecutiveStuckCount >= config.maxConsecutiveStuck && !paused) {
+        paused = true;
+        console.warn(`[daemon] Auto-paused: ${consecutiveStuckCount} consecutive stuck runs reached threshold`);
+        void notify(config.webhooks, {
+          event: 'auto-paused',
+          issueNumber,
+          phase: 'stuck',
+          message: `Daemon auto-paused after ${consecutiveStuckCount} consecutive stuck runs`,
+        });
+      }
+    } else {
+      consecutiveStuckCount = 0;
+    }
+  };
+
   // 5. Build RepoManager or legacy single-repo detector
   let repoManager: RepoManager | null = null;
   let legacyDetector: WorkDetector | null = null;
@@ -136,24 +156,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           activeRuns++;
           repoManager!.notifyRunStart(repoId);
           processWorkRequest(config, repoId, owner, name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot)
-            .then((outcome) => {
-              if (outcome === 'stuck') {
-                consecutiveStuckCount++;
-                console.log(`[daemon] Consecutive stuck count: ${consecutiveStuckCount}/${config.maxConsecutiveStuck}`);
-                if (consecutiveStuckCount >= config.maxConsecutiveStuck && !paused) {
-                  paused = true;
-                  console.warn(`[daemon] Auto-paused: ${consecutiveStuckCount} consecutive stuck runs reached threshold`);
-                  void notify(config.webhooks, {
-                    event: 'auto-paused',
-                    issueNumber: request.issueNumber,
-                    phase: 'stuck',
-                    message: `Daemon auto-paused after ${consecutiveStuckCount} consecutive stuck runs`,
-                  });
-                }
-              } else {
-                consecutiveStuckCount = 0;
-              }
-            })
+            .then((outcome) => handleRunOutcome(outcome, request.issueNumber))
             .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
             // CRITICAL: notifyRunEnd must be in .finally(), never only in .catch() or .then().
             // If it is missing here, a disabled repo's poller hangs in pendingDisable forever.
@@ -162,6 +165,24 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
               repoManager!.notifyRunEnd(repoId);
             });
         }
+
+        // Bug-fix detection — lower priority than ready work (#284)
+        if (paused || shuttingDown) return;
+        if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
+        const bugResult = await detector.detectBugFixWork();
+        if (!bugResult.ok || !bugResult.value) return;
+        const bugRequest = bugResult.value;
+        const bugClaimResult = await detector.claimBugFixWork(bugRequest.issueNumber);
+        if (!bugClaimResult.ok) return;
+        activeRuns++;
+        repoManager!.notifyRunStart(repoId);
+        processWorkRequest(config, repoId, owner, name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot)
+          .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber))
+          .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
+          .finally(() => {
+            activeRuns--;
+            repoManager!.notifyRunEnd(repoId);
+          });
       },
     );
 
@@ -312,27 +333,24 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         if (!claimResult.ok) continue;
         activeRuns++;
         processWorkRequest(config, '', config.repo!.owner, config.repo!.name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot)
-          .then((outcome) => {
-            if (outcome === 'stuck') {
-              consecutiveStuckCount++;
-              console.log(`[daemon] Consecutive stuck count: ${consecutiveStuckCount}/${config.maxConsecutiveStuck}`);
-              if (consecutiveStuckCount >= config.maxConsecutiveStuck && !paused) {
-                paused = true;
-                console.warn(`[daemon] Auto-paused: ${consecutiveStuckCount} consecutive stuck runs reached threshold`);
-                void notify(config.webhooks, {
-                  event: 'auto-paused',
-                  issueNumber: request.issueNumber,
-                  phase: 'stuck',
-                  message: `Daemon auto-paused after ${consecutiveStuckCount} consecutive stuck runs`,
-                });
-              }
-            } else {
-              consecutiveStuckCount = 0;
-            }
-          })
+          .then((outcome) => handleRunOutcome(outcome, request.issueNumber))
           .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
           .finally(() => { activeRuns--; });
       }
+
+      // Bug-fix detection — lower priority than ready work (#284)
+      if (paused || shuttingDown) return;
+      if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
+      const bugResult = await detector.detectBugFixWork();
+      if (!bugResult.ok || !bugResult.value) return;
+      const bugRequest = bugResult.value;
+      const bugClaimResult = await detector.claimBugFixWork(bugRequest.issueNumber);
+      if (!bugClaimResult.ok) return;
+      activeRuns++;
+      processWorkRequest(config, '', config.repo!.owner, config.repo!.name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot)
+        .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber))
+        .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
+        .finally(() => { activeRuns--; });
     }, config.pollIntervalMs);
   }
 
