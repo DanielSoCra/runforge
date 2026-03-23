@@ -74,6 +74,21 @@ describe('candidate-queue', () => {
     expect(candidates).toHaveLength(0);
   });
 
+  it('approveCandidate rejects if record is no longer a candidate', async () => {
+    await store.storeRecord(
+      [{ artifactPatterns: ['src/**'], description: 'Will be archived first' }],
+      'retro-1', 'retrospective-tech-lead', 'technical_pitfall',
+    );
+    const candidates = await getCandidates(store);
+    const id = candidates[0]!.id;
+
+    // Simulate auto-archival winning the race
+    await rejectCandidate(store, id);
+
+    // Approval should fail — record is archived, not candidate
+    await expect(approveCandidate(store, id)).rejects.toThrow(/expected status 'candidate'/);
+  });
+
   it('archiveExpiredCandidates does not archive fresh candidates', async () => {
     await store.storeRecord(
       [{ artifactPatterns: ['src/**'], description: 'Fresh candidate' }],

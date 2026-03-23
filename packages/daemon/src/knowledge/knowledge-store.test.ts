@@ -315,6 +315,60 @@ describe('KnowledgeStore', () => {
       expect(records[0]!.lifecycleStatus).toBe('active');
     });
 
+    it('throws when expectedCurrentStatus does not match', async () => {
+      await store.storeRecord(
+        [makeMarker()],
+        'issue-1',
+        'autonomous',
+        'technical_pitfall',
+      );
+      const all = await store.loadAll();
+      const record = all[0]!;
+      expect(record.lifecycleStatus).toBe('active');
+
+      await expect(
+        store.transitionStatus(record.id, 'promoted', 'candidate'),
+      ).rejects.toThrow(/expected status 'candidate' but found 'active'/);
+
+      // Verify status was NOT changed
+      const after = await store.loadAll();
+      expect(after.find(r => r.id === record.id)!.lifecycleStatus).toBe('active');
+    });
+
+    it('succeeds when expectedCurrentStatus matches', async () => {
+      await store.storeRecord(
+        [makeMarker()],
+        'retro-1',
+        'retrospective-tech-lead',
+        'technical_pitfall',
+      );
+      const all = await store.loadAll();
+      const candidate = all.find(r => r.lifecycleStatus === 'candidate')!;
+
+      await store.transitionStatus(candidate.id, 'active', 'candidate');
+      const after = await store.loadAll();
+      expect(after.find(r => r.id === candidate.id)!.lifecycleStatus).toBe('active');
+    });
+
+    it('prevents approving an already-archived record', async () => {
+      await store.storeRecord(
+        [makeMarker()],
+        'retro-1',
+        'retrospective-tech-lead',
+        'technical_pitfall',
+      );
+      const all = await store.loadAll();
+      const candidate = all.find(r => r.lifecycleStatus === 'candidate')!;
+
+      // Archive it first (simulates auto-archival winning the race)
+      await store.transitionStatus(candidate.id, 'archived');
+
+      // Now try to approve — should fail because it's archived, not candidate
+      await expect(
+        store.transitionStatus(candidate.id, 'active', 'candidate'),
+      ).rejects.toThrow(/expected status 'candidate' but found 'archived'/);
+    });
+
     it('transitions active to archived (rejection)', async () => {
       await store.storeRecord(
         [makeMarker()],

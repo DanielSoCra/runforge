@@ -151,11 +151,20 @@ export class KnowledgeStore {
     });
   }
 
-  async transitionStatus(id: string, newStatus: KnowledgeRecord['lifecycleStatus']): Promise<void> {
+  async transitionStatus(
+    id: string,
+    newStatus: KnowledgeRecord['lifecycleStatus'],
+    expectedCurrentStatus?: KnowledgeRecord['lifecycleStatus'],
+  ): Promise<void> {
     return this.withMutex(async () => {
       const all = await this.loadAllInternal();
       const record = all.find(r => r.id === id);
       if (record) {
+        if (expectedCurrentStatus && record.lifecycleStatus !== expectedCurrentStatus) {
+          throw new Error(
+            `Cannot transition record ${id}: expected status '${expectedCurrentStatus}' but found '${record.lifecycleStatus}'`,
+          );
+        }
         record.lifecycleStatus = newStatus;
         if (newStatus === 'archived') {
           record.reviewedAt = new Date().toISOString();

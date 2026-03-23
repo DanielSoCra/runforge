@@ -8,11 +8,11 @@ export async function getCandidates(store: KnowledgeStore): Promise<KnowledgeRec
 }
 
 export async function approveCandidate(store: KnowledgeStore, id: string): Promise<void> {
-  await store.transitionStatus(id, 'active');
+  await store.transitionStatus(id, 'active', 'candidate');
 }
 
 export async function rejectCandidate(store: KnowledgeStore, id: string): Promise<void> {
-  await store.transitionStatus(id, 'archived');
+  await store.transitionStatus(id, 'archived', 'candidate');
 }
 
 export async function archiveExpiredCandidates(
@@ -26,7 +26,7 @@ export async function archiveExpiredCandidates(
   for (const r of all) {
     if (r.lifecycleStatus !== 'candidate') continue;
     if (now - new Date(r.createdAt).getTime() > timeoutMs) {
-      await store.transitionStatus(r.id, 'archived');
+      await store.transitionStatus(r.id, 'archived', 'candidate');
       expired.push(r.id);
     }
   }
