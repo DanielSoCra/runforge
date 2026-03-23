@@ -18,7 +18,7 @@ import { git } from '../lib/git.js';
 import { join } from 'node:path';
 import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
-import { loadSpecContent } from '../infra/spec-loader.js';
+import { loadSpecContent, loadImplementationContent } from '../infra/spec-loader.js';
 import { classify as runClassify } from './classifier.js';
 
 // Serializes git operations on the shared repoRoot across concurrent pipeline runs.
@@ -110,11 +110,19 @@ export function createPhaseHandlers(
         console.warn(`[diagnose] Failed to load spec content:`, e);
       }
 
+      // Load implementation content from code_paths in traceability.yml (#263)
+      let implementationContent = '';
+      try {
+        implementationContent = await loadImplementationContent(workRequest.specRefs, cwd);
+      } catch (e) {
+        console.warn(`[diagnose] Failed to load implementation content:`, e);
+      }
+
       const result = await diagnose(
         runtime,
         workRequest.issueNumber,
         workRequest.body,
-        '',  // implementation content — not yet available at this phase
+        implementationContent,
         specContent,
         runWriter,
         runId,

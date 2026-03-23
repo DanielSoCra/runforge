@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { loadSpecContent } from './spec-loader.js';
+import { loadSpecContent, loadImplementationContent, extractCodePaths } from './spec-loader.js';
 
 describe('loadSpecContent', () => {
   let specifyRoot: string;
@@ -80,7 +80,7 @@ describe('loadSpecContent', () => {
     expect(result).toBe('');
   });
 
-  it('regression: phases.ts must pass spec content not workRequest.body (#122)', async () => {
+  it('regression: phases.ts must pass spec content not workRequest.body (#122, #263)', async () => {
     // This test verifies the core claim of issue #122:
     // The reviewer-spec prompt must receive actual spec file content,
     // not the GitHub issue body text.
@@ -95,5 +95,145 @@ describe('loadSpecContent', () => {
     expect(specContent).toContain('Acceptance Criteria');
     expect(specContent).toContain('Gate 2 receives governing spec content');
     expect(specContent).not.toBe(''); // Must not be empty
+  });
+});
+
+describe('extractCodePaths', () => {
+  it('extracts multi-line code_paths for matching spec IDs', () => {
+    const traceContent = `
+STACK-AC-DIAGNOSIS:
+  parent: ARCH-AC-DIAGNOSIS
+  code_paths:
+    - packages/daemon/src/diagnosis/
+  test_paths:
+    - packages/daemon/src/diagnosis/**/*.test.ts
+  status: draft
+
+STACK-AC-CONTROL-PLANE:
+  parent: ARCH-AC-CONTROL-PLANE
+  code_paths:
+    - packages/daemon/src/control-plane/
+    - packages/daemon/src/control-plane/classifier.ts
+  test_paths:
+    - packages/daemon/src/control-plane/**/*.test.ts
+  status: draft
+`;
+    const paths = extractCodePaths(traceContent, new Set(['STACK-AC-DIAGNOSIS']));
+    expect(paths).toEqual(['packages/daemon/src/diagnosis/']);
+  });
+
+  it('extracts inline code_paths', () => {
+    const traceContent = `
+STACK-AC-DIAGNOSIS:
+  parent: ARCH-AC-DIAGNOSIS
+  code_paths: [packages/daemon/src/diagnosis/]
+  status: draft
+`;
+    const paths = extractCodePaths(traceContent, new Set(['STACK-AC-DIAGNOSIS']));
+    expect(paths).toEqual(['packages/daemon/src/diagnosis/']);
+  });
+
+  it('returns empty array for non-matching specs', () => {
+    const traceContent = `
+STACK-AC-DIAGNOSIS:
+  code_paths:
+    - packages/daemon/src/diagnosis/
+`;
+    const paths = extractCodePaths(traceContent, new Set(['NO-MATCH']));
+    expect(paths).toEqual([]);
+  });
+});
+
+describe('loadImplementationContent', () => {
+  let repoRoot: string;
+
+  beforeEach(async () => {
+    repoRoot = await mkdtemp(join(tmpdir(), 'impl-loader-test-'));
+    await mkdir(join(repoRoot, '.specify'));
+    await mkdir(join(repoRoot, 'src'), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(repoRoot, { recursive: true, force: true });
+  });
+
+  it('loads implementation files from code_paths in traceability.yml (#263)', async () => {
+    await writeFile(
+      join(repoRoot, '.specify', 'traceability.yml'),
+      `STACK-AC-DIAGNOSIS:\n  parent: ARCH-AC-DIAGNOSIS\n  code_paths:\n    - src/fix.ts\n  status: draft\n`,
+    );
+    await writeFile(join(repoRoot, 'src', 'fix.ts'), 'export function fix() { return true; }');
+
+    const content = await loadImplementationContent(['STACK-AC-DIAGNOSIS'], repoRoot);
+    expect(content).toContain('src/fix.ts');
+    expect(content).toContain('export function fix()');
+  });
+
+  it('expands directory code_paths into .ts files (#263)', async () => {
+    await writeFile(
+      join(repoRoot, '.specify', 'traceability.yml'),
+      `STACK-AC-DIAGNOSIS:\n  code_paths: [src/]\n`,
+    );
+    await writeFile(join(repoRoot, 'src', 'router.ts'), 'export function route() {}');
+    await writeFile(join(repoRoot, 'src', 'schema.ts'), 'export const schema = {};');
+    await writeFile(join(repoRoot, 'src', 'router.test.ts'), 'test("skip me", () => {});');
+
+    const content = await loadImplementationContent(['STACK-AC-DIAGNOSIS'], repoRoot);
+    expect(content).toContain('router.ts');
+    expect(content).toContain('schema.ts');
+    expect(content).not.toContain('router.test.ts'); // test files excluded
+  });
+
+  it('returns empty string when no spec refs match', async () => {
+    await writeFile(
+      join(repoRoot, '.specify', 'traceability.yml'),
+      `STACK-OTHER:\n  code_paths:\n    - src/other.ts\n`,
+    );
+
+    const content = await loadImplementationContent(['NO-MATCH'], repoRoot);
+    expect(content).toBe('');
+  });
+
+  it('skips glob patterns and missing files', async () => {
+    await writeFile(
+      join(repoRoot, '.specify', 'traceability.yml'),
+      `STACK-AC-DIAGNOSIS:\n  code_paths:\n    - src/**/*.test.ts\n    - src/missing.ts\n    - src/exists.ts\n`,
+    );
+    await writeFile(join(repoRoot, 'src', 'exists.ts'), 'const x = 1;');
+
+    const content = await loadImplementationContent(['STACK-AC-DIAGNOSIS'], repoRoot);
+    expect(content).toContain('exists.ts');
+    expect(content).not.toContain('missing.ts');
+    expect(content).not.toContain('**/*.test.ts');
+  });
+
+  it('truncates when content exceeds budget', async () => {
+    await writeFile(
+      join(repoRoot, '.specify', 'traceability.yml'),
+      `STACK-AC-DIAGNOSIS:\n  code_paths:\n    - src/big.ts\n`,
+    );
+    await writeFile(join(repoRoot, 'src', 'big.ts'), 'x'.repeat(5000));
+
+    const content = await loadImplementationContent(['STACK-AC-DIAGNOSIS'], repoRoot, 500);
+    expect(content.length).toBeLessThanOrEqual(600); // header + truncated content
+    expect(content).toContain('[truncated]');
+  });
+
+  it('regression: diagnose phase must not pass empty implementation content (#263)', async () => {
+    // This test verifies the core claim of issue #263:
+    // The diagnostician must receive implementation code, not an empty string,
+    // so it can classify Type A bugs (spec-vs-implementation mismatch).
+    await writeFile(
+      join(repoRoot, '.specify', 'traceability.yml'),
+      `STACK-AC-DIAGNOSIS:\n  parent: ARCH-AC-DIAGNOSIS\n  code_paths:\n    - src/diagnostician.ts\n  status: draft\n`,
+    );
+    await writeFile(
+      join(repoRoot, 'src', 'diagnostician.ts'),
+      'export async function diagnose(impl: string) { return impl !== ""; }',
+    );
+
+    const content = await loadImplementationContent(['STACK-AC-DIAGNOSIS'], repoRoot);
+    expect(content).not.toBe('');
+    expect(content).toContain('diagnose');
   });
 });
