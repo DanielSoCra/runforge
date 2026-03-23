@@ -676,13 +676,33 @@ describe('GotchaStore', () => {
       const m = await store.match(['foo.ts']);
       const id = m[0]!.id;
 
-      // scanForArchival with maxAgeDays=0 to treat everything as old
-      const archived = await store.scanForArchival(0, 100);
+      // scanForArchival with maxAgeDays=-1 so any positive age triggers archival
+      const archived = await store.scanForArchival(-1, 100);
       expect(archived).toContain(id);
 
       // Verify excluded from match
       const afterMatch = await store.match(['foo.ts']);
       expect(afterMatch).toHaveLength(0);
+    });
+
+    it('does not archive operator corrections regardless of age or hit count (#313)', async () => {
+      // Operator corrections are exempt from automatic archival per ARCH-AC-KNOWLEDGE §archival-flow
+      await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'Operator correction never archived' }],
+        1,
+        'operator',
+      );
+      const m = await store.match(['foo.ts']);
+      const id = m[0]!.id;
+
+      // maxAgeDays=0 treats everything as old, minHitCount=100 means low hits
+      const archived = await store.scanForArchival(0, 100);
+      expect(archived).not.toContain(id);
+
+      // Verify still matchable
+      const afterMatch = await store.match(['foo.ts']);
+      expect(afterMatch).toHaveLength(1);
+      expect(afterMatch[0]!.originType).toBe('operator');
     });
 
     it('does not archive gotchas with sufficient hits', async () => {

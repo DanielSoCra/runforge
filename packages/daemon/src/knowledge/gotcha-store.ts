@@ -189,6 +189,8 @@ export class GotchaStore {
       const toArchive: string[] = [];
       for (const g of all) {
         if (g.promoted || g.archived) continue;
+        // Operator corrections are exempt from automatic archival (ARCH-AC-KNOWLEDGE §archival-flow)
+        if (g.originType === 'operator') continue;
         const age = (now - new Date(g.createdAt).getTime()) / (1000 * 60 * 60 * 24);
         if (age > maxAgeDays && g.hitCount < minHitCount) {
           g.archived = true;
