@@ -35,6 +35,7 @@ These roles interact through structured protocols, not free-form communication. 
 | Delivery outcomes (aggregate) | Recent run history — success/failure rates per repo, completion counts | Whether the team is delivering or struggling |
 | Operator ideas | Ideas submitted via terminal or dashboard | Explicit operator intent |
 | Issue backlog | Open GitHub issues — labels, age, staleness | Forgotten or aging work |
+| Proposal history | Past proposals — what was approved, rejected, and why | Avoid re-proposing rejected work; learn from acceptance patterns |
 
 The PO reads aggregate delivery metrics (pass/fail rates, throughput). Detailed failure analysis (error categories, phase breakdowns, retry counts) belongs to the Tech Lead.
 
@@ -78,7 +79,7 @@ The PO reads aggregate delivery metrics (pass/fail rates, throughput). Detailed 
 4. **Dependency update** — "3 packages have known vulnerabilities. Propose update batch."
 5. **Failure pattern response** — "Last 4 runs in repo X failed at review phase. Propose investigation."
 
-**Proposal lifecycle:** Same as PO: generated → pending → approved (creates GitHub issue) | rejected (archived) | expired (default: 7 days). The PO may reject a Tech Lead proposal before it reaches the operator if business priority does not justify it; the PO records the rejection reason, and the Tech Lead may re-propose with stronger evidence.
+**Proposal lifecycle:** Same as PO: generated → pending → approved (creates GitHub issue) | rejected (archived) | expired (default: 7 days). The PO may reject a Tech Lead proposal before it reaches the operator if business priority does not justify it; the PO records the rejection reason, and the Tech Lead may re-propose with stronger evidence on any subsequent cycle (scheduled or event-driven).
 
 **Cadence:** Scheduled analysis (default: 2 hours) + event-driven on run failures, new review findings, or batch retrospective completion.
 
@@ -192,7 +193,7 @@ FUNC-AC-QUALITY currently covers review gates but does not distinguish between t
 | **Trigger** | Pipeline assigns a specific work product | Scheduled cycle (default: 20 minutes, throttled by signal ratio) |
 | **Scope** | Targeted — reviews one PR/implementation | Exploratory — scans broadly across codebase areas |
 | **Starting point** | Receives work from the pipeline gate | Finds its own work |
-| **Output** | Pass/fail verdict + structured feedback on specific work | Findings → GitHub issues labeled `review-finding` |
+| **Output** | Pass/fail verdict + structured feedback; discovered issues written to GotchaStore | Findings → GitHub issues labeled `review-finding` AND written to GotchaStore for Tech Lead consumption |
 | **Feeds into** | Pipeline progression (FUNC-AC-PIPELINE) — work does not merge without sign-off | Tech Lead's signal analysis → proposals |
 | **Already exists as** | Review phases in FUNC-AC-QUALITY | ReviewScheduler in the daemon |
 
@@ -201,14 +202,17 @@ FUNC-AC-QUALITY currently covers review gates but does not distinguish between t
 **Scenario: Assigned QA review**
 - Given a work item has completed implementation
 - When the pipeline submits it for quality review
-- Then the QA agent reviews the specific implementation against its spec, acceptance criteria, and quality standards
+- Then the QA agent receives relevant gotchas for the reviewed area (injected from GotchaStore)
+- And reviews the specific implementation against its spec, acceptance criteria, and quality standards
 - And produces a pass/fail verdict with structured feedback
+- And writes discovered issues to GotchaStore
 
 **Scenario: Proactive codebase review**
 - Given the proactive review agent's scheduled cycle triggers
 - When it scans a codebase area
 - Then it identifies issues (bugs, spec drift, security concerns, quality regression) independently of any active work item
-- And records findings as GitHub issues that feed the Tech Lead's signal analysis
+- And records findings as GitHub issues labeled `review-finding` AND writes them to GotchaStore
+- And the system never dispatches proactive review work through the pipeline gate — the two modes are independent
 
 **Connection to Tech Lead:** The proactive review agent is the Tech Lead's eyes. It generates the `review-finding` issues that appear in the Tech Lead's signal sources. The Tech Lead synthesizes these findings into proposals — the proactive reviewer does not propose remediation itself.
 
@@ -232,11 +236,13 @@ The coordination engine is a deterministic state machine — it manages ticks, s
 - Not a new agent role — the coordination engine remains a state machine
 - Not expensive — lightweight inference calls with narrow context (current state + immediate decision context)
 
-**Changes to FUNC-AC-COORDINATION:** Add a section:
+**Changes to FUNC-AC-COORDINATION:** Add a section and update the existing "Work item gets stuck" scenario:
 
 > ### LLM-Augmented Decision Points
 >
 > The coordination engine uses lightweight LLM inference at specific decision junctures where deterministic rules are insufficient. These calls receive narrow context (current work item state, recent activity, failure reason) and return a single routing decision. They do not generate proposals, modify specs, or initiate protocols — they inform the state machine's next transition.
+
+Update the existing "Work item gets stuck" scenario to clarify that the time/budget limit is the trigger, and the LLM-augmented decision point determines the response (retry, skip, or re-plan) rather than a rigid rule.
 
 ### 6. L0-AC-VISION update: Wide PO north star
 
@@ -285,10 +291,10 @@ The Retrospective protocol (Protocol 6) generates lessons learned, but the desig
 **Retrospective → Learning pipeline:**
 
 1. Retrospective produces lessons learned (structured: what failed, root cause, what to do differently)
-2. Tech Lead distills lessons into gotchas and deposits them into GotchaStore
+2. Tech Lead distills technical lessons into gotchas; PO records business-level lessons (e.g., "this type of spec advancement consistently gets rejected — adjust proposal criteria"). Both deposit into GotchaStore.
 3. GotchaStore deduplicates (Jaccard similarity) and stores with severity + affected area
 4. Future sessions receive relevant gotchas via injection at session start (already implemented)
-5. Recurring gotchas (same root cause appearing 3+ times) trigger a Tech Lead proposal for systemic fix
+5. Recurring gotchas (same root cause exceeding a configurable threshold, default: 3) trigger a Tech Lead proposal for systemic fix
 
 **Prospective checks at Batch Planning:**
 
@@ -305,9 +311,15 @@ Before committing to a batch, the coordination engine checks whether similar wor
 - Then the gotcha enters GotchaStore and becomes available for injection into future sessions
 
 **Scenario: Recurring gotcha triggers systemic proposal**
-- Given the same root cause appears in 3 or more gotchas
+- Given the same root cause appears in gotchas exceeding a configurable threshold (default: 3)
 - When the Tech Lead detects the pattern
 - Then it generates a technical debt proposal to address the root cause
+
+**Scenario: Prospective gotcha check at batch planning**
+- Given the coordination engine is preparing a batch for the Batch Planning protocol
+- When it queries GotchaStore for gotchas related to the planned work areas
+- Then high-severity gotchas are flagged and included in the Tech Lead's input to Batch Planning
+- And the Tech Lead factors historical failures into effort estimates and risk assessments
 
 ### 9. Agentic metrics
 
@@ -330,6 +342,7 @@ Each role tracks metrics that measure its effectiveness. These metrics inform th
 | Spec-code drift reduction | Drift items resolved per cycle | Whether the Tech Lead keeps implementation aligned with specs |
 | Failure pattern detection speed | Time between first failure and Tech Lead proposal | How quickly the Tech Lead responds to systemic issues |
 | Repeat gotcha rate | Gotchas with same root cause / total gotchas | Whether systemic issues are being addressed |
+| Dependency risk response time | Time from security advisory to Tech Lead proposal | Whether the Tech Lead responds promptly to supply chain risks |
 
 **Coordination engine metrics:**
 
@@ -346,6 +359,15 @@ Each role tracks metrics that measure its effectiveness. These metrics inform th
 | False rejection rate | Rejections overturned on re-review / total rejections | Whether QA is too strict |
 | Escape rate | Bugs found post-merge / total merged items | Whether QA catches issues before integration |
 | Review turnaround | Time from submission to verdict | Whether QA is a bottleneck |
+
+**Proactive Review Agent metrics:**
+
+| Metric | Definition | What it reveals |
+|---|---|---|
+| Findings per scan cycle | New findings generated per scheduled cycle | Whether the reviewer is productive |
+| Finding severity distribution | Breakdown of findings by severity (P0/P1/P2/P3) | Whether the reviewer focuses on high-impact issues |
+| False positive rate | Findings dismissed as invalid / total findings | Whether the reviewer generates noise |
+| Codebase coverage | Percentage of codebase areas scanned over a rolling window | Whether the reviewer covers the full codebase or gets stuck in one area |
 
 ### 10. Memory interaction map
 
@@ -429,6 +451,7 @@ For downstream spec authors:
 5. Clarify FUNC-AC-QUALITY (add QA vs. proactive review distinction)
 6. Connect FUNC-AC-LEARNING (add retrospective → gotcha pipeline scenarios)
 7. Update traceability.yml
-8. Feature pipeline picks up new/updated specs for L2/L3 generation → implementation
+8. Define metric collection approach (may be part of L2/L3 for each spec, or a cross-cutting concern)
+9. Feature pipeline picks up new/updated specs for L2/L3 generation → implementation
 
 The PO spec is the priority — it unblocks the PO prompt template, which unblocks wiring the coordinator into daemon startup, which unblocks the end-to-end daemon test.
