@@ -26,8 +26,12 @@ export async function archiveExpiredCandidates(
   for (const r of all) {
     if (r.lifecycleStatus !== 'candidate') continue;
     if (now - new Date(r.createdAt).getTime() > timeoutMs) {
-      await store.transitionStatus(r.id, 'archived', 'candidate');
-      expired.push(r.id);
+      try {
+        await store.transitionStatus(r.id, 'archived', 'candidate');
+        expired.push(r.id);
+      } catch {
+        // Record was already transitioned (approved or rejected) — skip
+      }
     }
   }
   return expired;

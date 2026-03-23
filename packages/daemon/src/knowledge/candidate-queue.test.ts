@@ -89,6 +89,27 @@ describe('candidate-queue', () => {
     await expect(approveCandidate(store, id)).rejects.toThrow(/expected status 'candidate'/);
   });
 
+  it('archiveExpiredCandidates skips already-approved candidates and continues', async () => {
+    await store.storeRecord(
+      [{ artifactPatterns: ['src/**'], description: 'First candidate' }],
+      'retro-1', 'retrospective-tech-lead', 'technical_pitfall',
+    );
+    await store.storeRecord(
+      [{ artifactPatterns: ['src/**'], description: 'Second candidate' }],
+      'retro-2', 'retrospective-tech-lead', 'technical_pitfall',
+    );
+    const candidates = await getCandidates(store);
+    expect(candidates).toHaveLength(2);
+
+    // Approve the first candidate (simulates interleaved approval)
+    await approveCandidate(store, candidates[0]!.id);
+
+    // Archive expired should skip the approved one and still archive the second
+    const archived = await archiveExpiredCandidates(store, -1);
+    expect(archived).toHaveLength(1);
+    expect(archived[0]).toBe(candidates[1]!.id);
+  });
+
   it('archiveExpiredCandidates does not archive fresh candidates', async () => {
     await store.storeRecord(
       [{ artifactPatterns: ['src/**'], description: 'Fresh candidate' }],
