@@ -52,6 +52,18 @@ The PO Agent does not expose its own service API. It operates as a session spawn
 
 ## System Boundaries
 
+The PO agent is a session-based component — it has no persistent process. The Coordination Service spawns PO sessions on schedule and on protocol triggers via Session Runtime. The following describes how the PO connects to each system and what it owns, reads, and writes.
+
+**Coordination Service → PO Agent:** The Coordination Service assembles a SignalSnapshot and spawns a PO session via Session Runtime. It passes the snapshot, protocol context (if applicable), and the PO prompt template as session input. When the session completes, the Coordination Service processes its structured output (proposals, protocol round documents). The Coordination Service is the PO's sole lifecycle manager.
+
+**Knowledge Service → PO Agent (read-only):** The Coordination Service queries the Knowledge Service for business_observation records relevant to the PO's current cycle and includes them in the session context. The PO does not call the Knowledge Service directly — it receives pre-fetched knowledge as part of its input.
+
+**PO Agent → Tech Lead Agent (mediated):** PO and Tech Lead never communicate directly. The Coordination Service mediates all interaction through ProtocolExecution: it spawns a PO session, collects its output, then spawns a Tech Lead session with that output as input (and vice versa). Each agent sees only its round's input document.
+
+**Operator → PO Agent (indirect):** Operators interact with the PO through the Coordination Service's terminal interface and the Dashboard. Idea submissions, proposal approvals/rejections, and priority changes flow through the Coordination Service, which incorporates them into the PO's next SignalSnapshot.
+
+**Session Runtime:** Provides the execution environment for PO sessions. Enforces per-session budget and time limits. Reports session completion, failure, or timeout to the Coordination Service.
+
 **PO Agent OWNS:** Signal analysis logic (within session), proposal generation logic (within session), business priority assessment (within protocol rounds), protocol round outputs.
 
 **PO Agent READS (via SignalSnapshot assembled by Coordination Service):**
@@ -68,6 +80,7 @@ The PO Agent does not expose its own service API. It operates as a session spawn
 
 **PO Agent NEVER:**
 - Reads detailed failure analysis (Tech Lead territory).
+- Performs code-level analysis or reads source files (operates at L0-L2 spec layers only).
 - Creates work requests directly (operator approval required, enforced by Coordination Service).
 - Modifies specs directly (L0 boundary).
 - Schedules its own execution (Coordination Service owns scheduling).
@@ -80,6 +93,8 @@ The PO Agent does not expose its own service API. It operates as a session spawn
 - Manages ProtocolExecution lifecycle: creates entries, spawns sequential rounds, detects convergence failure, escalates to operator.
 - Enforces all guardrails: operator approval, proposal expiry, no self-approval.
 
+**Operational constraints:** The PO analysis cycle runs on a configurable schedule (default: every 30 minutes). Event-driven triggers (operator idea submission, batch completion) are debounced with a configurable minimum interval (default: 5 minutes). Proposals remaining in `proposed` status beyond a configurable window (default: 7 days) are transitioned to `expired` by the Coordination Service as part of its PO-cycle tick — the PO agent does not manage expiry. The PO operates exclusively at spec layers 0 through 2 (vision, functional, architecture) and never performs code-level analysis. Each PO session operates within per-session budget and time limits configured in the Coordination Service. The system supports exactly one PO agent instance (pool allocation: min 1, max 1, per ARCH-AC-COORDINATION).
+
 ## Event Flows
 
 **PO analysis cycle (standalone — not part of a protocol):**
@@ -90,7 +105,7 @@ The PO Agent does not expose its own service API. It operates as a session spawn
 4. The PO session analyzes signals, identifies gaps and opportunities, and produces an array of raw proposals as structured output.
 5. The Coordination Service processes the output: for each raw proposal, it creates a Proposal record (status: proposed) in the database. For proposals that refine an operator idea, it links the Proposal to the originating IdeaSubmission and marks the IdeaSubmission as processed.
 6. For each new Proposal, the Coordination Service initiates a Proposal Enrichment protocol (see below).
-7. The PO session also sweeps Proposals past their expiry timestamp, transitioning them to expired (this sweep logic may alternatively run in the Coordination Service's tick without a PO session — an implementation choice).
+7. The Coordination Service sweeps Proposals past their expiry timestamp as part of its PO-cycle tick, transitioning them from `proposed` to `expired`. This runs in the Coordination Service, not in the PO session — expiry is a lifecycle operation, not an analysis task.
 
 **Proposal Enrichment protocol (PO-initiated):**
 
@@ -118,7 +133,8 @@ The PO Agent does not expose its own service API. It operates as a session spawn
 4. Round 2 — Tech Lead: The Coordination Service spawns a Tech Lead session with the PO's prioritized list plus current system health data and the prospective risk query results from the Knowledge Service. The Tech Lead flags hard constraints (dependencies, parallelism limits, capacity), proposes an ordering and parallelism map.
 5. The Coordination Service evaluates convergence: if the Tech Lead's constraints are compatible with the PO's priorities (no items vetoed, ordering adjustments are minor), the protocol produces a final batch definition. If incompatible (Tech Lead vetoes a PO priority item, or capacity forces removal of items the PO considers essential), the protocol cannot converge in one round.
 6. On convergence failure: ProtocolExecution status transitions to escalated_to_operator. Both the PO's priorities and the Tech Lead's constraints are presented to the operator for resolution.
-7. On convergence: the Coordination Service creates a Batch (as defined in ARCH-AC-COORDINATION) from the protocol output. ProtocolExecution status transitions to completed.
+7. On empty batch: if both the PO and Tech Lead agree that no items are viable (all items are blocked, capacity is insufficient, or dependencies cannot be satisfied), the protocol produces an empty batch definition with a reason summary. The Coordination Service creates an Escalation to the operator explaining why no work can proceed. ProtocolExecution status transitions to completed. No Batch is created.
+8. On convergence: the Coordination Service creates a Batch (as defined in ARCH-AC-COORDINATION) from the protocol output. ProtocolExecution status transitions to completed.
 
 **Backlog Grooming protocol:**
 
