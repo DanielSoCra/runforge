@@ -44,6 +44,7 @@ export type BatchItemStatus = z.infer<typeof BatchItemStatusSchema>;
 export const BatchItemSchema = z.object({
   id: z.string().uuid(),
   issueNumber: z.number(),
+  repoKey: z.string().optional(), // "owner/name" for per-repo concurrency limits
   status: BatchItemStatusSchema,
   dependencies: z.array(z.string().uuid()).default([]),
 });

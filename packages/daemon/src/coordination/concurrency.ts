@@ -131,6 +131,14 @@ export function evaluatePool(ctx: EvalContext): SpawnDecision[] {
       const currentWorkers = activeCounts.worker + decisions.filter(d => d.agentType === 'worker').length;
       if (currentWorkers >= TYPE_MAXIMUMS.worker) break;
 
+      // Per-repo limit check (same logic as dispatch queue above)
+      if (item.repoKey && ctx.perRepoLimits[item.repoKey] !== undefined) {
+        const repoLimit = ctx.perRepoLimits[item.repoKey]!;
+        const repoCount = repoActiveCounts[item.repoKey] ?? 0;
+        if (repoCount >= repoLimit) continue;
+        repoActiveCounts[item.repoKey] = repoCount + 1;
+      }
+
       decisions.push({
         issueNumber: item.issueNumber,
         agentType: 'worker',

@@ -408,4 +408,115 @@ describe('evaluatePool', () => {
     expect(workerDecisions).toHaveLength(1);
     expect(workerDecisions[0]!.issueNumber).toBe(1);
   });
+
+  it('batch items respect per-repo concurrency limits (BUG-34 regression)', () => {
+    // Regression: batch section spawned all items regardless of per-repo limits
+    const claims = [
+      makeClaim({ agentType: 'po', issueNumber: 100 }),
+      makeClaim({ agentType: 'reviewer', issueNumber: 101 }),
+    ];
+    // 8 batch items all for the same repo, per-repo limit is 2
+    const batchItems = Array.from({ length: 8 }, (_, i) => ({
+      id: crypto.randomUUID(),
+      issueNumber: i + 1,
+      repoKey: 'org/mono-repo',
+      status: 'pending' as const,
+      dependencies: [],
+    }));
+    const batch = makeBatch(batchItems);
+    const result = evaluatePool(makeCtx({
+      activeClaims: claims,
+      activeBatch: batch,
+      maxAgents: 20,
+      perRepoLimits: { 'org/mono-repo': 2 },
+    }));
+    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    // Only 2 should be spawned despite 8 ready items — per-repo limit is 2
+    expect(workerDecisions).toHaveLength(2);
+  });
+
+  it('batch per-repo limits account for existing active claims', () => {
+    const existingWorker = makeClaim({ agentType: 'worker', issueNumber: 50 });
+    const claims = [
+      makeClaim({ agentType: 'po', issueNumber: 100 }),
+      makeClaim({ agentType: 'reviewer', issueNumber: 101 }),
+      existingWorker,
+    ];
+    const activeClaimRepoKeys = new Map([[existingWorker.id, 'org/mono-repo']]);
+    // 4 batch items for the same repo, per-repo limit is 2, 1 already active
+    const batchItems = Array.from({ length: 4 }, (_, i) => ({
+      id: crypto.randomUUID(),
+      issueNumber: i + 1,
+      repoKey: 'org/mono-repo',
+      status: 'pending' as const,
+      dependencies: [],
+    }));
+    const batch = makeBatch(batchItems);
+    const result = evaluatePool(makeCtx({
+      activeClaims: claims,
+      activeClaimRepoKeys,
+      activeBatch: batch,
+      maxAgents: 20,
+      perRepoLimits: { 'org/mono-repo': 2 },
+    }));
+    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    // 1 existing + limit 2 = room for only 1 more from batch
+    expect(workerDecisions).toHaveLength(1);
+  });
+
+  it('dispatch queue and batch items share per-repo budget within a tick', () => {
+    const claims = [
+      makeClaim({ agentType: 'po', issueNumber: 100 }),
+      makeClaim({ agentType: 'reviewer', issueNumber: 101 }),
+    ];
+    // Dispatch queue takes 2 of the 3 slots for org/repo-a
+    const queue: DispatchQueueItem[] = [
+      { issueNumber: 1, repoKey: 'org/repo-a' },
+      { issueNumber: 2, repoKey: 'org/repo-a' },
+    ];
+    // Batch has 3 more items for the same repo
+    const batchItems = Array.from({ length: 3 }, (_, i) => ({
+      id: crypto.randomUUID(),
+      issueNumber: 10 + i,
+      repoKey: 'org/repo-a',
+      status: 'pending' as const,
+      dependencies: [],
+    }));
+    const batch = makeBatch(batchItems);
+    const result = evaluatePool(makeCtx({
+      activeClaims: claims,
+      dispatchQueue: queue,
+      activeBatch: batch,
+      maxAgents: 20,
+      perRepoLimits: { 'org/repo-a': 3 },
+    }));
+    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    // Queue takes 2 slots, batch gets only 1 more (3 - 2 = 1)
+    expect(workerDecisions).toHaveLength(3);
+    expect(workerDecisions.map(d => d.issueNumber)).toEqual([1, 2, 10]);
+  });
+
+  it('batch items without repoKey bypass per-repo limits (backward compat)', () => {
+    const claims = [
+      makeClaim({ agentType: 'po', issueNumber: 100 }),
+      makeClaim({ agentType: 'reviewer', issueNumber: 101 }),
+    ];
+    // Items without repoKey should still be spawned freely
+    const batchItems = Array.from({ length: 4 }, (_, i) => ({
+      id: crypto.randomUUID(),
+      issueNumber: i + 1,
+      status: 'pending' as const,
+      dependencies: [],
+    }));
+    const batch = makeBatch(batchItems);
+    const result = evaluatePool(makeCtx({
+      activeClaims: claims,
+      activeBatch: batch,
+      maxAgents: 20,
+      perRepoLimits: { 'org/some-repo': 2 },
+    }));
+    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    // All 4 should spawn — no repoKey means no repo-based limiting
+    expect(workerDecisions).toHaveLength(4);
+  });
 });
