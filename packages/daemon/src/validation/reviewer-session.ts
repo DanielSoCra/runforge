@@ -1,7 +1,7 @@
 // src/validation/reviewer-session.ts
 import { z } from 'zod';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
-import type { GateType, GateResult, ReviewFinding } from '../types.js';
+import type { GateType, GateResult, ReviewFinding, DiscoveredIssue } from '../types.js';
 import { SessionError } from '../session-runtime/session-error.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 
@@ -22,7 +22,6 @@ export const ReviewFindingsSchema = z.object({
 });
 
 export type ReviewFindings = z.infer<typeof ReviewFindingsSchema>;
-export type DiscoveredIssue = z.infer<typeof DiscoveredIssueSchema>;
 
 const jsonSchema = JSON.stringify(z.toJSONSchema(ReviewFindingsSchema));
 
@@ -117,7 +116,7 @@ export function createReviewerGate(
  * requiring Operator approval before becoming permanent knowledge.
  */
 export function extractDiscoveredIssues(
-  gateResult: GateResult & { discoveredIssues?: DiscoveredIssue[] },
+  gateResult: GateResult,
 ): DiscoveredIssue[] {
   return gateResult.discoveredIssues ?? [];
 }

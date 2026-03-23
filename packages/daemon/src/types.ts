@@ -177,11 +177,16 @@ export interface ReviewFinding {
   description: string;
 }
 
+export interface DiscoveredIssue {
+  artifactPatterns: string[];
+  description: string;
+}
+
 export interface GateResult {
   gate: GateType;
   passed: boolean;
   findings: ReviewFinding[];
-  discoveredIssues?: Array<{ artifactPatterns: string[]; description: string }>;
+  discoveredIssues?: DiscoveredIssue[];
 }
 
 // --- Bug Diagnosis ---

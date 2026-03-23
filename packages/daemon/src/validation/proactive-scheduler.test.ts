@@ -44,6 +44,12 @@ describe('ProactiveScheduler', () => {
       const result = ProactiveScheduler.pickNextArea(state, areas);
       expect(result).toBe('src/validation');
     });
+
+    it('returns undefined for empty areas array', () => {
+      const state: ProactiveState = { lastReviewedAt: {}, cycleIndex: 0 };
+      const result = ProactiveScheduler.pickNextArea(state, []);
+      expect(result).toBeUndefined();
+    });
   });
 
   describe('shouldThrottle', () => {

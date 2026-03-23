@@ -23,7 +23,8 @@ export class ProactiveScheduler {
    * Pick the codebase area with the oldest lastReviewedAt timestamp.
    * Areas with no timestamp are treated as epoch 0 (highest staleness priority).
    */
-  static pickNextArea(state: ProactiveState, areas: string[]): string {
+  static pickNextArea(state: ProactiveState, areas: string[]): string | undefined {
+    if (areas.length === 0) return undefined;
     return areas.reduce((oldest, area) => {
       const oldestTs = state.lastReviewedAt[oldest] ?? '';
       const areaTs = state.lastReviewedAt[area] ?? '';
