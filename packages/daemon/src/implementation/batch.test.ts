@@ -305,6 +305,22 @@ describe('executeBatch', () => {
     );
   });
 
+  it('passes activePlugins through to SessionContext (#262)', async () => {
+    const runtime = createMockRuntime();
+    const units = [makeUnit('a')];
+    const plugins = [{ id: 'plugin-1', activatedAt: '2026-01-01T00:00:00Z' }];
+
+    await executeBatch(
+      units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 },
+      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, plugins,
+    );
+
+    const spawnCall = runtime.spawnSession.mock.calls[0];
+    const context = spawnCall?.[1];
+    expect(context).toHaveProperty('activePlugins', plugins);
+  });
+
   it('propagates timed-out exit status through UnitResult (#64)', async () => {
     const timedOutResult: SessionResult = {
       output: 'timed out waiting', structuredData: null, cost: 1.2,

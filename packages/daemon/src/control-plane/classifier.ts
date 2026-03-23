@@ -18,6 +18,7 @@ export async function classify(
   runWriter?: SupabaseRunWriter,
   runId?: string,
   workspacePath?: string,
+  activePlugins?: Array<{ id: string; activatedAt: string }>,
 ): Promise<ClassifyResult> {
   const context = {
     variables: {
@@ -26,6 +27,7 @@ export async function classify(
       scope: workRequest.scopeDescription ?? 'no scope description provided',
     },
     workspacePath,
+    activePlugins,
   };
 
   const result = await runtime.spawnSession('classifier', context, workRequest.issueNumber, {

@@ -39,7 +39,7 @@ export class ImplementationCoordinator {
     featureBranch: string,
     runWriter?: SupabaseRunWriter,
     runId?: string,
-    options?: { complexity?: 'simple' | 'standard' | 'complex'; specContent?: string; checkpoint?: number; handoffNotes?: Map<string, string>; variant?: PipelineVariant; diagnosisDetail?: string },
+    options?: { complexity?: 'simple' | 'standard' | 'complex'; specContent?: string; checkpoint?: number; handoffNotes?: Map<string, string>; variant?: PipelineVariant; diagnosisDetail?: string; activePlugins?: Array<{ id: string; activatedAt: string }> },
   ): Promise<Result<ImplementResult>> {
     // 1. Get task graph
     let graph: TaskGraph;
@@ -58,6 +58,7 @@ export class ImplementationCoordinator {
         options.specContent ?? '',
         runWriter,
         runId,
+        options.activePlugins,
       );
       if (!decomposeResult.ok) {
         return err(new Error(`Decomposition failed: ${decomposeResult.error.message}`));
@@ -106,6 +107,7 @@ export class ImplementationCoordinator {
         options?.handoffNotes,
         options?.variant,
         options?.variant === 'bug' ? { bugReport: request.body, diagnosis: options?.diagnosisDetail ?? '' } : undefined,
+        options?.activePlugins,
       );
 
       allResults.push(...batchResult.results);

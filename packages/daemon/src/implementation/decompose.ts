@@ -13,6 +13,7 @@ export async function decompose(
   specContent: string,
   runWriter?: SupabaseRunWriter,
   runId?: string,
+  activePlugins?: Array<{ id: string; activatedAt: string }>,
 ): Promise<Result<TaskGraph>> {
   // Spawn coordinator session to produce a task graph
   const result = await runtime.spawnSession(
@@ -23,6 +24,7 @@ export async function decompose(
         specs: specContent,
         specRefs: request.specRefs.join(', '),
       },
+      activePlugins,
     },
     request.issueNumber,
     undefined,
@@ -38,7 +40,7 @@ export async function decompose(
     // Retry once
     const retry = await runtime.spawnSession(
       'coordinator',
-      { variables: { workRequest: `Title: ${request.title}\n\n${request.body}`, specs: specContent, specRefs: request.specRefs.join(', ') } },
+      { variables: { workRequest: `Title: ${request.title}\n\n${request.body}`, specs: specContent, specRefs: request.specRefs.join(', ') }, activePlugins },
       request.issueNumber,
       undefined,
       runWriter,

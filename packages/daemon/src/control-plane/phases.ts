@@ -58,6 +58,7 @@ export function createPhaseHandlers(
   runWriter?: SupabaseRunWriter,
   runId?: string,
   repoRoot?: string,
+  activePlugins?: Array<{ id: string; activatedAt: string }>,
 ): PhaseHandlerMap {
   const repo = repoName;
   const detector = createWorkDetector(octokit, owner, repo);
@@ -90,7 +91,7 @@ export function createPhaseHandlers(
 
     classify: async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[classify] Classifying work request #${workRequest.issueNumber}`);
-      const result = await runClassify(runtime, workRequest, runWriter, runId, repoRoot);
+      const result = await runClassify(runtime, workRequest, runWriter, runId, repoRoot, activePlugins);
       run.classificationComplexity = result.complexity;
       return result.event;
     },
@@ -118,6 +119,7 @@ export function createPhaseHandlers(
         runWriter,
         runId,
         repoRoot,
+        activePlugins,
       );
 
       if (!result.ok) {
@@ -193,6 +195,7 @@ export function createPhaseHandlers(
         handoffNotes,
         variant: run.variant,
         diagnosisDetail: run.diagnosisDetail,
+        activePlugins,
       });
       if (!result.ok) { console.error(`[implement] Error:`, result.error.message); return 'failure'; }
       if (!result.value.success) {
@@ -255,19 +258,19 @@ export function createPhaseHandlers(
         'spec-compliance', 'reviewer-spec',
         'Verify implementation against spec acceptance criteria.',
         runtime, workRequest.issueNumber, runWriter, runId,
-        diff, specContent,
+        diff, specContent, activePlugins,
       );
       const gate3 = createReviewerGate(
         'quality', 'reviewer-quality',
         'Evaluate code quality, pattern consistency, and test quality.',
         runtime, workRequest.issueNumber, runWriter, runId,
-        diff,
+        diff, undefined, activePlugins,
       );
       const gate4 = createReviewerGate(
         'security', 'reviewer-security',
         'Evaluate injection risks, authentication, data validation, and concurrency safety.',
         runtime, workRequest.issueNumber, runWriter, runId,
-        diff,
+        diff, undefined, activePlugins,
       );
 
       // Select gates based on complexity and risk

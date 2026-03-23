@@ -28,6 +28,7 @@ export function createReviewerGate(
   runId?: string,
   diff?: string,
   specs?: string,
+  activePlugins?: Array<{ id: string; activatedAt: string }>,
 ): { type: GateType; execute: (cwd: string) => Promise<GateResult> } {
   return {
     type,
@@ -39,6 +40,7 @@ export function createReviewerGate(
       const sessionOpts = {
         variables,
         workspacePath: cwd,
+        activePlugins,
       };
 
       // Retry logic: one retry on session failure or invalid structured output
