@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ReviewFindingsSchema, createReviewerGate } from './reviewer-session.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
+import { SessionError } from '../session-runtime/session-error.js';
 
 describe('ReviewFindingsSchema', () => {
   it('validates correct input', () => {
@@ -342,6 +343,68 @@ describe('createReviewerGate', () => {
     const result = await gate.execute('/workspace');
 
     expect(result.passed).toBe(true);
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry on SessionError.rateLimited — propagates immediately (#267)', async () => {
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce({ ok: false, error: SessionError.rateLimited(0.5, 30000) }),
+      getCostTracker: vi.fn(),
+    } as unknown as SessionRuntime;
+
+    const gate = createReviewerGate('quality', 'reviewer-quality', 'Check quality', runtime, 42);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    expect(result.findings[0]?.description).toContain('Rate limited');
+    // Must NOT retry — only 1 call to spawnSession
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry on SessionError.budgetExceeded — propagates immediately (#267)', async () => {
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce({ ok: false, error: SessionError.budgetExceeded('monthly cap reached') }),
+      getCostTracker: vi.fn(),
+    } as unknown as SessionRuntime;
+
+    const gate = createReviewerGate('quality', 'reviewer-quality', 'Check quality', runtime, 42);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    expect(result.findings[0]?.description).toContain('Budget exceeded');
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry on SessionError.containmentBreached — propagates immediately (#267)', async () => {
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce({ ok: false, error: SessionError.containmentBreached('sandbox escape', 0.2) }),
+      getCostTracker: vi.fn(),
+    } as unknown as SessionRuntime;
+
+    const gate = createReviewerGate('security', 'reviewer-security', 'Check security', runtime, 42);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    expect(result.findings[0]?.description).toContain('Containment breach');
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('still retries on generic Error (non-SessionError) failures', async () => {
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce({ ok: false, error: new Error('network timeout') })
+        .mockResolvedValueOnce({ ok: false, error: new Error('network timeout again') }),
+      getCostTracker: vi.fn(),
+    } as unknown as SessionRuntime;
+
+    const gate = createReviewerGate('quality', 'reviewer-quality', 'Check quality', runtime, 42);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    // Generic errors should still retry — 2 calls
     expect(runtime.spawnSession).toHaveBeenCalledTimes(2);
   });
 

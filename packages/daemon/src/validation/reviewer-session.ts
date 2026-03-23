@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { GateType, GateResult, ReviewFinding } from '../types.js';
+import { SessionError } from '../session-runtime/session-error.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 
 export const ReviewFindingsSchema = z.object({
@@ -55,6 +56,15 @@ export function createReviewerGate(
         );
 
         if (!result.ok) {
+          // Propagate budget/rate-limit/containment signals immediately — never consume a retry attempt.
+          // ARCH-AC-OPERATIONAL-SAFETY invariant: "rate limit handling never consumes a retry attempt."
+          if (result.error instanceof SessionError && (result.error.rateLimited || result.error.containmentBreach || result.error.message.startsWith('Budget exceeded'))) {
+            return {
+              gate: type,
+              passed: false,
+              findings: [{ severity: 'critical', location: 'session', description: result.error.message }],
+            };
+          }
           if (attempt === 0) continue; // retry once
           return {
             gate: type,
