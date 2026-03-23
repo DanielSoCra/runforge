@@ -120,7 +120,7 @@ ARCH-AC-PLUGINS:
 
 ARCH-AC-COORDINATION:
   parent: FUNC-AC-COORDINATION
-  children: [STACK-AC-COORDINATION, STACK-AC-MERGE-AGENT]
+  children: [STACK-AC-COORDINATION, STACK-AC-MERGE-AGENT, STACK-AC-COORDINATION-DAEMON-WIRING]
   status: draft
 
 ARCH-AC-CONTROL-PLANE:
@@ -610,6 +610,17 @@ STACK-AC-TECH-LEAD:
   test_paths:
     - packages/daemon/src/coordination/tech-lead/**/*.test.ts
     - packages/daemon/src/coordination/tech-lead-scheduler.test.ts
+  status: draft
+
+STACK-AC-COORDINATION-DAEMON-WIRING:
+  parent: ARCH-AC-COORDINATION
+  children: []
+  code_paths:
+    - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/coordination/coordinator.ts
+  test_paths:
+    - packages/daemon/src/control-plane/daemon.test.ts
+    - packages/daemon/src/coordination/coordinator.test.ts
   status: draft
 
 STACK-AC-PRODUCT-OWNER:
