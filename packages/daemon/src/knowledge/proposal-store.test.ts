@@ -62,9 +62,10 @@ describe('PromptProposalStore', () => {
       expect(pending).toHaveLength(0);
 
       const history = await store.getVersionHistory('worker.md');
-      expect(history).toHaveLength(1);
-      expect(history[0]!.content).toBe('new');
-      expect(history[0]!.status).toBe('approved');
+      expect(history).toHaveLength(2);
+      expect(history[0]!.content).toBe('old');
+      expect(history[1]!.content).toBe('new');
+      expect(history[1]!.status).toBe('approved');
     });
   });
 
@@ -122,14 +123,56 @@ describe('PromptProposalStore', () => {
       await store.approve(id2);
 
       const history = await store.getVersionHistory('worker.md');
-      expect(history).toHaveLength(2);
-      expect(history[0]!.content).toBe('v2');
-      expect(history[1]!.content).toBe('v3');
+      expect(history).toHaveLength(3);
+      expect(history[0]!.content).toBe('v1');
+      expect(history[1]!.content).toBe('v2');
+      expect(history[2]!.content).toBe('v3');
     });
 
     it('returns empty array when no history exists', async () => {
       const history = await store.getVersionHistory('nonexistent.md');
       expect(history).toHaveLength(0);
+    });
+
+    it('archives previous version on first approval for rollback (#264)', async () => {
+      const id = await store.store({
+        templateName: 'worker.md',
+        currentContent: 'original',
+        proposedContent: 'improved',
+        reasoning: 'empirical evidence',
+      });
+      await store.approve(id);
+
+      const history = await store.getVersionHistory('worker.md');
+      // History should contain both the original (previous) and improved (new) versions
+      expect(history).toHaveLength(2);
+      expect(history[0]!.content).toBe('original');
+      expect(history[1]!.content).toBe('improved');
+    });
+
+    it('does not duplicate previous version on subsequent approvals (#264)', async () => {
+      const id1 = await store.store({
+        templateName: 'worker.md',
+        currentContent: 'v1',
+        proposedContent: 'v2',
+        reasoning: 'first',
+      });
+      await store.approve(id1);
+
+      const id2 = await store.store({
+        templateName: 'worker.md',
+        currentContent: 'v2',
+        proposedContent: 'v3',
+        reasoning: 'second',
+      });
+      await store.approve(id2);
+
+      const history = await store.getVersionHistory('worker.md');
+      // v1 (original), v2 (first approval), v3 (second approval)
+      expect(history).toHaveLength(3);
+      expect(history[0]!.content).toBe('v1');
+      expect(history[1]!.content).toBe('v2');
+      expect(history[2]!.content).toBe('v3');
     });
   });
 });
