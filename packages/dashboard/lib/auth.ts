@@ -2,8 +2,14 @@ import { createClient } from '@/lib/supabase/server';
 
 type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 
-/** Returns true when auth is disabled (private network, single operator). */
+/**
+ * Returns true when auth is disabled (private network, single operator).
+ *
+ * SECURITY: Refuses AUTH_DISABLED=true in production to prevent accidental
+ * deployment without authentication. Mirrors the NODE_ENV guard in getOrigin().
+ */
 export function isAuthDisabled(): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
   return process.env.AUTH_DISABLED === 'true';
 }
 

@@ -280,6 +280,12 @@ describe('isAuthDisabled', () => {
     vi.stubEnv('AUTH_DISABLED', 'false');
     expect(isAuthDisabled()).toBe(false);
   });
+
+  it('returns false in production even when AUTH_DISABLED is "true" (regression: SEC-29)', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('AUTH_DISABLED', 'true');
+    expect(isAuthDisabled()).toBe(false);
+  });
 });
 
 describe('requireAdmin — AUTH_DISABLED bypass', () => {
