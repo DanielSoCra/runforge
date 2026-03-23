@@ -26,11 +26,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (tokenErr || !token) return NextResponse.json({ error: 'Could not retrieve token' }, { status: 500 });
 
   // Determine if this is the personal account (org matches github_login)
-  const { data: conn } = await supabase
+  const { data: conn, error: connErr } = await supabase
     .from('github_connections')
     .select('github_login')
     .eq('id', id)
     .single();
+  if (connErr) return NextResponse.json({ error: 'Database error' }, { status: 500 });
 
   const ghHeaders = { Authorization: `Bearer ${token}`, 'X-GitHub-Api-Version': '2022-11-28' };
   const endpoint = conn?.github_login === org

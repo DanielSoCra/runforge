@@ -238,6 +238,41 @@ describe('GET /api/github/connections/[id]/repos', () => {
     expect(body[0]).not.toHaveProperty('html_url');
   });
 
+  it('returns 500 when github_connections query fails (#354)', async () => {
+    const createClient = await getCreateClient();
+    const sb = mockSupabaseAdmin();
+    sb.from = vi.fn().mockImplementation((table: string) => {
+      if (table === 'team_members') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
+        };
+      }
+      if (table === 'github_connections') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          single: vi.fn().mockResolvedValue({ data: null, error: { message: 'connection timeout' } }),
+        };
+      }
+      return {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        single: vi.fn().mockResolvedValue({ data: null, error: null }),
+      };
+    });
+    createClient.mockResolvedValueOnce(sb);
+    const { GET } = await import('./route.js');
+
+    const res = await GET(makeRequest('my-org'), { params: paramsPromise() });
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toMatch(/database/i);
+    // Must NOT reach GitHub API — fetch should not be called
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('returns 502 when GitHub API returns an error', async () => {
     const createClient = await getCreateClient();
     createClient.mockResolvedValueOnce(mockSupabaseAdminWithConnection('other'));
