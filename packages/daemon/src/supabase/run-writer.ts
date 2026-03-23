@@ -15,15 +15,12 @@ export function toDbOutcome(outcome: PipelineResult['outcome']): DbOutcome {
 export function toDbSessionType(type: SessionType): DbSessionType {
   switch (type) {
     case 'coordinator':
-    case 'classifier':
-    case 'prompt-optimizer': return 'planning';
+    case 'classifier':       return 'planning';
     case 'worker':
-    case 'conflict-resolver':
     case 'bug-worker':       return 'implementation';
     case 'reviewer-spec':
     case 'reviewer-quality':
-    case 'reviewer-security':
-    case 'tester':           return 'validation';
+    case 'reviewer-security': return 'validation';
     case 'diagnostician':    return 'diagnosis';
   }
 }

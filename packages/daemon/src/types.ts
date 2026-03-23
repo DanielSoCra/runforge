@@ -21,8 +21,7 @@ export type Outcome = 'complete' | 'stuck' | 'escalated';
 export type SessionType =
   | 'coordinator' | 'classifier' | 'worker'
   | 'reviewer-spec' | 'reviewer-quality' | 'reviewer-security'
-  | 'conflict-resolver' | 'bug-worker' | 'tester'
-  | 'diagnostician' | 'prompt-optimizer';
+  | 'bug-worker' | 'diagnostician';
 
 export type ExitStatus =
   | 'completed' | 'completed-with-concerns'

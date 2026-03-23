@@ -106,15 +106,6 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     timeoutMs: 180_000,
     budgetCap: 2,
   },
-  'conflict-resolver': {
-    name: 'conflict-resolver',
-    description: 'Resolves merge conflicts favoring spec intent',
-    systemPrompt: '', // loaded from prompts/conflict-resolver.md
-    allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep'],
-    maxTurns: 10,
-    timeoutMs: 120_000,
-    budgetCap: 1,
-  },
   'bug-worker': {
     name: 'bug-worker',
     description: 'Fixes Type A bugs with regression-test-first protocol',
@@ -124,15 +115,6 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     timeoutMs: 600_000,
     budgetCap: 5,
   },
-  tester: {
-    name: 'tester',
-    description: 'Runs post-deployment tests and reports results',
-    systemPrompt: '', // loaded from prompts/tester.md
-    allowedTools: ['Read', 'Bash', 'Glob', 'Grep'],
-    maxTurns: 10,
-    timeoutMs: 300_000,
-    budgetCap: 1,
-  },
   diagnostician: {
     name: 'diagnostician',
     description: 'Classifies bugs as Type A/B/C with confidence score',
@@ -141,15 +123,6 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     maxTurns: 1,
     timeoutMs: 120_000,
     budgetCap: 1,
-  },
-  'prompt-optimizer': {
-    name: 'prompt-optimizer',
-    description: 'Proposes improvements to mutable instruction templates',
-    systemPrompt: '', // loaded from prompts/prompt-optimizer.md
-    allowedTools: ['Read', 'Glob', 'Grep'],
-    maxTurns: 5,
-    timeoutMs: 300_000,
-    budgetCap: 3,
   },
 };
 
