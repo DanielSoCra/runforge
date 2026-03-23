@@ -35,7 +35,7 @@ export function createReviewerGate(
     type,
     async execute(cwd: string): Promise<GateResult> {
       const variables: Record<string, string> = { rubric, cwd };
-      if (diff !== undefined) variables.diff = diff;
+      variables.diff = diff ?? '(diff unavailable — git diff failed or returned no output)';
       variables.specs = specs || 'No spec content available for this review.';
 
       const sessionOpts = {
