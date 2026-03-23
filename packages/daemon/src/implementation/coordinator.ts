@@ -155,7 +155,18 @@ export class ImplementationCoordinator {
       }
 
       // 3. Merge successful units sequentially into feature branch (STACK-AC-IMPLEMENTATION: merge.ts)
-      await git(['checkout', featureBranch], this.repoRoot);
+      const checkoutResult = await git(['checkout', featureBranch], this.repoRoot);
+      if (!checkoutResult.ok) {
+        return ok({
+          success: false,
+          unitResults: allResults,
+          totalCost,
+          batchesCompleted: i,
+          error: `Checkout failed: ${checkoutResult.error.message}`,
+          handoffNotes: collectHandoffNotes(allResults),
+          containmentBreach: breached || undefined,
+        });
+      }
       const successfulUnits = batchResult.results.filter((r) => isMergeable(r.exitStatus));
       const nonMergedUnits = batchResult.results.filter((r) => !isMergeable(r.exitStatus));
 

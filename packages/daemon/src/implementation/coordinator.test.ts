@@ -631,6 +631,58 @@ describe('ImplementationCoordinator — multi-unit', () => {
     }
   });
 
+  it('returns success:false when git checkout fails before merge (#259)', async () => {
+    const { mergeWorktree } = await import('./worktree.js');
+    vi.mocked(mergeWorktree).mockClear();
+    const mockedGit = vi.mocked(git);
+
+    const validUnits = [
+      {
+        id: 'unit-ok', title: 'Passing', specIds: [], specContent: '',
+        expectedArtifacts: [], dependencies: [], batchNumber: 0,
+        verificationCommand: '', context: 'do ok',
+      },
+    ];
+
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce(ok({
+          output: 'decomposed',
+          structuredData: { units: validUnits },
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        } as SessionResult))
+        .mockResolvedValueOnce(ok(successResult)),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    // Make git checkout fail only for the checkout call (not other git calls during batch)
+    mockedGit.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'checkout') {
+        return { ok: false, error: new Error('error: pathspec \'feature/42\' did not match any file(s) known to git') } as any;
+      }
+      return { ok: true, value: '' };
+    });
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'standard',
+      specContent: 'spec',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.success).toBe(false);
+      expect(result.value.error).toContain('Checkout failed');
+    }
+    // mergeUnitsSequentially should NOT have been called
+    expect(mergeWorktree).not.toHaveBeenCalled();
+
+    // Restore default git mock behavior
+    mockedGit.mockResolvedValue({ ok: true, value: '' });
+  });
+
   it('returns err when decomposition fails', async () => {
     const runtime = {
       spawnSession: vi.fn().mockResolvedValue({ ok: false, error: new Error('API timeout') }),
