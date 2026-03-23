@@ -3,7 +3,7 @@ id: FUNC-AC-QUALITY
 type: functional
 domain: auto-claude
 status: draft
-version: 2
+version: 3
 layer: 1
 ---
 
@@ -175,6 +175,29 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 - Given the system has been operating for some time
 - When the Operator reviews holdout effectiveness
 - Then they can add, modify, or retire scenarios without affecting in-progress work — changes apply to the next validation cycle
+
+### Review Modes
+
+**Scenario: Assigned quality review**
+- Given a work item has completed implementation
+- When the pipeline submits it for quality review
+- Then the reviewer receives relevant findings for the reviewed area (injected from the knowledge store)
+- And reviews the specific implementation against its spec, acceptance criteria, and quality standards
+- And produces a pass/fail verdict with structured feedback
+- And writes discovered issues to the knowledge store
+
+**Scenario: Proactive codebase review**
+- Given the proactive review agent's scheduled cycle triggers
+- When it scans a codebase area
+- Then it identifies issues (bugs, spec drift, security concerns, quality regression) independently of any active work item
+- And records findings that feed the Tech Lead's signal analysis
+- And the system never dispatches proactive review work through the pipeline gate — the two modes are independent
+
+**Scenario: Proactive review work detection boundary**
+- Given the proactive review agent has created a finding
+- When the work detection system scans for executable work
+- Then it excludes review findings from the executable scan
+- And findings only become executable work when the Tech Lead proposes remediation, the PO approves, the operator approves, and a new work request is created with executable labels
 
 ## Success Criteria
 
