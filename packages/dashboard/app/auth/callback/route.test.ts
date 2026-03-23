@@ -88,7 +88,7 @@ describe('GET /auth/callback', () => {
     expect(location).toContain('/login?error=access_denied');
   });
 
-  it('redirects to / when RPC errors (bootstrap failure is not treated as denial)', async () => {
+  it('signs out and redirects to access_denied when RPC errors (#350 regression)', async () => {
     mockSupabase.auth.exchangeCodeForSession.mockResolvedValue({
       data: { user: { id: 'u-rpc', user_metadata: { user_name: 'user' } } },
       error: null,
@@ -96,10 +96,10 @@ describe('GET /auth/callback', () => {
     mockSupabase.rpc.mockResolvedValue({ data: null, error: new Error('rpc failed') });
     const { GET } = await import('./route.js');
     const res = await GET(makeRequest('http://localhost:3000/auth/callback?code=valid'));
-    expect(mockSupabase.auth.signOut).not.toHaveBeenCalled();
+    expect(mockSupabase.auth.signOut).toHaveBeenCalled();
     expect([302, 307]).toContain(res.status);
     const location = res.headers.get('location') ?? '';
-    expect(location).toBe('http://localhost:3000/');
+    expect(location).toContain('/login?error=access_denied');
   });
 
   it('redirects to / on successful bootstrap (non-denied)', async () => {
