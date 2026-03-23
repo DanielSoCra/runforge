@@ -10,14 +10,21 @@
 
 **Design spec:** `docs/superpowers/specs/2026-03-23-po-techlead-roles-design.md`
 
-**Spec guardian skills:** Use `personal:l1-spec-guardian` when writing FUNC-AC-* specs. The guardian validates format, forbidden fields, and L1 guardrails.
+**Spec guardian skills:** Use `personal:l1-spec-guardian` when writing FUNC-AC-* specs. The guardian validates format, forbidden fields, and L1 guardrails. If the guardian flags technology references in constraints, rephrase to be technology-agnostic — do not remove the constraint.
+
+**Terminology:** Use "gotcha" (not "observation") and "GotchaStore" (not "knowledge layer") consistently to match the existing codebase and design spec. Exception: when referring to business-level PO records that are a distinct record type, use "business observation" and note this requires a separate store or extended schema (L2 decision).
+
+**Deferred to L2/L3:**
+- **Metrics** (design spec Section 9) — metric definitions are captured in the design spec. The L1 specs do not define metrics; they define behaviors that produce measurable outcomes. Metric collection and ground-truth mechanisms (operator override records, re-review outcomes, finding dismissal tracking) are L2/L3 concerns.
+- **Memory interaction map** (design spec Section 10) — the read/write flows are captured in the design spec. How agents physically interact with GotchaStore (query patterns, record types, consumer routing) is an L2 architecture decision.
+- **L2/L3 scope hints** (design spec Section 12) — the pipeline issues in Task 8 reference the design spec as source of truth for downstream authors. The hints live in the design spec, not the L1 specs.
 
 ---
 
 ### Task 1: Update L0-AC-VISION with Wide PO phase
 
 **Files:**
-- Modify: `.specify/L0-vision.md:22-23`
+- Modify: `.specify/L0-vision.md` (the "Product co-ownership" bullet in "What the harness provides")
 
 - [ ] **Step 1: Read current L0-AC-VISION**
 
@@ -60,9 +67,16 @@ git commit -m "spec(L0): add Wide PO evolutionary phases to product co-ownership
 
 **Skill:** Invoke `personal:l1-spec-guardian` after writing to validate format.
 
-- [ ] **Step 1: Write the spec file**
+- [ ] **Step 1: Read design spec and existing specs for reference**
 
-Create `.specify/functional/product-owner.md` with the following content. Use the L1 template format (`---` frontmatter, Problem Statement, Actors, Behavior with Given/When/Then scenarios, Success Criteria, Constraints).
+Read these files before writing:
+- `docs/superpowers/specs/2026-03-23-po-techlead-roles-design.md` — Sections 1, 3 (all protocols, PO side)
+- `.specify/functional/coordination.md` — for Given/When/Then style reference
+- `.specify/templates/l1-functional.md` — for structure template
+
+- [ ] **Step 2: Write the spec file**
+
+Create `.specify/functional/product-owner.md`. Write each scenario in full Given/When/Then format matching the style in `coordination.md`. The design spec provides all content — translate it into scenarios.
 
 Frontmatter:
 ```yaml
@@ -76,43 +90,184 @@ layer: 1
 ---
 ```
 
-**Problem Statement:** From design spec Section 1 — the system can execute work but cannot decide what to work on next. Work detection finds labeled issues but nobody creates them proactively. The PO synthesizes spec pipeline state, delivery health, backlog age, operator ideas, and proposal history to propose the next most valuable work.
+**Problem Statement:** The system can execute work but cannot decide what to work on next. Work detection finds labeled issues but nobody creates them proactively. Without a dedicated product ownership function, the operator must manually monitor spec pipeline state, delivery patterns, and backlog health to decide what to build next.
 
 **Actors:**
 - **Operator** — approves/rejects proposals, submits ideas, sets priorities
 - **PO Agent** — analyzes signals, generates proposals, refines operator ideas
+- **Tech Lead Agent** — participates in shared protocols (enrichment, planning, grooming, standups, retrospectives, escalation)
 
-**Behavior sections to include (each as Given/When/Then scenarios):**
+**Behavior — write full Given/When/Then for ALL of these scenarios:**
 
-Signal Analysis:
-- Scenario: PO analyzes spec pipeline state
-- Scenario: PO reads aggregate delivery outcomes
-- Scenario: PO reads proposal history
+### Signal Analysis
+```
+Scenario: PO analyzes spec pipeline state
+- Given the PO's scheduled cycle triggers
+- When it reads the specification directory
+- Then it identifies which L1 specs have L2 architecture specs, which L2s have L3 stack specs, and which L3s have been implemented
+- And it flags gaps where the pipeline is stuck or incomplete
 
-Proposal Generation:
-- Scenario: PO proposes spec advancement
-- Scenario: PO escalates stale work
-- Scenario: PO proposes backlog prioritization
-- Scenario: PO refines operator idea
+Scenario: PO reads aggregate delivery outcomes
+- Given recent runs have completed
+- When the PO reads delivery metrics
+- Then it reads aggregate pass/fail rates and completion counts per repository
+- And it does not read detailed failure reasons, error categories, or phase breakdowns (those belong to the Tech Lead)
 
-Proposal Lifecycle:
-- Scenario: Proposal approval creates work request
-- Scenario: Proposal rejection is archived
-- Scenario: Proposal expiry
-- Scenario: Proposal guardrails (always requires operator approval)
+Scenario: PO reads proposal history
+- Given past proposals exist in the proposal store
+- When the PO prepares for a new cycle
+- Then it reads what was previously approved, rejected, and why
+- And it avoids re-proposing work that was recently rejected without new justification
+```
 
-Interaction Protocols (PO side):
-- Scenario: PO initiates proposal enrichment with Tech Lead
-- Scenario: PO receives Tech Lead technical proposal for priority assessment
-- Scenario: PO participates in batch planning
-- Scenario: PO initiates backlog grooming
-- Scenario: PO participates in status sync
-- Scenario: PO participates in retrospective
-- Scenario: PO escalates priority shift
-- Scenario: PO receives Tech Lead escalation
+### Proposal Generation
+```
+Scenario: PO proposes spec advancement
+- Given a spec exists at one layer but the next layer is missing
+- When the PO identifies the gap
+- Then it generates a proposal to advance the spec (e.g., "FUNC-AC-LEARNING has no L2 — propose generating L2 architecture spec")
 
-Operator Idea Flow:
-- Scenario: Operator submits idea through terminal or dashboard
+Scenario: PO escalates stale work
+- Given an issue has been in-progress for longer than a configurable threshold with no recent activity
+- When the PO detects the staleness
+- Then it generates a proposal to investigate the stale item
+
+Scenario: PO proposes backlog prioritization
+- Given multiple issues are ready for work
+- When the PO evaluates the backlog
+- Then it proposes an ordering based on dependency analysis, spec completeness, and business value
+
+Scenario: PO refines operator idea
+- Given the operator has submitted a rough idea through the terminal or dashboard
+- When the PO processes the idea
+- Then it refines it into a scoped proposal with rationale and estimated impact
+- And it runs the Proposal Enrichment protocol with the Tech Lead before presenting the enriched proposal to the operator
+```
+
+### Proposal Lifecycle
+```
+Scenario: Proposal approval creates work request
+- Given the operator approves a proposal
+- When the system processes the approval
+- Then it creates a work request (GitHub issue with executable labels) that work detection can pick up
+
+Scenario: Proposal rejection is archived
+- Given the operator rejects a proposal
+- When the system processes the rejection
+- Then it archives the proposal with the operator's reason
+
+Scenario: Proposal expiry
+- Given a proposal has been pending longer than a configurable window (default: 7 days)
+- When the expiry time is reached
+- Then the proposal is marked expired and removed from the active queue
+
+Scenario: Proposal guardrails
+- Given the PO generates any proposal
+- When it enters the proposal queue
+- Then it always requires operator approval — the system never acts on PO proposals autonomously
+```
+
+### Interaction Protocols (PO side)
+```
+Scenario: PO initiates proposal enrichment with Tech Lead
+- Given the PO has generated a raw proposal
+- When it sends the proposal to the Tech Lead for enrichment
+- Then the Tech Lead adds effort estimate, dependency analysis, technical risks, and prerequisite work
+- And the PO reviews the Tech Lead's input and may adjust priority or scope
+- And the PO presents the enriched proposal to the operator
+
+Scenario: PO receives Tech Lead technical proposal
+- Given the Tech Lead has generated a technical proposal
+- When the PO receives it for priority assessment
+- Then the PO evaluates whether the proposal is worth doing now versus other backlog items
+- And either forwards it to the operator with priority context, or rejects it with reason
+- And the PO has veto power — it decides whether the proposal reaches the operator
+
+Scenario: PO participates in batch planning
+- Given it is time to select the next batch of work
+- When the PO enters the Batch Planning protocol
+- Then it brings the top N items from the backlog ordered by business priority
+- And participates in a single round-trip negotiation with the Tech Lead
+- And adjusts selection based on the Tech Lead's hard constraints
+
+Scenario: PO initiates backlog grooming
+- Given the PO's grooming cycle triggers or a significant backlog change occurs
+- When the PO enters the Backlog Grooming protocol
+- Then it brings the current prioritized backlog plus new signals
+- And the Tech Lead brings updated technical landscape
+- And they produce a re-prioritized backlog
+
+Scenario: PO participates in status sync
+- Given a status sync cycle triggers
+- When the PO reports
+- Then it shares priority changes, new operator ideas, and proposal outcomes
+
+Scenario: PO participates in retrospective
+- Given a batch has completed
+- When the PO enters the Retrospective protocol
+- Then it brings delivery expectations versus actuals
+- And actionable items become proposals (PO) or technical debt items (Tech Lead)
+
+Scenario: PO escalates priority shift
+- Given the operator submits an urgent idea or priority change
+- When the PO determines current batch items should be superseded
+- Then it escalates through the Escalation protocol to the Tech Lead
+- And they jointly decide whether to re-plan the batch or queue for the next cycle
+
+Scenario: PO receives Tech Lead escalation
+- Given the Tech Lead raises a technical blocker
+- When the PO receives the escalation with options
+- Then the PO evaluates the options against business priority and decides
+```
+
+### Degraded Paths
+```
+Scenario: Proposal enrichment without Tech Lead assessment
+- Given the Tech Lead cannot assess effort for a proposal (e.g., unfamiliar area, insufficient data)
+- When the proposal enrichment cannot complete normally
+- Then the proposal goes to the operator with an "unassessed" flag indicating technical review is incomplete
+
+Scenario: Empty batch from planning
+- Given no viable batch can be formed during Batch Planning
+- When all items are blocked or capacity is insufficient
+- Then the protocol produces an empty batch and triggers an Escalation to the operator explaining why
+
+Scenario: PO-only backlog grooming
+- Given the Tech Lead has no new technical input during grooming
+- When the PO grooms the backlog alone
+- Then it records that the grooming was PO-only
+
+Scenario: Protocol convergence failure
+- Given the PO and Tech Lead cannot converge in one round during Batch Planning
+- When no agreement is reached
+- Then both positions go to the operator for resolution
+```
+
+### Protocol Composition
+```
+Scenario: Batch completion triggers protocol chain
+- Given a Status Sync detects that a batch has completed
+- When the system processes the event
+- Then it triggers Retrospective, then Backlog Grooming, then Batch Planning for the next batch
+
+Scenario: Stuck item triggers escalation chain
+- Given a Status Sync detects a stuck work item
+- When the system processes the event
+- Then it triggers Escalation from Tech Lead to PO, which may trigger re-Batch Planning
+
+Scenario: Operator idea triggers proposal chain
+- Given the operator submits an idea
+- When the PO refines it
+- Then it runs Proposal Enrichment with the Tech Lead, and upon operator approval, triggers Backlog Grooming and Batch Planning
+```
+
+### Operator Idea Flow
+```
+Scenario: Operator submits idea through terminal or dashboard
+- Given the operator has an idea for a feature or improvement
+- When they submit it through the dashboard or terminal interface
+- Then the PO receives the idea and refines it into a scoped proposal on its next cycle (debounced, default 5-minute window)
+```
 
 **Success Criteria:**
 - Spec pipeline gaps are identified and proposed for advancement without operator prompting
@@ -150,9 +305,16 @@ git commit -m "spec(L1): add FUNC-AC-PRODUCT-OWNER — product owner agent role"
 
 **Skill:** Invoke `personal:l1-spec-guardian` after writing to validate format.
 
-- [ ] **Step 1: Write the spec file**
+- [ ] **Step 1: Read design spec and existing specs for reference**
 
-Create `.specify/functional/tech-lead.md` with L1 template format.
+Read these files before writing:
+- `docs/superpowers/specs/2026-03-23-po-techlead-roles-design.md` — Sections 2, 3 (all protocols, Tech Lead side), 8 (self-improvement)
+- `.specify/functional/coordination.md` — for Given/When/Then style reference
+- `.specify/functional/product-owner.md` — for consistency with the PO spec just written
+
+- [ ] **Step 2: Write the spec file**
+
+Create `.specify/functional/tech-lead.md`. Write each scenario in full Given/When/Then format matching the style used in the PO spec and `coordination.md`.
 
 Frontmatter:
 ```yaml
@@ -166,48 +328,185 @@ layer: 1
 ---
 ```
 
-**Problem Statement:** From design spec Section 2 — the system has no agent responsible for code-level health. Review findings accumulate, TODOs grow, test coverage drifts, and dependency risks go unnoticed unless the operator manually inspects. The Tech Lead synthesizes technical signals and proposes improvements.
+**Problem Statement:** The system has no agent responsible for code-level health. Review findings accumulate, deferred work grows, test coverage drifts, and dependency risks go unnoticed unless the operator manually inspects. Without a dedicated technical leadership function, the gap between specification and implementation widens silently.
 
 **Actors:**
 - **Operator** — approves technical proposals, resolves PO/Tech Lead disagreements
 - **Tech Lead Agent** — analyzes code health, estimates effort, manages technical quality
-- **PO Agent** — receives Tech Lead input during shared protocols
+- **PO Agent** — receives Tech Lead input during shared protocols, has veto power on Tech Lead proposals reaching the operator
 
-**Behavior sections (Given/When/Then):**
+**Behavior — write full Given/When/Then for ALL of these scenarios:**
 
-Signal Analysis:
-- Scenario: Tech Lead reads review findings from GotchaStore
-- Scenario: Tech Lead analyzes detailed run outcomes
-- Scenario: Tech Lead detects spec-code drift
-- Scenario: Tech Lead monitors TODO/FIXME density
-- Scenario: Tech Lead monitors test health
-- Scenario: Tech Lead monitors dependency risks
+### Signal Analysis
+```
+Scenario: Tech Lead reads review findings
+- Given the GotchaStore contains unaddressed findings with severity ratings
+- When the Tech Lead's analysis cycle triggers
+- Then it reads accumulated findings and identifies areas with high finding density or severity
 
-Proposal Generation:
-- Scenario: Tech Lead proposes technical debt reduction
-- Scenario: Tech Lead proposes quality improvement
-- Scenario: Tech Lead raises architecture concern
-- Scenario: Tech Lead proposes dependency update
-- Scenario: Tech Lead proposes failure pattern investigation
+Scenario: Tech Lead analyzes detailed run outcomes
+- Given recent runs have completed or failed
+- When the Tech Lead reads run data
+- Then it analyzes failure reasons, error categories, phase-level breakdowns, and retry counts
+- And it identifies systemic patterns across multiple runs
 
-Proposal Lifecycle:
-- Scenario: Tech Lead proposal flows through PO for priority assessment
-- Scenario: PO rejects Tech Lead proposal with reason
-- Scenario: Tech Lead re-proposes with stronger evidence
+Scenario: Tech Lead detects spec-code drift
+- Given L3 stack specs define expected implementation patterns
+- When the Tech Lead compares specs against actual implementation
+- Then it identifies areas where implementation has diverged from the spec
 
-Interaction Protocols (Tech Lead side):
-- Scenario: Tech Lead enriches PO business proposal
-- Scenario: Tech Lead initiates technical proposal enrichment
-- Scenario: Tech Lead participates in batch planning (dependency graph, capacity)
-- Scenario: Tech Lead participates in backlog grooming (technical landscape)
-- Scenario: Tech Lead reports in status sync
-- Scenario: Tech Lead participates in retrospective (failure analysis, gotcha trends)
-- Scenario: Tech Lead escalates technical blocker
-- Scenario: Tech Lead receives PO priority escalation
+Scenario: Tech Lead monitors TODO/FIXME density
+- Given the codebase contains deferred work markers
+- When the Tech Lead scans code areas
+- Then it identifies areas with high TODO/FIXME concentration
 
-Self-Improvement Connection:
-- Scenario: Tech Lead distills retrospective lessons into gotchas
-- Scenario: Tech Lead detects recurring gotcha pattern and proposes systemic fix
+Scenario: Tech Lead monitors test health
+- Given CI results and coverage data exist
+- When the Tech Lead reads test metrics
+- Then it identifies areas with declining coverage or increasing test failures
+
+Scenario: Tech Lead monitors dependency risks
+- Given the project has external package dependencies
+- When the Tech Lead checks dependency health
+- Then it identifies outdated packages and known security advisories
+```
+
+### Proposal Generation
+```
+Scenario: Tech Lead proposes technical debt reduction
+- Given an area has accumulated TODOs and recurring gotchas
+- When the Tech Lead identifies the pattern
+- Then it generates a proposal for targeted refactoring of that area
+
+Scenario: Tech Lead proposes quality improvement
+- Given test coverage in an area has dropped below a threshold
+- When the Tech Lead detects the regression
+- Then it generates a proposal for coverage hardening
+
+Scenario: Tech Lead raises architecture concern
+- Given spec-code drift has been detected
+- When the drift affects system correctness or maintainability
+- Then it generates a proposal to realign implementation with the spec
+
+Scenario: Tech Lead proposes dependency update
+- Given packages have known vulnerabilities
+- When the Tech Lead identifies the risk
+- Then it generates a proposal for an update batch
+
+Scenario: Tech Lead proposes failure pattern investigation
+- Given multiple recent runs in a repository failed at the same phase
+- When the Tech Lead detects the pattern
+- Then it generates a proposal to investigate the root cause
+```
+
+### Proposal Lifecycle
+```
+Scenario: Tech Lead proposal flows through PO
+- Given the Tech Lead has generated a technical proposal
+- When it submits the proposal for enrichment
+- Then the PO evaluates business priority and either forwards to operator with context or rejects with reason
+
+Scenario: PO rejects Tech Lead proposal
+- Given the PO has rejected a Tech Lead proposal
+- When the rejection is recorded
+- Then the PO records the rejection reason
+- And the Tech Lead may re-propose with stronger evidence on any subsequent cycle (scheduled or event-driven)
+
+Scenario: Tech Lead re-proposes with stronger evidence
+- Given a previous proposal was rejected by the PO
+- When the Tech Lead has gathered additional evidence supporting the proposal
+- Then it generates a new proposal with the stronger evidence and a reference to the prior rejection
+```
+
+### Interaction Protocols (Tech Lead side)
+```
+Scenario: Tech Lead enriches PO business proposal
+- Given the PO has generated a raw business proposal
+- When the Tech Lead receives it for enrichment
+- Then it adds effort estimate, dependency analysis, technical risks, and prerequisite work
+- And returns the enrichment to the PO
+
+Scenario: Tech Lead initiates technical proposal
+- Given the Tech Lead has generated a technical proposal
+- When it enters the Proposal Enrichment protocol
+- Then the PO evaluates business priority
+- And the PO has veto power — it decides whether the proposal reaches the operator
+
+Scenario: Tech Lead participates in batch planning
+- Given it is time to select the next batch of work
+- When the Tech Lead enters the Batch Planning protocol
+- Then it brings the dependency graph, capacity assessment, and current system health
+- And identifies hard constraints (dependencies, parallelism limits, capacity)
+- And determines how many items, in what order, and what can parallelize
+
+Scenario: Tech Lead participates in backlog grooming
+- Given the PO has initiated backlog grooming
+- When the Tech Lead joins the protocol
+- Then it brings the updated technical landscape (new findings, resolved debt, changed dependencies)
+- And flags items as blocked or risky
+
+Scenario: Tech Lead reports in status sync
+- Given a status sync cycle triggers
+- When the Tech Lead reports
+- Then it shares active work status, stuck items, completed items, and resource utilization
+
+Scenario: Tech Lead participates in retrospective
+- Given a batch has completed
+- When the Tech Lead enters the Retrospective protocol
+- Then it brings failure analysis, recurring patterns, resource utilization, and gotcha trends
+- And actionable items become technical debt proposals
+
+Scenario: Tech Lead escalates technical blocker
+- Given a work item has failed or encountered a blocker
+- When the Tech Lead determines it requires PO input
+- Then it escalates through the Escalation protocol with options (retry, skip, fix spec first)
+
+Scenario: Tech Lead receives PO priority escalation
+- Given the PO escalates a priority shift
+- When the Tech Lead receives the escalation
+- Then it evaluates capacity impact and jointly decides with the PO whether to re-plan or queue
+```
+
+### Degraded Paths
+```
+Scenario: Tech Lead cannot assess effort
+- Given the Tech Lead receives a proposal for enrichment in an unfamiliar area
+- When it cannot produce a reliable effort estimate
+- Then it returns an "unassessed" flag so the proposal reaches the operator with incomplete technical review
+
+Scenario: Escalation to unavailable PO
+- Given the Tech Lead raises an escalation but the PO is mid-analysis
+- When the escalation cannot be processed immediately
+- Then it queues and processes on the next tick
+- And time-critical escalations (budget exceeded, system down) bypass the protocol and go directly to the operator
+```
+
+### Self-Improvement Connection
+```
+Scenario: Tech Lead distills retrospective lessons into gotchas
+- Given the Retrospective protocol has produced lessons learned
+- When the Tech Lead distills a technical lesson
+- Then it deposits the gotcha into GotchaStore with severity, affected area, and root cause
+- And the gotcha becomes available for injection into future sessions
+
+Scenario: Tech Lead detects recurring gotcha pattern
+- Given the same root cause appears in gotchas exceeding a configurable threshold (default: 3)
+- When the Tech Lead detects the pattern
+- Then it generates a technical debt proposal to address the root cause systemically
+```
+
+### Protocol Composition
+```
+Scenario: Batch completion triggers protocol chain
+- Given a Status Sync detects that a batch has completed
+- When the system processes the event
+- Then it triggers Retrospective, then Backlog Grooming, then Batch Planning for the next batch
+
+Scenario: Failure triggers escalation chain
+- Given a Status Sync detects a stuck work item or repeated failure
+- When the Tech Lead evaluates the situation
+- Then it triggers Escalation to the PO, which may trigger re-Batch Planning
+```
 
 **Success Criteria:**
 - Review findings translate to actionable proposals at a measurable rate
@@ -261,16 +560,27 @@ Product ownership behavior — proposal generation, signal analysis, operator id
 
 - [ ] **Step 3: Add preconditions to batch scenarios**
 
-Update these scenarios with preconditions:
+Find and update each scenario by replacing its Given/When/Then lines:
 
-- "System creates a batch from related work" — add: "Given the PO and Tech Lead have agreed on a batch through the Batch Planning protocol..."
-- "Independent work dispatches immediately" — add: "Given the PO has approved the issue for immediate dispatch..."
-- "Higher-priority work arrives" — rewrite trigger: "When the PO escalates new work as higher priority through the Escalation protocol..."
-- "Work item gets stuck" — add: "Then the coordination engine uses an LLM-augmented decision point to determine the response (retry, skip, or re-plan) and routes the impediment through the Escalation protocol to PO or Tech Lead as appropriate"
+**"System creates a batch from related work"** — replace the Given line:
+- Old: `- Given multiple related issues are ready for work`
+- New: `- Given the PO and Tech Lead have agreed on a batch through the Batch Planning protocol and multiple related issues are ready for work`
+
+**"Independent work dispatches immediately"** — replace the Given line:
+- Old: `- Given an issue is ready for work and has no dependencies on other pending issues`
+- New: `- Given the PO has approved an issue for immediate dispatch and it has no dependencies on other pending issues`
+
+**"Higher-priority work arrives"** — replace the When line:
+- Old: `- When new work arrives that the system judges to be higher priority`
+- New: `- When the PO escalates new work as higher priority through the Escalation protocol`
+
+**"Work item gets stuck"** — replace the Then line:
+- Old: `- Then it decides whether to retry the issue, skip it, or re-plan the batch around the failure`
+- New: `- Then the coordination engine uses an LLM-augmented decision point to determine the response (retry, skip, or re-plan) and routes the impediment through the Escalation protocol to PO or Tech Lead as appropriate`
 
 - [ ] **Step 4: Add LLM-Augmented Decision Points section**
 
-Add before "Concurrency Management":
+Add immediately before the line `### Concurrency Management`:
 ```markdown
 ### LLM-Augmented Decision Points
 
@@ -360,32 +670,33 @@ Read `.specify/functional/institutional-learning.md` fully.
 
 - [ ] **Step 2: Add three new scenarios**
 
-Add a new section "### Retrospective Learning" after the existing sections:
+Add a new section "### Retrospective Learning" after the last existing section (likely "Knowledge from Implementation Records" or similar). Find the last scenario in the file and add after it:
 
 ```markdown
 ### Retrospective Learning
 
 **Scenario: Retrospective feeds institutional knowledge**
 - Given the Retrospective protocol produces lessons learned
-- When the Tech Lead distills a lesson into a structured observation
-- Then the observation enters the knowledge store and becomes available for injection into future sessions
+- When the Tech Lead distills a technical lesson into a gotcha
+- Then the gotcha enters GotchaStore and becomes available for injection into future sessions
 
 **Scenario: Business-level retrospective lessons**
 - Given the Retrospective protocol produces business-level lessons
 - When the PO records a business observation (e.g., "this type of proposal consistently gets rejected")
-- Then the observation is stored as a distinct record type from technical observations and is available to the PO for future proposal generation
+- Then the business observation is stored as a distinct record type from technical gotchas
+- And it is available to the PO for future proposal generation
 
-**Scenario: Recurring observation triggers systemic proposal**
-- Given the same root cause appears in observations exceeding a configurable threshold (default: 3)
+**Scenario: Recurring gotcha triggers systemic proposal**
+- Given the same root cause appears in gotchas exceeding a configurable threshold (default: 3)
 - When the Tech Lead detects the pattern
 - Then it generates a technical debt proposal to address the root cause
 
 ### Prospective Checks
 
-**Scenario: Prospective observation check at batch planning**
+**Scenario: Prospective gotcha check at batch planning**
 - Given the coordination engine is preparing a batch for the Batch Planning protocol
-- When it queries the knowledge store for observations related to the planned work areas
-- Then high-severity observations are flagged and included in the Tech Lead's input to Batch Planning
+- When it queries GotchaStore for gotchas related to the planned work areas
+- Then high-severity gotchas are flagged and included in the Tech Lead's input to Batch Planning
 - And the Tech Lead factors historical failures into effort estimates and risk assessments
 ```
 
