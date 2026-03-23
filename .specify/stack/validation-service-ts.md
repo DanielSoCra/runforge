@@ -10,6 +10,14 @@ references: ARCH-AC-VALIDATION
 code_paths:
   - packages/daemon/src/validation/
   - packages/daemon/src/validation/review.ts
+  - packages/daemon/src/validation/gates.ts
+  - packages/daemon/src/validation/reviewer-session.ts
+  - packages/daemon/src/validation/risk-detection.ts
+  - packages/daemon/src/validation/sampling.ts
+  - packages/daemon/src/validation/warmup.ts
+  - packages/daemon/src/validation/holdout.ts
+  - packages/daemon/src/validation/deploy.ts
+  - packages/daemon/src/validation/post-deploy-test.ts
   - packages/daemon/src/validation/proactive-reviewer.ts
   - packages/daemon/src/validation/proactive-scheduler.ts
   - packages/daemon/src/validation/knowledge-injector.ts
@@ -72,6 +80,8 @@ test_paths:
 **Post-deployment testing: Command execution with fix loop.** `config.validation.testCommands` is an array of shell commands run against the deployed environment. On failure, truncate output to the relevant failure excerpt (scan backwards for failure markers, take surrounding context, configurable via `config.validation.failureExcerptLines`, default: 50) to prevent context flooding. Delegate fix to Implementation Coordinator, re-deploy, re-test. Bounded by `config.validation.maxTestFixAttempts`.
 
 **Knowledge injection: Query before reviewer spawn.** The `KnowledgeInjector` calls `KnowledgeService.matchRecords(artifactPaths, 'review')` to retrieve active records whose artifact patterns match the reviewed area. The results are formatted as a `## Known Issues` section prepended to the reviewer session's context. Only `active` lifecycle records targeting the `review` session type (per PolicyRegistry) are injected. Hit counts are incremented by the Knowledge Service on match.
+
+**Assigned QA reviewer write-back: Candidate observations.** After an assigned QA reviewer session completes, any issues it discovers beyond the pass/fail verdict are persisted as candidate observations via `KnowledgeService.storeRecord()` with `recordType: 'review_finding'`, `originType: 'autonomous'`, and `lifecycleStatus: 'candidate'`. Candidate records require Operator approval before becoming permanent knowledge (see STACK-AC-KNOWLEDGE candidate lifecycle). The reviewer session's structured output includes a `discoveredIssues` array alongside the gate verdict; the Validation Service extracts these and stores each as a separate knowledge record.
 
 **Proactive reviewer: Session Runtime session with exploratory rubric.** The proactive reviewer spawns a Session Runtime session with an exploratory rubric (not the same rubric as assigned QA gates 2-4). Dimensions: spec-code drift, dead code, security regression, convention violations, test coverage gaps. The session receives the codebase area path and recent git activity (last N commits touching that area, default: 20) as context.
 
@@ -185,3 +195,4 @@ async function recordFinding(f: Finding, octokit: Octokit, ks: KnowledgeService)
 - `review-finding` label exclusion in work detection is a query-time filter, not a post-filter. Including then removing creates a TOCTOU window where the Coordinator might briefly see the issue as executable work.
 - Proactive review throttling checks active worker count at schedule time. If the threshold is exceeded, the cycle is skipped entirely — it does not queue for later. The next scheduled cycle will re-check.
 - Proactive findings create both a GitHub issue and a knowledge record. If the Octokit call succeeds but the knowledge store write fails (or vice versa), log the inconsistency but do not retry — the next proactive scan will rediscover the issue and dedup via knowledge store similarity matching.
+- Assigned QA reviewer write-back uses `lifecycleStatus: 'candidate'` — not `active`. This ensures discovered issues require Operator approval before injection into future sessions. Proactive findings enter as `active` (autonomous origin) because they are already independently verified by the scheduled scan.
