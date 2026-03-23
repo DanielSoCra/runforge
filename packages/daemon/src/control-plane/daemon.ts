@@ -8,7 +8,7 @@ import { ImplementationCoordinator } from '../implementation/coordinator.js';
 import { StateManager } from './state.js';
 import { createControlServer } from './server.js';
 import { RepoManager } from './repo-manager.js';
-import { createWorkDetector, type WorkDetector } from './work-detection.js';
+import { createWorkDetector, type WorkDetector, type FeaturePipelineWorkType } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
 import { createWebsitePhaseHandlers } from './phases-website.js';
 import { readAgencyConfig } from './agency-config.js';
@@ -24,6 +24,7 @@ import { SupabaseConfigReader } from '../supabase/config-reader.js';
 import { SupabaseRunWriter, toDbOutcome } from '../supabase/run-writer.js';
 import { GotchaStore } from '../knowledge/gotcha-store.js';
 import { join } from 'path';
+import { createReviewScheduler } from '../coordination/review-scheduler.js';
 
 export async function startDaemon(configPath: string): Promise<Result<void>> {
   // 0. Validate GITHUB_TOKEN — required for Octokit (labeling, commenting, notifications)
@@ -68,11 +69,77 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   const remoteControl = new RemoteControlManager();
   remoteControl.start();
 
+  // 3c. Start Review Scheduler
+  const reviewScheduler = createReviewScheduler(
+    {
+      spawnReviewSession: async (category, maxIssues) => {
+        const result = await runtime.spawnSession(
+          'codebase-reviewer',
+          { variables: { category, maxIssues: String(maxIssues) } },
+          0, // no issue number — proactive review
+        );
+        if (!result.ok) {
+          console.error('[review-scheduler] session failed:', result.error.message);
+          return { findingsCount: 0, issuesCreated: 0 };
+        }
+        // Parse structured data from session output if available
+        const data = result.value.structuredData as { findingsCount?: number; issuesCreated?: number } | null;
+        return {
+          findingsCount: data?.findingsCount ?? 0,
+          issuesCreated: data?.issuesCreated ?? 0,
+        };
+      },
+      getSignalRatio: () => {
+        // TODO(#285): compute from historical review issue data (verified / total closed)
+        // Default to 1.0 (no throttling) until signal tracking is implemented
+        return 1.0;
+      },
+    },
+    {
+      intervalMs: 20 * 60 * 1000, // 20 minutes
+      signalRatioThreshold: 0.6,
+      maxIssuesPerCycle: 5,
+    },
+  );
+  const stopReviewScheduler = reviewScheduler.start();
+
   // 4. State tracking
   let paused = false;
   let activeRuns = 0;
   let shuttingDown = false;
   let consecutiveStuckCount = 0;
+
+  /** Shared handler for run outcomes — tracks stuck count and auto-pause. */
+  const handleRunOutcome = (outcome: string, issueNumber: number) => {
+    if (outcome === 'paused') {
+      if (!paused) {
+        paused = true;
+        console.warn(`[daemon] Auto-paused: daily budget exceeded (issue #${issueNumber})`);
+        void notify(config.webhooks, {
+          event: 'auto-paused',
+          issueNumber,
+          phase: 'paused',
+          message: 'Daemon auto-paused: daily budget exceeded',
+        });
+      }
+      consecutiveStuckCount = 0;
+    } else if (outcome === 'stuck') {
+      consecutiveStuckCount++;
+      console.log(`[daemon] Consecutive stuck count: ${consecutiveStuckCount}/${config.maxConsecutiveStuck}`);
+      if (consecutiveStuckCount >= config.maxConsecutiveStuck && !paused) {
+        paused = true;
+        console.warn(`[daemon] Auto-paused: ${consecutiveStuckCount} consecutive stuck runs reached threshold`);
+        void notify(config.webhooks, {
+          event: 'auto-paused',
+          issueNumber,
+          phase: 'stuck',
+          message: `Daemon auto-paused after ${consecutiveStuckCount} consecutive stuck runs`,
+        });
+      }
+    } else {
+      consecutiveStuckCount = 0;
+    }
+  };
 
   // 5. Build RepoManager or legacy single-repo detector
   let repoManager: RepoManager | null = null;
@@ -88,6 +155,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         if (paused || shuttingDown) return;
         if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
         costTracker.maybeResetDaily();
+        const claimedIssues = new Set<number>();
         const workResult = await detector.detectReadyWork();
         if (!workResult.ok) {
           // TODO: proactive token health check — if 401, mark connection token_invalid
@@ -98,27 +166,11 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           if (paused || shuttingDown) break;
           const claimResult = await detector.claimWork(request.issueNumber);
           if (!claimResult.ok) continue;
+          claimedIssues.add(request.issueNumber);
           activeRuns++;
           repoManager!.notifyRunStart(repoId);
           processWorkRequest(config, repoId, owner, name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot)
-            .then((outcome) => {
-              if (outcome === 'stuck') {
-                consecutiveStuckCount++;
-                console.log(`[daemon] Consecutive stuck count: ${consecutiveStuckCount}/${config.maxConsecutiveStuck}`);
-                if (consecutiveStuckCount >= config.maxConsecutiveStuck && !paused) {
-                  paused = true;
-                  console.warn(`[daemon] Auto-paused: ${consecutiveStuckCount} consecutive stuck runs reached threshold`);
-                  void notify(config.webhooks, {
-                    event: 'auto-paused',
-                    issueNumber: request.issueNumber,
-                    phase: 'stuck',
-                    message: `Daemon auto-paused after ${consecutiveStuckCount} consecutive stuck runs`,
-                  });
-                }
-              } else {
-                consecutiveStuckCount = 0;
-              }
-            })
+            .then((outcome) => handleRunOutcome(outcome, request.issueNumber))
             .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
             // CRITICAL: notifyRunEnd must be in .finally(), never only in .catch() or .then().
             // If it is missing here, a disabled repo's poller hangs in pendingDisable forever.
@@ -126,6 +178,47 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
               activeRuns--;
               repoManager!.notifyRunEnd(repoId);
             });
+        }
+
+        // Bug-fix detection — lower priority than ready work (#284)
+        if (paused || shuttingDown) return;
+        if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
+        const bugResult = await detector.detectBugFixWork();
+        if (bugResult.ok && bugResult.value && !claimedIssues.has(bugResult.value.issueNumber)) {
+          const bugRequest = bugResult.value;
+          const bugClaimResult = await detector.claimBugFixWork(bugRequest.issueNumber);
+          if (bugClaimResult.ok) {
+            claimedIssues.add(bugRequest.issueNumber);
+            activeRuns++;
+            repoManager!.notifyRunStart(repoId);
+            processWorkRequest(config, repoId, owner, name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot)
+              .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber))
+              .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
+              .finally(() => {
+                activeRuns--;
+                repoManager!.notifyRunEnd(repoId);
+              });
+          }
+        }
+
+        // Feature-pipeline detection — lowest priority (#282)
+        if (paused || shuttingDown) return;
+        if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
+        const fpResult = await detector.detectFeaturePipelineWork();
+        if (fpResult.ok && fpResult.value && !claimedIssues.has(fpResult.value.issueNumber)) {
+          const fpRequest = fpResult.value;
+          const fpClaimResult = await detector.claimFeaturePipelineWork(fpRequest.issueNumber, fpRequest.workType as FeaturePipelineWorkType);
+          if (fpClaimResult.ok) {
+            activeRuns++;
+            repoManager!.notifyRunStart(repoId);
+            processWorkRequest(config, repoId, owner, name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot)
+              .then((outcome) => handleRunOutcome(outcome, fpRequest.issueNumber))
+              .catch((e) => console.error(`Run failed for #${fpRequest.issueNumber}:`, e))
+              .finally(() => {
+                activeRuns--;
+                repoManager!.notifyRunEnd(repoId);
+              });
+          }
         }
       },
     );
@@ -224,7 +317,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     };
     const handlers = run.variant === 'website'
       ? createWebsitePhaseHandlers(agencyConfig, null, notifyOctokit, runOwner, runRepoName, run.issueNumber, null)
-      : createPhaseHandlers(config, runOwner, runRepoName, runtime, coordinator, notifyOctokit, resumedRequest, stateDir, runWriter ?? undefined, run.id, repoRoot);
+      : createPhaseHandlers(config, runOwner, runRepoName, runtime, coordinator, notifyOctokit, resumedRequest, stateDir, runWriter ?? undefined, run.id, repoRoot, configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins);
     const table = getPipeline(run.variant);
 
     const resumeDetector = legacyDetector ?? createWorkDetector(new Octokit({ auth: process.env.GITHUB_TOKEN }), runOwner, runRepoName);
@@ -238,8 +331,9 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           total_cost: run.cost,
         });
 
+        handleRunOutcome(result.outcome, run.issueNumber);
+
         if (result.outcome === 'stuck') {
-          consecutiveStuckCount++;
           await resumeDetector.markStuck(run.issueNumber, result.error ?? 'Unknown error');
           await notify(config.webhooks, {
             event: 'stuck',
@@ -247,8 +341,6 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
             phase: run.phase,
             message: `Issue #${run.issueNumber} stuck: ${result.error ?? 'unknown'}`,
           });
-        } else {
-          consecutiveStuckCount = 0;
         }
       })
       .catch((e) => console.error(`Resumed run failed for #${run.issueNumber}:`, e))
@@ -268,6 +360,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       if (paused || shuttingDown) return;
       if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
       costTracker.maybeResetDaily();
+      const claimedIssues = new Set<number>();
       const workResult = await detector.detectReadyWork();
       if (!workResult.ok) return;
       for (const request of workResult.value) {
@@ -275,28 +368,45 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         if (paused || shuttingDown) break;
         const claimResult = await detector.claimWork(request.issueNumber);
         if (!claimResult.ok) continue;
+        claimedIssues.add(request.issueNumber);
         activeRuns++;
         processWorkRequest(config, '', config.repo!.owner, config.repo!.name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot)
-          .then((outcome) => {
-            if (outcome === 'stuck') {
-              consecutiveStuckCount++;
-              console.log(`[daemon] Consecutive stuck count: ${consecutiveStuckCount}/${config.maxConsecutiveStuck}`);
-              if (consecutiveStuckCount >= config.maxConsecutiveStuck && !paused) {
-                paused = true;
-                console.warn(`[daemon] Auto-paused: ${consecutiveStuckCount} consecutive stuck runs reached threshold`);
-                void notify(config.webhooks, {
-                  event: 'auto-paused',
-                  issueNumber: request.issueNumber,
-                  phase: 'stuck',
-                  message: `Daemon auto-paused after ${consecutiveStuckCount} consecutive stuck runs`,
-                });
-              }
-            } else {
-              consecutiveStuckCount = 0;
-            }
-          })
+          .then((outcome) => handleRunOutcome(outcome, request.issueNumber))
           .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
           .finally(() => { activeRuns--; });
+      }
+
+      // Bug-fix detection — lower priority than ready work (#284)
+      if (paused || shuttingDown) return;
+      if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
+      const bugResult = await detector.detectBugFixWork();
+      if (bugResult.ok && bugResult.value && !claimedIssues.has(bugResult.value.issueNumber)) {
+        const bugRequest = bugResult.value;
+        const bugClaimResult = await detector.claimBugFixWork(bugRequest.issueNumber);
+        if (bugClaimResult.ok) {
+          claimedIssues.add(bugRequest.issueNumber);
+          activeRuns++;
+          processWorkRequest(config, '', config.repo!.owner, config.repo!.name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot)
+            .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber))
+            .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
+            .finally(() => { activeRuns--; });
+        }
+      }
+
+      // Feature-pipeline detection — lowest priority (#282)
+      if (paused || shuttingDown) return;
+      if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
+      const fpResult = await detector.detectFeaturePipelineWork();
+      if (fpResult.ok && fpResult.value && !claimedIssues.has(fpResult.value.issueNumber)) {
+        const fpRequest = fpResult.value;
+        const fpClaimResult = await detector.claimFeaturePipelineWork(fpRequest.issueNumber, fpRequest.workType as FeaturePipelineWorkType);
+        if (fpClaimResult.ok) {
+          activeRuns++;
+          processWorkRequest(config, '', config.repo!.owner, config.repo!.name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot)
+            .then((outcome) => handleRunOutcome(outcome, fpRequest.issueNumber))
+            .catch((e) => console.error(`Run failed for #${fpRequest.issueNumber}:`, e))
+            .finally(() => { activeRuns--; });
+        }
       }
     }, config.pollIntervalMs);
   }
@@ -307,6 +417,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     shuttingDown = true;
     console.log('Shutting down...');
     if (legacyPoller) clearInterval(legacyPoller);
+    stopReviewScheduler();
     repoManager?.stop();
     configReader?.stop();
     const deadline = Date.now() + config.gracePeriodMs;
@@ -391,7 +502,7 @@ async function processWorkRequest(
         request.issueNumber,
         null,          // repoId — wired in follow-on
       )
-    : createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir, runWriter ?? undefined, run.id, repoRoot);
+    : createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir, runWriter ?? undefined, run.id, repoRoot, repoConfig?.activePlugins);
   const table = getPipeline(variant);
 
   console.log(`[daemon] Pipeline start for #${request.issueNumber}: ${request.title}`);

@@ -60,11 +60,12 @@ export class CliAdapter implements ProviderAdapter {
         : typeof json['output'] === 'string'
           ? json['output']
           : JSON.stringify(json);
-      const cost = typeof json['cost_usd'] === 'number'
+      const rawCost = typeof json['cost_usd'] === 'number'
         ? json['cost_usd']
         : typeof json['cost'] === 'number'
           ? json['cost']
           : 0;
+      const cost = Number.isFinite(rawCost) && rawCost > 0 ? rawCost : 0;
       return ok({
         output,
         cost,
@@ -301,9 +302,12 @@ export class CliAdapter implements ProviderAdapter {
     let match;
     while ((match = regex.exec(output)) !== null) {
       try {
-        const marker = JSON.parse(match[1] ?? '') as PitfallMarker;
-        if (marker.artifactPatterns && marker.description) {
-          markers.push(marker);
+        const parsed = JSON.parse(match[1] ?? '') as Record<string, unknown>;
+        if (Array.isArray(parsed.artifactPatterns) && typeof parsed.description === 'string') {
+          markers.push({
+            artifactPatterns: parsed.artifactPatterns.map(String),
+            description: parsed.description,
+          });
         }
       } catch {
         // skip malformed markers

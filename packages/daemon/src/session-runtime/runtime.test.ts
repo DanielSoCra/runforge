@@ -364,8 +364,8 @@ describe('loadPromptTemplate', () => {
   });
 
   it('replaces all occurrences of the same placeholder', async () => {
-    await writeFile(join(tmpDir, 'tester.md'), 'Run {{cmd}} then {{cmd}} again');
-    const result = await loadPromptTemplate('tester', { cmd: 'vitest' });
+    await writeFile(join(tmpDir, 'worker.md'), 'Run {{cmd}} then {{cmd}} again');
+    const result = await loadPromptTemplate('worker', { cmd: 'vitest' });
     expect(result).toBe('Run vitest then vitest again');
   });
 

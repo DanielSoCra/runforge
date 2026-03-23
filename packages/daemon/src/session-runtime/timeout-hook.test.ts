@@ -6,4 +6,9 @@ describe('timeout-hook', () => {
     expect(typeof TIMEOUT_WARNING_MESSAGE).toBe('string');
     expect(TIMEOUT_WARNING_MESSAGE.length).toBeGreaterThan(0);
   });
+
+  it('instructs session to use [HANDOFF] delimiters so extractHandoff() can match', () => {
+    expect(TIMEOUT_WARNING_MESSAGE).toContain('[HANDOFF]');
+    expect(TIMEOUT_WARNING_MESSAGE).toContain('[/HANDOFF]');
+  });
 });

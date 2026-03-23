@@ -41,6 +41,7 @@ export async function executeBatch(
   unitHandoffs?: Map<string, string>,
   variant?: PipelineVariant,
   bugContext?: { bugReport: string; diagnosis: string },
+  activePlugins?: Array<{ id: string; activatedAt: string }>,
 ): Promise<BatchResult> {
   const staggerMs = options?.staggerMs ?? 2000;
   const maxDiffLines = options?.maxDiffLines ?? 300;
@@ -49,7 +50,7 @@ export async function executeBatch(
     // Stagger delay between starts
     if (index > 0) await delay(index * staggerMs);
     const pitfalls = unitPitfalls?.get(unit.id) ?? '';
-    return executeUnit(unit, featureBranch, issueNumber, runtime, repoRoot, maxDiffLines, runWriter, runId, pitfalls, gotchaStore, unitHandoffs?.get(unit.id), variant, bugContext);
+    return executeUnit(unit, featureBranch, issueNumber, runtime, repoRoot, maxDiffLines, runWriter, runId, pitfalls, gotchaStore, unitHandoffs?.get(unit.id), variant, bugContext, activePlugins);
   });
 
   const settled = await Promise.allSettled(promises);
@@ -87,6 +88,7 @@ async function executeUnit(
   handoffNote?: string,
   variant?: PipelineVariant,
   bugContext?: { bugReport: string; diagnosis: string },
+  activePlugins?: Array<{ id: string; activatedAt: string }>,
 ): Promise<UnitResult> {
   // 1. Create worktree
   console.log(`[batch] Creating worktree for ${unit.id} from ${featureBranch}`);
@@ -134,6 +136,7 @@ async function executeUnit(
         variables,
         workspacePath: worktreeResult.value,
         baseBranch: featureBranch,
+        activePlugins,
       },
       issueNumber,
       undefined,

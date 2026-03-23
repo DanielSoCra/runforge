@@ -52,7 +52,10 @@ export async function integrateToStaging(
         /^(AA|UU|DD|AU|UA|DU|UD) /m.test(status.value);
       if (hasConflicts) {
         // Abort the merge
-        await git(['merge', '--abort'], repoRoot);
+        const abort = await git(['merge', '--abort'], repoRoot);
+        if (!abort.ok) {
+          return err(new Error(`Merge conflict detected and abort failed: ${abort.error.message}`));
+        }
         return ok({ success: false, conflicted: true, error: 'Merge conflicts detected' });
       }
       // No conflict markers — the merge failed for another reason (e.g. branch not found)

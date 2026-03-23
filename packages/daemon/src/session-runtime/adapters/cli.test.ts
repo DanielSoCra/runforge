@@ -110,6 +110,35 @@ describe('CliAdapter', () => {
       expect(parsed.error.message).toContain('(empty output)');
     }
   });
+
+  // Regression tests for BUG-16: NaN/negative/Infinity cost_usd sanitized to 0
+  it('parseOutput sanitizes NaN cost_usd to 0', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(JSON.stringify({ result: 'ok', cost_usd: NaN }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0);
+  });
+
+  it('parseOutput sanitizes negative cost_usd to 0', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(JSON.stringify({ result: 'ok', cost_usd: -5 }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0);
+  });
+
+  it('parseOutput sanitizes Infinity cost_usd to 0', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(JSON.stringify({ result: 'ok', cost_usd: Infinity }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0);
+  });
+
+  it('parseOutput sanitizes -Infinity cost_usd to 0', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(JSON.stringify({ result: 'ok', cost_usd: -Infinity }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0);
+  });
 });
 
 describe('CliAdapter.extractHandoff (#11)', () => {
@@ -599,6 +628,30 @@ describe('CliAdapter.spawn() (#102)', () => {
     if (result.ok) {
       expect(result.value.pitfallMarkers).toHaveLength(1);
       expect(result.value.pitfallMarkers[0]?.description).toBe('watch out for X');
+    }
+  });
+
+  it('rejects non-array artifactPatterns in pitfall markers (#296)', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    // LLM outputs string instead of array for artifactPatterns
+    const output = JSON.stringify({
+      result: 'done <!-- PITFALL: {"artifactPatterns":"src/**","description":"bad marker"} --> <!-- PITFALL: {"artifactPatterns":["src/**"],"description":"good marker"} --> more',
+      cost_usd: 0.01,
+    });
+    mockProc.stdout.emit('data', Buffer.from(output));
+    mockProc.emit('close', 0);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Only the valid array marker should be accepted
+      expect(result.value.pitfallMarkers).toHaveLength(1);
+      expect(result.value.pitfallMarkers[0]?.description).toBe('good marker');
     }
   });
 

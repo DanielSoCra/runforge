@@ -7,6 +7,15 @@
 /**
  * Warning message emitted by the timeout hook when a session nears expiry.
  * Displayed once per session via the PreToolUse hook mechanism.
+ *
+ * KEEP IN SYNC with .claude/hooks/timeout-warning.sh (hardcoded copy for CLI adapter).
  */
 export const TIMEOUT_WARNING_MESSAGE =
-  'Warning: Session approaching timeout. Consider saving progress and wrapping up.';
+  'Warning: Session approaching timeout. ' +
+  'Save your progress by writing a handoff note between [HANDOFF] and [/HANDOFF] delimiters. ' +
+  'Include: what you completed, what failed, and what to try next. Example:\n' +
+  '[HANDOFF]\n' +
+  'Completed: implemented X in file Y\n' +
+  'Failed: approach Z due to constraint W\n' +
+  'Next: try alternative approach A\n' +
+  '[/HANDOFF]';

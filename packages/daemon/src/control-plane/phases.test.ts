@@ -261,6 +261,23 @@ describe('createPhaseHandlers', () => {
       expect(result).toBe('failure');
     });
 
+    it('returns failure when staging checkout fails before branch creation (#255)', async () => {
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('error: pathspec \'staging\' did not match') }); // checkout staging fails
+      const { handlers } = createHandlers();
+      const result = await handlers.detect!(makeRun());
+      expect(result).toBe('failure');
+      // Branch creation should never be attempted if staging checkout failed
+      expect(mockGit).toHaveBeenCalledTimes(1);
+      expect(mockGit).toHaveBeenCalledWith(['checkout', 'staging'], undefined);
+    });
+
+    it('releases detect lock when staging checkout fails (#255)', async () => {
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('checkout staging failed') });
+      const { handlers } = createHandlers();
+      await handlers.detect!(makeRun());
+      expect(isDetectLocked()).toBe(false);
+    });
+
     it('returns failure when detect lock is held by another run', async () => {
       acquireDetectLock();
       const { handlers } = createHandlers();
@@ -300,7 +317,7 @@ describe('createPhaseHandlers', () => {
       expect(run.classificationComplexity).toBe('standard');
       expect(mockClassify).toHaveBeenCalledWith(
         mockRuntime, expect.objectContaining({ issueNumber: 42 }),
-        undefined, undefined, undefined,
+        undefined, undefined, undefined, undefined,
       );
     });
 
@@ -328,7 +345,7 @@ describe('createPhaseHandlers', () => {
       await handlers.classify!(makeRun());
       expect(mockClassify).toHaveBeenCalledWith(
         mockRuntime, expect.anything(),
-        undefined, undefined, '/custom/repo/root',
+        undefined, undefined, '/custom/repo/root', undefined,
       );
     });
   });
@@ -483,17 +500,17 @@ describe('createPhaseHandlers', () => {
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'spec-compliance', 'reviewer-spec',
         expect.any(String), mockRuntime, 42,
-        undefined, undefined, expect.any(String), '',
+        undefined, undefined, expect.any(String), '', undefined,
       );
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'quality', 'reviewer-quality',
         expect.any(String), mockRuntime, 42,
-        undefined, undefined, expect.any(String),
+        undefined, undefined, expect.any(String), undefined, undefined,
       );
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'security', 'reviewer-security',
         expect.any(String), mockRuntime, 42,
-        undefined, undefined, expect.any(String),
+        undefined, undefined, expect.any(String), undefined, undefined,
       );
     });
 
@@ -519,7 +536,7 @@ describe('createPhaseHandlers', () => {
         'spec-compliance', 'reviewer-spec',
         expect.any(String), mockRuntime, 42,
         undefined, undefined, expect.any(String),
-        '# FUNC-AC-PIPELINE\n\nAcceptance criteria here',
+        '# FUNC-AC-PIPELINE\n\nAcceptance criteria here', undefined,
       );
 
       // Verify workRequest.body is NOT passed as specs
@@ -659,7 +676,7 @@ describe('createPhaseHandlers', () => {
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'spec-compliance', 'reviewer-spec',
         expect.any(String), mockRuntime, 42,
-        undefined, undefined, expect.any(String), '',
+        undefined, undefined, expect.any(String), '', undefined,
       );
     });
   });
@@ -693,7 +710,7 @@ describe('createPhaseHandlers', () => {
       expect(run.diagnosisConfidence).toBe(0.9);
       // specContent is loaded via loadSpecContent (returns '' by default mock)
       expect(mockDiagnose).toHaveBeenCalledWith(
-        mockRuntime, 42, 'Fix something', '', '', undefined, undefined, undefined,
+        mockRuntime, 42, 'Fix something', '', '', undefined, undefined, undefined, undefined,
       );
       expect(mockRouteDiagnosis).toHaveBeenCalledWith(typeADiagnosis, 0.7);
     });
@@ -729,7 +746,7 @@ describe('createPhaseHandlers', () => {
       expect(mockDiagnose).toHaveBeenCalledWith(
         mockRuntime, 42, 'Fix something', '',
         '# FUNC-AC-PIPELINE\n\nFull spec markdown content',
-        undefined, undefined, undefined,
+        undefined, undefined, undefined, undefined,
       );
     });
 
@@ -740,7 +757,7 @@ describe('createPhaseHandlers', () => {
       await handlers.diagnose!(makeRun({ variant: 'bug' }));
       // specContent loaded via loadSpecContent (returns '' by default mock)
       expect(mockDiagnose).toHaveBeenCalledWith(
-        mockRuntime, 42, 'Fix something', '', '', undefined, undefined, '/custom/repo/root',
+        mockRuntime, 42, 'Fix something', '', '', undefined, undefined, '/custom/repo/root', undefined,
       );
       // loadSpecContent should use repoRoot-based .specify path
       expect(mockLoadSpecContent).toHaveBeenCalledWith(
@@ -802,6 +819,40 @@ describe('createPhaseHandlers', () => {
           body: expect.stringContaining('Diagnosis Failed'),
         }),
       );
+    });
+
+    it('returns rate-limited when diagnose errors with SessionError.rateLimited (#266)', async () => {
+      const { SessionError } = await import('../session-runtime/session-error.js');
+      mockDiagnose.mockResolvedValue({ ok: false, error: SessionError.rateLimited(0.5) });
+
+      const { handlers } = createHandlers();
+      const result = await handlers.diagnose!(makeRun({ variant: 'bug' }));
+
+      expect(result).toBe('rate-limited');
+      // Should NOT label needs-human — this is a pause, not a failure
+      expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('returns budget-exceeded when diagnose errors with SessionError.budgetExceeded (#266)', async () => {
+      const { SessionError } = await import('../session-runtime/session-error.js');
+      mockDiagnose.mockResolvedValue({ ok: false, error: SessionError.budgetExceeded('daily limit') });
+
+      const { handlers } = createHandlers();
+      const result = await handlers.diagnose!(makeRun({ variant: 'bug' }));
+
+      expect(result).toBe('budget-exceeded');
+      expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('returns containment-breach when diagnose errors with SessionError.containmentBreached (#266)', async () => {
+      const { SessionError } = await import('../session-runtime/session-error.js');
+      mockDiagnose.mockResolvedValue({ ok: false, error: SessionError.containmentBreached('bad access', 0.1) });
+
+      const { handlers } = createHandlers();
+      const result = await handlers.diagnose!(makeRun({ variant: 'bug' }));
+
+      expect(result).toBe('containment-breach');
+      expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
     });
 
     it('uses config.diagnosis.confidenceThreshold', async () => {

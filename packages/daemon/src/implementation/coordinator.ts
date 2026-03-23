@@ -1,4 +1,5 @@
 import { ok, err, type Result } from '../lib/result.js';
+import { SessionError } from '../session-runtime/session-error.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { WorkRequest, TaskGraph, Gotcha, PipelineVariant } from '../types.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
@@ -39,7 +40,7 @@ export class ImplementationCoordinator {
     featureBranch: string,
     runWriter?: SupabaseRunWriter,
     runId?: string,
-    options?: { complexity?: 'simple' | 'standard' | 'complex'; specContent?: string; checkpoint?: number; handoffNotes?: Map<string, string>; variant?: PipelineVariant; diagnosisDetail?: string },
+    options?: { complexity?: 'simple' | 'standard' | 'complex'; specContent?: string; checkpoint?: number; handoffNotes?: Map<string, string>; variant?: PipelineVariant; diagnosisDetail?: string; activePlugins?: Array<{ id: string; activatedAt: string }> },
   ): Promise<Result<ImplementResult>> {
     // 1. Get task graph
     let graph: TaskGraph;
@@ -58,8 +59,12 @@ export class ImplementationCoordinator {
         options.specContent ?? '',
         runWriter,
         runId,
+        options.activePlugins,
       );
       if (!decomposeResult.ok) {
+        if (decomposeResult.error instanceof SessionError) {
+          return err(decomposeResult.error);
+        }
         return err(new Error(`Decomposition failed: ${decomposeResult.error.message}`));
       }
       graph = decomposeResult.value;
@@ -106,6 +111,7 @@ export class ImplementationCoordinator {
         options?.handoffNotes,
         options?.variant,
         options?.variant === 'bug' ? { bugReport: request.body, diagnosis: options?.diagnosisDetail ?? '' } : undefined,
+        options?.activePlugins,
       );
 
       allResults.push(...batchResult.results);
@@ -113,10 +119,10 @@ export class ImplementationCoordinator {
 
       // Check for failures
       const failures = batchResult.results.filter(
-        (r) => r.exitStatus === 'failed' || r.exitStatus === 'timed-out',
+        (r) => r.exitStatus === 'failed' || r.exitStatus === 'timed-out' || r.exitStatus === 'needs-context',
       );
       const blocked = batchResult.results.filter(
-        (r) => r.exitStatus === 'blocked' || r.exitStatus === 'needs-context',
+        (r) => r.exitStatus === 'blocked',
       );
 
       // Check for containment breach — terminal, no retries (STACK-AC-OPERATIONAL-SAFETY)
@@ -155,7 +161,18 @@ export class ImplementationCoordinator {
       }
 
       // 3. Merge successful units sequentially into feature branch (STACK-AC-IMPLEMENTATION: merge.ts)
-      await git(['checkout', featureBranch], this.repoRoot);
+      const checkoutResult = await git(['checkout', featureBranch], this.repoRoot);
+      if (!checkoutResult.ok) {
+        return ok({
+          success: false,
+          unitResults: allResults,
+          totalCost,
+          batchesCompleted: i,
+          error: `Checkout failed: ${checkoutResult.error.message}`,
+          handoffNotes: collectHandoffNotes(allResults),
+          containmentBreach: breached || undefined,
+        });
+      }
       const successfulUnits = batchResult.results.filter((r) => isMergeable(r.exitStatus));
       const nonMergedUnits = batchResult.results.filter((r) => !isMergeable(r.exitStatus));
 

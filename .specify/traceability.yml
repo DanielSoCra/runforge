@@ -52,7 +52,7 @@ ARCH-SDD-SPEC-LIFECYCLE:
 # --- Auto-Claude L0 spec (vision — root of all Auto-Claude specs) ---
 
 L0-AC-VISION:
-  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, FUNC-AC-PLUGINS, STACK-AC-CONVENTIONS]
+  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, FUNC-AC-PLUGINS, FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, STACK-AC-CONVENTIONS]
   status: draft
 
 # --- Auto-Claude L1 specs ---
@@ -101,6 +101,14 @@ FUNC-AC-PLUGINS:
   children: [ARCH-AC-PLUGINS]
   status: draft
 
+FUNC-AC-PRODUCT-OWNER:
+  children: []
+  status: draft
+
+FUNC-AC-TECH-LEAD:
+  children: [ARCH-AC-TECH-LEAD]
+  status: draft
+
 # --- Auto-Claude Plugins L2 spec ---
 
 ARCH-AC-PLUGINS:
@@ -112,6 +120,7 @@ ARCH-AC-PLUGINS:
 
 ARCH-AC-COORDINATION:
   parent: FUNC-AC-COORDINATION
+  children: [STACK-AC-COORDINATION, STACK-AC-MERGE-AGENT]
   status: draft
 
 ARCH-AC-CONTROL-PLANE:
@@ -167,6 +176,10 @@ ARCH-AC-HANDOFF:
 ARCH-AC-DASHBOARD:
   parent: FUNC-AC-DASHBOARD
   children: [STACK-AC-DASHBOARD, STACK-AC-DASHBOARD-BRIEFING]
+  status: draft
+
+ARCH-AC-TECH-LEAD:
+  parent: FUNC-AC-TECH-LEAD
   status: draft
 
 ARCH-AC-ENRICHED-COMMITS:
@@ -505,6 +518,36 @@ STACK-AC-DASHBOARD-BRIEFING:
     - supabase/tests/rls-briefing.test.ts
   status: draft
 
+STACK-AC-COORDINATION:
+  parent: ARCH-AC-COORDINATION
+  children: []
+  code_paths:
+    - packages/daemon/src/coordination/
+    - packages/daemon/src/coordination/coordinator.ts
+    - packages/daemon/src/coordination/concurrency.ts
+    - packages/daemon/src/coordination/batch-manager.ts
+    - packages/daemon/src/coordination/work-claimer.ts
+    - packages/daemon/src/coordination/po-agent.ts
+    - packages/daemon/src/coordination/review-scheduler.ts
+    - packages/daemon/src/coordination/terminal-server.ts
+    - packages/daemon/src/coordination/types.ts
+  test_paths:
+    - packages/daemon/src/coordination/**/*.test.ts
+  status: draft
+
+STACK-AC-MERGE-AGENT:
+  parent: ARCH-AC-COORDINATION
+  children: []
+  code_paths:
+    - packages/daemon/src/coordination/merge-agent.ts
+    - packages/daemon/src/coordination/conflict-resolver.ts
+    - packages/daemon/src/coordination/merge-queue.ts
+  test_paths:
+    - packages/daemon/src/coordination/merge-agent.test.ts
+    - packages/daemon/src/coordination/conflict-resolver.test.ts
+    - packages/daemon/src/coordination/merge-queue.test.ts
+  status: draft
+
 STACK-AC-SPEC-PIPELINE:
   parent: ARCH-AC-SPEC-PIPELINE
   children: []
@@ -527,6 +570,10 @@ STACK-AC-PIPELINE-DISPATCH:
     - packages/daemon/src/pipeline-dispatch/dispatch.ts
     - packages/daemon/src/pipeline-dispatch/session-types.ts
     - packages/daemon/src/pipeline-dispatch/fallback.ts
+    - prompts/l2-designer.md
+    - prompts/l3-generator.md
+    - prompts/compliance-reviewer.md
+    - prompts/spec-implementer.md
   test_paths:
     - packages/daemon/src/pipeline-dispatch/**/*.test.ts
   status: draft

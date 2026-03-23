@@ -18,8 +18,9 @@ import { git } from '../lib/git.js';
 import { join } from 'node:path';
 import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
-import { loadSpecContent } from '../infra/spec-loader.js';
+import { loadSpecContent, loadImplementationContent } from '../infra/spec-loader.js';
 import { classify as runClassify } from './classifier.js';
+import { SessionError } from '../session-runtime/session-error.js';
 
 // Serializes git operations on the shared repoRoot across concurrent pipeline runs.
 // Currently protects detect (which modifies checkout state via git checkout).
@@ -58,6 +59,7 @@ export function createPhaseHandlers(
   runWriter?: SupabaseRunWriter,
   runId?: string,
   repoRoot?: string,
+  activePlugins?: Array<{ id: string; activatedAt: string }>,
 ): PhaseHandlerMap {
   const repo = repoName;
   const detector = createWorkDetector(octokit, owner, repo);
@@ -71,7 +73,11 @@ export function createPhaseHandlers(
       }
       try {
         console.log(`[detect] Creating branch ${featureBranch} from ${config.branches.staging}`);
-        await git(['checkout', config.branches.staging], repoRoot);
+        const stagingCheckout = await git(['checkout', config.branches.staging], repoRoot);
+        if (!stagingCheckout.ok) {
+          console.error(`[detect] Checkout staging failed:`, stagingCheckout.error.message);
+          return 'failure';
+        }
         const branchResult = await git(['checkout', '-b', featureBranch, config.branches.staging], repoRoot);
         if (!branchResult.ok) {
           console.log(`[detect] Branch exists, checking out`);
@@ -86,7 +92,7 @@ export function createPhaseHandlers(
 
     classify: async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[classify] Classifying work request #${workRequest.issueNumber}`);
-      const result = await runClassify(runtime, workRequest, runWriter, runId, repoRoot);
+      const result = await runClassify(runtime, workRequest, runWriter, runId, repoRoot, activePlugins);
       run.classificationComplexity = result.complexity;
       return result.event;
     },
@@ -105,18 +111,44 @@ export function createPhaseHandlers(
         console.warn(`[diagnose] Failed to load spec content:`, e);
       }
 
+      // Load implementation content from code_paths in traceability.yml (#263)
+      let implementationContent = '';
+      try {
+        implementationContent = await loadImplementationContent(workRequest.specRefs, cwd);
+      } catch (e) {
+        console.warn(`[diagnose] Failed to load implementation content:`, e);
+      }
+
       const result = await diagnose(
         runtime,
         workRequest.issueNumber,
         workRequest.body,
-        '',  // implementation content — not yet available at this phase
+        implementationContent,
         specContent,
         runWriter,
         runId,
         repoRoot,
+        activePlugins,
       );
 
       if (!result.ok) {
+        // Extract safety signals from SessionError before falling back (ARCH-AC-OPERATIONAL-SAFETY)
+        if (result.error instanceof SessionError) {
+          if (result.error.rateLimited) {
+            console.warn(`[diagnose] Diagnosis session rate-limited: ${result.error.message} — signaling pipeline to pause`);
+            return 'rate-limited';
+          }
+          if (result.error.containmentBreach) {
+            console.warn(`[diagnose] Diagnosis session containment breach: ${result.error.message} — signaling pipeline`);
+            return 'containment-breach';
+          }
+          // SessionError.budgetExceeded() has cost=0, rateLimited=false, containmentBreach=false —
+          // no dedicated boolean, so detect via message prefix (matches factory method format)
+          if (result.error.message.startsWith('Budget exceeded')) {
+            console.warn(`[diagnose] Diagnosis session budget exceeded: ${result.error.message} — signaling pipeline to pause`);
+            return 'budget-exceeded';
+          }
+        }
         console.error(`[diagnose] Diagnosis failed:`, result.error.message);
         // Diagnosis failed — route to human
         try {
@@ -189,6 +221,7 @@ export function createPhaseHandlers(
         handoffNotes,
         variant: run.variant,
         diagnosisDetail: run.diagnosisDetail,
+        activePlugins,
       });
       if (!result.ok) { console.error(`[implement] Error:`, result.error.message); return 'failure'; }
       if (!result.value.success) {
@@ -251,19 +284,19 @@ export function createPhaseHandlers(
         'spec-compliance', 'reviewer-spec',
         'Verify implementation against spec acceptance criteria.',
         runtime, workRequest.issueNumber, runWriter, runId,
-        diff, specContent,
+        diff, specContent, activePlugins,
       );
       const gate3 = createReviewerGate(
         'quality', 'reviewer-quality',
         'Evaluate code quality, pattern consistency, and test quality.',
         runtime, workRequest.issueNumber, runWriter, runId,
-        diff,
+        diff, undefined, activePlugins,
       );
       const gate4 = createReviewerGate(
         'security', 'reviewer-security',
         'Evaluate injection risks, authentication, data validation, and concurrency safety.',
         runtime, workRequest.issueNumber, runWriter, runId,
-        diff,
+        diff, undefined, activePlugins,
       );
 
       // Select gates based on complexity and risk

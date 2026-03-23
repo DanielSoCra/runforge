@@ -21,8 +21,8 @@ export type Outcome = 'complete' | 'stuck' | 'escalated';
 export type SessionType =
   | 'coordinator' | 'classifier' | 'worker'
   | 'reviewer-spec' | 'reviewer-quality' | 'reviewer-security'
-  | 'conflict-resolver' | 'bug-worker' | 'tester'
-  | 'diagnostician' | 'prompt-optimizer';
+  | 'bug-worker' | 'diagnostician'
+  | 'codebase-reviewer';
 
 export type ExitStatus =
   | 'completed' | 'completed-with-concerns'
@@ -62,6 +62,8 @@ export interface PitfallMarker {
 
 // --- Work Request ---
 
+export type DetectedWorkType = 'feature' | 'bug-fix' | 'implementation' | 'l3-generate' | 'l2-brainstorm';
+
 export interface WorkRequest {
   issueNumber: number;
   title: string;
@@ -69,6 +71,7 @@ export interface WorkRequest {
   labels: string[];
   specRefs: string[];
   scopeDescription?: string;
+  workType?: DetectedWorkType;
 }
 
 // --- Run State ---
@@ -98,6 +101,7 @@ export interface RunState {
   diagnosisDetail?: string; // Serialized BugDiagnosis JSON — passed to bug-worker sessions
   classificationComplexity?: 'simple' | 'standard' | 'complex';
   handoffNotes?: Record<string, string>;
+  workerClaimId?: string;
 }
 
 // --- Daemon State ---

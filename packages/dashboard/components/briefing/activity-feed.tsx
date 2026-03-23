@@ -30,12 +30,11 @@ const severityDotColor: Record<string, string> = {
 };
 
 const eventTypeBadgeColor: Record<string, string> = {
-  run_started: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
-  run_completed: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-  run_stuck: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-  phase_changed: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
-  merge_detected: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400',
+  'state-transition': 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+  merge: 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400',
   error: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+  heartbeat: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+  completion: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
 };
 
 function relativeTime(isoDate: string): string {

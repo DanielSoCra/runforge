@@ -1,6 +1,8 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
+import { requireUser } from '@/lib/auth';
 import { formatDuration } from '@/lib/format';
 import type { Database } from '@/lib/types';
 
@@ -41,6 +43,7 @@ const URGENCY_ORDER: Record<AttentionItem['reason'], number> = {
  */
 export async function getLatestBriefing(): Promise<Briefing | null> {
   const supabase = await createClient();
+  await requireUser(supabase);
   const { data, error } = await supabase
     .from('briefings')
     .select('*')
@@ -64,6 +67,7 @@ export async function getLatestBriefing(): Promise<Briefing | null> {
  */
 export async function getActiveRuns() {
   const supabase = await createClient();
+  await requireUser(supabase);
   const { data, error } = await supabase
     .from('runs')
     .select('id, repo_owner, repo_name, issue_number, issue_title, current_phase, outcome, total_cost, started_at, phases')
@@ -83,6 +87,7 @@ export async function getActiveRuns() {
  */
 export async function getNeedsAttention(): Promise<AttentionItem[]> {
   const supabase = await createClient();
+  await requireUser(supabase);
 
   const [stuckResult, escalatedResult] = await Promise.all([
     supabase
@@ -137,21 +142,157 @@ export async function getNeedsAttention(): Promise<AttentionItem[]> {
   return items;
 }
 
+// Pipeline labels that indicate queued work, ordered by priority (highest first).
+// Issues with "implementing" or "in-progress" labels are excluded — they're active, not queued.
+const PIPELINE_STAGE_LABELS = [
+  'ready-to-implement',
+  'l3-approved',
+  'l2-approved',
+  'l1-approved',
+] as const;
+
+const ACTIVE_LABELS = new Set(['implementing', 'in-progress']);
+
+const STAGE_PRIORITY: Record<string, number> = Object.fromEntries(
+  PIPELINE_STAGE_LABELS.map((label, i) => [label, i]),
+);
+
+interface GitHubIssueLabel {
+  name: string;
+}
+
+interface GitHubIssue {
+  number: number;
+  title: string;
+  labels: GitHubIssueLabel[];
+  pull_request?: unknown;
+}
+
 /**
  * Fetch queued work items that are up next.
  *
- * TODO: This will query GitHub Issues with pipeline labels once the daemon
- * integration is complete. For now, returns an empty array since queued items
- * are tracked externally via GitHub issue labels, not as run rows.
+ * Queries GitHub Issues with pipeline-stage labels from enabled repos,
+ * excludes issues with in-progress runs, and sorts by label priority.
  */
 export async function getUpNext(): Promise<UpNextItem[]> {
-  return [];
+  const service = createServiceClient();
+  const supabase = await createClient();
+  await requireUser(supabase);
+
+  // Fetch enabled repos and active runs in parallel
+  const [reposResult, runsResult] = await Promise.all([
+    service
+      .from('repos')
+      .select('id, owner, name, connection_id')
+      .eq('enabled', true)
+      .is('deleted_at', null),
+    supabase
+      .from('runs')
+      .select('issue_number, repo_owner, repo_name')
+      .eq('outcome', 'in-progress'),
+  ]);
+
+  if (reposResult.error) {
+    console.error('[briefing] getUpNext repos query failed:', reposResult.error);
+    return [];
+  }
+  if (runsResult.error) {
+    console.error('[briefing] getUpNext runs query failed:', runsResult.error);
+    return [];
+  }
+
+  const repos = (reposResult.data ?? []) as Array<{
+    id: string; owner: string; name: string; connection_id: string | null;
+  }>;
+  if (repos.length === 0) return [];
+
+  // Build set of in-progress run keys for exclusion
+  const activeRunKeys = new Set(
+    (runsResult.data ?? []).map(
+      (r: { repo_owner: string; repo_name: string; issue_number: number }) =>
+        `${r.repo_owner}/${r.repo_name}#${r.issue_number}`,
+    ),
+  );
+
+  // Resolve tokens and fetch issues per repo (first 100 per repo — sufficient for pipeline queues)
+  const perRepoItems = await Promise.all(
+    repos.map(async (repo): Promise<UpNextItem[]> => {
+      let token: string | undefined;
+      if (repo.connection_id) {
+        const { data } = await service.rpc('decrypt_github_token', {
+          p_connection_id: repo.connection_id,
+        });
+        token = (data as string | null) ?? process.env.GITHUB_TOKEN;
+      } else {
+        token = process.env.GITHUB_TOKEN;
+      }
+      if (!token) return [];
+
+      try {
+        const res = await fetch(
+          `https://api.github.com/repos/${repo.owner}/${repo.name}/issues?state=open&labels=feature-pipeline&per_page=100`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              Accept: 'application/vnd.github+json',
+            },
+          },
+        );
+        if (!res.ok) return [];
+
+        const issues = (await res.json()) as GitHubIssue[];
+        const repoItems: UpNextItem[] = [];
+
+        for (const issue of issues) {
+          // Skip PRs (GitHub issues endpoint includes them)
+          if ('pull_request' in issue && issue.pull_request) continue;
+
+          const labelNames = issue.labels.map((l) => l.name);
+
+          // Skip actively being worked on
+          if (labelNames.some((l) => ACTIVE_LABELS.has(l))) continue;
+
+          // Skip issues with in-progress runs
+          const key = `${repo.owner}/${repo.name}#${issue.number}`;
+          if (activeRunKeys.has(key)) continue;
+
+          // Find the highest-priority pipeline stage label
+          const stageLabel = PIPELINE_STAGE_LABELS.find((sl) =>
+            labelNames.includes(sl),
+          );
+          if (!stageLabel) continue;
+
+          repoItems.push({
+            issueNumber: issue.number,
+            repoOwner: repo.owner,
+            repoName: repo.name,
+            pipelineLabel: stageLabel,
+          });
+        }
+        return repoItems;
+      } catch {
+        // Skip repo on fetch failure — degrade gracefully
+        return [];
+      }
+    }),
+  );
+
+  const items = perRepoItems.flat();
+
+  // Sort by pipeline stage priority (ready-to-implement first)
+  items.sort(
+    (a, b) => (STAGE_PRIORITY[a.pipelineLabel] ?? 99) - (STAGE_PRIORITY[b.pipelineLabel] ?? 99),
+  );
+
+  return items;
 }
 
 /**
  * Refresh live panel data (called by auto-refresh interval on the client).
  */
 export async function refreshLivePanels() {
+  const supabase = await createClient();
+  await requireUser(supabase);
   const [activeRuns, needsAttention, upNext] = await Promise.all([
     getActiveRuns(),
     getNeedsAttention(),
@@ -168,6 +309,7 @@ export async function getActivityFeed(
   opts?: { cursor?: string; pageSize?: number },
 ): Promise<ActivityEvent[]> {
   const supabase = await createClient();
+  await requireUser(supabase);
   const pageSize = opts?.pageSize ?? 50;
 
   let query = supabase

@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fix } from './fix.js';
 import type { ReviewFinding, SessionResult } from '../types.js';
 import { ok, err } from '../lib/result.js';
+import { SessionError } from '../session-runtime/session-error.js';
 
 vi.mock('./worktree.js', () => ({
   createWorktree: vi.fn().mockResolvedValue({ ok: true, value: '/tmp/workspace/fix-1' }),
@@ -127,5 +128,73 @@ describe('fix', () => {
     const call = runtime.spawnSession.mock.calls[0];
     const vars = call[1].variables;
     expect(vars.task).toContain('Regression-Test-First');
+  });
+
+  it('preserves cost from SessionError when spawnSession returns error Result', async () => {
+    const runtime = {
+      spawnSession: vi.fn().mockResolvedValue(err(SessionError.rateLimited(1.75))),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const result = await fix(mockFindings, 'feature/42', runtime, '/tmp/repo');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.success).toBe(false);
+      expect(result.value.cost).toBe(1.75);
+    }
+  });
+
+  it('preserves cost from SessionError when spawnSession throws', async () => {
+    const runtime = {
+      spawnSession: vi.fn().mockRejectedValue(SessionError.containmentBreached('sandbox escape', 2.5)),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const result = await fix(mockFindings, 'feature/42', runtime, '/tmp/repo');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.success).toBe(false);
+      expect(result.value.cost).toBe(2.5);
+    }
+  });
+
+  it('returns failure when git checkout of target branch fails before merge', async () => {
+    const { git } = await import('../lib/git.js');
+    const { mergeWorktree } = await import('./worktree.js');
+    // Make checkout fail (e.g., branch doesn't exist or dirty state)
+    vi.mocked(git).mockImplementation(async (args: string[]) => {
+      if (args[0] === 'checkout') {
+        return { ok: false, error: new Error('error: pathspec \'bad-branch\' did not match any file(s)') } as any;
+      }
+      return { ok: true, value: '' };
+    });
+
+    const runtime = createMockRuntime();
+    const result = await fix(mockFindings, 'bad-branch', runtime, '/tmp/repo');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.success).toBe(false);
+      expect(result.value.output).toContain('Checkout failed');
+    }
+    // mergeWorktree must NOT be called if checkout failed
+    expect(mergeWorktree).not.toHaveBeenCalled();
+  });
+
+  it('returns cost 0 when spawnSession returns non-SessionError', async () => {
+    const runtime = {
+      spawnSession: vi.fn().mockResolvedValue(err(new Error('generic failure'))),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const result = await fix(mockFindings, 'feature/42', runtime, '/tmp/repo');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.success).toBe(false);
+      expect(result.value.cost).toBe(0);
+    }
   });
 });

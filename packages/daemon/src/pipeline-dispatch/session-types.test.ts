@@ -1,3 +1,5 @@
+import { existsSync } from 'fs';
+import { join } from 'path';
 import { describe, it, expect } from 'vitest';
 import {
   mapWorkTypeToSessionType,
@@ -88,5 +90,20 @@ describe('getPipelineAgentDef', () => {
 describe('validatePipelineSessionTypes', () => {
   it('does not throw when all types are registered', () => {
     expect(() => validatePipelineSessionTypes()).not.toThrow();
+  });
+});
+
+describe('pipeline prompt templates', () => {
+  const promptsDir = join(import.meta.dirname, '../../../../prompts');
+
+  it('every pipeline agent def has a corresponding prompt template file', () => {
+    const defs = getPipelineAgentDefs();
+    for (const def of Object.values(defs)) {
+      const templatePath = join(promptsDir, `${def.name}.md`);
+      expect(
+        existsSync(templatePath),
+        `Missing prompt template: prompts/${def.name}.md`,
+      ).toBe(true);
+    }
   });
 });

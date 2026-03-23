@@ -1,4 +1,5 @@
 #!/bin/bash
+# DEPRECATED: Migrated to daemon control plane. See docs/running.md
 cd ~/code/auto-claude
 REPO="DANIELSOCRAHANDLEZZ/auto-claude"
 FAIL_COUNT=0

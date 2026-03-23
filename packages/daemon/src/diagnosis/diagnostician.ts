@@ -13,6 +13,7 @@ export async function diagnose(
   runWriter?: SupabaseRunWriter,
   runId?: string,
   workspacePath?: string,
+  activePlugins?: Array<{ id: string; activatedAt: string }>,
 ): Promise<Result<BugDiagnosis>> {
   const context = {
     variables: {
@@ -21,6 +22,7 @@ export async function diagnose(
       specs: specContent,
     },
     workspacePath,
+    activePlugins,
   };
 
   // First attempt

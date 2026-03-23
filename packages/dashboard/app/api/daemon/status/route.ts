@@ -1,13 +1,15 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { isAuthDisabled } from '@/lib/auth';
+import { requireUser } from '@/lib/auth';
 
 export async function GET() {
-  // Auth check — require authenticated user to view daemon status
-  if (!isAuthDisabled()) {
+  // Auth check — require team member to view daemon status (#276)
+  try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    await requireUser(supabase);
+  } catch (e: any) {
+    const status = e.message === 'Unauthorized' ? 401 : 403;
+    return NextResponse.json({ error: e.message }, { status });
   }
 
   try {

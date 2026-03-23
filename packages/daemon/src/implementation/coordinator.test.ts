@@ -5,6 +5,7 @@ import { join } from 'path';
 import { ImplementationCoordinator } from './coordinator.js';
 import { git } from '../lib/git.js';
 import { ok } from '../lib/result.js';
+import { SessionError } from '../session-runtime/session-error.js';
 import type { WorkRequest, SessionResult } from '../types.js';
 
 // Mock the worktree module so tests don't need real git worktrees
@@ -528,6 +529,161 @@ describe('ImplementationCoordinator — multi-unit', () => {
     expect(deleteUnitBranch).toHaveBeenCalledTimes(1);
   });
 
+  it('merges successful units when needs-context is in the same batch — not grouped with blocked (#235)', async () => {
+    const { mergeWorktree } = await import('./worktree.js');
+    vi.mocked(mergeWorktree).mockClear();
+
+    const needsContextResult: SessionResult = {
+      output: 'I need more spec context',
+      structuredData: null,
+      cost: 0.2,
+      pitfallMarkers: [],
+      exitStatus: 'needs-context',
+    };
+
+    const validUnits = [
+      {
+        id: 'unit-ok', title: 'Succeeds', specIds: [], specContent: '',
+        expectedArtifacts: [], dependencies: [], batchNumber: 0,
+        verificationCommand: '', context: 'do ok',
+      },
+      {
+        id: 'unit-ctx', title: 'Needs context', specIds: [], specContent: '',
+        expectedArtifacts: [], dependencies: [], batchNumber: 0,
+        verificationCommand: '', context: 'needs more info',
+      },
+    ];
+
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce(ok({
+          output: 'decomposed',
+          structuredData: { units: validUnits },
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        } as SessionResult))
+        .mockResolvedValueOnce(ok(successResult))
+        .mockResolvedValueOnce(ok(needsContextResult)),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'standard',
+      specContent: 'spec',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // The successful unit should be merged — needs-context must NOT trigger the blocked early return
+      expect(result.value.success).toBe(true);
+      expect(result.value.unitResults).toHaveLength(2);
+    }
+    // Only the successful unit merges; needs-context unit does not
+    expect(mergeWorktree).toHaveBeenCalledTimes(1);
+    expect(mergeWorktree).toHaveBeenCalledWith('unit-ok', 'feature/42', '/tmp/repo');
+  });
+
+  it('returns success:false when all units need context — treated as batch failure not blocked (#235)', async () => {
+    const needsContextResult: SessionResult = {
+      output: 'I need more spec context',
+      structuredData: null,
+      cost: 0.2,
+      pitfallMarkers: [],
+      exitStatus: 'needs-context',
+    };
+
+    const validUnits = [
+      {
+        id: 'unit-ctx-only', title: 'Needs context', specIds: [], specContent: '',
+        expectedArtifacts: [], dependencies: [], batchNumber: 0,
+        verificationCommand: '', context: 'needs info',
+      },
+    ];
+
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce(ok({
+          output: 'decomposed',
+          structuredData: { units: validUnits },
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        } as SessionResult))
+        .mockResolvedValueOnce(ok(needsContextResult)),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'standard',
+      specContent: 'spec',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.success).toBe(false);
+      // Error should say "failed" (batch failure path), NOT "blocked" (escalation path)
+      expect(result.value.error).toContain('failed');
+      expect(result.value.error).not.toContain('blocked');
+      // Caller can inspect unitResults to see needs-context and decide to retry
+      expect(result.value.unitResults[0]?.exitStatus).toBe('needs-context');
+    }
+  });
+
+  it('returns success:false when git checkout fails before merge (#259)', async () => {
+    const { mergeWorktree } = await import('./worktree.js');
+    vi.mocked(mergeWorktree).mockClear();
+    const mockedGit = vi.mocked(git);
+
+    const validUnits = [
+      {
+        id: 'unit-ok', title: 'Passing', specIds: [], specContent: '',
+        expectedArtifacts: [], dependencies: [], batchNumber: 0,
+        verificationCommand: '', context: 'do ok',
+      },
+    ];
+
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce(ok({
+          output: 'decomposed',
+          structuredData: { units: validUnits },
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        } as SessionResult))
+        .mockResolvedValueOnce(ok(successResult)),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    // Make git checkout fail only for the checkout call (not other git calls during batch)
+    mockedGit.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'checkout') {
+        return { ok: false, error: new Error('error: pathspec \'feature/42\' did not match any file(s) known to git') } as any;
+      }
+      return { ok: true, value: '' };
+    });
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'standard',
+      specContent: 'spec',
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.success).toBe(false);
+      expect(result.value.error).toContain('Checkout failed');
+    }
+    // mergeUnitsSequentially should NOT have been called
+    expect(mergeWorktree).not.toHaveBeenCalled();
+
+    // Restore default git mock behavior
+    mockedGit.mockResolvedValue({ ok: true, value: '' });
+  });
+
   it('returns err when decomposition fails', async () => {
     const runtime = {
       spawnSession: vi.fn().mockResolvedValue({ ok: false, error: new Error('API timeout') }),
@@ -542,6 +698,69 @@ describe('ImplementationCoordinator — multi-unit', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
+      expect(result.error.message).toContain('Decomposition failed');
+    }
+  });
+
+  it('propagates SessionError from decomposition instead of wrapping in generic Error (#268)', async () => {
+    const sessionError = SessionError.rateLimited(0.5, 30000);
+    const runtime = {
+      spawnSession: vi.fn().mockResolvedValue({ ok: false, error: sessionError }),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'complex',
+      specContent: 'spec',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // Must be the original SessionError, not a generic Error wrapper
+      expect(result.error).toBeInstanceOf(SessionError);
+      expect(result.error).toBe(sessionError);
+      expect((result.error as SessionError).rateLimited).toBe(true);
+      expect((result.error as SessionError).cost).toBe(0.5);
+    }
+  });
+
+  it('propagates SessionError with containmentBreach from decomposition (#268)', async () => {
+    const sessionError = SessionError.containmentBreached('sandbox escape', 1.2);
+    const runtime = {
+      spawnSession: vi.fn().mockResolvedValue({ ok: false, error: sessionError }),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'standard',
+      specContent: 'spec',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(SessionError);
+      expect((result.error as SessionError).containmentBreach).toBe(true);
+      expect((result.error as SessionError).cost).toBe(1.2);
+    }
+  });
+
+  it('still wraps non-SessionError decomposition failures in generic Error (#268)', async () => {
+    const runtime = {
+      spawnSession: vi.fn().mockResolvedValue({ ok: false, error: new Error('Network error') }),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'complex',
+      specContent: 'spec',
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).not.toBeInstanceOf(SessionError);
       expect(result.error.message).toContain('Decomposition failed');
     }
   });

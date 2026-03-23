@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ReviewFindingsSchema, createReviewerGate } from './reviewer-session.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
+import { SessionError } from '../session-runtime/session-error.js';
 
 describe('ReviewFindingsSchema', () => {
   it('validates correct input', () => {
@@ -190,7 +191,7 @@ describe('createReviewerGate', () => {
     expect(runtime.spawnSession).toHaveBeenCalledWith(
       'reviewer-spec',
       expect.objectContaining({
-        variables: { rubric: 'my rubric', cwd: '/my/workspace', specs: 'No spec content available for this review.' },
+        variables: { rubric: 'my rubric', cwd: '/my/workspace', diff: expect.stringContaining('diff unavailable'), specs: 'No spec content available for this review.' },
         workspacePath: '/my/workspace',
       }),
       99,
@@ -238,7 +239,7 @@ describe('createReviewerGate', () => {
     );
   });
 
-  it('omits diff from variables when not provided but always includes specs fallback', async () => {
+  it('sets diff fallback when not provided and always includes specs fallback (#272)', async () => {
     const runtime = makeRuntime({
       ok: true,
       value: {
@@ -255,7 +256,8 @@ describe('createReviewerGate', () => {
 
     const callArgs = (runtime.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]!;
     const passedVariables = (callArgs[1] as { variables: Record<string, string> }).variables;
-    expect(passedVariables).not.toHaveProperty('diff');
+    expect(passedVariables).toHaveProperty('diff');
+    expect(passedVariables.diff).toContain('diff unavailable');
     expect(passedVariables).toHaveProperty('specs');
     expect(passedVariables.specs).toBe('No spec content available for this review.');
   });
@@ -343,6 +345,123 @@ describe('createReviewerGate', () => {
 
     expect(result.passed).toBe(true);
     expect(runtime.spawnSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry on SessionError.rateLimited — propagates immediately (#267)', async () => {
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce({ ok: false, error: SessionError.rateLimited(0.5, 30000) }),
+      getCostTracker: vi.fn(),
+    } as unknown as SessionRuntime;
+
+    const gate = createReviewerGate('quality', 'reviewer-quality', 'Check quality', runtime, 42);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    expect(result.findings[0]?.description).toContain('Rate limited');
+    // Must NOT retry — only 1 call to spawnSession
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry on SessionError.budgetExceeded — propagates immediately (#267)', async () => {
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce({ ok: false, error: SessionError.budgetExceeded('monthly cap reached') }),
+      getCostTracker: vi.fn(),
+    } as unknown as SessionRuntime;
+
+    const gate = createReviewerGate('quality', 'reviewer-quality', 'Check quality', runtime, 42);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    expect(result.findings[0]?.description).toContain('Budget exceeded');
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry on SessionError.containmentBreached — propagates immediately (#267)', async () => {
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce({ ok: false, error: SessionError.containmentBreached('sandbox escape', 0.2) }),
+      getCostTracker: vi.fn(),
+    } as unknown as SessionRuntime;
+
+    const gate = createReviewerGate('security', 'reviewer-security', 'Check security', runtime, 42);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    expect(result.findings[0]?.description).toContain('Containment breach');
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('still retries on generic Error (non-SessionError) failures', async () => {
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce({ ok: false, error: new Error('network timeout') })
+        .mockResolvedValueOnce({ ok: false, error: new Error('network timeout again') }),
+      getCostTracker: vi.fn(),
+    } as unknown as SessionRuntime;
+
+    const gate = createReviewerGate('quality', 'reviewer-quality', 'Check quality', runtime, 42);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(false);
+    // Generic errors should still retry — 2 calls
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('diff fallback replaces {{diff}} placeholder instead of leaving literal template syntax (#272)', async () => {
+    // Regression: when diff is undefined, renderTemplate received no 'diff' key,
+    // leaving literal {{diff}} in the reviewer prompt. Verify the fallback is set.
+    const runtime = makeRuntime({
+      ok: true,
+      value: {
+        structuredData: { findings: [], summary: 'ok', approved: true },
+        output: '',
+        cost: 0.05,
+        pitfallMarkers: [],
+        exitStatus: 'completed',
+      },
+    });
+
+    // Pass undefined for diff (simulates git diff failure)
+    const gate = createReviewerGate(
+      'quality', 'reviewer-quality', 'rubric', runtime, 42,
+      undefined, undefined,
+      undefined, // diff = undefined
+    );
+    await gate.execute('/workspace');
+
+    const callArgs = (runtime.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const passedVariables = (callArgs[1] as { variables: Record<string, string> }).variables;
+    // The key must exist so renderTemplate replaces {{diff}}
+    expect(passedVariables).toHaveProperty('diff');
+    expect(passedVariables.diff).not.toBe('{{diff}}');
+    expect(passedVariables.diff).toContain('diff unavailable');
+  });
+
+  it('preserves empty-string diff as-is — empty diff is meaningful, not a failure (#272)', async () => {
+    const runtime = makeRuntime({
+      ok: true,
+      value: {
+        structuredData: { findings: [], summary: 'ok', approved: true },
+        output: '',
+        cost: 0.05,
+        pitfallMarkers: [],
+        exitStatus: 'completed',
+      },
+    });
+
+    const gate = createReviewerGate(
+      'quality', 'reviewer-quality', 'rubric', runtime, 42,
+      undefined, undefined,
+      '', // diff = empty string (git diff succeeded but no changes)
+    );
+    await gate.execute('/workspace');
+
+    const callArgs = (runtime.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    const passedVariables = (callArgs[1] as { variables: Record<string, string> }).variables;
+    // Empty string means "no changes" — distinct from undefined which means "failed to obtain"
+    expect(passedVariables.diff).toBe('');
   });
 
   it('uses fallback specs text when specs is empty string (#169)', async () => {

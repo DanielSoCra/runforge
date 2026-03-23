@@ -43,6 +43,7 @@ export class CostTracker {
   }
 
   recordCost(issueNumber: number, cost: number): void {
+    if (!Number.isFinite(cost) || cost <= 0) return;
     this.dailyCost += cost;
     this.runCosts.set(issueNumber, this.getRunCost(issueNumber) + cost);
   }
@@ -65,11 +66,12 @@ export class CostTracker {
   }
 
   restoreFromSnapshot(snapshot: CostSnapshot): void {
-    this.dailyCost = snapshot.dailyCost;
+    this.dailyCost = Number.isFinite(snapshot.dailyCost) && snapshot.dailyCost >= 0
+      ? snapshot.dailyCost : 0;
     this.resetAt = new Date(snapshot.resetAt);
     this.runCosts.clear();
     for (const [k, v] of Object.entries(snapshot.runCosts)) {
-      this.runCosts.set(Number(k), v);
+      this.runCosts.set(Number(k), Number.isFinite(v) && v >= 0 ? v : 0);
     }
   }
 

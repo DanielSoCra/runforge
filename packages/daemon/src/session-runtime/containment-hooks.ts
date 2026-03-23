@@ -230,6 +230,12 @@ export const DEFAULT_POLICY: ContainmentPolicy = {
     'deno ', 'bun ', 'bunx ', 'npx ',
     // Symlink creation — prevents bypassing path checks via symlink indirection
     'ln ',
+    // Shell interpreters — can fetch and execute arbitrary scripts.
+    // SEC-31: git can clone+exec, sh/bash/source can run fetched scripts,
+    // find -exec can invoke any binary while bypassing substring checks.
+    'git ', 'sh ', 'bash ', 'zsh ', 'find ', 'source ', '/bin/sh ',
+    // NOTE: POSIX dot-source (`. script.sh`) is not blocked — '. ' causes
+    // massive false positives. Mitigated by blocking fetch vectors (git/curl/wget).
     // Destructive disk commands
     'rm -rf /', 'mkfs', 'dd if=',
   ],

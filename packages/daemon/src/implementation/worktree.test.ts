@@ -119,4 +119,38 @@ describe('worktree management', () => {
       expect(result.error.message).toBeTruthy();
     }
   });
+
+  it('removeWorktree returns error when branch deletion fails (#256)', async () => {
+    // Create a worktree so there's something to remove
+    const createResult = await createWorktree('unit-bf', 'main', repoDir);
+    expect(createResult.ok).toBe(true);
+
+    // Checkout main so we're not on the unit branch
+    await git(['checkout', 'main'], repoDir);
+
+    // Remove the worktree manually first
+    const worktreePath = join(repoDir, 'workspaces', 'unit-bf');
+    await git(['worktree', 'remove', worktreePath, '--force'], repoDir);
+
+    // Delete the branch manually so removeWorktree's -D will fail
+    await git(['branch', '-D', 'unit/unit-bf'], repoDir);
+
+    // Re-create worktree to set up the test scenario
+    await git(['worktree', 'add', worktreePath, '-b', 'unit/unit-bf', 'main'], repoDir);
+
+    // Checkout main again to avoid being on unit branch
+    await git(['checkout', 'main'], repoDir);
+
+    // Remove worktree manually but leave an invalid branch state
+    await git(['worktree', 'remove', worktreePath, '--force'], repoDir);
+    await git(['branch', '-D', 'unit/unit-bf'], repoDir);
+
+    // Now removeWorktree: worktree remove will "succeed" (already gone),
+    // but branch -D will fail (already deleted)
+    const result = await removeWorktree('unit-bf', repoDir);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBeTruthy();
+    }
+  });
 });
