@@ -28,6 +28,10 @@ import { DEFAULT_POLICIES } from '../knowledge/policy-registry.js';
 import { join } from 'path';
 import { createReviewScheduler } from '../coordination/review-scheduler.js';
 import { createPOAgent } from '../coordination/po-agent.js';
+import { createTechLeadScheduler } from '../coordination/tech-lead-scheduler.js';
+import { TechProposalStore } from '../coordination/tech-lead/proposal-store.js';
+import { assembleSignalDigest } from '../coordination/tech-lead/signal-digest.js';
+import { isTerminalStatus } from '../coordination/tech-lead/proposal-lifecycle.js';
 import { readJsonSafe, writeJsonSafe } from '../lib/json-store.js';
 import { mkdir } from 'fs/promises';
 import type { Proposal, IdeaSubmission } from '../coordination/types.js';
@@ -145,6 +149,88 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     },
   );
   const stopPOAgent = poAgent.start();
+
+  // 3e. Start Tech Lead Scheduler
+  const techLeadStateDir = join(stateDir, 'coordination', 'tech-lead');
+  const techLeadProposalsDir = join(techLeadStateDir, 'proposals');
+  const techLeadEnrichmentsDir = join(techLeadStateDir, 'enrichments');
+  await mkdir(techLeadProposalsDir, { recursive: true });
+  await mkdir(techLeadEnrichmentsDir, { recursive: true });
+
+  const techProposalStore = new TechProposalStore(techLeadProposalsDir, techLeadEnrichmentsDir);
+  await techProposalStore.init();
+
+  const techLeadScheduler = createTechLeadScheduler(
+    {
+      assembleDigest: async (trigger, cfg) => {
+        return assembleSignalDigest(trigger, {
+          getReviewFindings: async () => [],
+          getRunOutcomes: async () => [],
+          getTestHealth: async () => [],
+          getActiveProposals: async () => techProposalStore.loadActiveProposals(),
+          getPriorRejections: async () => techProposalStore.loadRejectedProposals(),
+        }, {
+          lookbackWindowMs: cfg.lookbackWindowMs,
+          maxEntriesPerSection: cfg.maxEntriesPerSection,
+          deferredWorkPaths: [join(repoRoot, 'packages')],
+          deferredWorkExclude: ['node_modules', 'dist', '.git', 'coverage', '.next'],
+          workspacePath: repoRoot,
+          traceabilityPath: join(repoRoot, '.specify', 'traceability.yml'),
+        });
+      },
+      spawnTechLeadSession: async (digest) => {
+        const result = await runtime.spawnSession(
+          'tech-lead',
+          { variables: { signal_digest: JSON.stringify(digest) } },
+          0,
+        );
+        if (!result.ok) {
+          throw new Error(`Tech Lead session failed: ${result.error.message}`);
+        }
+        return typeof result.value.structuredData === 'string'
+          ? result.value.structuredData
+          : JSON.stringify(result.value.structuredData ?? { proposals: [], protocolTriggers: [] });
+      },
+      storeProposals: async (proposals) => {
+        let stored = 0;
+        for (const proposal of proposals) {
+          const duplicate = await techProposalStore.findDuplicate(proposal.proposalType, proposal.affectedAreas);
+          if (duplicate) {
+            const updated = { ...duplicate, evidence: [...duplicate.evidence, ...proposal.evidence] };
+            await techProposalStore.saveProposal(updated);
+          } else {
+            await techProposalStore.saveProposal(proposal);
+          }
+          stored++;
+        }
+        return stored;
+      },
+      sweepExpiredProposals: async () => {
+        const all = await techProposalStore.loadAllProposals();
+        const now = Date.now();
+        let swept = 0;
+        for (const proposal of all) {
+          if (!isTerminalStatus(proposal.status) && new Date(proposal.expiresAt).getTime() <= now) {
+            await techProposalStore.saveProposal({ ...proposal, status: 'expired' });
+            swept++;
+          }
+        }
+        return swept;
+      },
+      // TODO(#344): Wire to ProtocolExecutor when available
+      routeToProtocol: async (trigger) => {
+        console.log(`[tech-lead-scheduler] protocol trigger: ${trigger} (routing not yet wired)`);
+      },
+    },
+    {
+      intervalMs: config.coordination.techLeadInterval,
+      eventDebounceMs: config.coordination.techLeadEventDebounce,
+      proposalExpiryMs: config.coordination.techLeadProposalExpiryMs,
+      lookbackWindowMs: config.coordination.techLeadLookbackWindowMs,
+      maxEntriesPerSection: config.coordination.techLeadMaxEntriesPerSection,
+    },
+  );
+  const stopTechLeadScheduler = techLeadScheduler.start();
 
   // 4. State tracking
   let paused = false;
@@ -466,6 +552,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     if (legacyPoller) clearInterval(legacyPoller);
     stopReviewScheduler();
     stopPOAgent();
+    stopTechLeadScheduler();
     repoManager?.stop();
     configReader?.stop();
     const deadline = Date.now() + config.gracePeriodMs;

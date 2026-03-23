@@ -126,6 +126,11 @@ export const ConfigSchema = z.object({
     mergeValidationTimeout: z.number().int().min(60000).default(600000),
     mergePollInterval: z.number().int().min(1000).default(5000),
     mergePollMaxInterval: z.number().int().min(5000).default(60000),
+    techLeadInterval: z.number().int().min(60000).default(7200000),
+    techLeadEventDebounce: z.number().int().min(10000).default(300000),
+    techLeadProposalExpiryMs: z.number().int().min(60000).default(7 * 24 * 60 * 60 * 1000),
+    techLeadLookbackWindowMs: z.number().int().min(60000).default(48 * 60 * 60 * 1000),
+    techLeadMaxEntriesPerSection: z.number().int().min(1).default(50),
   }).default({
     maxAgents: 10,
     reviewerInterval: 3600000,
@@ -141,6 +146,11 @@ export const ConfigSchema = z.object({
     mergeValidationTimeout: 600000,
     mergePollInterval: 5000,
     mergePollMaxInterval: 60000,
+    techLeadInterval: 7200000,
+    techLeadEventDebounce: 300000,
+    techLeadProposalExpiryMs: 7 * 24 * 60 * 60 * 1000,
+    techLeadLookbackWindowMs: 48 * 60 * 60 * 1000,
+    techLeadMaxEntriesPerSection: 50,
   }),
 });
 

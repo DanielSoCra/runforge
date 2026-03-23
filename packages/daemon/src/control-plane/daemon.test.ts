@@ -147,9 +147,6 @@ vi.mock('../coordination/tech-lead/signal-digest.js', () => ({
 vi.mock('../coordination/tech-lead/proposal-lifecycle.js', () => ({
   isTerminalStatus: vi.fn().mockReturnValue(false),
 }));
-vi.mock('../coordination/tech-lead/retrospective.js', () => ({
-  submitRetrospectivePitfalls: vi.fn().mockResolvedValue(0),
-}));
 
 // --- Helpers ---
 
