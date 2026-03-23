@@ -83,7 +83,7 @@ export function evaluatePool(ctx: EvalContext): SpawnDecision[] {
   const decisions: SpawnDecision[] = [];
 
   // 2. Spawn to meet per-type minimums (po: 1, reviewer: 1)
-  for (const agentType of ['po', 'reviewer', 'worker', 'planner', 'codebase-reviewer'] as AgentType[]) {
+  for (const agentType of ['po', 'reviewer', 'worker', 'planner', 'codebase-reviewer', 'tech_lead'] as AgentType[]) {
     const min = TYPE_MINIMUMS[agentType];
     const max = TYPE_MAXIMUMS[agentType];
     const current = activeCounts[agentType];
