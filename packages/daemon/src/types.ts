@@ -22,7 +22,8 @@ export type SessionType =
   | 'coordinator' | 'classifier' | 'worker'
   | 'reviewer-spec' | 'reviewer-quality' | 'reviewer-security'
   | 'bug-worker' | 'diagnostician'
-  | 'codebase-reviewer';
+  | 'codebase-reviewer'
+  | 'product-owner' | 'tech-lead';
 
 export type ExitStatus =
   | 'completed' | 'completed-with-concerns'

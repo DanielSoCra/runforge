@@ -23,6 +23,8 @@ export function toDbSessionType(type: SessionType): DbSessionType {
     case 'reviewer-security':
     case 'codebase-reviewer': return 'validation';
     case 'diagnostician':    return 'diagnosis';
+    case 'product-owner':
+    case 'tech-lead':        return 'planning';
     default: {
       const _exhaustive: never = type;
       throw new Error(`Unknown session type: ${_exhaustive}`);

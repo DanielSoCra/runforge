@@ -133,6 +133,24 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     timeoutMs: 600_000,
     budgetCap: 3,
   },
+  'product-owner': {
+    name: 'product-owner',
+    description: 'Analyzes signals and generates business-level proposals',
+    systemPrompt: '', // loaded from prompts/product-owner.md
+    allowedTools: ['Read', 'Glob', 'Grep'],
+    maxTurns: 10,
+    timeoutMs: 300_000,
+    budgetCap: 3,
+  },
+  'tech-lead': {
+    name: 'tech-lead',
+    description: 'Analyzes technical signals and generates improvement proposals',
+    systemPrompt: '', // loaded from prompts/tech-lead.md
+    allowedTools: ['Read', 'Glob', 'Grep'],
+    maxTurns: 10,
+    timeoutMs: 300_000,
+    budgetCap: 3,
+  },
 };
 
 export class SessionRuntime {

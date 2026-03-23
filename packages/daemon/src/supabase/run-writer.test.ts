@@ -28,6 +28,10 @@ describe('toDbSessionType', () => {
   // codebase-reviewer (was missing — #319)
   it('maps codebase-reviewer → validation', () => expect(toDbSessionType('codebase-reviewer')).toBe('validation'));
 
+  // product-owner and tech-lead (#342)
+  it('maps product-owner → planning', () => expect(toDbSessionType('product-owner')).toBe('planning'));
+  it('maps tech-lead → planning',     () => expect(toDbSessionType('tech-lead')).toBe('planning'));
+
   // exhaustiveness guard
   it('throws on unknown session type', () => {
     expect(() => toDbSessionType('nonexistent' as any)).toThrow('Unknown session type');

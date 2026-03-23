@@ -55,6 +55,36 @@ describe('SessionRuntime', () => {
     if (!result.ok) expect(result.error.message).toContain('No agent definition');
   });
 
+  it('spawns product-owner session type without error (#342)', async () => {
+    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '{}', cost: 0.02 } });
+    const result = await runtime.spawnSession('product-owner', { variables: {} }, 1);
+    expect(result.ok).toBe(true);
+  });
+
+  it('spawns tech-lead session type without error (#342)', async () => {
+    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '{}', cost: 0.02 } });
+    const result = await runtime.spawnSession('tech-lead', { variables: {} }, 1);
+    expect(result.ok).toBe(true);
+  });
+
+  it('product-owner has read-only tools (#342)', async () => {
+    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '{}', cost: 0.01 } });
+    await runtime.spawnSession('product-owner', { variables: {} }, 1);
+    const calledDef = mockSpawn.mock.calls[mockSpawn.mock.calls.length - 1]![0];
+    expect(calledDef.allowedTools).not.toContain('Write');
+    expect(calledDef.allowedTools).not.toContain('Edit');
+    expect(calledDef.allowedTools).not.toContain('Bash');
+  });
+
+  it('tech-lead has read-only tools (#342)', async () => {
+    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '{}', cost: 0.01 } });
+    await runtime.spawnSession('tech-lead', { variables: {} }, 1);
+    const calledDef = mockSpawn.mock.calls[mockSpawn.mock.calls.length - 1]![0];
+    expect(calledDef.allowedTools).not.toContain('Write');
+    expect(calledDef.allowedTools).not.toContain('Edit');
+    expect(calledDef.allowedTools).not.toContain('Bash');
+  });
+
   it('does not define a reporter agent — reports are generated directly (#54)', async () => {
     // The reporter prompt template and agent definition were dead code:
     // phases.ts calls formatReport() directly, no session is spawned.
