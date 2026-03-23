@@ -40,6 +40,8 @@ The fleet controller (which daemons should exist) is a separate concern built la
 - DB-mode vs legacy-mode conditional branching in `daemon.ts`
 - Per-repo concurrency config and per-repo state namespacing
 - Supabase repos table dependency for core daemon operation
+- `CoordinatorConfig.perRepoLimits` field (single repo — `maxAgents` is the only concurrency cap needed)
+- Legacy polling loop (replaced by Coordinator tick-based dispatch)
 
 **Simplify config to:**
 ```yaml
@@ -85,12 +87,21 @@ state/
       {issue-number}.json
 ```
 
+**Work detection unification:** The legacy polling loop (`pollRepos` / single-repo legacy poller) is removed. The Coordinator's tick-based dispatch replaces it entirely. Work detection functions (`detectReadyWork`, `detectBugFixWork`, `detectFeaturePipelineWork`) remain — they become the Coordinator's `getDispatchQueue` implementation. The Coordinator calls them on each tick to populate its dispatch queue, then `evaluatePool` decides what to spawn.
+
+**RemoteControlManager:** Stays — it handles remote pause/resume commands. Initialized before coordination, referenced by Coordinator's `isPaused()` callback.
+
+**Config migration:** Existing config fields (`maxConcurrentRuns`, `pollIntervalMs`, `maxConsecutiveStuck`, `perRunBudget`, `webhooks`, `gracePeriodMs`, `controlPort`) are preserved with their current names. The new `coordination` section is additive. The `repo` field replaces the `repos[]` array in DB mode. Legacy single-repo config (the current format) continues to work — it already has a single `repo` field. No migration script needed; just add the `coordination` section.
+
+**Shutdown sequence update:** The `shutdown` function stops: Coordinator (`coordinator.stop()`), PO Agent (clear interval), ReviewScheduler, RemoteControlManager, control server. RepoManager and legacy poller are removed from shutdown.
+
 **What stays:**
 - Supabase sync layer (optional) — for dashboard visibility of runs, costs, proposals
 - Control server REST API
+- RemoteControlManager
 - Review scheduler
 - All coordination components
-- Work detection (ready work, bug fixes, feature pipeline)
+- Work detection functions (consumed by Coordinator, not run in a separate loop)
 
 ### 2. Strip Dashboard GitHub Repo Flow
 
@@ -99,14 +110,20 @@ state/
 - GitHub repo connection OAuth flow (callback route, token exchange, storage)
 - `github_connections` Supabase table
 - Repo CRUD pages (`/repos`, `/repos/[id]`, `/repos/[id]/plugins`)
-- Repo add/remove/enable/disable API routes
+- Repo add/remove/enable/disable API routes, specifically:
+  - `packages/dashboard/app/api/github/connections/` (entire directory)
+  - `packages/dashboard/actions/github-connections.ts`
+  - `packages/dashboard/components/github-connections-section.tsx`
+  - `packages/dashboard/app/(dashboard)/command-center/` (entire directory)
+  - Sidebar link to command center in `packages/dashboard/components/sidebar.tsx`
 
 **Keep:**
 - Supabase auth with GitHub provider (dashboard login for team members)
 - All non-repo pages: `/runs`, `/runs/[id]`, `/cost`, `/team`, `/settings`, `/briefing`
 
 **Add:**
-- `daemons` Supabase table: `(id, repo_owner, repo_name, url, status, last_heartbeat, created_at)`
+- Supabase migration file (next sequential number after existing migrations)
+- `daemons` Supabase table: `(id, repo_owner, repo_name, url, status, last_heartbeat, created_at)`. Dashboard treats `last_heartbeat` older than 5 minutes as "unresponsive" status.
 - `proposals` Supabase table: `(id, repo_owner, repo_name, title, rationale, status, spec_references, estimated_scope, created_at, expires_at, decided_at, decision_notes)`
 - Replace `/repos` with fleet status page reading from `daemons` table (read-only — shows which daemons are running, their repo, status, pending proposals)
 - Update `/briefing` page to show pending proposals with approve/reject buttons
@@ -135,11 +152,13 @@ Four MCP tools the PO session uses to gather signals and act. Implemented in a n
 - Returns created proposal with ID
 
 **`list_proposals(statusFilter?)`**
-- Already exists in terminal server handlers
+- The handler logic exists in terminal server (`listProposalsHandler`). Extract it into a shared function in `po-tools.ts` that both terminal server and PO session can call. The PO session gets its own MCP tool wrapper around the shared function.
 - Reads from `state/coordination/proposals.json`
 - PO uses this to check proposal history (avoid re-proposing rejected work)
 
-Tools are registered as MCP tools on the PO session via session options.
+**Supabase sync timing:** `create_proposal` syncs eagerly (on each proposal creation) so the dashboard sees proposals in real-time. The `spawnPOSession` callback does NOT sync after completion — the tools handle sync individually.
+
+**Tool registration mechanism:** The PO tools are defined as an array of `ToolDefinition` objects (name, description, inputSchema, handler). The `spawnPOSession` callback passes them via a new `tools` field on `AgentDefinition`. The session runtime's CLI adapter registers them as MCP tools when spawning the session. This requires extending `AgentDefinition` with an optional `tools: ToolDefinition[]` field and updating the CLI adapter to register them.
 
 ### 4. PO Prompt Template and Daemon Wiring
 
@@ -157,23 +176,38 @@ The PO session receives:
 - Constraints: no implementation details, no direct work creation, silence is valid output
 - Pending ideas: {{pendingIdeas}} (operator-submitted ideas to refine)
 
+**SessionType and AgentDefinition additions:**
+
+Add `'po'` to the `SessionType` union in `packages/daemon/src/types.ts`. Add a PO entry to `DEFAULT_AGENT_DEFS` in `packages/daemon/src/session-runtime/runtime.ts`:
+```
+po: {
+  name: 'po',
+  promptFile: 'po.md',
+  tools: [scanSpecPipeline, getBacklog, createProposal, listProposals],
+  maxTurns: 20,
+  budgetPerSession: 0.50  // PO sessions are lightweight analysis
+}
+```
+
 **`spawnPOSession` implementation:**
 
 The PO agent's `spawnPOSession` callback:
 1. Loads pending ideas from ideas store
-2. Calls `runtime.spawnSession('po', { repoName, maxProposals, pendingIdeas })` with PO tools registered
-3. Session runs, calls tools, creates proposals
-4. On completion, syncs any new proposals to Supabase
+2. Calls `runtime.spawnSession('po', { repoName, maxProposals, pendingIdeas }, 0)` — issueNumber `0` since this is not tied to a specific issue (same convention as minimum-fill agents in the Coordinator)
+3. The session runtime loads the `po` AgentDefinition, registers its tools, and runs the prompt template
+4. Session runs, calls tools, creates proposals (each tool syncs to Supabase eagerly)
 
 **Daemon REST API additions:**
 - `POST /proposals/:id/approve` — approves proposal, creates GitHub issue with `ready` label via Octokit, updates local state, syncs to Supabase
 - `POST /proposals/:id/reject` — rejects proposal with decision notes, updates local state, syncs to Supabase
 - `GET /proposals` — lists proposals (shortcut for terminal/dashboard)
+- `POST /po/trigger` — manually triggers a PO cycle (calls `poAgent.runCycle()` immediately, bypassing the scheduled interval). Used for testing and operator-initiated analysis.
 
 **Daemon self-registration:**
 - On startup, writes entry to Supabase `daemons` table with repo, URL, status
-- Periodic heartbeat updates `last_heartbeat`
+- Periodic heartbeat updates `last_heartbeat` (every 60 seconds)
 - On clean shutdown, marks status as `stopped`
+- Dashboard treats `last_heartbeat` older than 5 minutes as "unresponsive"
 
 ### 5. End-to-End Test Plan
 
