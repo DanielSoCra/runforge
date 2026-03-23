@@ -132,7 +132,7 @@ describe('enableAllSuggested', () => {
     expect(upsert).toHaveBeenCalledTimes(2);
   });
 
-  it('returns empty arrays when the DB query errors', async () => {
+  it('returns error field when the DB select query fails (#360)', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'u1' } as never);
     const eqActive = vi.fn().mockResolvedValue({ data: null, error: { message: 'rls violation' } });
     const eqRecommended = vi.fn().mockReturnValue({ eq: eqActive });
@@ -144,6 +144,7 @@ describe('enableAllSuggested', () => {
     const result = await enableAllSuggested('repo-id');
     expect(result.succeeded).toHaveLength(0);
     expect(result.failed).toHaveLength(0);
+    expect(result.error).toBe('rls violation');
   });
 
   it('assigns distinct activated_at timestamps to each plugin for deterministic merge order', async () => {

@@ -56,7 +56,7 @@ export async function enableAllSuggested(
     .eq('active', false);
   if (selectError) {
     console.error('[plugins] enableAllSuggested select failed:', selectError);
-    return { succeeded: [], failed: [] };
+    return { succeeded: [], failed: [], error: selectError.message };
   }
 
   const allIds = (suggested ?? []).map((r: { plugin_id: string }) => r.plugin_id);
