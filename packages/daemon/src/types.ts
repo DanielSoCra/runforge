@@ -62,6 +62,8 @@ export interface PitfallMarker {
 
 // --- Work Request ---
 
+export type DetectedWorkType = 'feature' | 'bug-fix';
+
 export interface WorkRequest {
   issueNumber: number;
   title: string;
@@ -69,6 +71,7 @@ export interface WorkRequest {
   labels: string[];
   specRefs: string[];
   scopeDescription?: string;
+  workType?: DetectedWorkType;
 }
 
 // --- Run State ---
