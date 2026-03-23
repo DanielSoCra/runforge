@@ -24,6 +24,14 @@ describe('toDbSessionType', () => {
 
   // diagnosis group
   it('maps diagnostician → diagnosis',    () => expect(toDbSessionType('diagnostician')).toBe('diagnosis'));
+
+  // codebase-reviewer (was missing — #319)
+  it('maps codebase-reviewer → validation', () => expect(toDbSessionType('codebase-reviewer')).toBe('validation'));
+
+  // exhaustiveness guard
+  it('throws on unknown session type', () => {
+    expect(() => toDbSessionType('nonexistent' as any)).toThrow('Unknown session type');
+  });
 });
 
 describe('SupabaseRunWriter', () => {
