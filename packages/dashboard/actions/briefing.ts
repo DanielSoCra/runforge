@@ -2,7 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
-import { requireAdmin } from '@/lib/auth';
+import { requireUser } from '@/lib/auth';
 import { formatDuration } from '@/lib/format';
 import type { Database } from '@/lib/types';
 
@@ -43,7 +43,7 @@ const URGENCY_ORDER: Record<AttentionItem['reason'], number> = {
  */
 export async function getLatestBriefing(): Promise<Briefing | null> {
   const supabase = await createClient();
-  await requireAdmin(supabase);
+  await requireUser(supabase);
   const { data, error } = await supabase
     .from('briefings')
     .select('*')
@@ -67,7 +67,7 @@ export async function getLatestBriefing(): Promise<Briefing | null> {
  */
 export async function getActiveRuns() {
   const supabase = await createClient();
-  await requireAdmin(supabase);
+  await requireUser(supabase);
   const { data, error } = await supabase
     .from('runs')
     .select('id, repo_owner, repo_name, issue_number, issue_title, current_phase, outcome, total_cost, started_at, phases')
@@ -87,7 +87,7 @@ export async function getActiveRuns() {
  */
 export async function getNeedsAttention(): Promise<AttentionItem[]> {
   const supabase = await createClient();
-  await requireAdmin(supabase);
+  await requireUser(supabase);
 
   const [stuckResult, escalatedResult] = await Promise.all([
     supabase
@@ -177,7 +177,7 @@ interface GitHubIssue {
 export async function getUpNext(): Promise<UpNextItem[]> {
   const service = createServiceClient();
   const supabase = await createClient();
-  await requireAdmin(supabase);
+  await requireUser(supabase);
 
   // Fetch enabled repos and active runs in parallel
   const [reposResult, runsResult] = await Promise.all([
@@ -292,7 +292,7 @@ export async function getUpNext(): Promise<UpNextItem[]> {
  */
 export async function refreshLivePanels() {
   const supabase = await createClient();
-  await requireAdmin(supabase);
+  await requireUser(supabase);
   const [activeRuns, needsAttention, upNext] = await Promise.all([
     getActiveRuns(),
     getNeedsAttention(),
@@ -309,7 +309,7 @@ export async function getActivityFeed(
   opts?: { cursor?: string; pageSize?: number },
 ): Promise<ActivityEvent[]> {
   const supabase = await createClient();
-  await requireAdmin(supabase);
+  await requireUser(supabase);
   const pageSize = opts?.pageSize ?? 50;
 
   let query = supabase

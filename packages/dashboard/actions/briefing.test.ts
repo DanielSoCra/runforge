@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// Mock auth — requireAdmin resolves by default; tests override to reject
-const mockRequireAdmin = vi.fn().mockResolvedValue({ id: 'user-1', email: 'admin@test.com' });
+// Mock auth — requireUser resolves by default; tests override to reject
+const mockRequireUser = vi.fn().mockResolvedValue({ id: 'user-1', email: 'viewer@test.com' });
 vi.mock('@/lib/auth', () => ({
-  requireAdmin: (...args: unknown[]) => mockRequireAdmin(...args),
+  requireUser: (...args: unknown[]) => mockRequireUser(...args),
 }));
 
 // Mock Supabase client
@@ -31,7 +31,7 @@ const mockFetch = vi.fn();
 let savedGithubToken: string | undefined;
 
 beforeEach(() => {
-  mockRequireAdmin.mockReset().mockResolvedValue({ id: 'user-1', email: 'admin@test.com' });
+  mockRequireUser.mockReset().mockResolvedValue({ id: 'user-1', email: 'viewer@test.com' });
   mockFrom.mockReset();
   mockServiceFrom.mockReset();
   mockServiceRpc.mockReset();
@@ -555,10 +555,10 @@ describe('getActivityFeed', () => {
   });
 });
 
-describe('requireAdmin guard (SEC-25 regression)', () => {
-  it('every exported server action calls requireAdmin before querying', async () => {
-    // Setup: requireAdmin rejects
-    mockRequireAdmin.mockRejectedValue(new Error('Unauthorized'));
+describe('requireUser guard (SEC-25 regression — auth required)', () => {
+  it('every exported server action calls requireUser before querying', async () => {
+    // Setup: requireUser rejects (unauthenticated user)
+    mockRequireUser.mockRejectedValue(new Error('Unauthorized'));
 
     const {
       getLatestBriefing,
@@ -577,10 +577,34 @@ describe('requireAdmin guard (SEC-25 regression)', () => {
     await expect(getActivityFeed()).rejects.toThrow('Unauthorized');
     await expect(refreshLivePanels()).rejects.toThrow('Unauthorized');
 
-    // requireAdmin was called 6 times (once per action), Supabase was never queried
-    expect(mockRequireAdmin).toHaveBeenCalledTimes(6);
+    // requireUser was called 6 times (once per action), Supabase was never queried
+    expect(mockRequireUser).toHaveBeenCalledTimes(6);
     expect(mockFrom).not.toHaveBeenCalled();
     expect(mockServiceFrom).not.toHaveBeenCalled();
+  });
+});
+
+describe('viewer access (SPEC-38 / #273 regression)', () => {
+  it('briefing actions use requireUser, not requireAdmin — viewers can access', async () => {
+    // requireUser resolves for any authenticated team member (admin or viewer)
+    mockRequireUser.mockResolvedValue({ id: 'viewer-1', email: 'viewer@test.com' });
+
+    // Setup minimal mocks so getLatestBriefing doesn't throw on Supabase calls
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        order: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({ data: null, error: { code: 'PGRST116', message: 'No rows' } }),
+          }),
+        }),
+      }),
+    });
+
+    const { getLatestBriefing } = await import('./briefing');
+    // Should NOT throw — viewers are allowed
+    const result = await getLatestBriefing();
+    expect(result).toBeNull();
+    expect(mockRequireUser).toHaveBeenCalled();
   });
 });
 

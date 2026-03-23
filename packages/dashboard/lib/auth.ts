@@ -52,6 +52,26 @@ export async function requireAdmin(supabase: SupabaseClient) {
   return user;
 }
 
+/**
+ * Require any authenticated user (admin or viewer).
+ * Throws if the user is not signed in or has no team membership.
+ * Unlike requireAdmin, this does NOT check the role — any team member is allowed.
+ */
+export async function requireUser(supabase: SupabaseClient) {
+  if (isAuthDisabled()) return SYNTHETIC_ADMIN as any;
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Unauthorized');
+  const { data: member, error } = await supabase.from('team_members')
+    .select('role')
+    .eq('user_id', user.id)
+    .single();
+  if (error && error.code !== 'PGRST116') {
+    console.error('[auth] team_members query failed:', error.message);
+  }
+  if (!member) throw new Error('Access denied — ask an admin to invite you');
+  return user;
+}
+
 /** Returns true if the current user is an admin. Never throws. */
 export async function isAdmin(supabase: SupabaseClient): Promise<boolean> {
   if (isAuthDisabled()) return true;

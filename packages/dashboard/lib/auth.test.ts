@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { getOrigin, requireAdmin, isAdmin, isAuthDisabled } from './auth';
+import { getOrigin, requireAdmin, requireUser, isAdmin, isAuthDisabled } from './auth';
 
 describe('getOrigin', () => {
   const originalEnv = { ...process.env };
@@ -120,6 +120,72 @@ describe('requireAdmin', () => {
       'relation does not exist',
     );
     consoleSpy.mockRestore();
+  });
+});
+
+describe('requireUser', () => {
+  it('returns the user when they are an admin', async () => {
+    const supabase = mockSupabase({ user: { id: 'u1' }, member: { role: 'admin' } });
+    const user = await requireUser(supabase);
+    expect(user).toEqual({ id: 'u1' });
+  });
+
+  it('returns the user when they are a viewer', async () => {
+    const supabase = mockSupabase({ user: { id: 'u2' }, member: { role: 'viewer' } });
+    const user = await requireUser(supabase);
+    expect(user).toEqual({ id: 'u2' });
+  });
+
+  it('throws Unauthorized when no user session exists', async () => {
+    const supabase = mockSupabase({ user: null });
+    await expect(requireUser(supabase)).rejects.toThrow('Unauthorized');
+  });
+
+  it('throws Access denied when no team_members row exists (PGRST116)', async () => {
+    const supabase = mockSupabase({
+      member: null,
+      queryError: { code: 'PGRST116', message: 'not found' },
+    });
+    await expect(requireUser(supabase)).rejects.toThrow('Access denied');
+  });
+
+  it('logs non-PGRST116 query errors and still rejects non-member', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const supabase = mockSupabase({
+      member: null,
+      queryError: { code: '42P01', message: 'relation does not exist' },
+    });
+    await expect(requireUser(supabase)).rejects.toThrow('Access denied');
+    expect(consoleSpy).toHaveBeenCalledWith(
+      '[auth] team_members query failed:',
+      'relation does not exist',
+    );
+    consoleSpy.mockRestore();
+  });
+});
+
+describe('requireUser — AUTH_DISABLED bypass', () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    delete process.env.AUTH_DISABLED;
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    delete process.env.AUTH_DISABLED;
+  });
+
+  it('returns synthetic admin without calling supabase when AUTH_DISABLED=true', async () => {
+    vi.stubEnv('AUTH_DISABLED', 'true');
+    const supabase = mockSupabase({ user: null });
+    const user = await requireUser(supabase);
+    expect(user.id).toBe('00000000-0000-0000-0000-000000000000');
+    expect(supabase.auth.getUser).not.toHaveBeenCalled();
+  });
+
+  it('still enforces auth when AUTH_DISABLED is not set', async () => {
+    const supabase = mockSupabase({ user: null });
+    await expect(requireUser(supabase)).rejects.toThrow('Unauthorized');
   });
 });
 
