@@ -24,6 +24,7 @@ import { SupabaseConfigReader } from '../supabase/config-reader.js';
 import { SupabaseRunWriter, toDbOutcome } from '../supabase/run-writer.js';
 import { GotchaStore } from '../knowledge/gotcha-store.js';
 import { join } from 'path';
+import { createReviewScheduler } from '../coordination/review-scheduler.js';
 
 export async function startDaemon(configPath: string): Promise<Result<void>> {
   // 0. Validate GITHUB_TOKEN — required for Octokit (labeling, commenting, notifications)
@@ -67,6 +68,40 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   // 3b. Start Remote Control
   const remoteControl = new RemoteControlManager();
   remoteControl.start();
+
+  // 3c. Start Review Scheduler
+  const reviewScheduler = createReviewScheduler(
+    {
+      spawnReviewSession: async (category) => {
+        const result = await runtime.spawnSession(
+          'codebase-reviewer',
+          { variables: { category } },
+          0, // no issue number — proactive review
+        );
+        if (!result.ok) {
+          console.error('[review-scheduler] session failed:', result.error.message);
+          return { findingsCount: 0, issuesCreated: 0 };
+        }
+        // Parse structured data from session output if available
+        const data = result.value.structuredData as { findingsCount?: number; issuesCreated?: number } | null;
+        return {
+          findingsCount: data?.findingsCount ?? 0,
+          issuesCreated: data?.issuesCreated ?? 0,
+        };
+      },
+      getSignalRatio: () => {
+        // TODO: compute from historical review issue data (verified / total closed)
+        // Default to 1.0 (no throttling) until tracking is implemented
+        return 1.0;
+      },
+    },
+    {
+      intervalMs: 20 * 60 * 1000, // 20 minutes
+      signalRatioThreshold: 0.6,
+      maxIssuesPerCycle: 5,
+    },
+  );
+  const stopReviewScheduler = reviewScheduler.start();
 
   // 4. State tracking
   let paused = false;
@@ -307,6 +342,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     shuttingDown = true;
     console.log('Shutting down...');
     if (legacyPoller) clearInterval(legacyPoller);
+    stopReviewScheduler();
     repoManager?.stop();
     configReader?.stop();
     const deadline = Date.now() + config.gracePeriodMs;

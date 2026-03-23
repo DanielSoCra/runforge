@@ -124,6 +124,15 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     timeoutMs: 120_000,
     budgetCap: 1,
   },
+  'codebase-reviewer': {
+    name: 'codebase-reviewer',
+    description: 'Periodic codebase review — discovery, verification, filtered issue creation',
+    systemPrompt: '', // loaded from prompts/codebase-reviewer.md
+    allowedTools: ['Read', 'Glob', 'Grep', 'Bash'],
+    maxTurns: 30,
+    timeoutMs: 600_000,
+    budgetCap: 3,
+  },
 };
 
 export class SessionRuntime {
