@@ -243,6 +243,9 @@ STACK-AC-VALIDATION:
     - packages/daemon/src/validation/holdout.ts
     - packages/daemon/src/validation/deploy.ts
     - packages/daemon/src/validation/post-deploy-test.ts
+    - packages/daemon/src/validation/proactive-reviewer.ts
+    - packages/daemon/src/validation/proactive-scheduler.ts
+    - packages/daemon/src/validation/knowledge-injector.ts
     - packages/daemon/src/infra/spec-loader.ts
   test_paths:
     - packages/daemon/src/validation/**/*.test.ts
@@ -255,6 +258,9 @@ STACK-AC-VALIDATION:
     - packages/daemon/src/validation/holdout.test.ts
     - packages/daemon/src/validation/deploy.test.ts
     - packages/daemon/src/validation/post-deploy-test.test.ts
+    - packages/daemon/src/validation/proactive-reviewer.test.ts
+    - packages/daemon/src/validation/proactive-scheduler.test.ts
+    - packages/daemon/src/validation/knowledge-injector.test.ts
     - packages/daemon/src/infra/spec-loader.test.ts
   status: draft
 
