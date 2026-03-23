@@ -88,9 +88,16 @@ export function createControlServer(
       }
     } else if (method === 'POST' && url.pathname === '/ideas') {
       if (handlers.submitIdea) {
+        const MAX_BODY = 10240; // 10KB
         let body = '';
-        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        let oversize = false;
+        req.on('data', (chunk: Buffer) => {
+          body += chunk.toString();
+          if (body.length > MAX_BODY) oversize = true;
+        });
+        req.on('error', () => { json(res, 400, { error: 'request error' }); });
         req.on('end', () => {
+          if (oversize) { json(res, 413, { error: 'body too large' }); return; }
           try {
             const parsed = JSON.parse(body) as { submittedBy?: string; description?: string };
             if (!parsed.description || typeof parsed.description !== 'string') {
