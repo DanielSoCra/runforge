@@ -214,7 +214,7 @@ export class SessionRuntime {
 
     // 9. Post-session audit — containment layer 6 (detective)
     // Scan output for references to prohibited paths (ARCH-AC-SESSION-RUNTIME step 9)
-    // Note: currently scans path references only; "suspicious operations" audit is a known gap.
+    // Scans path references and blocked command evidence (SEC-35).
     if (result.ok) {
       const audit = auditSessionOutput(result.value.output, DEFAULT_POLICY);
       if (!audit.clean) {
