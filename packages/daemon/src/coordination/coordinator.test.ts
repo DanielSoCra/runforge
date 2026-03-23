@@ -1,8 +1,9 @@
 // src/coordination/coordinator.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createCoordinator, type CoordinatorDeps, type CoordinatorConfig } from './coordinator.js';
-import type { WorkerClaim, AgentType, ClaimStatus, Batch, BatchItem } from './types.js';
+import { createCoordinator, type CoordinatorDeps, type CoordinatorConfig, type PendingDecision } from './coordinator.js';
+import type { WorkerClaim, AgentType, ClaimStatus, Batch, BatchItem, InferenceDecision } from './types.js';
 import type { SpawnDecision } from './concurrency.js';
+import type { InferenceEngine } from './inference-decision.js';
 
 function makeClaim(overrides: Partial<WorkerClaim> & { agentType: AgentType }): WorkerClaim {
   return {
@@ -369,6 +370,104 @@ describe('Coordinator', () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(callCount).toBe(2);
 
+    stop();
+  });
+
+  it('processes pending inference decisions on each tick', async () => {
+    const onResult = vi.fn().mockResolvedValue(undefined);
+    const pendingDecisions: PendingDecision[] = [
+      {
+        context: {
+          decisionType: 'stuck_detection',
+          workItemId: 'item-1',
+          stateSnapshot: {},
+          recentActivity: [],
+          failureReason: null,
+        },
+        onResult,
+      },
+    ];
+
+    const mockDecision: InferenceDecision = {
+      decisionType: 'stuck_detection',
+      chosenAction: 'stuck',
+      confidence: 0.8,
+      rationale: 'No progress',
+      timestamp: new Date().toISOString(),
+      degraded: false,
+    };
+
+    const mockInferenceEngine: InferenceEngine = {
+      decide: vi.fn().mockResolvedValue(mockDecision),
+      shouldAct: vi.fn().mockReturnValue(true),
+      getRecentDecisions: vi.fn().mockResolvedValue([]),
+      resetTickBudget: vi.fn(),
+    };
+
+    const deps = makeDeps({
+      inferenceEngine: mockInferenceEngine,
+      getPendingDecisions: vi.fn().mockResolvedValue(pendingDecisions),
+    });
+    const config = makeConfig({ tickIntervalMs: 100 });
+    const coordinator = createCoordinator(deps, config);
+    const stop = coordinator.start();
+
+    await vi.advanceTimersByTimeAsync(150);
+
+    expect(mockInferenceEngine.decide).toHaveBeenCalledWith(pendingDecisions[0]!.context);
+    expect(onResult).toHaveBeenCalledWith('stuck', true);
+    stop();
+  });
+
+  it('processes inference decisions before pool evaluation', async () => {
+    const callOrder: string[] = [];
+
+    const mockInferenceEngine: InferenceEngine = {
+      decide: vi.fn().mockImplementation(() => {
+        callOrder.push('inference');
+        return Promise.resolve({
+          decisionType: 'stuck_detection',
+          chosenAction: 'stuck',
+          confidence: 0.8,
+          rationale: 'test',
+          timestamp: new Date().toISOString(),
+          degraded: false,
+        });
+      }),
+      shouldAct: vi.fn().mockReturnValue(true),
+      getRecentDecisions: vi.fn().mockResolvedValue([]),
+      resetTickBudget: vi.fn(),
+    };
+
+    const deps = makeDeps({
+      inferenceEngine: mockInferenceEngine,
+      getPendingDecisions: vi.fn().mockResolvedValue([{
+        context: { decisionType: 'stuck_detection', workItemId: null, stateSnapshot: {}, recentActivity: [], failureReason: null },
+        onResult: vi.fn().mockResolvedValue(undefined),
+      }]),
+      checkDiskSpace: vi.fn().mockImplementation(() => {
+        callOrder.push('diskCheck');
+        return Promise.resolve(true);
+      }),
+    });
+    const config = makeConfig({ tickIntervalMs: 100 });
+    const coordinator = createCoordinator(deps, config);
+    const stop = coordinator.start();
+
+    await vi.advanceTimersByTimeAsync(150);
+
+    expect(callOrder).toEqual(['inference', 'diskCheck']);
+    stop();
+  });
+
+  it('skips inference processing when no engine provided', async () => {
+    const deps = makeDeps(); // no inferenceEngine
+    const config = makeConfig({ tickIntervalMs: 100 });
+    const coordinator = createCoordinator(deps, config);
+    const stop = coordinator.start();
+
+    // Should not throw
+    await vi.advanceTimersByTimeAsync(150);
     stop();
   });
 });

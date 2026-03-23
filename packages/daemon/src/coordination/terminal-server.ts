@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import type { Proposal, IdeaSubmission, Batch, WorkerClaim, MergeQueueEntry } from './types.js';
+import type { Proposal, IdeaSubmission, Batch, WorkerClaim, MergeQueueEntry, InferenceDecision } from './types.js';
 import { ProposalStatusSchema } from './types.js';
 import type { Result } from '../lib/result.js';
 
@@ -22,12 +22,14 @@ export interface TerminalServerDeps {
   cancelBatch: (batchId?: string) => Promise<Result<void>>;
   createWorkRequest: (proposal: Proposal) => Promise<number>;
   reprioritizeIssue: (issueNumber: number, priority: string) => Promise<Result<void>>;
+  getRecentInferenceDecisions?: (count: number) => Promise<InferenceDecision[]>;
 }
 
 export interface Briefing {
   activeWorkers: number;
   mergeQueueDepth: number;
   batchStatus: string | null;
+  recentInferenceDecisions: InferenceDecision[];
 }
 
 export class TerminalServerError extends Error {
@@ -128,11 +130,15 @@ export function createTerminalServerHandlers(deps: TerminalServerDeps): Terminal
       const claims = await deps.getActiveClaims();
       const mergeEntries = await deps.getMergeQueueEntries();
       const batch = await deps.getActiveBatch();
+      const recentInferenceDecisions = deps.getRecentInferenceDecisions
+        ? await deps.getRecentInferenceDecisions(5)
+        : [];
 
       return {
         activeWorkers: claims.length,
         mergeQueueDepth: mergeEntries.length,
         batchStatus: batch?.status ?? null,
+        recentInferenceDecisions,
       };
     },
 

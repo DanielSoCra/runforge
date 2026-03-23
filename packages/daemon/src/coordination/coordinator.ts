@@ -1,9 +1,11 @@
 // src/coordination/coordinator.ts — Tick-driven loop for agent pool management
 import { evaluatePool, type EvalContext, type SpawnDecision, type DispatchQueueItem } from './concurrency.js';
-import type { WorkerClaim } from './types.js';
+import type { WorkerClaim, InferenceContext } from './types.js';
 import type { WorkClaimer } from './work-claimer.js';
 import type { BatchManager } from './batch-manager.js';
 import type { MergeAgent } from './merge-agent.js';
+import type { InferenceEngine } from './inference-decision.js';
+import type { ProtocolOrchestrator } from './protocol-orchestrator.js';
 
 export interface CoordinatorConfig {
   tickIntervalMs: number;
@@ -12,14 +14,22 @@ export interface CoordinatorConfig {
   perRepoLimits: Record<string, number>;
 }
 
+export interface PendingDecision {
+  context: InferenceContext;
+  onResult: (chosenAction: string, acted: boolean) => Promise<void>;
+}
+
 export interface CoordinatorDeps {
   workClaimer: WorkClaimer;
   batchManager: BatchManager;
   mergeAgent: MergeAgent;
+  inferenceEngine?: InferenceEngine;
+  protocolOrchestrator?: ProtocolOrchestrator;
   spawnWorker: (claim: WorkerClaim, decision: SpawnDecision) => Promise<void>;
   checkDiskSpace: () => Promise<boolean>;
   getDispatchQueue: () => Promise<DispatchQueueItem[]>;
   getActiveClaimRepoKeys: () => Promise<Map<string, string>>;
+  getPendingDecisions?: () => Promise<PendingDecision[]>;
   onMergeAgentCrash: (callback: () => void) => void;
   isPaused: () => boolean;
   isShuttingDown: () => boolean;
@@ -49,6 +59,22 @@ export function createCoordinator(deps: CoordinatorDeps, config: CoordinatorConf
       if (tickInProgress) return;
       tickInProgress = true;
       try {
+        // --- Reset per-tick inference budget ---
+        if (deps.inferenceEngine) {
+          deps.inferenceEngine.resetTickBudget();
+        }
+
+        // --- Process pending inference decisions (at most one per decision point per tick) ---
+        if (deps.inferenceEngine && deps.getPendingDecisions) {
+          const pending = await deps.getPendingDecisions();
+          for (const item of pending) {
+            const decision = await deps.inferenceEngine.decide(item.context);
+            const acted = deps.inferenceEngine.shouldAct(decision);
+            await item.onResult(decision.chosenAction, acted);
+          }
+        }
+
+        // --- Concurrency evaluation ---
         const diskSpaceOk = await deps.checkDiskSpace();
         const activeClaims = await deps.workClaimer.listActive();
         const activeClaimRepoKeys = await deps.getActiveClaimRepoKeys();

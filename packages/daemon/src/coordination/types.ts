@@ -127,6 +127,37 @@ export const IdeaSubmissionSchema = z.object({
 });
 export type IdeaSubmission = z.infer<typeof IdeaSubmissionSchema>;
 
+// --- InferenceContext ---
+
+export const DecisionTypeSchema = z.enum([
+  'stuck_detection',
+  'retry_skip_replan',
+  'impediment_routing',
+  'batch_rebalancing',
+]);
+export type DecisionType = z.infer<typeof DecisionTypeSchema>;
+
+export const InferenceContextSchema = z.object({
+  decisionType: DecisionTypeSchema,
+  workItemId: z.string().nullable(),
+  stateSnapshot: z.record(z.string(), z.unknown()),
+  recentActivity: z.array(z.unknown()).max(10),
+  failureReason: z.string().nullable().default(null),
+});
+export type InferenceContext = z.infer<typeof InferenceContextSchema>;
+
+// --- InferenceDecision ---
+
+export const InferenceDecisionSchema = z.object({
+  decisionType: DecisionTypeSchema,
+  chosenAction: z.string(),
+  confidence: z.number().min(0).max(1),
+  rationale: z.string(),
+  timestamp: z.string().datetime().optional(),
+  degraded: z.boolean().default(false),
+});
+export type InferenceDecision = z.infer<typeof InferenceDecisionSchema>;
+
 // --- Helper: check if claim status is active ---
 
 export function isActiveClaimStatus(status: ClaimStatus): boolean {
