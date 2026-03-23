@@ -2,8 +2,8 @@ import { Octokit } from '@octokit/rest';
 import type { WorkRequest, DetectedWorkType } from '../types.js';
 import { ok, err, type Result } from '../lib/result.js';
 
-/** Work types produced by feature-pipeline tier detection. */
-export type FeaturePipelineWorkType = 'implementation' | 'l3-generate' | 'l2-brainstorm';
+/** Work types produced by feature-pipeline tier detection — derived from DetectedWorkType to prevent drift. */
+export type FeaturePipelineWorkType = Extract<DetectedWorkType, 'implementation' | 'l3-generate' | 'l2-brainstorm'>;
 
 export interface WorkDetector {
   detectReadyWork(): Promise<Result<WorkRequest[]>>;
