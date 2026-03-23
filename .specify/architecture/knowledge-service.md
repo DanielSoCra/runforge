@@ -16,7 +16,7 @@ The Knowledge Service accumulates, structures, and distributes institutional kno
 
 ## Data Model
 
-**KnowledgeRecord** is the base entity for all institutional knowledge. It contains: a unique identifier, a record type (see RecordType below), an array of artifact patterns, a description, the source identifier (work request, retrospective, or review that produced it), a confidence score, a creation timestamp, a hit count (incremented each time the record is matched and injected), a lifecycle status (candidate, active, promoted, or archived — see Lifecycle Status below), an origin type (autonomous, operator, retrospective-tech-lead, or retrospective-po), a priority tier (normal or elevated), and an optional root-cause tag (a short identifier grouping records that share the same underlying cause).
+**KnowledgeRecord** is the base entity for all institutional knowledge. It contains: a unique identifier, a record type (see RecordType below), an array of artifact patterns, a description, the source identifier (work request, retrospective, or review that produced it), a confidence score, a creation timestamp, a hit count (incremented each time the record is matched and injected), a lifecycle status (candidate, active, promoted, or archived — see Lifecycle Status below), an origin type (autonomous, operator, retrospective-tech-lead, or retrospective-po), a priority tier (normal or elevated), an optional root-cause tag (a short identifier grouping records that share the same underlying cause), and an optional reasoning section (a structured narrative capturing what changed, why the approach was chosen, what was discovered, and what approaches failed — populated for records originating from implementation sessions).
 
 **RecordType** discriminates the kind of knowledge a record represents:
 - **technical_pitfall** — a non-obvious pitfall discovered during implementation. Consumers: implementation sessions, review sessions.
@@ -114,8 +114,8 @@ If the type cannot be determined automatically, the unit is not exemplar-eligibl
 ## Event Flows
 
 **Record capture flow (session-sourced):**
-1. An intelligent session completes (any type: worker, reviewer, diagnostician, etc.).
-2. Session Runtime parses the session output for structured observation markers. Each marker contains artifact patterns, a description, and an optional root-cause tag.
+1. An intelligent session completes (any type: worker, reviewer, diagnostician, etc.). **Precondition:** Only sessions that completed successfully contribute knowledge. Sessions that ended in a stuck state, were escalated, or otherwise did not reach successful completion are excluded — their output is not parsed for knowledge extraction.
+2. Session Runtime parses the session output for structured observation markers. Each marker contains artifact patterns, a description, an optional root-cause tag, and a reasoning section. The reasoning section captures: what changed, why the approach was chosen, what was discovered during implementation, and what alternative approaches were attempted and why they failed. This structure ensures implementation records carry sufficient context for future sessions to understand not just the outcome but the decision-making process.
 3. Session Runtime calls Knowledge Service to store the extracted records with origin type "autonomous" and the appropriate record type.
 4. Knowledge Service checks for duplicates: if a record with matching artifact patterns and similar description already exists, increment its hit count instead of creating a new entry. Otherwise, create a new KnowledgeRecord with hit count 1 and lifecycle status "active."
 
