@@ -111,7 +111,7 @@ No proposal reaches the operator without input from both agents.
 3. PO either forwards to operator with priority context, or rejects with reason
 4. If rejected, the Tech Lead may re-propose with stronger evidence on the next cycle
 
-**Decision authority:** The initiating agent owns whether to propose. The enriching agent's assessment is advisory but always attached to proposals that reach the operator.
+**Decision authority:** For PO-initiated proposals, the PO owns whether to propose; the Tech Lead's enrichment is advisory but always attached. For Tech Lead-initiated proposals, the PO has veto power — the PO decides whether the proposal reaches the operator, consistent with the constraint that all technical proposals flow through PO for priority assessment. The Tech Lead owns whether to *generate* the proposal, but the PO controls whether it *advances*.
 
 **Degraded path:** If the Tech Lead cannot assess effort (e.g., unfamiliar area, insufficient data), the proposal goes to the operator with an "unassessed" flag. The operator sees that technical review is incomplete.
 
@@ -216,6 +216,8 @@ FUNC-AC-QUALITY currently covers review gates but does not distinguish between t
 
 **Connection to Tech Lead:** The proactive review agent is the Tech Lead's eyes. It generates the `review-finding` issues that appear in the Tech Lead's signal sources. The Tech Lead synthesizes these findings into proposals — the proactive reviewer does not propose remediation itself.
 
+**Work detection boundary:** Issues labeled `review-finding` are explicitly excluded from work detection's executable scan (ready work, feature pipeline). They are signal inputs for the Tech Lead, not work items. A `review-finding` only becomes executable work when the Tech Lead proposes remediation → PO approves → operator approves → a new issue with executable labels is created. This preserves the L0 boundary: the system never acts on self-generated findings without operator approval.
+
 **Connection to pipeline:** The QA agent is a pipeline gate. FUNC-AC-PIPELINE's review phase dispatches to the QA agent. The QA agent's verdict determines whether work progresses to integration or returns to the developer for revision.
 
 ### 5. LLM-augmented coordination engine (FUNC-AC-COORDINATION addition)
@@ -278,11 +280,16 @@ Replace the entire Product Ownership section with:
 >
 > Product ownership behavior — proposal generation, signal analysis, operator idea refinement — is defined in FUNC-AC-PRODUCT-OWNER. Technical health analysis and effort estimation is defined in FUNC-AC-TECH-LEAD. This spec covers the coordination mechanics that both roles participate in: batch planning execution, merge sequencing, concurrency management, and failure recovery.
 
-Add a precondition to the Batch Planning scenarios: "Given the PO and Tech Lead have agreed on a batch through the Batch Planning protocol (see FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD)..."
+Add preconditions to these Batch Planning scenarios to route through PO/Tech Lead protocols:
+
+- **"System creates a batch from related work"** — add precondition: "Given the PO and Tech Lead have agreed on a batch through the Batch Planning protocol..."
+- **"Independent work dispatches immediately"** — add precondition: "Given the PO has approved the issue for immediate dispatch (either via Backlog Grooming or operator directive)..." The coordination engine does not dispatch work that hasn't been prioritized by the PO.
+- **"Higher-priority work arrives"** — rewrite to: "When the PO escalates new work as higher priority through the Escalation protocol, the coordination engine cancels the current batch..." The system does not independently judge priority — the PO does.
+- **"Work item gets stuck"** — add: the LLM-augmented decision point determines the response (retry, skip, re-plan) and routes impediments through the Escalation protocol to PO or Tech Lead as appropriate.
 
 Add the LLM-Augmented Decision Points section (see Section 5 above).
 
-Everything else in FUNC-AC-COORDINATION stays as-is.
+All other scenarios in FUNC-AC-COORDINATION stay as-is.
 
 ### 8. Self-improvement loop (FUNC-AC-LEARNING connection)
 
@@ -291,7 +298,7 @@ The Retrospective protocol (Protocol 6) generates lessons learned, but the desig
 **Retrospective → Learning pipeline:**
 
 1. Retrospective produces lessons learned (structured: what failed, root cause, what to do differently)
-2. Tech Lead distills technical lessons into gotchas; PO records business-level lessons (e.g., "this type of spec advancement consistently gets rejected — adjust proposal criteria"). Both deposit into GotchaStore.
+2. Tech Lead distills technical lessons into gotchas (artifact-scoped, as per FUNC-AC-LEARNING). PO records business-level lessons (e.g., "this type of spec advancement consistently gets rejected — adjust proposal criteria") as a distinct record type. The knowledge layer must support multiple record types — technical gotchas, business observations, QA verdicts, and review findings — each with its own schema and consumer set. The current GotchaStore handles technical gotchas; business observations and proposal history require either an extended schema or a separate store. This distinction is an L2 architecture decision.
 3. GotchaStore deduplicates (Jaccard similarity) and stores with severity + affected area
 4. Future sessions receive relevant gotchas via injection at session start (already implemented)
 5. Recurring gotchas (same root cause exceeding a configurable threshold, default: 3) trigger a Tech Lead proposal for systemic fix
@@ -430,8 +437,9 @@ For downstream spec authors:
 - Signal aggregation services (how each agent gathers its inputs)
 - LLM-augmented decision point integration (how lightweight inference calls fit into the tick loop)
 - QA vs. proactive review routing (how the pipeline dispatches to assigned QA vs. scheduled proactive review)
-- Memory interaction layer (how agents read/write GotchaStore)
-- Metric collection and aggregation architecture
+- Knowledge layer record types: technical gotchas, business observations, QA verdicts, review findings — separate schemas or extended GotchaStore (see Section 8 note)
+- Memory interaction layer (how agents read/write across record types)
+- Metric collection and aggregation architecture — includes ground-truth mechanisms for adjudication metrics (stuck detection accuracy requires operator override records; false rejection rate requires re-review outcomes; false positive rate requires finding dismissal tracking)
 
 **L3 (stack-specific) concerns:**
 - Concrete prompt templates for PO and Tech Lead analysis sessions
@@ -450,7 +458,7 @@ For downstream spec authors:
 4. Narrow FUNC-AC-COORDINATION (remove Product Ownership section, add references, add LLM-augmented decision points)
 5. Clarify FUNC-AC-QUALITY (add QA vs. proactive review distinction)
 6. Connect FUNC-AC-LEARNING (add retrospective → gotcha pipeline scenarios)
-7. Update traceability.yml
+7. Update traceability.yml (add FUNC-AC-PRODUCT-OWNER and FUNC-AC-TECH-LEAD to L0-AC-VISION's children list)
 8. Define metric collection approach (may be part of L2/L3 for each spec, or a cross-cutting concern)
 9. Feature pipeline picks up new/updated specs for L2/L3 generation → implementation
 
