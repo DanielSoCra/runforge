@@ -101,7 +101,7 @@ The Tech Lead Agent's functionality is exposed through operations on the Coordin
 
 **Relationship to ARCH-AC-KNOWLEDGE:** The Tech Lead consumes and produces KnowledgeRecords through the Knowledge Service's existing APIs. No changes to the Knowledge Service are required — the record types (`review_finding`, `technical_pitfall`) and consumer sets (technical leadership sessions) are already defined in ARCH-AC-KNOWLEDGE.
 
-**Relationship to ARCH-AC-SESSION-RUNTIME:** Tech Lead sessions are spawned through Session Runtime like all other agent types. A new AgentDefinition is registered for the `tech_lead` session type with appropriate model tier, timeout, budget cap, and containment rules.
+**Relationship to ARCH-AC-SESSION-RUNTIME:** Tech Lead sessions are spawned through Session Runtime like all other agent types. A new AgentConfig is registered for the `tech_lead` session type with appropriate model tier, timeout, budget cap, and containment rules. The containment rules include `.specify/` as a prohibited path pattern, structurally preventing the Tech Lead from modifying specs (see Operational Constraints).
 
 ## Event Flows
 
@@ -159,8 +159,27 @@ The Tech Lead Agent's functionality is exposed through operations on the Coordin
 - **Backlog Grooming:** PO brings current backlog + new signals → Tech Lead brings updated technical landscape → output: re-prioritized backlog.
 - **Escalation (Tech Lead):** Tech Lead raises blocker with options → PO evaluates → decision.
 - **Escalation (PO):** PO raises priority shift → Tech Lead evaluates capacity impact → joint decision.
-- **Status Sync:** Tech Lead reports active work, stuck items, completions → PO reports priority changes, ideas, proposal outcomes → output: shared state update, may trigger other protocols.
+- **Status Sync:** Tech Lead reports active work, stuck items, completions → PO reports priority changes, ideas, proposal outcomes → output: shared state update. Status Sync output may trigger composition chains (see below).
 - **Retrospective:** PO brings delivery expectations vs actuals → Tech Lead brings failure analysis, patterns, utilization, finding trends → output: lessons learned. Tech Lead distills technical lessons into pitfalls for the Knowledge Service. PO records business observations. Actionable items become proposals.
+
+**Protocol composition chains:**
+
+The ProtocolExecutor supports ordered chain definitions — sequences of protocols triggered by a preceding protocol's outcome. Chains are executed sequentially: each protocol in the chain completes before the next begins, with the prior protocol's outcome included in the next protocol's context.
+
+- **Batch completion chain:** When a Status Sync detects that a batch has completed (all work items in the batch are in a terminal state), the ProtocolExecutor triggers the following chain in order:
+  1. Retrospective (analyzes the completed batch)
+  2. Backlog Grooming (re-prioritizes remaining work with retrospective lessons as context)
+  3. Batch Planning (defines the next batch with groomed backlog as input)
+
+  If any protocol in the chain fails (agent timeout, session failure), the chain halts at the failed step. The partial result is recorded in the ProtocolExchange, and the remaining chain steps are logged as skipped. The operator is notified so they can decide whether to retry.
+
+- **Failure chain:** When a Status Sync detects a stuck work item or repeated failure pattern, the ProtocolExecutor triggers:
+  1. Escalation (Tech Lead raises the failure with options to the PO)
+  2. If the Escalation outcome includes a scope change or priority shift: Batch Planning (re-plans the current batch with the escalation decision as context)
+
+  The second step is conditional — the Escalation outcome includes a flag indicating whether re-planning is needed.
+
+Chain definitions are registered in the ProtocolExecutor's configuration alongside the protocol-specific sequences. Each chain specifies: a trigger condition (evaluated against the preceding protocol's structured outcome), the ordered list of protocol types, and whether each subsequent step is conditional on the prior step's outcome.
 
 **Retrospective-to-knowledge flow:**
 
@@ -192,6 +211,20 @@ The Tech Lead Agent's functionality is exposed through operations on the Coordin
    - **Dependency risk response time:** timestamp delta between a security advisory appearing in the dependency audit and a TechnicalProposal for the affected packages.
 2. Metrics are stored as time-series data points and surfaced on the dashboard.
 3. Retrospective protocol sessions receive recent metrics as context input.
+
+## Operational Constraints
+
+The Tech Lead Agent operates under the following hard boundaries, derived from L1 constraints:
+
+1. **Never proposes features or business priorities.** The Tech Lead generates only technical proposals (debt reduction, quality improvement, architecture concerns, dependency updates, failure investigation). Business-level decisions are PO territory. The Coordination Engine validates that TechnicalProposal types are within the allowed set before storing them.
+
+2. **Never modifies specs directly.** The Tech Lead's AgentConfig in Session Runtime includes `.specify/` in its containment rules (prohibited path patterns). This is a structural guarantee enforced by Session Runtime's six-layer containment: the workspace excludes spec paths, path blocking prevents writes to spec directories, and post-session audit flags any attempt to modify spec files as a containment breach. The Tech Lead may only _read_ specs (via the traceability map and signal digest) and _propose changes_ via TechnicalProposals that flow through PO and operator approval.
+
+3. **Operates at L2-L3 level — no business-level decisions.** The Tech Lead analyzes technical signals and produces technical recommendations. It does not assess business value, customer impact, or feature priority. When enriching PO proposals, it provides effort, risk, and dependency analysis — never priority recommendations.
+
+4. **Technical proposals always flow through PO for priority assessment before reaching operator.** No TechnicalProposal may transition to `pending_operator` without a PO verdict. The Coordination Engine enforces this by requiring `submit_po_verdict_on_technical_proposal` before any proposal reaches operator-visible status.
+
+5. **Configurable defaults.** The following operational parameters are configurable via GlobalSettings (ARCH-AC-COORDINATION): analysis schedule (`tech_lead_interval`, default 7200 seconds), proposal expiry (`tech_lead_proposal_expiry`, default 7 days), recurring finding threshold (`recurring_finding_threshold`, default 3), drift scan paths (`drift_scan_paths`), and event debounce window (default 5 minutes).
 
 ## Error Handling
 
