@@ -135,6 +135,80 @@ supabase db push
 4. Run state (status, cost, logs) syncs to Supabase in real time.
 5. The dashboard displays active runs, repo status, and operator controls.
 
+## Daemon Mode
+
+The daemon control plane (`auto-claude start`) replaces the legacy shell scripts (`scripts/pipeline.sh`, `scripts/developer.sh`, `scripts/reviewer.sh`). A single process now handles all work detection modes:
+
+| Legacy script | Daemon equivalent |
+|---------------|-------------------|
+| `scripts/pipeline.sh` | Built-in feature pipeline variant (detect → classify → implement → review → deploy) |
+| `scripts/developer.sh` | Built-in bug-fix variant (detect → implement → review → deploy) |
+| `scripts/reviewer.sh` | Built-in codebase review variant (periodic review cycle) |
+
+### Starting the daemon
+
+```bash
+# Via pnpm (development)
+cd packages/daemon && pnpm start
+
+# Via CLI directly
+npx tsx packages/daemon/src/main.ts start
+
+# With custom config
+auto-claude start -c /path/to/auto-claude.config.json
+```
+
+### Process supervision (macOS)
+
+On macOS, use a single launchd plist to keep the daemon running:
+
+```xml
+<!-- ~/Library/LaunchAgents/com.auto-claude.daemon.plist -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.auto-claude.daemon</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/path/to/pnpm</string>
+    <string>start</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/path/to/auto-claude/packages/daemon</string>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/auto-claude-daemon.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/auto-claude-daemon.err</string>
+</dict>
+</plist>
+```
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.auto-claude.daemon.plist
+```
+
+### Operator commands
+
+The daemon exposes a control API on `localhost:3847`:
+
+```bash
+auto-claude status          # Show active runs, daily cost, uptime
+auto-claude pause           # Stop claiming new work (active runs finish)
+auto-claude resume          # Resume claiming work
+auto-claude retry <issue>   # Re-run a stuck issue from the beginning
+auto-claude health          # Health check (for process supervisors)
+```
+
+### Work detection modes
+
+The daemon polls the configured GitHub repo for issues and selects a pipeline variant based on labels and content:
+
+- **Feature pipeline** — issues labelled `feature-pipeline` + `ready-to-implement`. Full pipeline: detect, classify, decompose, implement, review, holdout, integrate, deploy, test, report.
+- **Bug fix** — issues labelled as bugs. Streamlined: detect, implement, review, integrate, deploy, test, report.
+- **Codebase review** — periodic review cycles triggered by configuration. Discovers issues and creates findings.
+
 ## Stopping
 
 ```bash
