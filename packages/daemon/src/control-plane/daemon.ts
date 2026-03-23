@@ -298,7 +298,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           claimedIssues.add(request.issueNumber);
           activeRuns++;
           repoManager!.notifyRunStart(repoId);
-          processWorkRequest(config, repoId, owner, name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot, knowledgeStore)
+          processWorkRequest(config, repoId, owner, name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot, knowledgeStore, repoManager)
             .then((outcome) => handleRunOutcome(outcome, request.issueNumber))
             .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
             // CRITICAL: notifyRunEnd must be in .finally(), never only in .catch() or .then().
@@ -320,7 +320,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
             claimedIssues.add(bugRequest.issueNumber);
             activeRuns++;
             repoManager!.notifyRunStart(repoId);
-            processWorkRequest(config, repoId, owner, name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot, knowledgeStore)
+            processWorkRequest(config, repoId, owner, name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot, knowledgeStore, repoManager)
               .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber))
               .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
               .finally(() => {
@@ -340,7 +340,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           if (fpClaimResult.ok) {
             activeRuns++;
             repoManager!.notifyRunStart(repoId);
-            processWorkRequest(config, repoId, owner, name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot, knowledgeStore)
+            processWorkRequest(config, repoId, owner, name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot, knowledgeStore, repoManager)
               .then((outcome) => handleRunOutcome(outcome, fpRequest.issueNumber))
               .catch((e) => console.error(`Run failed for #${fpRequest.issueNumber}:`, e))
               .finally(() => {
@@ -439,7 +439,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       repoManager.notifyRunStart(resumeRepoId);
     }
 
-    const notifyOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+    const resumeToken = repoManager && resumeRepoId
+      ? await repoManager.resolveTokenForRepo(resumeRepoId)
+      : process.env.GITHUB_TOKEN;
+    const notifyOctokit = new Octokit({ auth: resumeToken });
     const agencyConfig = await readAgencyConfig(null, '');
     const resumedRequest: WorkRequest = {
       issueNumber: run.issueNumber,
@@ -453,7 +456,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       : createPhaseHandlers(config, runOwner, runRepoName, runtime, coordinator, notifyOctokit, resumedRequest, stateDir, runWriter ?? undefined, run.id, repoRoot, configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins, knowledgeStore);
     const table = getPipeline(run.variant);
 
-    const resumeDetector = legacyDetector ?? createWorkDetector(new Octokit({ auth: process.env.GITHUB_TOKEN }), runOwner, runRepoName);
+    const resumeDetector = legacyDetector ?? createWorkDetector(new Octokit({ auth: resumeToken }), runOwner, runRepoName);
     runPipeline(run, table, handlers, stateMgr, costTracker, undefined, runWriter ?? undefined)
       .then(async (result) => {
         console.log(`[daemon] Resumed run #${run.issueNumber} finished: ${result.outcome}`);
@@ -587,6 +590,7 @@ async function processWorkRequest(
   configReader?: SupabaseConfigReader,
   repoRoot?: string,
   knowledgeStore?: KnowledgeStore,
+  repoManager?: RepoManager | null,
 ): Promise<string> {
   const repoConfig = configReader?.getRepoConfig(owner, repoName);
   const variant = selectVariant(request);
@@ -625,8 +629,9 @@ async function processWorkRequest(
     active_plugins: repoConfig?.activePlugins.map(p => p.id) ?? [],
   });
 
-  // Build a notifyOctokit from env for phase handlers
-  const notifyOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+  // Build a notifyOctokit using per-connection token when available
+  const resolvedToken = repoManager ? await repoManager.resolveTokenForRepo(repoId) : process.env.GITHUB_TOKEN;
+  const notifyOctokit = new Octokit({ auth: resolvedToken });
   const agencyConfig = await readAgencyConfig(null, '');
   const handlers = variant === 'website'
     ? createWebsitePhaseHandlers(

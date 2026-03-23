@@ -293,6 +293,50 @@ describe('RepoManager', () => {
     }
   });
 
+  it('resolveTokenForRepo returns per-connection token for DB repos (#359)', async () => {
+    const onPoll = vi.fn();
+    const originalEnv = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = 'global-fallback';
+
+    try {
+      const supabase = {
+        from: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          is: vi.fn().mockResolvedValue({
+            data: [
+              { id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: 'conn-abc' },
+              { id: 'r2', owner: 'acme', name: 'api', poll_interval_ms: null, connection_id: null },
+            ],
+            error: null,
+          }),
+        }),
+        rpc: vi.fn().mockResolvedValue({ data: 'decrypted-oauth-token', error: null }),
+      } as any;
+
+      const mgr = new RepoManager(supabase, 60_000, onPoll);
+      await mgr.initialize();
+
+      // Repo with connection_id should resolve per-connection token
+      const token1 = await mgr.resolveTokenForRepo('r1');
+      expect(token1).toBe('decrypted-oauth-token');
+      expect(supabase.rpc).toHaveBeenCalledWith('decrypt_github_token', { p_connection_id: 'conn-abc' });
+
+      // Repo without connection_id should fall back to GITHUB_TOKEN
+      supabase.rpc.mockClear();
+      const token2 = await mgr.resolveTokenForRepo('r2');
+      expect(token2).toBe('global-fallback');
+
+      // Unknown repo should fall back to GITHUB_TOKEN
+      const token3 = await mgr.resolveTokenForRepo('nonexistent');
+      expect(token3).toBe('global-fallback');
+
+      mgr.stop();
+    } finally {
+      process.env.GITHUB_TOKEN = originalEnv;
+    }
+  });
+
   it('upsertRepo inserts a repo and returns its id', async () => {
     const onPoll = vi.fn();
     const supabase = {
