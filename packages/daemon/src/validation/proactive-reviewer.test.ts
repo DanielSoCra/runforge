@@ -75,6 +75,24 @@ describe('runProactiveReview', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('passes rubric containing all scanning areas to spawnSession', async () => {
+    const runtime = makeRuntime({ findings: [] });
+    await runProactiveReview(runtime, {
+      area: 'src/lib',
+      cwd: '/workspace',
+      recentCommits: '',
+      issueNumber: 0,
+    });
+
+    const call = vi.mocked(runtime.spawnSession).mock.calls[0]!;
+    const variables = (call[1] as { variables: Record<string, string> }).variables;
+    expect(variables.rubric).toContain('Spec-code drift');
+    expect(variables.rubric).toContain('Dead code');
+    expect(variables.rubric).toContain('Security regression');
+    expect(variables.rubric).toContain('Convention violations');
+    expect(variables.rubric).toContain('Test coverage gaps');
+  });
+
   it('passes area and recentCommits as session variables', async () => {
     const runtime = makeRuntime({ findings: [] });
     await runProactiveReview(runtime, {
@@ -90,6 +108,7 @@ describe('runProactiveReview', () => {
         variables: expect.objectContaining({
           area: 'src/validation',
           recentCommits: 'abc fix\ndef refactor',
+          rubric: expect.stringContaining('Exploratory codebase review'),
         }),
         workspacePath: '/workspace',
       }),
