@@ -32,6 +32,7 @@ export interface Coordinator {
 export function createCoordinator(deps: CoordinatorDeps, config: CoordinatorConfig): Coordinator {
   function start(): () => void {
     let stopped = false;
+    let tickInProgress = false;
     let tickTimer: ReturnType<typeof setInterval> | null = null;
 
     // Start Merge Agent
@@ -45,46 +46,51 @@ export function createCoordinator(deps: CoordinatorDeps, config: CoordinatorConf
 
     async function tick(): Promise<void> {
       if (stopped || deps.isPaused()) return;
+      if (tickInProgress) return;
+      tickInProgress = true;
+      try {
+        const diskSpaceOk = await deps.checkDiskSpace();
+        const activeClaims = await deps.workClaimer.listActive();
+        const activeClaimRepoKeys = await deps.getActiveClaimRepoKeys();
+        const dispatchQueue = await deps.getDispatchQueue();
+        const activeBatch = await deps.batchManager.getActive();
 
-      const diskSpaceOk = await deps.checkDiskSpace();
-      const activeClaims = await deps.workClaimer.listActive();
-      const activeClaimRepoKeys = await deps.getActiveClaimRepoKeys();
-      const dispatchQueue = await deps.getDispatchQueue();
-      const activeBatch = await deps.batchManager.getActive();
+        const ctx: EvalContext = {
+          activeClaims,
+          activeClaimRepoKeys,
+          dispatchQueue,
+          activeBatch,
+          maxAgents: config.maxAgents,
+          perRepoLimits: config.perRepoLimits,
+          diskSpaceOk,
+        };
 
-      const ctx: EvalContext = {
-        activeClaims,
-        activeClaimRepoKeys,
-        dispatchQueue,
-        activeBatch,
-        maxAgents: config.maxAgents,
-        perRepoLimits: config.perRepoLimits,
-        diskSpaceOk,
-      };
+        const decisions = evaluatePool(ctx);
 
-      const decisions = evaluatePool(ctx);
+        // Execute spawn decisions
+        for (const decision of decisions) {
+          if (decision.issueNumber === 0) {
+            // Minimum-fill spawn (po, reviewer) — no claim needed
+            await deps.spawnWorker(
+              { id: '', issueNumber: 0, attempt: 0, batchItemId: null, sessionId: null, worktreePath: null, prNumber: null, agentType: decision.agentType, status: 'claimed', failureReason: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } satisfies WorkerClaim,
+              decision,
+            );
+            continue;
+          }
 
-      // Execute spawn decisions
-      for (const decision of decisions) {
-        if (decision.issueNumber === 0) {
-          // Minimum-fill spawn (po, reviewer) — no claim needed
-          await deps.spawnWorker(
-            { id: '', issueNumber: 0, attempt: 0, batchItemId: null, sessionId: null, worktreePath: null, prNumber: null, agentType: decision.agentType, status: 'claimed', failureReason: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } satisfies WorkerClaim,
-            decision,
+          // Claim the issue before spawning
+          const claimResult = await deps.workClaimer.claim(
+            decision.issueNumber,
+            decision.agentType,
+            decision.batchItemId ?? undefined,
           );
-          continue;
+
+          if (!claimResult.ok) continue; // Already claimed or error — skip
+
+          await deps.spawnWorker(claimResult.value, decision);
         }
-
-        // Claim the issue before spawning
-        const claimResult = await deps.workClaimer.claim(
-          decision.issueNumber,
-          decision.agentType,
-          decision.batchItemId ?? undefined,
-        );
-
-        if (!claimResult.ok) continue; // Already claimed or error — skip
-
-        await deps.spawnWorker(claimResult.value, decision);
+      } finally {
+        tickInProgress = false;
       }
     }
 

@@ -311,4 +311,64 @@ describe('Coordinator', () => {
     expect(deps.spawnWorker).toHaveBeenCalled();
     stop();
   });
+
+  it('does not overlap ticks — re-entrancy guard prevents concurrent tick execution', async () => {
+    // Simulate a slow tick: checkDiskSpace takes longer than the tick interval
+    let diskCheckResolve: (() => void) | undefined;
+    const slowDiskCheck = vi.fn().mockImplementation(
+      () => new Promise<boolean>((resolve) => {
+        diskCheckResolve = () => resolve(true);
+      }),
+    );
+    const deps = makeDeps({
+      checkDiskSpace: slowDiskCheck,
+      getDispatchQueue: vi.fn().mockResolvedValue([{ issueNumber: 42 }]),
+    });
+    const config = makeConfig({ tickIntervalMs: 100 });
+    const coordinator = createCoordinator(deps, config);
+    const stop = coordinator.start();
+
+    // First tick fires at 100ms — starts but blocks on disk check
+    await vi.advanceTimersByTimeAsync(100);
+    expect(slowDiskCheck).toHaveBeenCalledTimes(1);
+
+    // Second tick fires at 200ms — should be skipped because first is still in progress
+    await vi.advanceTimersByTimeAsync(100);
+    expect(slowDiskCheck).toHaveBeenCalledTimes(1); // NOT 2
+
+    // Complete the first tick
+    diskCheckResolve!();
+    await vi.advanceTimersByTimeAsync(0); // flush microtasks
+
+    // Third tick fires at 300ms — should run normally since first completed
+    await vi.advanceTimersByTimeAsync(100);
+    expect(slowDiskCheck).toHaveBeenCalledTimes(2);
+
+    stop();
+  });
+
+  it('resets re-entrancy guard even if tick throws', async () => {
+    let callCount = 0;
+    const deps = makeDeps({
+      checkDiskSpace: vi.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) return Promise.reject(new Error('disk error'));
+        return Promise.resolve(true);
+      }),
+      getDispatchQueue: vi.fn().mockResolvedValue([{ issueNumber: 42 }]),
+    });
+    const config = makeConfig({ tickIntervalMs: 100 });
+    const coordinator = createCoordinator(deps, config);
+    const stop = coordinator.start();
+
+    // First tick fires and throws
+    await vi.advanceTimersByTimeAsync(100);
+    expect(callCount).toBe(1);
+
+    // Second tick should still run (guard was reset in finally block)
+    await vi.advanceTimersByTimeAsync(100);
+    expect(callCount).toBe(2);
+
+    stop();
+  });
 });
