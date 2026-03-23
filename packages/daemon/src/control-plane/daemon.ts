@@ -111,7 +111,19 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
 
   /** Shared handler for run outcomes — tracks stuck count and auto-pause. */
   const handleRunOutcome = (outcome: string, issueNumber: number) => {
-    if (outcome === 'stuck') {
+    if (outcome === 'paused') {
+      if (!paused) {
+        paused = true;
+        console.warn(`[daemon] Auto-paused: daily budget exceeded (issue #${issueNumber})`);
+        void notify(config.webhooks, {
+          event: 'auto-paused',
+          issueNumber,
+          phase: 'paused',
+          message: 'Daemon auto-paused: daily budget exceeded',
+        });
+      }
+      consecutiveStuckCount = 0;
+    } else if (outcome === 'stuck') {
       consecutiveStuckCount++;
       console.log(`[daemon] Consecutive stuck count: ${consecutiveStuckCount}/${config.maxConsecutiveStuck}`);
       if (consecutiveStuckCount >= config.maxConsecutiveStuck && !paused) {

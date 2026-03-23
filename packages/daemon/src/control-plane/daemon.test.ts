@@ -894,7 +894,7 @@ describe('daemon', () => {
       expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(0);
     });
 
-    it('resets consecutive stuck count on paused outcome (#109)', async () => {
+    it('resets stuck count and pauses daemon on paused outcome (#109, #293)', async () => {
       const config = makeConfig({ maxConsecutiveStuck: 3 });
       mockLoadConfig.mockResolvedValue(ok(config));
 
@@ -913,25 +913,50 @@ describe('daemon', () => {
       const handlers = vi.mocked(createControlServer).mock.lastCall![1];
       expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
 
-      // Second run: paused (budget/rate-limit) → should reset count
+      // Second run: paused (budget exceeded) → resets count AND pauses daemon
       mockRunPipeline.mockResolvedValueOnce({ outcome: 'paused' });
       const request2 = makeWorkRequest({ issueNumber: 2 });
       mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request2]));
 
       await vi.advanceTimersByTimeAsync(30000);
       await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
 
       expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(0);
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(true);
 
-      // Third run: stuck → count starts fresh at 1, not 2
-      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail again' });
-      const request3 = makeWorkRequest({ issueNumber: 3 });
-      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request3]));
+      // Daemon is paused — no new work will be processed, so stuck count stays 0
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(0);
+    });
+
+    it('auto-pauses daemon on budget-exceeded paused outcome (#293)', async () => {
+      const config = makeConfig({ webhooks: ['https://hooks.example.com/test'] });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      mockRunPipeline.mockResolvedValueOnce({ outcome: 'paused' });
+      const request1 = makeWorkRequest({ issueNumber: 1 });
+      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request1]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
 
       await vi.advanceTimersByTimeAsync(30000);
       await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
 
-      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(true);
+      expect(mockNotify).toHaveBeenCalledWith(
+        ['https://hooks.example.com/test'],
+        expect.objectContaining({
+          event: 'auto-paused',
+          message: expect.stringContaining('daily budget exceeded'),
+        }),
+      );
     });
 
     it('exposes consecutiveStuckCount in status endpoint', async () => {
