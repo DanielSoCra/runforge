@@ -3,7 +3,7 @@ id: L0-AC-VISION
 type: vision
 domain: auto-claude
 status: draft
-version: 2
+version: 3
 layer: 0
 ---
 
@@ -20,7 +20,10 @@ layer: 0
 - **Containment** — isolated environments, structural access controls, cost circuit breakers, credential isolation from intelligent sessions
 - **Quality gates** — independent heterogeneous review (not self-certification), holdout validation with scenarios the agent never sees, static analysis enforcement
 - **Learning** — captures pitfalls, injects them into future sessions, promotes recurring patterns to permanent documentation, proposes instruction improvements — all with Operator approval
-- **Product co-ownership** — analyzes the codebase and system health to propose features and improvements, always requiring Operator approval before any work begins
+- **Product co-ownership** (evolutionary) —
+  - **Phase 1 (Medium PO):** Synthesizes existing signals — spec pipeline gaps, delivery health, backlog staleness, operator ideas — to propose the next most valuable work. Reactive intelligence: sees what exists and what is stuck.
+  - **Phase 2 (Wide PO):** Develops domain understanding by reading L0 vision, project history, and operator patterns over time. Proactive intelligence: identifies strategic gaps, proposes new capabilities aligned with project vision, anticipates roadmap direction. Requires elevated operator trust, gated by demonstrated proposal quality.
+  - Both phases require Operator approval before any work begins.
 
 **What the model provides:** Reasoning within the boundaries the harness sets — decomposition, implementation, code review, conflict resolution, bug diagnosis.
 
