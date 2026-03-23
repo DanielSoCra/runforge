@@ -81,6 +81,26 @@ describe('inferWorkType', () => {
   it('review-finding takes priority over feature-pipeline', () => {
     expect(inferWorkType(['review-finding', 'feature-pipeline', 'ready-to-implement'])).toBe('bug-fix');
   });
+
+  it('prefers ready-to-implement over l2-approved when both labels present', () => {
+    expect(inferWorkType(['feature-pipeline', 'ready-to-implement', 'l2-approved'])).toBe('implementation');
+  });
+
+  it('prefers ready-to-implement over l1-approved when both labels present', () => {
+    expect(inferWorkType(['feature-pipeline', 'ready-to-implement', 'l1-approved'])).toBe('implementation');
+  });
+
+  it('prefers l2-approved over l1-approved when both labels present', () => {
+    expect(inferWorkType(['feature-pipeline', 'l2-approved', 'l1-approved'])).toBe('l3-generate');
+  });
+
+  it('prefers l2-approved over l2-in-progress when both labels present', () => {
+    expect(inferWorkType(['feature-pipeline', 'l2-approved', 'l2-in-progress'])).toBe('l3-generate');
+  });
+
+  it('returns highest priority tier when all tier labels present', () => {
+    expect(inferWorkType(['feature-pipeline', 'l1-approved', 'l2-in-progress', 'l2-approved', 'ready-to-implement'])).toBe('implementation');
+  });
 });
 
 describe('processSingleIssue', () => {
