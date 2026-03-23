@@ -294,7 +294,7 @@ describe('KnowledgeStore', () => {
       const shortPolicies = { ...DEFAULT_POLICIES };
       shortPolicies.technical_pitfall = {
         ...shortPolicies.technical_pitfall,
-        archivalMaxAgeDays: 0, // any age triggers archival
+        archivalMaxAgeDays: -1, // any age triggers archival
         archivalMinHitCount: 100, // effectively all records are "low hit"
       };
       const shortStore = new KnowledgeStore(join(dir, 'archival.jsonl'), shortPolicies);
