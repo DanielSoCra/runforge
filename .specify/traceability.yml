@@ -299,7 +299,12 @@ STACK-AC-KNOWLEDGE:
   parent: ARCH-AC-KNOWLEDGE
   children: []
   code_paths:
-    - packages/daemon/src/knowledge/gotcha-store.ts
+    - packages/daemon/src/knowledge/knowledge-store.ts
+    - packages/daemon/src/knowledge/record-types.ts
+    - packages/daemon/src/knowledge/policy-registry.ts
+    - packages/daemon/src/knowledge/candidate-queue.ts
+    - packages/daemon/src/knowledge/systemic-proposals.ts
+    - packages/daemon/src/knowledge/prospective-check.ts
     - packages/daemon/src/knowledge/extractor.ts
     - packages/daemon/src/knowledge/promotion.ts
     - packages/daemon/src/knowledge/templates.ts
@@ -307,13 +312,7 @@ STACK-AC-KNOWLEDGE:
     - packages/daemon/src/knowledge/pattern-extractor.ts
     - packages/daemon/src/knowledge/proposal-store.ts
   test_paths:
-    - packages/daemon/src/knowledge/gotcha-store.test.ts
-    - packages/daemon/src/knowledge/extractor.test.ts
-    - packages/daemon/src/knowledge/promotion.test.ts
-    - packages/daemon/src/knowledge/templates.test.ts
-    - packages/daemon/src/knowledge/exemplar-store.test.ts
-    - packages/daemon/src/knowledge/pattern-extractor.test.ts
-    - packages/daemon/src/knowledge/proposal-store.test.ts
+    - packages/daemon/src/knowledge/**/*.test.ts
   status: draft
 
 STACK-AC-DASHBOARD:
