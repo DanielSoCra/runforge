@@ -1,6 +1,6 @@
 // src/coordination/batch-manager.test.ts
-import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtemp, mkdir } from 'fs/promises';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtemp, mkdir, chmod } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createBatchManager, type BatchManager } from './batch-manager.js';
@@ -292,5 +292,49 @@ describe('batch-manager', () => {
   it('transition returns error for unknown batch', async () => {
     const result = await mgr.transition('00000000-0000-0000-0000-000000000000', 'finalize');
     expect(result.ok).toBe(false);
+  });
+
+  // Regression: #257 — saveBatches() throw must not bypass Result contract
+  describe('saveBatches failure returns err instead of throwing (#257)', () => {
+    let brokenMgr: BatchManager;
+    let brokenStateDir: string;
+
+    beforeEach(async () => {
+      brokenStateDir = await mkdtemp(join(tmpdir(), 'batch-mgr-broken-'));
+      await mkdir(join(brokenStateDir, 'coordination'), { recursive: true });
+      brokenMgr = createBatchManager(brokenStateDir);
+    });
+
+    afterEach(async () => {
+      // Restore permissions even if test assertions fail, so temp cleanup works
+      await chmod(join(brokenStateDir, 'coordination'), 0o755).catch(() => {});
+    });
+
+    it('transition returns err when saveBatches fails on disk error', async () => {
+      const batch = await brokenMgr.create([{ issueNumber: 1, dependencies: [] }], 1, 100);
+
+      // Make the coordination directory unwritable so saveBatches fails
+      await chmod(join(brokenStateDir, 'coordination'), 0o555);
+
+      const result = await brokenMgr.transition(batch.id, 'finalize');
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Failed to save batch after transition');
+      }
+    });
+
+    it('updateItemStatus returns err when saveBatches fails on disk error', async () => {
+      const batch = await brokenMgr.create([{ issueNumber: 1, dependencies: [] }], 1, 100);
+      await brokenMgr.transition(batch.id, 'finalize');
+
+      // Make the coordination directory unwritable
+      await chmod(join(brokenStateDir, 'coordination'), 0o555);
+
+      const result = await brokenMgr.updateItemStatus(batch.id, batch.items[0]!.id, 'in_progress');
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Failed to save batch after item status update');
+      }
+    });
   });
 });

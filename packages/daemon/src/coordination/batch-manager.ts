@@ -98,7 +98,11 @@ export function createBatchManager(stateDir: string): BatchManager {
         batch.completedAt = now;
       }
 
-      await saveBatches(batches);
+      try {
+        await saveBatches(batches);
+      } catch (e) {
+        return err(new Error(`Failed to save batch after transition: ${e instanceof Error ? e.message : String(e)}`));
+      }
       return ok(batch);
     },
 
@@ -143,7 +147,11 @@ export function createBatchManager(stateDir: string): BatchManager {
       }
 
       item.status = status;
-      await saveBatches(batches);
+      try {
+        await saveBatches(batches);
+      } catch (e) {
+        return err(new Error(`Failed to save batch after item status update: ${e instanceof Error ? e.message : String(e)}`));
+      }
       return ok(undefined);
     },
 
