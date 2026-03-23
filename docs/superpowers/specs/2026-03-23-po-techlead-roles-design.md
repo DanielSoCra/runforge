@@ -2,12 +2,15 @@
 
 **Date:** 2026-03-23
 **Status:** Draft
-**Scope:** L1 spec changes to define Product Owner and Tech Lead agents, update L0 vision for Wide PO north star, narrow FUNC-AC-COORDINATION
+**Scope:** L1 spec changes to define Product Owner and Tech Lead agents, update L0 vision for Wide PO north star, narrow FUNC-AC-COORDINATION, clarify QA vs. proactive review distinction, add LLM-augmented coordination, connect self-improvement and metrics
 
 ## Definitions
 
 - **Medium PO** — Phase 1 of the Product Owner capability. Synthesizes existing signals (spec pipeline gaps, delivery health, backlog staleness, operator ideas) to propose the next most valuable work. Reactive intelligence: sees what exists and what is stuck.
 - **Wide PO** — Phase 2 (future). Develops domain understanding from L0 vision and project history to proactively identify strategic gaps. Captured in L0 as a north star, not an implementation target.
+- **QA Agent** — Assigned reviewer. Gets specific work products (PRs, implementations) assigned by the pipeline. Produces pass/fail verdicts with feedback. Pipeline gate — work does not merge without QA sign-off.
+- **Proactive Review Agent** — Self-directed explorer. Scans the codebase on a schedule, finds issues on its own. Produces findings (GitHub issues labeled `review-finding`). Feeds the Tech Lead's signal analysis.
+- **LLM-augmented coordination** — The coordination engine (FUNC-AC-COORDINATION) is a deterministic state machine augmented with lightweight LLM inference calls at specific decision junctures. Not a full agent session — targeted, narrow-context calls for routing decisions.
 
 ## Problem
 
@@ -180,7 +183,62 @@ Protocols chain naturally:
 - Status Sync detects stuck item → Escalation (Tech Lead → PO) → may trigger re-Batch Planning
 - Operator submits idea → PO refines → Proposal Enrichment (PO ↔ Tech Lead) → operator approves → Backlog Grooming → Batch Planning
 
-### 4. L0-AC-VISION update: Wide PO north star
+### 4. QA Agent vs. Proactive Review Agent (FUNC-AC-QUALITY clarification)
+
+FUNC-AC-QUALITY currently covers review gates but does not distinguish between two fundamentally different review modes that share the same skillset (code review, security analysis, quality checks) but differ in purpose and trigger:
+
+| | QA Agent (assigned) | Proactive Review Agent (self-directed) |
+|---|---|---|
+| **Trigger** | Pipeline assigns a specific work product | Scheduled cycle (default: 20 minutes, throttled by signal ratio) |
+| **Scope** | Targeted — reviews one PR/implementation | Exploratory — scans broadly across codebase areas |
+| **Starting point** | Receives work from the pipeline gate | Finds its own work |
+| **Output** | Pass/fail verdict + structured feedback on specific work | Findings → GitHub issues labeled `review-finding` |
+| **Feeds into** | Pipeline progression (FUNC-AC-PIPELINE) — work does not merge without sign-off | Tech Lead's signal analysis → proposals |
+| **Already exists as** | Review phases in FUNC-AC-QUALITY | ReviewScheduler in the daemon |
+
+**Changes to FUNC-AC-QUALITY:** Add scenarios that explicitly distinguish the two modes:
+
+**Scenario: Assigned QA review**
+- Given a work item has completed implementation
+- When the pipeline submits it for quality review
+- Then the QA agent reviews the specific implementation against its spec, acceptance criteria, and quality standards
+- And produces a pass/fail verdict with structured feedback
+
+**Scenario: Proactive codebase review**
+- Given the proactive review agent's scheduled cycle triggers
+- When it scans a codebase area
+- Then it identifies issues (bugs, spec drift, security concerns, quality regression) independently of any active work item
+- And records findings as GitHub issues that feed the Tech Lead's signal analysis
+
+**Connection to Tech Lead:** The proactive review agent is the Tech Lead's eyes. It generates the `review-finding` issues that appear in the Tech Lead's signal sources. The Tech Lead synthesizes these findings into proposals — the proactive reviewer does not propose remediation itself.
+
+**Connection to pipeline:** The QA agent is a pipeline gate. FUNC-AC-PIPELINE's review phase dispatches to the QA agent. The QA agent's verdict determines whether work progresses to integration or returns to the developer for revision.
+
+### 5. LLM-augmented coordination engine (FUNC-AC-COORDINATION addition)
+
+The coordination engine is a deterministic state machine — it manages ticks, state transitions, deadlock detection, and cadence enforcement. But certain decision points within the state machine benefit from lightweight LLM judgment rather than rigid rules.
+
+**Decision points that use LLM inference:**
+
+| Decision point | Without LLM | With LLM |
+|---|---|---|
+| Stuck detection | Timer-based: "2 days with no progress = stuck" | Reads work item context and recent activity: "Is it stuck, or just complex?" |
+| Retry vs. skip vs. re-plan | Rule-based: "retry once, then skip" | Reads failure reason: "Will a retry help, or is this a fundamental blocker?" |
+| Impediment routing | Label-based: route by category | Classifies impediment: "Spec ambiguity → PO, technical blocker → Tech Lead, resource constraint → operator" |
+| Batch rebalancing | Static: run batch to completion | Judges whether to pull in more work or let the batch finish based on current velocity |
+
+**What this is NOT:**
+- Not a full agent session — no long-running analysis, no proposal generation
+- Not a new agent role — the coordination engine remains a state machine
+- Not expensive — lightweight inference calls with narrow context (current state + immediate decision context)
+
+**Changes to FUNC-AC-COORDINATION:** Add a section:
+
+> ### LLM-Augmented Decision Points
+>
+> The coordination engine uses lightweight LLM inference at specific decision junctures where deterministic rules are insufficient. These calls receive narrow context (current work item state, recent activity, failure reason) and return a single routing decision. They do not generate proposals, modify specs, or initiate protocols — they inform the state machine's next transition.
+
+### 6. L0-AC-VISION update: Wide PO north star
 
 Modify the "Product co-ownership" bullet in the "What the harness provides" section. Current text:
 
@@ -199,7 +257,7 @@ Replace with:
 - Never overrides Tech Lead on technical feasibility
 - Proposals gain strategic rationale and vision alignment, but the approval flow stays identical
 
-### 5. FUNC-AC-COORDINATION changes
+### 7. FUNC-AC-COORDINATION changes
 
 Remove these five scenarios from the Product Ownership section:
 1. "Scenario: System proposes a feature"
@@ -216,15 +274,130 @@ Replace the entire Product Ownership section with:
 
 Add a precondition to the Batch Planning scenarios: "Given the PO and Tech Lead have agreed on a batch through the Batch Planning protocol (see FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD)..."
 
+Add the LLM-Augmented Decision Points section (see Section 5 above).
+
 Everything else in FUNC-AC-COORDINATION stays as-is.
 
-### 6. Traceability updates
+### 8. Self-improvement loop (FUNC-AC-LEARNING connection)
+
+The Retrospective protocol (Protocol 6) generates lessons learned, but the design must explicitly connect those lessons to the institutional learning system (FUNC-AC-LEARNING) to close the feedback loop.
+
+**Retrospective → Learning pipeline:**
+
+1. Retrospective produces lessons learned (structured: what failed, root cause, what to do differently)
+2. Tech Lead distills lessons into gotchas and deposits them into GotchaStore
+3. GotchaStore deduplicates (Jaccard similarity) and stores with severity + affected area
+4. Future sessions receive relevant gotchas via injection at session start (already implemented)
+5. Recurring gotchas (same root cause appearing 3+ times) trigger a Tech Lead proposal for systemic fix
+
+**Prospective checks at Batch Planning:**
+
+Before committing to a batch, the coordination engine checks whether similar work has failed before:
+- Query GotchaStore for gotchas related to the planned work areas
+- If high-severity gotchas exist for a planned item, flag it during the Batch Planning protocol
+- Tech Lead factors historical failures into effort estimates and risk assessments
+
+**Changes to FUNC-AC-LEARNING:** Add scenarios:
+
+**Scenario: Retrospective feeds institutional knowledge**
+- Given the Retrospective protocol produces lessons learned
+- When the Tech Lead distills a lesson into a gotcha
+- Then the gotcha enters GotchaStore and becomes available for injection into future sessions
+
+**Scenario: Recurring gotcha triggers systemic proposal**
+- Given the same root cause appears in 3 or more gotchas
+- When the Tech Lead detects the pattern
+- Then it generates a technical debt proposal to address the root cause
+
+### 9. Agentic metrics
+
+Each role tracks metrics that measure its effectiveness. These metrics inform the Retrospective protocol and help the operator assess system health.
+
+**PO metrics:**
+
+| Metric | Definition | What it reveals |
+|---|---|---|
+| Proposal acceptance rate | Approved proposals / total proposals | Whether the PO proposes relevant work |
+| Backlog throughput | Items proposed → approved → completed per cycle | Pipeline velocity from idea to delivery |
+| Stale item detection latency | Time between item becoming stale and PO flagging it | How quickly the PO notices aging work |
+| Spec pipeline coverage | Percentage of L1 specs with complete L2+L3 chain | Whether the PO is advancing the full pipeline |
+
+**Tech Lead metrics:**
+
+| Metric | Definition | What it reveals |
+|---|---|---|
+| Finding-to-fix rate | Findings that result in completed fixes / total findings | Whether findings translate to action |
+| Spec-code drift reduction | Drift items resolved per cycle | Whether the Tech Lead keeps implementation aligned with specs |
+| Failure pattern detection speed | Time between first failure and Tech Lead proposal | How quickly the Tech Lead responds to systemic issues |
+| Repeat gotcha rate | Gotchas with same root cause / total gotchas | Whether systemic issues are being addressed |
+
+**Coordination engine metrics:**
+
+| Metric | Definition | What it reveals |
+|---|---|---|
+| Batch completion rate | Batches completed as planned / total batches | Whether planning is realistic |
+| Stuck detection accuracy | Items correctly identified as stuck / total stuck flags | Whether LLM-augmented detection works |
+| Re-plan frequency | Batch re-plans per cycle | Whether the system is stable or thrashing |
+
+**QA metrics:**
+
+| Metric | Definition | What it reveals |
+|---|---|---|
+| False rejection rate | Rejections overturned on re-review / total rejections | Whether QA is too strict |
+| Escape rate | Bugs found post-merge / total merged items | Whether QA catches issues before integration |
+| Review turnaround | Time from submission to verdict | Whether QA is a bottleneck |
+
+### 10. Memory interaction map
+
+How each role reads from and writes to the knowledge layer (FUNC-AC-LEARNING / GotchaStore):
+
+```
+┌──────────────┐     reads: proposal history,        ┌──────────────────┐
+│              │     delivery patterns                │                  │
+│   PO Agent   │◄────────────────────────────────────│                  │
+│              │                                      │                  │
+│              │     writes: retrospective lessons    │                  │
+│              │     (business-level)                 │                  │
+│              │────────────────────────────────────►│                  │
+└──────────────┘                                      │                  │
+                                                      │   GotchaStore /  │
+┌──────────────┐     reads: findings, failure         │   Knowledge      │
+│              │     patterns, gotcha trends           │   Layer          │
+│  Tech Lead   │◄────────────────────────────────────│                  │
+│              │                                      │                  │
+│              │     writes: distilled gotchas,       │                  │
+│              │     retrospective lessons (technical)│                  │
+│              │────────────────────────────────────►│                  │
+└──────────────┘                                      │                  │
+                                                      │                  │
+┌──────────────┐     writes: review findings          │                  │
+│  Proactive   │────────────────────────────────────►│                  │
+│  Review Agent│                                      │                  │
+└──────────────┘                                      │                  │
+                                                      │                  │
+┌──────────────┐     reads: relevant gotchas          │                  │
+│  QA Agent    │◄────────────────────────────────────│                  │
+│              │     (injected at review start)       │                  │
+│              │                                      │                  │
+│              │     writes: review verdicts,         │                  │
+│              │     discovered issues                │                  │
+│              │────────────────────────────────────►│                  │
+└──────────────┘                                      └──────────────────┘
+```
+
+**Key flows:**
+- Proactive Review Agent → writes findings → Tech Lead reads → proposes remediation
+- Retrospective → Tech Lead distills → writes gotchas → future sessions read via injection
+- QA Agent reads gotchas for reviewed area → uses them to focus review attention
+- PO reads proposal history → avoids re-proposing rejected work, tracks what worked
+
+### 11. Traceability updates
 
 Add to `traceability.yml`:
 - FUNC-AC-PRODUCT-OWNER (child of L0-AC-VISION)
 - FUNC-AC-TECH-LEAD (child of L0-AC-VISION)
 
-### 7. L2/L3 scope hints
+### 12. L2/L3 scope hints
 
 For downstream spec authors:
 
@@ -233,20 +406,29 @@ For downstream spec authors:
 - Protocol scheduling (how ticks map to protocol triggers)
 - Proposal storage and state management
 - Signal aggregation services (how each agent gathers its inputs)
+- LLM-augmented decision point integration (how lightweight inference calls fit into the tick loop)
+- QA vs. proactive review routing (how the pipeline dispatches to assigned QA vs. scheduled proactive review)
+- Memory interaction layer (how agents read/write GotchaStore)
+- Metric collection and aggregation architecture
 
 **L3 (stack-specific) concerns:**
 - Concrete prompt templates for PO and Tech Lead analysis sessions
+- Lightweight inference prompts for coordination engine decision points
 - Data structures for proposals, enrichments, protocol outputs
 - Integration with existing daemon tick loop and coordinator
 - Terminal server tool additions or modifications
+- Metric collection and storage implementation
+- GotchaStore query patterns for prospective checks
 
 ## Implementation Order
 
 1. Update L0-AC-VISION with Wide PO phase (establishes the north star both L1 specs reference)
 2. Write FUNC-AC-PRODUCT-OWNER L1 spec
 3. Write FUNC-AC-TECH-LEAD L1 spec
-4. Narrow FUNC-AC-COORDINATION (remove Product Ownership section, add references)
-5. Update traceability.yml
-6. Feature pipeline picks up new specs for L2/L3 generation → implementation
+4. Narrow FUNC-AC-COORDINATION (remove Product Ownership section, add references, add LLM-augmented decision points)
+5. Clarify FUNC-AC-QUALITY (add QA vs. proactive review distinction)
+6. Connect FUNC-AC-LEARNING (add retrospective → gotcha pipeline scenarios)
+7. Update traceability.yml
+8. Feature pipeline picks up new/updated specs for L2/L3 generation → implementation
 
 The PO spec is the priority — it unblocks the PO prompt template, which unblocks wiring the coordinator into daemon startup, which unblocks the end-to-end daemon test.
