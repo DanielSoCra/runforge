@@ -19,6 +19,7 @@ layer: 0
 - **Orchestration** — detects work, classifies complexity, decomposes into parallel units, drives an FSM pipeline through implementation, review, integration, and deployment; coordinates batches of concurrent work across repositories with dependency-aware merge ordering
 - **Containment** — isolated environments, structural access controls, cost circuit breakers, credential isolation from intelligent sessions
 - **Quality gates** — independent heterogeneous review (not self-certification), holdout validation with scenarios the agent never sees, static analysis enforcement
+- **Technical leadership** — monitors code health, detects spec-code drift, identifies failure patterns and dependency risks, proposes technical improvements — always flowing through product ownership for priority assessment before reaching the Operator
 - **Learning** — captures pitfalls, injects them into future sessions, promotes recurring patterns to permanent documentation, proposes instruction improvements — all with Operator approval
 - **Product co-ownership** (evolutionary) —
   - **Phase 1 (Medium PO):** Synthesizes existing signals — spec pipeline gaps, delivery health, backlog staleness, operator ideas — to propose the next most valuable work. Reactive intelligence: sees what exists and what is stuck.

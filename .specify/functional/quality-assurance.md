@@ -184,7 +184,7 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 - Then the reviewer receives relevant findings for the reviewed area (injected from the knowledge store)
 - And reviews the specific implementation against its spec, acceptance criteria, and quality standards
 - And produces a pass/fail verdict with structured feedback
-- And writes discovered issues to the knowledge store
+- And writes discovered issues as candidate observations pending Operator approval before they become permanent knowledge
 
 **Scenario: Proactive codebase review**
 - Given the proactive review agent's scheduled cycle triggers

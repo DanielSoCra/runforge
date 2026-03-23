@@ -169,11 +169,11 @@ This spec defines the technical leadership role extracted from FUNC-AC-COORDINAT
 **Scenario: Tech Lead distills retrospective lessons**
 - Given the Retrospective protocol has produced lessons learned
 - When the Tech Lead distills a technical lesson
-- Then it deposits the finding into the knowledge store with severity, affected area, and root cause
-- And the finding becomes available for injection into future sessions
+- Then it proposes a pitfall to the knowledge store with severity, affected area, and root cause
+- And the pitfall becomes available for injection into future sessions after Operator approval
 
-**Scenario: Tech Lead detects recurring finding pattern**
-- Given the same root cause appears in findings exceeding a configurable threshold (default: 3)
+**Scenario: Tech Lead detects recurring pitfall pattern**
+- Given the same root cause appears in pitfalls exceeding a configurable threshold (default: 3)
 - When the Tech Lead detects the pattern
 - Then it generates a technical debt proposal to address the root cause systemically
 

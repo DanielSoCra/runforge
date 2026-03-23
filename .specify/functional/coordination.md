@@ -27,6 +27,8 @@ This spec extends FUNC-AC-PIPELINE for multi-issue orchestration. FUNC-AC-PIPELI
 
 Product ownership behavior — proposal generation, signal analysis, operator idea refinement — is defined in FUNC-AC-PRODUCT-OWNER. Technical health analysis and effort estimation is defined in FUNC-AC-TECH-LEAD. This spec covers the coordination mechanics that both roles participate in: batch planning execution, merge sequencing, concurrency management, and failure recovery.
 
+Six interaction protocols govern PO and Tech Lead collaboration: Proposal Enrichment, Batch Planning, Backlog Grooming, Escalation, Status Sync, and Retrospective. Each protocol is defined from both sides — the PO side in FUNC-AC-PRODUCT-OWNER, the Tech Lead side in FUNC-AC-TECH-LEAD. The protocol is the combination of both specs' scenarios.
+
 ### Batch Planning
 
 **Scenario: System creates a batch from related work**
@@ -71,7 +73,7 @@ Product ownership behavior — proposal generation, signal analysis, operator id
 - When the system evaluates the impact
 - Then it pauses the affected work and re-plans the batch
 
-### LLM-Augmented Decision Points
+### Inference-Augmented Decision Points
 
 **Scenario: Coordination engine uses lightweight inference for routing decisions**
 - Given the coordination engine encounters a decision point where deterministic rules are insufficient
