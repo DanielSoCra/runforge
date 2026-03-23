@@ -9,7 +9,7 @@ import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import { CostTracker } from './cost.js';
 import { RateLimiter } from './rate-limiter.js';
 import { createAdapter, type ProviderAdapter } from './adapters/index.js';
-import { buildCompositeContext } from './plugin-injection.js';
+import { buildCompositeContext, type McpConfig } from './plugin-injection.js';
 import { readPluginsForContext } from './plugin-loader.js';
 import { DEFAULT_POLICY } from './containment-hooks.js';
 import { SessionError } from './session-error.js';
@@ -183,14 +183,15 @@ export class SessionRuntime {
     }
     this.lastSpawnTime = Date.now();
 
-    // 5. Assemble prompt
-    const prompt = await this.assemblePrompt(def, context);
+    // 5. Assemble prompt and extract plugin artifacts (ARCH-AC-PLUGINS Flow 4 step 3)
+    const assembled = await this.assemblePrompt(def, context);
 
-    // 6. Delegate to adapter — with containment policy enforced via PreToolUse hooks
-    const result = await this.adapter.spawn(def, prompt, {
+    // 6. Delegate to adapter — with containment policy and plugin MCP configs
+    const result = await this.adapter.spawn(def, assembled.prompt, {
       cwd: context.workspacePath,
       jsonSchema: options?.jsonSchema,
       containmentPolicy: DEFAULT_POLICY,
+      mcpConfigs: assembled.mcpConfigs,
     });
 
     // 7. Record cost — always, even on failure (ARCH-AC-SESSION-RUNTIME step 10)
@@ -226,10 +227,18 @@ export class SessionRuntime {
       }
     }
 
+    // 10. Attach plugin gates to result for downstream validation (ARCH-AC-PLUGINS Flow 4 step 3)
+    if (result.ok && assembled.gates.length > 0) {
+      result.value.pluginGates = assembled.gates;
+    }
+
     return result;
   }
 
-  private async assemblePrompt(def: AgentDefinition, context: SessionContext): Promise<string> {
+  private async assemblePrompt(
+    def: AgentDefinition,
+    context: SessionContext,
+  ): Promise<{ prompt: string; mcpConfigs: McpConfig[]; gates: string[] }> {
     // Load the prompt template from prompts/{name}.md with {{variable}} substitution.
     // Falls back to def.systemPrompt + appended variables if template file is missing.
     const template = await loadPromptTemplate(def.name, context.variables);
@@ -243,8 +252,8 @@ export class SessionRuntime {
       }
     }
 
-    // If no active plugins, return prompt as-is
-    if (!context.activePlugins?.length) return prompt;
+    // If no active plugins, return prompt with empty plugin artifacts
+    if (!context.activePlugins?.length) return { prompt, mcpConfigs: [], gates: [] };
 
     const pluginIds = context.activePlugins.map(e => e.id);
     const activations = new Map(context.activePlugins.map(e => [e.id, e.activatedAt]));
@@ -259,8 +268,11 @@ export class SessionRuntime {
     for (const agent of composite.agents) {
       if (agent.content) parts.push(agent.content);
     }
-    if (parts.length === 0) return prompt;
-    return `${parts.join('\n\n---\n\n')}\n\n---\n\n${prompt}`;
+    if (parts.length > 0) {
+      prompt = `${parts.join('\n\n---\n\n')}\n\n---\n\n${prompt}`;
+    }
+
+    return { prompt, mcpConfigs: composite.mcpConfigs, gates: composite.gates };
   }
 
   getCostTracker(): CostTracker {

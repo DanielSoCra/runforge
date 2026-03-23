@@ -164,6 +164,36 @@ describe('TerminalServer handlers', () => {
       expect(result).toHaveProperty('activeWorkers');
       expect(result).toHaveProperty('mergeQueueDepth');
       expect(result).toHaveProperty('batchStatus');
+      expect(result).toHaveProperty('recentInferenceDecisions');
+    });
+
+    it('includes recent inference decisions when provider available', async () => {
+      const decisions = [
+        {
+          decisionType: 'stuck_detection' as const,
+          chosenAction: 'stuck',
+          confidence: 0.8,
+          rationale: 'No progress',
+          timestamp: new Date().toISOString(),
+          degraded: false,
+        },
+      ];
+      const deps = makeDeps({
+        getRecentInferenceDecisions: vi.fn().mockResolvedValue(decisions),
+      });
+      const handlers = createTerminalServerHandlers(deps);
+
+      const result = await handlers.get_briefing();
+      expect(result.recentInferenceDecisions).toHaveLength(1);
+      expect(result.recentInferenceDecisions[0]!.chosenAction).toBe('stuck');
+    });
+
+    it('returns empty array when inference provider not available', async () => {
+      const deps = makeDeps(); // no getRecentInferenceDecisions
+      const handlers = createTerminalServerHandlers(deps);
+
+      const result = await handlers.get_briefing();
+      expect(result.recentInferenceDecisions).toEqual([]);
     });
   });
 

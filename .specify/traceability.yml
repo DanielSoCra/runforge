@@ -527,8 +527,8 @@ STACK-AC-COORDINATION:
     - packages/daemon/src/coordination/concurrency.ts
     - packages/daemon/src/coordination/batch-manager.ts
     - packages/daemon/src/coordination/work-claimer.ts
-    - packages/daemon/src/coordination/po-agent.ts
-    - packages/daemon/src/coordination/review-scheduler.ts
+    - packages/daemon/src/coordination/inference-decision.ts
+    - packages/daemon/src/coordination/protocol-orchestrator.ts
     - packages/daemon/src/coordination/terminal-server.ts
     - packages/daemon/src/coordination/types.ts
   test_paths:

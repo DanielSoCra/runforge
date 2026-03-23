@@ -20,8 +20,13 @@ export function toDbSessionType(type: SessionType): DbSessionType {
     case 'bug-worker':       return 'implementation';
     case 'reviewer-spec':
     case 'reviewer-quality':
-    case 'reviewer-security': return 'validation';
+    case 'reviewer-security':
+    case 'codebase-reviewer': return 'validation';
     case 'diagnostician':    return 'diagnosis';
+    default: {
+      const _exhaustive: never = type;
+      throw new Error(`Unknown session type: ${_exhaustive}`);
+    }
   }
 }
 

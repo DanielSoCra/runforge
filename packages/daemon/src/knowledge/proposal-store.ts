@@ -45,6 +45,16 @@ export class PromptProposalStore {
 
     // Record in version history
     const history = await this.getVersionHistory(proposal.templateName);
+    // Archive the previous version if not already in history (first approval).
+    // Uses proposal.createdAt as approximate timestamp since original authoring
+    // time is unavailable. Status 'approved' indicates this was the active content.
+    if (history.length === 0) {
+      history.push({
+        content: proposal.currentContent,
+        timestamp: proposal.createdAt,
+        status: 'approved',
+      });
+    }
     history.push({
       content: proposal.proposedContent,
       timestamp: new Date().toISOString(),
