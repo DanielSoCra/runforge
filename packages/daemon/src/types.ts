@@ -62,7 +62,7 @@ export interface PitfallMarker {
 
 // --- Work Request ---
 
-export type DetectedWorkType = 'feature' | 'bug-fix';
+export type DetectedWorkType = 'feature' | 'bug-fix' | 'implementation' | 'l3-generate' | 'l2-brainstorm';
 
 export interface WorkRequest {
   issueNumber: number;

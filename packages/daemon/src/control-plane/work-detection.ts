@@ -1,12 +1,17 @@
 import { Octokit } from '@octokit/rest';
-import type { WorkRequest } from '../types.js';
+import type { WorkRequest, DetectedWorkType } from '../types.js';
 import { ok, err, type Result } from '../lib/result.js';
+
+/** Work types produced by feature-pipeline tier detection. */
+export type FeaturePipelineWorkType = 'implementation' | 'l3-generate' | 'l2-brainstorm';
 
 export interface WorkDetector {
   detectReadyWork(): Promise<Result<WorkRequest[]>>;
   detectBugFixWork(): Promise<Result<WorkRequest | null>>;
+  detectFeaturePipelineWork(): Promise<Result<WorkRequest | null>>;
   claimWork(issueNumber: number): Promise<Result<void>>;
   claimBugFixWork(issueNumber: number): Promise<Result<void>>;
+  claimFeaturePipelineWork(issueNumber: number, workType: FeaturePipelineWorkType): Promise<Result<void>>;
   completeWork(issueNumber: number, comment: string): Promise<Result<void>>;
   completeBugFixWork(issueNumber: number, commitSha: string): Promise<Result<void>>;
   markStuck(issueNumber: number, comment: string): Promise<Result<void>>;
@@ -65,6 +70,68 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
           scopeDescription: extractScopeDescription(picked.body ?? ''),
           workType: 'bug-fix' as const,
         });
+      } catch (e) {
+        return err(e instanceof Error ? e : new Error(String(e)));
+      }
+    },
+
+    async detectFeaturePipelineWork(): Promise<Result<WorkRequest | null>> {
+      try {
+        // 4-tier priority scan matching pipeline.sh find_work()
+        const tiers: Array<{ labels: string; exclude: string[]; workType: FeaturePipelineWorkType }> = [
+          { labels: 'feature-pipeline,ready-to-implement', exclude: ['implementing', 'blocked'], workType: 'implementation' },
+          { labels: 'feature-pipeline,l2-approved', exclude: ['l3-in-progress', 'blocked'], workType: 'l3-generate' },
+          { labels: 'feature-pipeline,l2-in-progress', exclude: ['blocked'], workType: 'l2-brainstorm' },
+          { labels: 'feature-pipeline,l1-approved', exclude: ['l2-in-progress', 'blocked'], workType: 'l2-brainstorm' },
+        ];
+
+        for (const tier of tiers) {
+          const { data } = await octokit.issues.listForRepo({
+            owner, repo, labels: tier.labels, state: 'open', per_page: 100,
+          });
+
+          const candidates = data
+            .filter((issue) => !('pull_request' in issue && issue.pull_request))
+            .filter((issue) => {
+              const names = getLabelNames(issue.labels);
+              return !tier.exclude.some((ex) => names.includes(ex));
+            });
+
+          if (candidates.length > 0) {
+            const picked = candidates[0]!;
+            return ok({
+              issueNumber: picked.number,
+              title: picked.title,
+              body: picked.body ?? '',
+              labels: getLabelNames(picked.labels),
+              specRefs: extractSpecRefs(picked.body ?? ''),
+              scopeDescription: extractScopeDescription(picked.body ?? ''),
+              workType: tier.workType,
+            });
+          }
+        }
+
+        return ok(null);
+      } catch (e) {
+        return err(e instanceof Error ? e : new Error(String(e)));
+      }
+    },
+
+    async claimFeaturePipelineWork(issueNumber: number, workType: FeaturePipelineWorkType): Promise<Result<void>> {
+      try {
+        switch (workType) {
+          case 'implementation':
+            await octokit.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: 'ready-to-implement' }).catch(() => {});
+            await octokit.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: ['implementing'] });
+            break;
+          case 'l3-generate':
+            await octokit.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: ['l3-in-progress'] });
+            break;
+          case 'l2-brainstorm':
+            await octokit.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: ['l2-in-progress'] });
+            break;
+        }
+        return ok(undefined);
       } catch (e) {
         return err(e instanceof Error ? e : new Error(String(e)));
       }

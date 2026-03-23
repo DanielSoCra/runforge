@@ -34,4 +34,33 @@ describe('selectVariant', () => {
   it('website-init takes priority over bug label', () => {
     expect(selectVariant(makeRequest(['ready', 'website-init', 'bug']))).toBe('website');
   });
+
+  it('returns spec-driven for feature-pipeline with spec ref in body', () => {
+    const req: WorkRequest = {
+      issueNumber: 1, title: 'Test', body: 'FUNC-AC-PIPELINE ref', labels: ['feature-pipeline', 'ready-to-implement'], specRefs: ['FUNC-AC-PIPELINE'],
+    };
+    expect(selectVariant(req)).toBe('spec-driven');
+  });
+
+  it('returns spec-driven for feature-pipeline with l2-approved labels', () => {
+    const req: WorkRequest = {
+      issueNumber: 2, title: 'Test', body: 'ARCH-AC ref', labels: ['feature-pipeline', 'l2-approved'], specRefs: ['ARCH-AC-CONTROL-PLANE'],
+    };
+    expect(selectVariant(req)).toBe('spec-driven');
+  });
+
+  it('returns spec-driven for feature-pipeline with l1-approved labels', () => {
+    const req: WorkRequest = {
+      issueNumber: 3, title: 'Test', body: 'FUNC-AC ref', labels: ['feature-pipeline', 'l1-approved'], specRefs: ['FUNC-AC-PIPELINE'],
+    };
+    expect(selectVariant(req)).toBe('spec-driven');
+  });
+
+  it('preserves workType through variant selection', () => {
+    const req: WorkRequest = {
+      issueNumber: 1, title: 'Test', body: 'FUNC-AC ref', labels: ['feature-pipeline', 'ready-to-implement'], specRefs: ['FUNC-AC-PIPELINE'], workType: 'implementation',
+    };
+    expect(selectVariant(req)).toBe('spec-driven');
+    expect(req.workType).toBe('implementation');
+  });
 });
