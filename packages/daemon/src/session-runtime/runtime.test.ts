@@ -88,28 +88,28 @@ describe('SessionRuntime', () => {
 
   it('assembles prompt with context variables', async () => {
     // Access private method via any for testing
-    const assembled = await (runtime as any).assemblePrompt(
+    const result = await (runtime as any).assemblePrompt(
       { name: 'test-agent', systemPrompt: 'Base prompt' },
       { variables: { task: 'do something', specs: 'spec content' } },
     );
-    expect(assembled).toContain('Base prompt');
-    expect(assembled).toContain('## task');
-    expect(assembled).toContain('do something');
-    expect(assembled).toContain('## specs');
-    expect(assembled).toContain('spec content');
+    expect(result.prompt).toContain('Base prompt');
+    expect(result.prompt).toContain('## task');
+    expect(result.prompt).toContain('do something');
+    expect(result.prompt).toContain('## specs');
+    expect(result.prompt).toContain('spec content');
   });
 
   it('includes plugin skills and agents before system prompt', async () => {
-    const assembled = await (runtime as any).assemblePrompt(
+    const result = await (runtime as any).assemblePrompt(
       { name: 'test-agent', systemPrompt: 'SYSTEM PROMPT' },
       { variables: {}, activePlugins: [{ id: 'test', activatedAt: '2024-01-01T00:00:00Z' }] },
     );
-    expect(assembled).toContain('SKILL CONTENT');
-    expect(assembled).toContain('AGENT CONTENT');
-    expect(assembled).toContain('PLUGIN INJECTION');
-    expect(assembled.indexOf('PLUGIN INJECTION')).toBeLessThan(assembled.indexOf('SYSTEM PROMPT'));
-    expect(assembled.indexOf('SKILL CONTENT')).toBeLessThan(assembled.indexOf('SYSTEM PROMPT'));
-    expect(assembled.indexOf('AGENT CONTENT')).toBeLessThan(assembled.indexOf('SYSTEM PROMPT'));
+    expect(result.prompt).toContain('SKILL CONTENT');
+    expect(result.prompt).toContain('AGENT CONTENT');
+    expect(result.prompt).toContain('PLUGIN INJECTION');
+    expect(result.prompt.indexOf('PLUGIN INJECTION')).toBeLessThan(result.prompt.indexOf('SYSTEM PROMPT'));
+    expect(result.prompt.indexOf('SKILL CONTENT')).toBeLessThan(result.prompt.indexOf('SYSTEM PROMPT'));
+    expect(result.prompt.indexOf('AGENT CONTENT')).toBeLessThan(result.prompt.indexOf('SYSTEM PROMPT'));
   });
 
   it('composite context prompt injection appears before system prompt', () => {
@@ -306,6 +306,92 @@ describe('SessionRuntime', () => {
     }
   });
 
+  it('passes plugin mcpConfigs to adapter.spawn (#314)', async () => {
+    const { readPluginsForContext } = await import('./plugin-loader.js');
+    (readPluginsForContext as ReturnType<typeof vi.fn>).mockResolvedValueOnce([{
+      id: 'figma-plugin',
+      activatedAt: '2024-01-01T00:00:00Z',
+      promptInjection: '',
+      skills: [],
+      agents: [],
+      mcpConfigs: [{ name: 'figma-mcp', command: 'npx', args: ['figma-mcp-server'], env: { TOKEN: 'abc' } }],
+      gates: ['pnpm run lint'],
+    }]);
+
+    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: 'done', cost: 0.01 } });
+    await runtime.spawnSession(
+      'worker',
+      { variables: { task: 'do it' }, workspacePath: '/tmp/ws', activePlugins: [{ id: 'figma-plugin', activatedAt: '2024-01-01T00:00:00Z' }] },
+      200,
+    );
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      expect.objectContaining({
+        mcpConfigs: [expect.objectContaining({ name: 'figma-mcp', command: 'npx' })],
+      }),
+    );
+  });
+
+  it('returns plugin gates in session result (#314)', async () => {
+    const { readPluginsForContext } = await import('./plugin-loader.js');
+    (readPluginsForContext as ReturnType<typeof vi.fn>).mockResolvedValueOnce([{
+      id: 'lint-plugin',
+      activatedAt: '2024-01-01T00:00:00Z',
+      promptInjection: '',
+      skills: [],
+      agents: [],
+      mcpConfigs: [],
+      gates: ['pnpm run lint', 'pnpm run typecheck'],
+    }]);
+
+    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: 'done', cost: 0.01 } });
+    const result = await runtime.spawnSession(
+      'worker',
+      { variables: { task: 'do it' }, workspacePath: '/tmp/ws', activePlugins: [{ id: 'lint-plugin', activatedAt: '2024-01-01T00:00:00Z' }] },
+      201,
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.pluginGates).toEqual(['pnpm run lint', 'pnpm run typecheck']);
+    }
+  });
+
+  it('assemblePrompt returns mcpConfigs and gates from plugins (#314)', async () => {
+    const { readPluginsForContext } = await import('./plugin-loader.js');
+    (readPluginsForContext as ReturnType<typeof vi.fn>).mockResolvedValueOnce([{
+      id: 'test-plugin',
+      activatedAt: '2024-01-01T00:00:00Z',
+      promptInjection: '',
+      skills: [],
+      agents: [],
+      mcpConfigs: [{ name: 'test-mcp', command: 'node', args: ['server.js'] }],
+      gates: ['npm test'],
+    }]);
+
+    const result = await (runtime as any).assemblePrompt(
+      { name: 'test-agent', systemPrompt: 'PROMPT' },
+      { variables: {}, activePlugins: [{ id: 'test-plugin', activatedAt: '2024-01-01T00:00:00Z' }] },
+    );
+
+    expect(result.mcpConfigs).toHaveLength(1);
+    expect(result.mcpConfigs[0].name).toBe('test-mcp');
+    expect(result.gates).toEqual(['npm test']);
+  });
+
+  it('assemblePrompt returns empty mcpConfigs and gates without plugins (#314)', async () => {
+    const result = await (runtime as any).assemblePrompt(
+      { name: 'test-agent', systemPrompt: 'PROMPT' },
+      { variables: {} },
+    );
+
+    expect(result.mcpConfigs).toEqual([]);
+    expect(result.gates).toEqual([]);
+    expect(result.prompt).toContain('PROMPT');
+  });
+
   it('containment breach error carries the session cost (#222)', async () => {
     mockSpawn.mockResolvedValueOnce({
       ok: true,
@@ -407,14 +493,14 @@ describe('SessionRuntime prompt assembly with templates', () => {
       { adapter: 'cli', dailyBudget: 50, perRunBudget: 10 } as Config,
       costTracker,
     );
-    const assembled = await (runtime as any).assemblePrompt(
+    const result = await (runtime as any).assemblePrompt(
       { name: 'worker', systemPrompt: '' },
       { variables: { task: 'add auth', specs: 'FUNC-AC-SAFETY' } },
     );
-    expect(assembled).toContain('# Worker');
-    expect(assembled).toContain('You implement add auth per FUNC-AC-SAFETY.');
+    expect(result.prompt).toContain('# Worker');
+    expect(result.prompt).toContain('You implement add auth per FUNC-AC-SAFETY.');
     // Must NOT contain the old appended-variable format when template is loaded
-    expect(assembled).not.toContain('## task');
+    expect(result.prompt).not.toContain('## task');
   });
 
   it('falls back to systemPrompt + appended variables when template is missing', async () => {
@@ -423,12 +509,12 @@ describe('SessionRuntime prompt assembly with templates', () => {
       { adapter: 'cli', dailyBudget: 50, perRunBudget: 10 } as Config,
       costTracker,
     );
-    const assembled = await (runtime as any).assemblePrompt(
+    const result = await (runtime as any).assemblePrompt(
       { name: 'nonexistent-agent', systemPrompt: 'Fallback prompt' },
       { variables: { task: 'do something' } },
     );
-    expect(assembled).toContain('Fallback prompt');
-    expect(assembled).toContain('## task');
-    expect(assembled).toContain('do something');
+    expect(result.prompt).toContain('Fallback prompt');
+    expect(result.prompt).toContain('## task');
+    expect(result.prompt).toContain('do something');
   });
 });

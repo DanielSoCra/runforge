@@ -53,6 +53,7 @@ export interface SessionResult {
   pitfallMarkers: PitfallMarker[];
   exitStatus: ExitStatus;
   handoffNote?: string;
+  pluginGates?: string[];  // Gate scripts from active plugins — additive with repo validation commands
 }
 
 export interface PitfallMarker {

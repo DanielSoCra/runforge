@@ -335,6 +335,45 @@ describe('CliAdapter containment hook setup', () => {
 
     adapter.cleanupHooks(paths);
   });
+
+  it('writes plugin MCP configs to settings.local.json (#314)', () => {
+    const adapter = new CliAdapter();
+    const mcpConfigs = [
+      { name: 'figma-mcp', command: 'npx', args: ['figma-server'], env: { TOKEN: 'secret' } },
+      { name: 'sentry-mcp', command: 'node', args: ['sentry.js'] },
+    ];
+    const paths = adapter.setupHooks(tempDir, DEFAULT_POLICY, 30000, undefined, mcpConfigs);
+
+    const settings = JSON.parse(readFileSync(paths.settingsPath, 'utf8'));
+    expect(settings.mcpServers).toBeDefined();
+    expect(settings.mcpServers['figma-mcp']).toEqual({
+      command: 'npx',
+      args: ['figma-server'],
+      env: { TOKEN: 'secret' },
+    });
+    expect(settings.mcpServers['sentry-mcp']).toEqual({
+      command: 'node',
+      args: ['sentry.js'],
+    });
+
+    adapter.cleanupHooks(paths);
+
+    // mcpServers should be removed after cleanup
+    if (existsSync(paths.settingsPath)) {
+      const restored = JSON.parse(readFileSync(paths.settingsPath, 'utf8'));
+      expect(restored.mcpServers).toBeUndefined();
+    }
+  });
+
+  it('does not write mcpServers when mcpConfigs is empty (#314)', () => {
+    const adapter = new CliAdapter();
+    const paths = adapter.setupHooks(tempDir, DEFAULT_POLICY, 30000, undefined, []);
+
+    const settings = JSON.parse(readFileSync(paths.settingsPath, 'utf8'));
+    expect(settings.mcpServers).toBeUndefined();
+
+    adapter.cleanupHooks(paths);
+  });
 });
 
 // --- spawn() integration tests using mocked child_process ---
@@ -567,7 +606,7 @@ describe('CliAdapter.spawn() (#102)', () => {
       containmentPolicy: DEFAULT_POLICY,
     });
 
-    expect(setupSpy).toHaveBeenCalledWith(tempDir, DEFAULT_POLICY, mockDef.timeoutMs, expect.any(Number));
+    expect(setupSpy).toHaveBeenCalledWith(tempDir, DEFAULT_POLICY, mockDef.timeoutMs, expect.any(Number), undefined);
 
     mockProc.stdout.emit('data', Buffer.from(JSON.stringify({ result: 'ok' })));
     mockProc.emit('close', 0);
