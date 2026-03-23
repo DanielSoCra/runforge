@@ -5,6 +5,11 @@ import type { GateType, GateResult, ReviewFinding } from '../types.js';
 import { SessionError } from '../session-runtime/session-error.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 
+export const DiscoveredIssueSchema = z.object({
+  artifactPatterns: z.array(z.string()),
+  description: z.string(),
+});
+
 export const ReviewFindingsSchema = z.object({
   findings: z.array(z.object({
     severity: z.enum(['critical', 'important', 'minor']),
@@ -13,9 +18,11 @@ export const ReviewFindingsSchema = z.object({
   })),
   summary: z.string(),
   approved: z.boolean(),
+  discoveredIssues: z.array(DiscoveredIssueSchema).optional(),
 });
 
 export type ReviewFindings = z.infer<typeof ReviewFindingsSchema>;
+export type DiscoveredIssue = z.infer<typeof DiscoveredIssueSchema>;
 
 const jsonSchema = JSON.stringify(z.toJSONSchema(ReviewFindingsSchema));
 
@@ -89,6 +96,7 @@ export function createReviewerGate(
           gate: type,
           passed: parsed.data.approved && !hasCritical,
           findings: parsed.data.findings as ReviewFinding[],
+          discoveredIssues: parsed.data.discoveredIssues,
         };
       }
 
@@ -100,4 +108,16 @@ export function createReviewerGate(
       };
     },
   };
+}
+
+/**
+ * Extract discovered issues from a gate result for write-back to the knowledge store.
+ * Returns only issues from gates that included discoveredIssues in their output.
+ * Per L3 spec: discovered issues are stored as candidate observations (lifecycleStatus: 'candidate')
+ * requiring Operator approval before becoming permanent knowledge.
+ */
+export function extractDiscoveredIssues(
+  gateResult: GateResult & { discoveredIssues?: DiscoveredIssue[] },
+): DiscoveredIssue[] {
+  return gateResult.discoveredIssues ?? [];
 }

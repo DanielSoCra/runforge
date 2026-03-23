@@ -141,6 +141,10 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
     testCommands: [],
     maxTestFixAttempts: 3,
     failureExcerptLines: 50,
+    proactiveIntervalMs: 1200000,
+    proactiveMaxConcurrent: 1,
+    proactiveThrottleThreshold: 0.8,
+    proactiveRecentCommits: 20,
   },
   coordination: {
     maxAgents: 10, reviewerInterval: 3600000, poInterval: 3600000,

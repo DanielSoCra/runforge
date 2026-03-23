@@ -59,6 +59,11 @@ export const ConfigSchema = z.object({
     ).default([]),
     maxTestFixAttempts: z.number().int().min(1).default(3),
     failureExcerptLines: z.number().int().min(10).default(50),
+    proactiveIntervalMs: z.number().int().min(60000).default(1200000),
+    proactiveAreas: z.array(z.string()).optional(),
+    proactiveMaxConcurrent: z.number().int().min(1).default(1),
+    proactiveThrottleThreshold: z.number().min(0).max(1).default(0.8),
+    proactiveRecentCommits: z.number().int().min(1).default(20),
   }).default({
     gate1Commands: ['vitest run', 'tsc --noEmit', 'eslint --max-warnings 0 src/'],
     maxFixCycles: 3,
@@ -70,6 +75,10 @@ export const ConfigSchema = z.object({
     testCommands: [],
     maxTestFixAttempts: 3,
     failureExcerptLines: 50,
+    proactiveIntervalMs: 1200000,
+    proactiveMaxConcurrent: 1,
+    proactiveThrottleThreshold: 0.8,
+    proactiveRecentCommits: 20,
   }),
   diagnosis: z.object({
     confidenceThreshold: z.number().min(0).max(1).default(0.7),

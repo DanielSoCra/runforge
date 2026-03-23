@@ -113,6 +113,10 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
       testCommands: [],
       maxTestFixAttempts: 3,
       failureExcerptLines: 50,
+      proactiveIntervalMs: 1200000,
+      proactiveMaxConcurrent: 1,
+      proactiveThrottleThreshold: 0.8,
+      proactiveRecentCommits: 20,
     },
     diagnosis: { confidenceThreshold: 0.7 },
     warmup: { threshold: 10, regressionThreshold: 3, samplingRate: 0.1, minSamplingRate: 0.01 },
@@ -629,6 +633,10 @@ describe('createPhaseHandlers', () => {
           testCommands: [],
           maxTestFixAttempts: 3,
           failureExcerptLines: 50,
+          proactiveIntervalMs: 1200000,
+          proactiveMaxConcurrent: 1,
+          proactiveThrottleThreshold: 0.8,
+          proactiveRecentCommits: 20,
         },
       });
       await handlers.review!(makeRun());

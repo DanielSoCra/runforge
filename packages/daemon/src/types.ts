@@ -181,6 +181,7 @@ export interface GateResult {
   gate: GateType;
   passed: boolean;
   findings: ReviewFinding[];
+  discoveredIssues?: Array<{ artifactPatterns: string[]; description: string }>;
 }
 
 // --- Bug Diagnosis ---

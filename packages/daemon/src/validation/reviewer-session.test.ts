@@ -1,6 +1,6 @@
 // src/validation/reviewer-session.test.ts
 import { describe, it, expect, vi } from 'vitest';
-import { ReviewFindingsSchema, createReviewerGate } from './reviewer-session.js';
+import { ReviewFindingsSchema, createReviewerGate, extractDiscoveredIssues } from './reviewer-session.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import { SessionError } from '../session-runtime/session-error.js';
 
@@ -486,5 +486,78 @@ describe('createReviewerGate', () => {
     const callArgs = (runtime.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]!;
     const passedVariables = (callArgs[1] as { variables: Record<string, string> }).variables;
     expect(passedVariables.specs).toBe('No spec content available for this review.');
+  });
+
+  it('returns discoveredIssues from structured output', async () => {
+    const runtime = makeRuntime({
+      ok: true,
+      value: {
+        structuredData: {
+          findings: [],
+          summary: 'Approved',
+          approved: true,
+          discoveredIssues: [
+            { artifactPatterns: ['src/foo.ts'], description: 'Potential race condition' },
+          ],
+        },
+        output: '',
+        cost: 0.1,
+        pitfallMarkers: [],
+        exitStatus: 'completed',
+      },
+    });
+
+    const gate = createReviewerGate('quality', 'reviewer-quality', 'rubric', runtime, 42);
+    const result = await gate.execute('/workspace');
+    expect((result as { discoveredIssues?: unknown[] }).discoveredIssues).toHaveLength(1);
+  });
+});
+
+describe('ReviewFindingsSchema with discoveredIssues', () => {
+  it('accepts input with discoveredIssues', () => {
+    const input = {
+      findings: [],
+      summary: 'ok',
+      approved: true,
+      discoveredIssues: [
+        { artifactPatterns: ['src/a.ts'], description: 'some issue' },
+      ],
+    };
+    const result = ReviewFindingsSchema.safeParse(input);
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts input without discoveredIssues (backward-compatible)', () => {
+    const input = {
+      findings: [],
+      summary: 'ok',
+      approved: true,
+    };
+    const result = ReviewFindingsSchema.safeParse(input);
+    expect(result.success).toBe(true);
+  });
+});
+
+describe('extractDiscoveredIssues', () => {
+  it('returns discoveredIssues when present', () => {
+    const issues = [
+      { artifactPatterns: ['src/foo.ts'], description: 'Race condition' },
+    ];
+    const result = extractDiscoveredIssues({
+      gate: 'quality',
+      passed: true,
+      findings: [],
+      discoveredIssues: issues,
+    });
+    expect(result).toEqual(issues);
+  });
+
+  it('returns empty array when discoveredIssues is absent', () => {
+    const result = extractDiscoveredIssues({
+      gate: 'quality',
+      passed: true,
+      findings: [],
+    });
+    expect(result).toEqual([]);
   });
 });
