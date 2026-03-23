@@ -191,7 +191,7 @@ describe('createReviewerGate', () => {
     expect(runtime.spawnSession).toHaveBeenCalledWith(
       'reviewer-spec',
       expect.objectContaining({
-        variables: { rubric: 'my rubric', cwd: '/my/workspace', diff: expect.stringContaining('diff unavailable'), specs: 'No spec content available for this review.' },
+        variables: { rubric: 'my rubric', cwd: '/my/workspace', diff: expect.stringContaining('diff unavailable'), specs: 'No spec content available for this review.', knownIssues: '' },
         workspacePath: '/my/workspace',
       }),
       99,
@@ -229,6 +229,7 @@ describe('createReviewerGate', () => {
           cwd: '/my/workspace',
           diff: '--- a/file.ts\n+++ b/file.ts\n@@ added line',
           specs: '# Spec Content\nAcceptance criteria here',
+          knownIssues: '',
         },
         workspacePath: '/my/workspace',
       }),
@@ -286,7 +287,7 @@ describe('createReviewerGate', () => {
     expect(passedVariables.knownIssues).toBe('## Known Issues\n- Parser crashes on empty input');
   });
 
-  it('omits knownIssues variable when knowledgeContext is not provided (#326)', async () => {
+  it('sets knownIssues to empty string when knowledgeContext is not provided (#326, #340)', async () => {
     const runtime = makeRuntime({
       ok: true,
       value: {
@@ -305,7 +306,7 @@ describe('createReviewerGate', () => {
 
     const callArgs = (runtime.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]!;
     const passedVariables = (callArgs[1] as { variables: Record<string, string> }).variables;
-    expect(passedVariables).not.toHaveProperty('knownIssues');
+    expect(passedVariables.knownIssues).toBe('');
   });
 
   it('retries once on session failure then returns failure', async () => {
@@ -606,4 +607,18 @@ describe('extractDiscoveredIssues', () => {
     });
     expect(result).toEqual([]);
   });
+});
+
+describe('reviewer templates contain {{knownIssues}} placeholder (#340)', () => {
+  const templateNames = ['reviewer-spec.md', 'reviewer-quality.md', 'reviewer-security.md'];
+  const promptsDir = `${import.meta.dirname}/../../../../prompts`;
+
+  for (const name of templateNames) {
+    it(`${name} contains {{knownIssues}} placeholder`, async () => {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const content = fs.readFileSync(path.join(promptsDir, name), 'utf-8');
+      expect(content).toContain('{{knownIssues}}');
+    });
+  }
 });
