@@ -378,6 +378,41 @@ describe('GotchaStore', () => {
 
     });
 
+    it('serializes with mutex during concurrent file access (#298)', async () => {
+      // Seed a gotcha that qualifies for promotion
+      await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'Concurrent promo test' }],
+        1,
+      );
+      const m = await store.match(['foo.ts']);
+      const id = m[0]!.id;
+      for (let i = 0; i < 4; i++) {
+        await store.incrementHitCount(id);
+      }
+
+      // Fire concurrent getPromotionCandidates + store operations.
+      // Before the fix, getPromotionCandidates read outside the mutex,
+      // so a concurrent appendJsonl could produce a partial line that
+      // readJsonl silently drops — causing the candidate to vanish.
+      const [candidates1, , candidates2] = await Promise.all([
+        store.getPromotionCandidates(5),
+        store.store(
+          [{ artifactPatterns: ['**/*.js'], description: 'Concurrent new entry' }],
+          99,
+        ),
+        store.getPromotionCandidates(5),
+      ]);
+
+      // Both calls must see the promotion candidate — no silent data loss
+      expect(candidates1).toHaveLength(1);
+      expect(candidates2).toHaveLength(1);
+
+      // Verify the new entry also survived
+      const freshStore = new GotchaStore(storePath);
+      const newEntry = await freshStore.match(['foo.js']);
+      expect(newEntry.length).toBeGreaterThanOrEqual(1);
+    });
+
     it('excludes already promoted gotchas', async () => {
       await store.store(
         [{ artifactPatterns: ['**/*.ts'], description: 'Already promoted' }],

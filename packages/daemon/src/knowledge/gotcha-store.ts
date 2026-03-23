@@ -129,18 +129,20 @@ export class GotchaStore {
   }
 
   async getPromotionCandidates(threshold: number = 5, maxAgeDays: number = 90, cooldownDays: number = 30): Promise<Gotcha[]> {
-    const all = await this.loadAll();
-    const now = Date.now();
-    return all.filter((g) => {
-      if (g.promoted || g.archived) return false;
-      const age = (now - new Date(g.createdAt).getTime()) / (1000 * 60 * 60 * 24);
-      if (age > maxAgeDays) return false;
-      if (g.reviewedAt) {
-        const cooldownMs = cooldownDays * 24 * 60 * 60 * 1000;
-        if (new Date(g.reviewedAt).getTime() + cooldownMs > now) return false;
-      }
-      const effectiveThreshold = g.priorityTier === 'elevated' ? Math.floor(threshold / 2) : threshold;
-      return g.hitCount >= effectiveThreshold;
+    return this.withMutex(async () => {
+      const all = await this.loadAll();
+      const now = Date.now();
+      return all.filter((g) => {
+        if (g.promoted || g.archived) return false;
+        const age = (now - new Date(g.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+        if (age > maxAgeDays) return false;
+        if (g.reviewedAt) {
+          const cooldownMs = cooldownDays * 24 * 60 * 60 * 1000;
+          if (new Date(g.reviewedAt).getTime() + cooldownMs > now) return false;
+        }
+        const effectiveThreshold = g.priorityTier === 'elevated' ? Math.floor(threshold / 2) : threshold;
+        return g.hitCount >= effectiveThreshold;
+      });
     });
   }
 
