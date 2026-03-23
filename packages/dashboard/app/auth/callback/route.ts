@@ -15,12 +15,12 @@ export async function GET(request: NextRequest) {
 
   // Bootstrap: first user → admin; invited users → their role; others → denied
   const providerHandle = user.user_metadata?.user_name ?? user.email ?? '';
-  const { data: result } = await supabase.rpc('bootstrap_user_access', {
+  const { data: result, error: rpcError } = await supabase.rpc('bootstrap_user_access', {
     p_user_id: user.id,
     p_provider_handle: providerHandle,
   });
 
-  if (result === 'denied') {
+  if (rpcError || result === 'denied') {
     await supabase.auth.signOut();
     return NextResponse.redirect(`${origin}/login?error=access_denied`);
   }
