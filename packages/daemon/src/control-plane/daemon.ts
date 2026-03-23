@@ -8,7 +8,7 @@ import { ImplementationCoordinator } from '../implementation/coordinator.js';
 import { StateManager } from './state.js';
 import { createControlServer } from './server.js';
 import { RepoManager } from './repo-manager.js';
-import { createWorkDetector, type WorkDetector } from './work-detection.js';
+import { createWorkDetector, type WorkDetector, type FeaturePipelineWorkType } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
 import { createWebsitePhaseHandlers } from './phases-website.js';
 import { readAgencyConfig } from './agency-config.js';
@@ -143,6 +143,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         if (paused || shuttingDown) return;
         if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
         costTracker.maybeResetDaily();
+        const claimedIssues = new Set<number>();
         const workResult = await detector.detectReadyWork();
         if (!workResult.ok) {
           // TODO: proactive token health check — if 401, mark connection token_invalid
@@ -153,6 +154,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           if (paused || shuttingDown) break;
           const claimResult = await detector.claimWork(request.issueNumber);
           if (!claimResult.ok) continue;
+          claimedIssues.add(request.issueNumber);
           activeRuns++;
           repoManager!.notifyRunStart(repoId);
           processWorkRequest(config, repoId, owner, name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot)
@@ -170,19 +172,42 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         if (paused || shuttingDown) return;
         if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
         const bugResult = await detector.detectBugFixWork();
-        if (!bugResult.ok || !bugResult.value) return;
-        const bugRequest = bugResult.value;
-        const bugClaimResult = await detector.claimBugFixWork(bugRequest.issueNumber);
-        if (!bugClaimResult.ok) return;
-        activeRuns++;
-        repoManager!.notifyRunStart(repoId);
-        processWorkRequest(config, repoId, owner, name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot)
-          .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber))
-          .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
-          .finally(() => {
-            activeRuns--;
-            repoManager!.notifyRunEnd(repoId);
-          });
+        if (bugResult.ok && bugResult.value && !claimedIssues.has(bugResult.value.issueNumber)) {
+          const bugRequest = bugResult.value;
+          const bugClaimResult = await detector.claimBugFixWork(bugRequest.issueNumber);
+          if (bugClaimResult.ok) {
+            claimedIssues.add(bugRequest.issueNumber);
+            activeRuns++;
+            repoManager!.notifyRunStart(repoId);
+            processWorkRequest(config, repoId, owner, name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot)
+              .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber))
+              .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
+              .finally(() => {
+                activeRuns--;
+                repoManager!.notifyRunEnd(repoId);
+              });
+          }
+        }
+
+        // Feature-pipeline detection — lowest priority (#282)
+        if (paused || shuttingDown) return;
+        if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
+        const fpResult = await detector.detectFeaturePipelineWork();
+        if (fpResult.ok && fpResult.value && !claimedIssues.has(fpResult.value.issueNumber)) {
+          const fpRequest = fpResult.value;
+          const fpClaimResult = await detector.claimFeaturePipelineWork(fpRequest.issueNumber, fpRequest.workType as FeaturePipelineWorkType);
+          if (fpClaimResult.ok) {
+            activeRuns++;
+            repoManager!.notifyRunStart(repoId);
+            processWorkRequest(config, repoId, owner, name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot)
+              .then((outcome) => handleRunOutcome(outcome, fpRequest.issueNumber))
+              .catch((e) => console.error(`Run failed for #${fpRequest.issueNumber}:`, e))
+              .finally(() => {
+                activeRuns--;
+                repoManager!.notifyRunEnd(repoId);
+              });
+          }
+        }
       },
     );
 
@@ -324,6 +349,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       if (paused || shuttingDown) return;
       if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
       costTracker.maybeResetDaily();
+      const claimedIssues = new Set<number>();
       const workResult = await detector.detectReadyWork();
       if (!workResult.ok) return;
       for (const request of workResult.value) {
@@ -331,6 +357,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         if (paused || shuttingDown) break;
         const claimResult = await detector.claimWork(request.issueNumber);
         if (!claimResult.ok) continue;
+        claimedIssues.add(request.issueNumber);
         activeRuns++;
         processWorkRequest(config, '', config.repo!.owner, config.repo!.name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot)
           .then((outcome) => handleRunOutcome(outcome, request.issueNumber))
@@ -342,15 +369,34 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       if (paused || shuttingDown) return;
       if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
       const bugResult = await detector.detectBugFixWork();
-      if (!bugResult.ok || !bugResult.value) return;
-      const bugRequest = bugResult.value;
-      const bugClaimResult = await detector.claimBugFixWork(bugRequest.issueNumber);
-      if (!bugClaimResult.ok) return;
-      activeRuns++;
-      processWorkRequest(config, '', config.repo!.owner, config.repo!.name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot)
-        .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber))
-        .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
-        .finally(() => { activeRuns--; });
+      if (bugResult.ok && bugResult.value && !claimedIssues.has(bugResult.value.issueNumber)) {
+        const bugRequest = bugResult.value;
+        const bugClaimResult = await detector.claimBugFixWork(bugRequest.issueNumber);
+        if (bugClaimResult.ok) {
+          claimedIssues.add(bugRequest.issueNumber);
+          activeRuns++;
+          processWorkRequest(config, '', config.repo!.owner, config.repo!.name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot)
+            .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber))
+            .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
+            .finally(() => { activeRuns--; });
+        }
+      }
+
+      // Feature-pipeline detection — lowest priority (#282)
+      if (paused || shuttingDown) return;
+      if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
+      const fpResult = await detector.detectFeaturePipelineWork();
+      if (fpResult.ok && fpResult.value && !claimedIssues.has(fpResult.value.issueNumber)) {
+        const fpRequest = fpResult.value;
+        const fpClaimResult = await detector.claimFeaturePipelineWork(fpRequest.issueNumber, fpRequest.workType as FeaturePipelineWorkType);
+        if (fpClaimResult.ok) {
+          activeRuns++;
+          processWorkRequest(config, '', config.repo!.owner, config.repo!.name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot)
+            .then((outcome) => handleRunOutcome(outcome, fpRequest.issueNumber))
+            .catch((e) => console.error(`Run failed for #${fpRequest.issueNumber}:`, e))
+            .finally(() => { activeRuns--; });
+        }
+      }
     }, config.pollIntervalMs);
   }
 

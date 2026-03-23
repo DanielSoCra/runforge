@@ -29,8 +29,10 @@ const {
   mockDetector: {
     detectReadyWork: vi.fn(),
     detectBugFixWork: vi.fn(),
+    detectFeaturePipelineWork: vi.fn(),
     claimWork: vi.fn(),
     claimBugFixWork: vi.fn(),
+    claimFeaturePipelineWork: vi.fn(),
     markStuck: vi.fn(),
   },
   mockServer: { close: vi.fn((cb?: () => void) => { if (cb) cb(); }) },
@@ -187,8 +189,10 @@ describe('daemon', () => {
     mockLoadConfig.mockResolvedValue(ok(makeConfig()));
     mockDetector.detectReadyWork.mockResolvedValue(ok([]));
     mockDetector.detectBugFixWork.mockResolvedValue(ok(null));
+    mockDetector.detectFeaturePipelineWork.mockResolvedValue(ok(null));
     mockDetector.claimWork.mockResolvedValue(ok(undefined));
     mockDetector.claimBugFixWork.mockResolvedValue(ok(undefined));
+    mockDetector.claimFeaturePipelineWork.mockResolvedValue(ok(undefined));
     mockDetector.markStuck.mockResolvedValue(ok(undefined));
     mockSelectVariant.mockReturnValue('feature');
     mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
@@ -212,7 +216,7 @@ describe('daemon', () => {
     vi.restoreAllMocks();
     // vi.restoreAllMocks only restores spies, not hoisted vi.fn() — clear them explicitly
     for (const mock of [
-      mockDetector.detectReadyWork, mockDetector.detectBugFixWork, mockDetector.claimWork, mockDetector.claimBugFixWork, mockDetector.markStuck,
+      mockDetector.detectReadyWork, mockDetector.detectBugFixWork, mockDetector.detectFeaturePipelineWork, mockDetector.claimWork, mockDetector.claimBugFixWork, mockDetector.claimFeaturePipelineWork, mockDetector.markStuck,
       mockRunPipeline, mockNotify, mockServerStart, mockLoadConfig,
       mockStateMgr.initialize, mockStateMgr.saveRunState, mockStateMgr.findIncompleteRuns,
       mockServer.close, mockRemoteControl.start, mockRemoteControl.stop,
@@ -1085,6 +1089,161 @@ describe('daemon', () => {
       await vi.advanceTimersByTimeAsync(30000);
 
       expect(mockDetector.detectBugFixWork).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('feature-pipeline routing (#282)', () => {
+    it('polls detectFeaturePipelineWork after bug-fix processing', async () => {
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(mockDetector.detectFeaturePipelineWork).toHaveBeenCalledTimes(1);
+    });
+
+    it('claims and processes feature-pipeline work when detected', async () => {
+      const fpRequest = makeWorkRequest({
+        issueNumber: 60,
+        title: 'Brainstorm L2 spec',
+        labels: ['feature-pipeline', 'l1-approved'],
+        workType: 'l2-brainstorm',
+      });
+      mockDetector.detectFeaturePipelineWork.mockResolvedValue(ok(fpRequest));
+      mockSelectVariant.mockReturnValue('spec-driven');
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(mockDetector.claimFeaturePipelineWork).toHaveBeenCalledWith(60, 'l2-brainstorm');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockRunPipeline).toHaveBeenCalled();
+    });
+
+    it('routes feature-pipeline work to spec-driven variant via selectVariant', async () => {
+      const fpRequest = makeWorkRequest({
+        issueNumber: 61,
+        title: 'Generate L3',
+        labels: ['feature-pipeline', 'l2-approved'],
+        workType: 'l3-generate',
+      });
+      mockDetector.detectFeaturePipelineWork.mockResolvedValue(ok(fpRequest));
+      mockSelectVariant.mockReturnValue('spec-driven');
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockStateMgr.saveRunState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          issueNumber: 61,
+          variant: 'spec-driven',
+        }),
+      );
+    });
+
+    it('skips feature-pipeline detection when at max concurrency', async () => {
+      const config = makeConfig({ maxConcurrentRuns: 1 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      // Ready work fills concurrency
+      const readyRequest = makeWorkRequest({ issueNumber: 1 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([readyRequest]));
+      mockRunPipeline.mockImplementation(() => new Promise(() => {})); // never resolves
+
+      const fpRequest = makeWorkRequest({
+        issueNumber: 60,
+        labels: ['feature-pipeline', 'l1-approved'],
+        workType: 'l2-brainstorm',
+      });
+      mockDetector.detectFeaturePipelineWork.mockResolvedValue(ok(fpRequest));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(1);
+      expect(mockDetector.claimFeaturePipelineWork).not.toHaveBeenCalled();
+    });
+
+    it('skips feature-pipeline when claim fails', async () => {
+      const fpRequest = makeWorkRequest({
+        issueNumber: 60,
+        labels: ['feature-pipeline', 'l1-approved'],
+        workType: 'l2-brainstorm',
+      });
+      mockDetector.detectFeaturePipelineWork.mockResolvedValue(ok(fpRequest));
+      mockDetector.claimFeaturePipelineWork.mockResolvedValue(err(new Error('already claimed')));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockDetector.claimFeaturePipelineWork).toHaveBeenCalledWith(60, 'l2-brainstorm');
+      expect(mockRunPipeline).not.toHaveBeenCalled();
+    });
+
+    it('handles detectFeaturePipelineWork returning an error gracefully', async () => {
+      mockDetector.detectFeaturePipelineWork.mockResolvedValue(err(new Error('API error')));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockDetector.detectFeaturePipelineWork).toHaveBeenCalled();
+      expect(mockDetector.claimFeaturePipelineWork).not.toHaveBeenCalled();
+      expect(mockRunPipeline).not.toHaveBeenCalled();
+    });
+
+    it('does not call detectFeaturePipelineWork when paused', async () => {
+      const { startDaemon } = await loadDaemon();
+      const { createControlServer } = await import('./server.js');
+
+      await startDaemon('config.json');
+
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      handlers.pause();
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(mockDetector.detectFeaturePipelineWork).not.toHaveBeenCalled();
+    });
+
+    it('deduplicates: skips feature-pipeline work if same issue already claimed by ready work', async () => {
+      // Ready work detects issue #60
+      const readyRequest = makeWorkRequest({ issueNumber: 60 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([readyRequest]));
+
+      // Feature pipeline also detects issue #60
+      const fpRequest = makeWorkRequest({
+        issueNumber: 60,
+        labels: ['feature-pipeline', 'l1-approved'],
+        workType: 'l2-brainstorm',
+      });
+      mockDetector.detectFeaturePipelineWork.mockResolvedValue(ok(fpRequest));
+
+      const config = makeConfig({ maxConcurrentRuns: 5 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Ready work was claimed
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(60);
+      // Feature pipeline should NOT try to claim the same issue
+      expect(mockDetector.claimFeaturePipelineWork).not.toHaveBeenCalled();
     });
   });
 });

@@ -78,4 +78,33 @@ describe('selectVariant', () => {
     // Without workType check, review-finding label would fall through to feature-simple
     expect(selectVariant(req)).toBe('bug');
   });
+
+  it('returns spec-driven for workType l2-brainstorm', () => {
+    const req: WorkRequest = {
+      issueNumber: 20, title: 'Brainstorm L2', body: 'FUNC-AC ref', labels: ['feature-pipeline', 'l1-approved'], specRefs: ['FUNC-AC-PIPELINE'], workType: 'l2-brainstorm',
+    };
+    expect(selectVariant(req)).toBe('spec-driven');
+  });
+
+  it('returns spec-driven for workType l3-generate', () => {
+    const req: WorkRequest = {
+      issueNumber: 21, title: 'Generate L3', body: 'ARCH-AC ref', labels: ['feature-pipeline', 'l2-approved'], specRefs: ['ARCH-AC-CONTROL-PLANE'], workType: 'l3-generate',
+    };
+    expect(selectVariant(req)).toBe('spec-driven');
+  });
+
+  it('returns spec-driven for workType implementation', () => {
+    const req: WorkRequest = {
+      issueNumber: 22, title: 'Implement feature', body: 'STACK-AC ref', labels: ['feature-pipeline', 'ready-to-implement'], specRefs: ['STACK-AC-CONTROL-PLANE'], workType: 'implementation',
+    };
+    expect(selectVariant(req)).toBe('spec-driven');
+  });
+
+  it('workType l2-brainstorm routes to spec-driven even without spec refs in body', () => {
+    const req: WorkRequest = {
+      issueNumber: 23, title: 'New feature', body: 'No spec refs here', labels: ['feature-pipeline', 'l1-approved'], specRefs: [], workType: 'l2-brainstorm',
+    };
+    // Without workType-based routing, isSpecDrivenRequest would return false (no spec refs)
+    expect(selectVariant(req)).toBe('spec-driven');
+  });
 });
