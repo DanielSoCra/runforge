@@ -3,7 +3,7 @@ id: FUNC-AC-LEARNING
 type: functional
 domain: auto-claude
 status: draft
-version: 2
+version: 3
 layer: 1
 ---
 
@@ -144,6 +144,32 @@ Each new piece of implementation work starts with limited project memory. When a
 - Given future work touches similar areas of the codebase
 - When the system prepares context for that work
 - Then knowledge extracted from past implementation records on those same areas is included alongside other matched observations
+
+### Retrospective Learning
+
+**Scenario: Retrospective feeds institutional knowledge**
+- Given the Retrospective protocol produces lessons learned
+- When the Tech Lead distills a technical lesson into a gotcha
+- Then the gotcha enters the knowledge store and becomes available for injection into future sessions
+
+**Scenario: Business-level retrospective lessons**
+- Given the Retrospective protocol produces business-level lessons
+- When the PO records a business observation (e.g., "this type of proposal consistently gets rejected")
+- Then the business observation is stored as a distinct record type from technical gotchas
+- And it is available to the PO for future proposal generation
+
+**Scenario: Recurring gotcha triggers systemic proposal**
+- Given the same root cause appears in gotchas exceeding a configurable threshold (default: 3)
+- When the Tech Lead detects the pattern
+- Then it generates a technical debt proposal to address the root cause
+
+### Prospective Checks
+
+**Scenario: Prospective gotcha check at batch planning**
+- Given the coordination engine is preparing a batch for the Batch Planning protocol
+- When it queries the knowledge store for gotchas related to the planned work areas
+- Then high-severity gotchas are flagged and included in the Tech Lead's input to Batch Planning
+- And the Tech Lead factors historical failures into effort estimates and risk assessments
 
 ## Success Criteria
 
