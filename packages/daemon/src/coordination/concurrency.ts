@@ -44,6 +44,7 @@ const TYPE_MINIMUMS: Record<AgentType, number> = {
   po: 1,
   planner: 0,
   'codebase-reviewer': 0,
+  tech_lead: 0,
 };
 
 const TYPE_MAXIMUMS: Record<AgentType, number> = {
@@ -52,6 +53,7 @@ const TYPE_MAXIMUMS: Record<AgentType, number> = {
   reviewer: 1,
   worker: Infinity, // capped by maxAgents
   'codebase-reviewer': 1,
+  tech_lead: 1,
 };
 
 // ---------------------------------------------------------------------------
@@ -69,6 +71,7 @@ export function evaluatePool(ctx: EvalContext): SpawnDecision[] {
     po: 0,
     planner: 0,
     'codebase-reviewer': 0,
+    tech_lead: 0,
   };
   for (const claim of ctx.activeClaims) {
     if (isActiveClaimStatus(claim.status)) {
@@ -76,14 +79,14 @@ export function evaluatePool(ctx: EvalContext): SpawnDecision[] {
     }
   }
 
-  const totalActive = activeCounts.worker + activeCounts.reviewer + activeCounts.po + activeCounts.planner + activeCounts['codebase-reviewer'];
+  const totalActive = activeCounts.worker + activeCounts.reviewer + activeCounts.po + activeCounts.planner + activeCounts['codebase-reviewer'] + activeCounts.tech_lead;
   let remaining = ctx.maxAgents - totalActive;
   if (remaining <= 0) return [];
 
   const decisions: SpawnDecision[] = [];
 
   // 2. Spawn to meet per-type minimums (po: 1, reviewer: 1)
-  for (const agentType of ['po', 'reviewer', 'worker', 'planner', 'codebase-reviewer', 'tech_lead'] as AgentType[]) {
+  for (const agentType of (['po', 'reviewer', 'worker', 'planner', 'codebase-reviewer', 'tech_lead'] satisfies AgentType[])) {
     const min = TYPE_MINIMUMS[agentType];
     const max = TYPE_MAXIMUMS[agentType];
     const current = activeCounts[agentType];

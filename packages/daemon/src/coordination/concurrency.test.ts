@@ -1,6 +1,7 @@
 // src/coordination/concurrency.test.ts
 import { describe, it, expect } from 'vitest';
 import { evaluatePool, type EvalContext, type SpawnDecision, type DispatchQueueItem } from './concurrency.js';
+import { AgentTypeSchema } from './types.js';
 import type { WorkerClaim, Batch, AgentType, ClaimStatus } from './types.js';
 
 function makeClaim(
@@ -494,6 +495,46 @@ describe('evaluatePool', () => {
     // Queue takes 2 slots, batch gets only 1 more (3 - 2 = 1)
     expect(workerDecisions).toHaveLength(3);
     expect(workerDecisions.map(d => d.issueNumber)).toEqual([1, 2, 10]);
+  });
+
+  it('AgentTypeSchema accepts tech_lead (BUG-21 regression)', () => {
+    // Regression: tech_lead was not in the Zod enum, requiring an unsafe cast
+    expect(AgentTypeSchema.safeParse('tech_lead').success).toBe(true);
+  });
+
+  it('tech_lead is a valid agent type with min 0 and max 1 (BUG-21 regression)', () => {
+    // Regression: tech_lead was in the iteration array but not in AgentTypeSchema,
+    // TYPE_MINIMUMS, TYPE_MAXIMUMS, or activeCounts. The `as AgentType[]` cast
+    // silenced TypeScript, causing NaN in the needed calculation and preventing
+    // tech_lead from ever being managed by the pool.
+    const claims = [
+      makeClaim({ agentType: 'po', issueNumber: 100 }),
+      makeClaim({ agentType: 'reviewer', issueNumber: 101 }),
+    ];
+    const result = evaluatePool(makeCtx({
+      activeClaims: claims,
+      maxAgents: 10,
+    }));
+    // tech_lead has min 0, so it should NOT be spawned for minimums
+    const tlDecisions = result.filter(d => d.agentType === 'tech_lead');
+    expect(tlDecisions).toHaveLength(0);
+  });
+
+  it('tech_lead counts toward totalActive and respects max 1 (BUG-21 regression)', () => {
+    // An active tech_lead claim should be counted toward total active agents
+    const claims = [
+      makeClaim({ agentType: 'po', issueNumber: 100 }),
+      makeClaim({ agentType: 'reviewer', issueNumber: 101 }),
+      makeClaim({ agentType: 'tech_lead', issueNumber: 0 }),
+    ];
+    // maxAgents = 3 means no room left (po + reviewer + tech_lead = 3)
+    const queue: DispatchQueueItem[] = [{ issueNumber: 1 }];
+    const result = evaluatePool(makeCtx({
+      activeClaims: claims,
+      dispatchQueue: queue,
+      maxAgents: 3,
+    }));
+    expect(result).toEqual([]);
   });
 
   it('batch items without repoKey bypass per-repo limits (backward compat)', () => {

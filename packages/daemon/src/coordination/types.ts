@@ -64,7 +64,7 @@ export type Batch = z.infer<typeof BatchSchema>;
 
 // --- WorkerClaim ---
 
-export const AgentTypeSchema = z.enum(['worker', 'reviewer', 'po', 'planner', 'codebase-reviewer']);
+export const AgentTypeSchema = z.enum(['worker', 'reviewer', 'po', 'planner', 'codebase-reviewer', 'tech_lead']);
 export type AgentType = z.infer<typeof AgentTypeSchema>;
 
 export const ClaimStatusSchema = z.enum(['claimed', 'in_progress', 'paused', 'pr_opened', 'completed', 'failed']);
