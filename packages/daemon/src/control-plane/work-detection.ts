@@ -24,6 +24,7 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
             body: issue.body ?? '',
             labels: issue.labels.map((l) => typeof l === 'string' ? l : l.name ?? ''),
             specRefs: extractSpecRefs(issue.body ?? ''),
+            scopeDescription: extractScopeDescription(issue.body ?? ''),
           }));
         return ok(requests);
       } catch (e) {
@@ -70,4 +71,28 @@ function extractSpecRefs(body: string): string[] {
   // Match spec IDs like FUNC-AC-PIPELINE, ARCH-AC-CONTROL-PLANE, STACK-AC-CONVENTIONS
   const matches = body.match(/[A-Z]+-[A-Z]+-[A-Z0-9-]+/g);
   return [...new Set(matches ?? [])];
+}
+
+/**
+ * Extracts a scope description from the issue body.
+ * Looks for an explicit "## Scope" section first, then falls back to the first
+ * non-empty paragraph. Returns undefined if the body is empty or whitespace-only.
+ */
+function extractScopeDescription(body: string): string | undefined {
+  if (!body.trim()) return undefined;
+
+  // Look for an explicit scope section (## Scope, ### Scope, etc.)
+  const scopeMatch = body.match(/^#{1,4}\s+Scope\s*\n([\s\S]*?)(?=\n#{1,4}\s|\n$)/im);
+  if (scopeMatch?.[1]?.trim()) {
+    return scopeMatch[1].trim().slice(0, 500);
+  }
+
+  // Fall back to first non-empty paragraph (split on double newline)
+  const paragraphs = body.split(/\n\s*\n/).filter((p) => p.trim());
+  const first = paragraphs[0]?.trim();
+  if (first) {
+    return first.slice(0, 500);
+  }
+
+  return undefined;
 }

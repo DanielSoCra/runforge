@@ -43,6 +43,54 @@ describe('WorkDetector', () => {
       }
     });
 
+    it('populates scopeDescription from issue body', async () => {
+      const octokit = mockOctokit([{
+        number: 99,
+        title: 'Fix auth middleware',
+        body: 'The auth middleware is broken when tokens expire.\n\nSteps to reproduce:\n1. Login\n2. Wait for expiry',
+        labels: [{ name: 'ready' }],
+      }]);
+      const detector = createWorkDetector(octokit, 'owner', 'repo');
+      const result = await detector.detectReadyWork();
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const item = result.value[0]!;
+        expect(item.scopeDescription).toBe('The auth middleware is broken when tokens expire.');
+      }
+    });
+
+    it('extracts explicit ## Scope section as scopeDescription', async () => {
+      const octokit = mockOctokit([{
+        number: 100,
+        title: 'Add caching layer',
+        body: '# Overview\n\nSome overview text.\n\n## Scope\n\nAdd Redis caching to the API layer.\n\n## Details\n\nMore info here.',
+        labels: [{ name: 'ready' }],
+      }]);
+      const detector = createWorkDetector(octokit, 'owner', 'repo');
+      const result = await detector.detectReadyWork();
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const item = result.value[0]!;
+        expect(item.scopeDescription).toBe('Add Redis caching to the API layer.');
+      }
+    });
+
+    it('sets scopeDescription to undefined for empty body', async () => {
+      const octokit = mockOctokit([{
+        number: 101,
+        title: 'No body issue',
+        body: null,
+        labels: [{ name: 'ready' }],
+      }]);
+      const detector = createWorkDetector(octokit, 'owner', 'repo');
+      const result = await detector.detectReadyWork();
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const item = result.value[0]!;
+        expect(item.scopeDescription).toBeUndefined();
+      }
+    });
+
     it('handles API errors gracefully', async () => {
       const octokit = mockOctokit();
       octokit.issues.listForRepo = vi.fn().mockRejectedValue(new Error('API error'));
