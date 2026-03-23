@@ -3,7 +3,7 @@ id: FUNC-AC-COORDINATION
 type: functional
 domain: auto-claude
 status: draft
-version: 2
+version: 3
 layer: 1
 ---
 
@@ -15,7 +15,7 @@ An autonomous development system that processes work serially wastes capacity wh
 
 ## Relationship to Other Specs
 
-This spec extends FUNC-AC-PIPELINE for multi-issue orchestration. FUNC-AC-PIPELINE defines the lifecycle of a single work request (detect → classify → implement → review → deploy). This spec defines how multiple work requests are batched, prioritized, and integrated, plus the product ownership capability where the system proposes new work.
+This spec extends FUNC-AC-PIPELINE for multi-issue orchestration. FUNC-AC-PIPELINE defines the lifecycle of a single work request (detect → classify → implement → review → deploy). This spec defines how multiple work requests are batched, prioritized, and integrated. Product ownership behavior is defined in FUNC-AC-PRODUCT-OWNER and technical leadership behavior in FUNC-AC-TECH-LEAD; this spec covers only the coordination mechanics that both roles participate in.
 
 ## Actors
 
@@ -25,40 +25,17 @@ This spec extends FUNC-AC-PIPELINE for multi-issue orchestration. FUNC-AC-PIPELI
 
 ### Product Ownership
 
-**Scenario: System proposes a feature**
-- Given the system periodically analyzes the codebase, specifications, findings, and system health
-- When it identifies a potential improvement or new feature
-- Then it produces a proposal with a title, rationale, estimated scope, and links to related work
-
-**Scenario: Operator approves a proposal**
-- Given the system has produced a proposal
-- When the operator approves it
-- Then a work request is created and enters the pipeline for specification and implementation
-
-**Scenario: Operator submits an idea**
-- Given the operator has an idea for a feature or improvement
-- When they submit it through the dashboard or terminal
-- Then the system receives it and refines it into a proposal on its next scheduled cycle
-
-**Scenario: Proposal expiry**
-- Given a proposal has been pending for longer than a configurable window
-- When the expiry time is reached
-- Then the proposal is marked as expired and removed from the active queue
-
-**Scenario: Proposal guardrails**
-- Given the system produces proposals
-- When a proposal is created
-- Then it always requires operator approval — the system never acts on its own proposals autonomously
+Product ownership behavior — proposal generation, signal analysis, operator idea refinement — is defined in FUNC-AC-PRODUCT-OWNER. Technical health analysis and effort estimation is defined in FUNC-AC-TECH-LEAD. This spec covers the coordination mechanics that both roles participate in: batch planning execution, merge sequencing, concurrency management, and failure recovery.
 
 ### Batch Planning
 
 **Scenario: System creates a batch from related work**
-- Given multiple related issues are ready for work
+- Given the PO and Tech Lead have agreed on a batch through the Batch Planning protocol and multiple related issues are ready for work
 - When the system analyzes their dependencies and relationships
 - Then it creates a batch with a dependency graph, parallelism map, target concurrency, and budget estimate
 
 **Scenario: Independent work dispatches immediately**
-- Given an issue is ready for work and has no dependencies on other pending issues
+- Given the PO has approved an issue for immediate dispatch and it has no dependencies on other pending issues
 - When the system evaluates it
 - Then it dispatches the issue immediately without waiting to form a batch
 
@@ -69,13 +46,13 @@ This spec extends FUNC-AC-PIPELINE for multi-issue orchestration. FUNC-AC-PIPELI
 
 **Scenario: Higher-priority work arrives**
 - Given a batch is currently active
-- When new work arrives that the system judges to be higher priority
+- When the PO escalates new work as higher priority through the Escalation protocol
 - Then the system cancels the current batch and creates a new one — in-flight work continues to completion but no new work is dispatched for the cancelled batch
 
 **Scenario: Work item gets stuck**
 - Given a work item in a batch exceeds its time or budget limit
 - When the system detects the failure
-- Then it decides whether to retry the issue, skip it, or re-plan the batch around the failure
+- Then the coordination engine uses a lightweight decision point to determine the response (retry, skip, or re-plan) and routes the impediment through the Escalation protocol to PO or Tech Lead as appropriate
 
 ### Continuous Re-Planning
 
@@ -93,6 +70,14 @@ This spec extends FUNC-AC-PIPELINE for multi-issue orchestration. FUNC-AC-PIPELI
 - Given a batch is active and a finding reveals the in-flight approach is flawed
 - When the system evaluates the impact
 - Then it pauses the affected work and re-plans the batch
+
+### LLM-Augmented Decision Points
+
+**Scenario: Coordination engine uses lightweight inference for routing decisions**
+- Given the coordination engine encounters a decision point where deterministic rules are insufficient
+- When it needs to determine the appropriate response (e.g., stuck detection, retry vs. skip, impediment routing)
+- Then it uses a lightweight inference call with narrow context (current work item state, recent activity, failure reason) to inform the state machine's next transition
+- And these calls do not generate proposals, modify specs, or initiate protocols — they return a single routing decision
 
 ### Concurrency Management
 
