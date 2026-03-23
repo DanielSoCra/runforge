@@ -821,6 +821,40 @@ describe('createPhaseHandlers', () => {
       );
     });
 
+    it('returns rate-limited when diagnose errors with SessionError.rateLimited (#266)', async () => {
+      const { SessionError } = await import('../session-runtime/session-error.js');
+      mockDiagnose.mockResolvedValue({ ok: false, error: SessionError.rateLimited(0.5) });
+
+      const { handlers } = createHandlers();
+      const result = await handlers.diagnose!(makeRun({ variant: 'bug' }));
+
+      expect(result).toBe('rate-limited');
+      // Should NOT label needs-human — this is a pause, not a failure
+      expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('returns budget-exceeded when diagnose errors with SessionError.budgetExceeded (#266)', async () => {
+      const { SessionError } = await import('../session-runtime/session-error.js');
+      mockDiagnose.mockResolvedValue({ ok: false, error: SessionError.budgetExceeded('daily limit') });
+
+      const { handlers } = createHandlers();
+      const result = await handlers.diagnose!(makeRun({ variant: 'bug' }));
+
+      expect(result).toBe('budget-exceeded');
+      expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('returns containment-breach when diagnose errors with SessionError.containmentBreached (#266)', async () => {
+      const { SessionError } = await import('../session-runtime/session-error.js');
+      mockDiagnose.mockResolvedValue({ ok: false, error: SessionError.containmentBreached('bad access', 0.1) });
+
+      const { handlers } = createHandlers();
+      const result = await handlers.diagnose!(makeRun({ variant: 'bug' }));
+
+      expect(result).toBe('containment-breach');
+      expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
+    });
+
     it('uses config.diagnosis.confidenceThreshold', async () => {
       mockDiagnose.mockResolvedValue({ ok: true, value: typeADiagnosis });
       mockRouteDiagnosis.mockReturnValue({ route: 'bug-pipeline', diagnosis: typeADiagnosis });

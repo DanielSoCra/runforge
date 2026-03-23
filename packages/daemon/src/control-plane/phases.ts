@@ -20,6 +20,7 @@ import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
 import { loadSpecContent, loadImplementationContent } from '../infra/spec-loader.js';
 import { classify as runClassify } from './classifier.js';
+import { SessionError } from '../session-runtime/session-error.js';
 
 // Serializes git operations on the shared repoRoot across concurrent pipeline runs.
 // Currently protects detect (which modifies checkout state via git checkout).
@@ -131,6 +132,23 @@ export function createPhaseHandlers(
       );
 
       if (!result.ok) {
+        // Extract safety signals from SessionError before falling back (ARCH-AC-OPERATIONAL-SAFETY)
+        if (result.error instanceof SessionError) {
+          if (result.error.rateLimited) {
+            console.warn(`[diagnose] Diagnosis session rate-limited: ${result.error.message} — signaling pipeline to pause`);
+            return 'rate-limited';
+          }
+          if (result.error.containmentBreach) {
+            console.warn(`[diagnose] Diagnosis session containment breach: ${result.error.message} — signaling pipeline`);
+            return 'containment-breach';
+          }
+          // SessionError.budgetExceeded() has cost=0, rateLimited=false, containmentBreach=false —
+          // no dedicated boolean, so detect via message prefix (matches factory method format)
+          if (result.error.message.startsWith('Budget exceeded')) {
+            console.warn(`[diagnose] Diagnosis session budget exceeded: ${result.error.message} — signaling pipeline to pause`);
+            return 'budget-exceeded';
+          }
+        }
         console.error(`[diagnose] Diagnosis failed:`, result.error.message);
         // Diagnosis failed — route to human
         try {
