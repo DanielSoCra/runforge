@@ -125,4 +125,29 @@ describe('runProactiveReview', () => {
       undefined,
     );
   });
+
+  it('forwards runWriter and runId to spawnSession when provided', async () => {
+    const runtime = makeRuntime({ findings: [] });
+    const fakeRunWriter = { write: vi.fn() } as unknown as import('../supabase/run-writer.js').SupabaseRunWriter;
+    const fakeRunId = 'run-abc-123';
+
+    const result = await runProactiveReview(runtime, {
+      area: 'src/validation',
+      cwd: '/workspace',
+      recentCommits: 'abc fix',
+      issueNumber: 7,
+      runWriter: fakeRunWriter,
+      runId: fakeRunId,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(runtime.spawnSession).toHaveBeenCalledWith(
+      'codebase-reviewer',
+      expect.objectContaining({ workspacePath: '/workspace' }),
+      7,
+      expect.objectContaining({ jsonSchema: expect.any(String) }),
+      fakeRunWriter,
+      fakeRunId,
+    );
+  });
 });
