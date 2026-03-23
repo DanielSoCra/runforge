@@ -180,6 +180,7 @@ ARCH-AC-DASHBOARD:
 
 ARCH-AC-PRODUCT-OWNER:
   parent: FUNC-AC-PRODUCT-OWNER
+  children: [STACK-AC-PRODUCT-OWNER]
   status: draft
 
 ARCH-AC-TECH-LEAD:
@@ -605,4 +606,21 @@ STACK-AC-TECH-LEAD:
     - prompts/tech-lead-enrichment.md
   test_paths:
     - packages/daemon/src/coordination/tech-lead/**/*.test.ts
+  status: draft
+
+STACK-AC-PRODUCT-OWNER:
+  parent: ARCH-AC-PRODUCT-OWNER
+  children: []
+  code_paths:
+    - packages/daemon/src/coordination/product-owner/
+    - packages/daemon/src/coordination/product-owner/schemas.ts
+    - packages/daemon/src/coordination/product-owner/signal-analyzer.ts
+    - packages/daemon/src/coordination/product-owner/proposal-generator.ts
+    - packages/daemon/src/coordination/product-owner/session-output-parser.ts
+    - packages/daemon/src/coordination/product-owner/protocol-round-formatter.ts
+    - packages/daemon/src/coordination/product-owner/idea-processor.ts
+    - prompts/product-owner.md
+    - prompts/product-owner-enrichment.md
+  test_paths:
+    - packages/daemon/src/coordination/product-owner/**/*.test.ts
   status: draft
