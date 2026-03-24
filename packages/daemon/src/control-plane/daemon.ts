@@ -35,6 +35,7 @@ import { createBatchManager } from '../coordination/batch-manager.js';
 import { createMergeAgent } from '../coordination/merge-agent.js';
 import { createMergeQueue } from '../coordination/merge-queue.js';
 import { statfs } from 'fs/promises';
+import { startHeartbeat } from './heartbeat.js';
 import { TechProposalStore } from '../coordination/tech-lead/proposal-store.js';
 import { assembleSignalDigest } from '../coordination/tech-lead/signal-digest.js';
 import { isTerminalStatus } from '../coordination/tech-lead/proposal-lifecycle.js';
@@ -559,6 +560,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       });
   }
 
+  // 6c. Heartbeat — write a timestamp file for operator monitoring (health.sh compatibility)
+  const heartbeatPath = join(process.env.HOME ?? '/tmp', 'logs', 'claude-daemon.heartbeat');
+  const stopHeartbeat = startHeartbeat(heartbeatPath, config.pollIntervalMs);
+
   // 7. Legacy polling loop (only used when repoManager is null AND coordinator is off)
   let legacyPoller: ReturnType<typeof setInterval> | null = null;
   if (legacyDetector && !config.coordination.useCoordinator) {
@@ -624,6 +629,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     shuttingDown = true;
     console.log('Shutting down...');
     if (legacyPoller) clearInterval(legacyPoller);
+    stopHeartbeat();
     if (stopCoordinator) stopCoordinator();
     stopReviewScheduler();
     stopPOAgent?.();

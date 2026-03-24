@@ -160,34 +160,33 @@ auto-claude start -c /path/to/auto-claude.config.json
 
 ### Process supervision (macOS)
 
-On macOS, use a single launchd plist to keep the daemon running:
-
-```xml
-<!-- ~/Library/LaunchAgents/com.auto-claude.daemon.plist -->
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>com.auto-claude.daemon</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/path/to/pnpm</string>
-    <string>start</string>
-  </array>
-  <key>WorkingDirectory</key>
-  <string>/path/to/auto-claude/packages/daemon</string>
-  <key>KeepAlive</key>
-  <true/>
-  <key>StandardOutPath</key>
-  <string>/tmp/auto-claude-daemon.log</string>
-  <key>StandardErrorPath</key>
-  <string>/tmp/auto-claude-daemon.err</string>
-</dict>
-</plist>
-```
+On macOS, use the provided install script to set up a single launchd plist that keeps the daemon running. This replaces the 3 legacy shell-script plists (pipeline, developer, reviewer).
 
 ```bash
-launchctl load ~/Library/LaunchAgents/com.auto-claude.daemon.plist
+# Install: unloads legacy plists, substitutes env vars from .env.mac, loads daemon plist
+./scripts/install-daemon.sh
+
+# Verify
+launchctl list | grep autoclaude
+# Should show: com.autoclaude.daemon (single entry)
+
+# Rollback (if needed)
+./scripts/uninstall-daemon.sh
 ```
+
+The install script reads `.env.mac` for `GITHUB_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and Supabase public keys, then substitutes them into the plist template at `scripts/com.autoclaude.daemon.plist`.
+
+The daemon writes a heartbeat file to `~/logs/claude-daemon.heartbeat` on each poll interval. Check it with:
+
+```bash
+./scripts/health.sh
+```
+
+**Plist details:**
+- Label: `com.autoclaude.daemon`
+- KeepAlive: `true` (restarts on crash)
+- ThrottleInterval: 30 seconds (prevents rapid restart loops)
+- Logs: `~/logs/claude-daemon.log`
 
 ### Operator commands
 
