@@ -36,7 +36,8 @@ export interface RetrospectiveResult {
 
 export interface ProtocolOrchestratorDeps {
   poBatchPlanning: () => Promise<unknown>;
-  tlBatchPlanning: () => Promise<unknown>;
+  tlBatchPlanning: (prospectiveRisks: unknown[]) => Promise<unknown>;
+  queryProspectiveRisks?: () => Promise<unknown[]>;
   poEscalation: (input: EscalationInput) => Promise<unknown>;
   tlEscalation: (input: EscalationInput) => Promise<unknown>;
   poStatusSync: () => Promise<void>;
@@ -72,12 +73,22 @@ export function createProtocolOrchestrator(
 
   async function batchPlanning(): Promise<Result<BatchPlanningResult>> {
     try {
-      const [poOutput, tlOutput] = await withTimeout(
-        Promise.all([deps.poBatchPlanning(), deps.tlBatchPlanning()]),
-        config.protocolTimeoutMs,
-        'Batch Planning protocol',
-      );
-      return ok({ poOutput, tlOutput });
+      // Query prospective risks before batch planning so the Tech Lead
+      // can factor historical failures into effort estimates and risk assessments.
+      // The entire sequence (risk query + planning) is covered by the timeout.
+      const run = async () => {
+        const prospectiveRisks = deps.queryProspectiveRisks
+          ? await deps.queryProspectiveRisks()
+          : [];
+        const [poOutput, tlOutput] = await Promise.all([
+          deps.poBatchPlanning(),
+          deps.tlBatchPlanning(prospectiveRisks),
+        ]);
+        return { poOutput, tlOutput };
+      };
+
+      const result = await withTimeout(run(), config.protocolTimeoutMs, 'Batch Planning protocol');
+      return ok(result);
     } catch (e) {
       return err(e instanceof Error ? e : new Error(String(e)));
     }

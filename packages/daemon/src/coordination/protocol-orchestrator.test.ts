@@ -92,6 +92,48 @@ describe('ProtocolOrchestrator', () => {
 
       expect(result.ok).toBe(false);
     });
+
+    it('queries prospective risks and passes them to TL batch planning', async () => {
+      const fakeRisks = [
+        { id: 'kr-1', artifactPatterns: ['src/auth/**'], priorityTier: 'elevated' },
+        { id: 'kr-2', artifactPatterns: ['src/api/**'], hitCount: 7 },
+      ];
+      const queryProspectiveRisks = vi.fn().mockResolvedValue(fakeRisks);
+      const tlBatchPlanning = vi.fn().mockResolvedValue({ plan: 'ok' });
+      const deps = makeDeps({ queryProspectiveRisks, tlBatchPlanning });
+      const orchestrator = createProtocolOrchestrator(deps, makeConfig());
+
+      const result = await orchestrator.batchPlanning();
+
+      expect(result.ok).toBe(true);
+      expect(queryProspectiveRisks).toHaveBeenCalledOnce();
+      expect(tlBatchPlanning).toHaveBeenCalledWith(fakeRisks);
+    });
+
+    it('returns error when queryProspectiveRisks rejects', async () => {
+      const deps = makeDeps({
+        queryProspectiveRisks: vi.fn().mockRejectedValue(new Error('knowledge store unavailable')),
+      });
+      const orchestrator = createProtocolOrchestrator(deps, makeConfig());
+
+      const result = await orchestrator.batchPlanning();
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('knowledge store unavailable');
+      }
+    });
+
+    it('passes empty array to TL when queryProspectiveRisks is not provided', async () => {
+      const tlBatchPlanning = vi.fn().mockResolvedValue({ plan: 'ok' });
+      const deps = makeDeps({ tlBatchPlanning });
+      const orchestrator = createProtocolOrchestrator(deps, makeConfig());
+
+      const result = await orchestrator.batchPlanning();
+
+      expect(result.ok).toBe(true);
+      expect(tlBatchPlanning).toHaveBeenCalledWith([]);
+    });
   });
 
   describe('escalation()', () => {
