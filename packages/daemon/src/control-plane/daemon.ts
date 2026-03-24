@@ -78,8 +78,9 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     perRunBudget: config.perRunBudget, // per-run budget is repo-specific, handled per-run
   });
   const runtime = new SessionRuntime(config, costTracker);
-  const gotchaStore = new GotchaStore(join(stateDir, 'gotchas.jsonl'));
-  const knowledgeStore = new KnowledgeStore(join(stateDir, 'knowledge.jsonl'), DEFAULT_POLICIES);
+  const gotchasPath = join(stateDir, 'gotchas.jsonl');
+  const gotchaStore = new GotchaStore(gotchasPath);
+  const knowledgeStore = new KnowledgeStore(join(stateDir, 'knowledge.jsonl'), DEFAULT_POLICIES, gotchasPath);
   const repoRoot = process.cwd();
   const coordinator = new ImplementationCoordinator(runtime, repoRoot, 300, 2000, gotchaStore, knowledgeStore);
 

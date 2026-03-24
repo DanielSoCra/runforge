@@ -11,6 +11,7 @@ const {
   mockServer, mockServerStart, mockRunPipeline, mockNotify,
   mockRunWriter, mockConfigReader, mockLoadConfig, mockSelectVariant, phaseHandlerCalls, mockCreateReviewScheduler,
   mockCreatePOAgent, mockCreateTechLeadScheduler, mockCreateCoordinator,
+  knowledgeStoreCtorArgs,
 } = vi.hoisted(() => ({
   mockStateMgr: {
     initialize: vi.fn().mockResolvedValue(undefined),
@@ -64,6 +65,7 @@ const {
   mockCreateCoordinator: vi.fn().mockReturnValue({
     start: vi.fn().mockReturnValue(vi.fn()),
   }),
+  knowledgeStoreCtorArgs: [] as unknown[],
 }));
 
 // --- Module mocks (use classes for constructors to work with `new`) ---
@@ -77,6 +79,15 @@ vi.mock('../session-runtime/cost.js', () => {
 vi.mock('../session-runtime/runtime.js', () => {
   return { SessionRuntime: class {} };
 });
+vi.mock('../knowledge/gotcha-store.js', () => {
+  return { GotchaStore: class {} };
+});
+vi.mock('../knowledge/knowledge-store.js', () => {
+  return { KnowledgeStore: class { constructor(...args: unknown[]) { knowledgeStoreCtorArgs.length = 0; knowledgeStoreCtorArgs.push(...args); } } };
+});
+vi.mock('../knowledge/policy-registry.js', () => ({
+  DEFAULT_POLICIES: {},
+}));
 vi.mock('../implementation/coordinator.js', () => {
   return { ImplementationCoordinator: class {} };
 });
@@ -1643,6 +1654,18 @@ describe('daemon', () => {
       const { startDaemon } = await loadDaemon();
       await startDaemon('config.json');
       expect(mockCreateReviewScheduler).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('knowledge store v1 migration wiring (#369)', () => {
+    it('passes v1GotchaPath to KnowledgeStore constructor', async () => {
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      // KnowledgeStore(path, policies, v1GotchaPath)
+      expect(knowledgeStoreCtorArgs).toHaveLength(3);
+      expect(knowledgeStoreCtorArgs[0]).toMatch(/knowledge\.jsonl$/);
+      expect(knowledgeStoreCtorArgs[2]).toMatch(/gotchas\.jsonl$/);
     });
   });
 });
