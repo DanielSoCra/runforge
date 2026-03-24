@@ -16,8 +16,8 @@
   "webhooks": [],
   "validation": {
     "gate1Commands": [
-      "vitest run",
-      "tsc --noEmit"
+      "pnpm -r run test",
+      "pnpm -r run typecheck"
     ],
     "maxFixCycles": 2
   }
