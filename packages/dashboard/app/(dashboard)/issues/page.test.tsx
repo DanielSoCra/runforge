@@ -4,12 +4,16 @@ vi.mock('@/lib/supabase/server', () => ({
 vi.mock('@/lib/supabase/service', () => ({
   createServiceClient: vi.fn(),
 }));
+vi.mock('@/lib/auth', () => ({
+  requireUser: vi.fn(),
+}));
 
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import IssuesPage from './page';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
+import { requireUser } from '@/lib/auth';
 
 function mockSupabase(repos: Record<string, unknown>[] = [], runs: Record<string, unknown>[] = []) {
   const runsResolved = { data: runs, error: null };
@@ -95,6 +99,15 @@ describe('IssuesPage', () => {
     } finally {
       global.fetch = originalFetch;
     }
+  });
+
+  it('rejects unauthenticated users before decrypting tokens (#367)', async () => {
+    const { rpcFn } = mockSupabase([], []);
+    vi.mocked(requireUser).mockRejectedValueOnce(new Error('Unauthorized'));
+
+    await expect(IssuesPage()).rejects.toThrow('Unauthorized');
+    // decrypt_github_token RPC must NOT have been called
+    expect(rpcFn).not.toHaveBeenCalled();
   });
 
   it('shows board when at least one repo has a GitHub token (#129)', async () => {

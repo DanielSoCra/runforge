@@ -1,6 +1,7 @@
 // packages/dashboard/app/(dashboard)/issues/page.tsx
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
+import { requireUser } from '@/lib/auth';
 import { classifyIssues, type RunRecord, type GitHubIssue } from '@/lib/classify-issues';
 import { IssuesBoard } from '@/components/issues-board';
 
@@ -38,6 +39,7 @@ async function fetchIssuesForRepo(
 
 export default async function IssuesPage() {
   const supabase = await createClient();
+  await requireUser(supabase);
 
   const [{ data: repos }, { data: runs }] = await Promise.all([
     supabase.from('repos').select('id, owner, name, connection_id').eq('enabled', true).is('deleted_at', null),
