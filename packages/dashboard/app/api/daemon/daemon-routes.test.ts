@@ -120,6 +120,18 @@ describe.each(inlineAuthRoutes)('POST /api/daemon/$name', ({ path, daemonPath })
     const res = await POST();
     expect(res.status).toBe(503);
   });
+
+  it('returns 500 when DAEMON_URL is not configured', async () => {
+    vi.stubEnv('DAEMON_URL', '');
+    const createClient = await getCreateClient();
+    createClient.mockResolvedValueOnce(mockSupabaseAdmin());
+    const { POST } = await import(path);
+    const res = await POST();
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toMatch(/DAEMON_URL/);
+    vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
+  });
 });
 
 // ---------- remote-control/restart (uses requireAdmin — returns 403 for both unauth and non-admin) ----------
@@ -243,5 +255,17 @@ describe('GET /api/daemon/status', () => {
     expect(res.status).toBe(503);
     const body = await res.json();
     expect(body.state).toBe('offline');
+  });
+
+  it('returns 500 when DAEMON_URL is not configured', async () => {
+    vi.stubEnv('DAEMON_URL', '');
+    const createClient = await getCreateClient();
+    createClient.mockResolvedValueOnce(mockSupabaseAdmin());
+    const { GET } = await import('./status/route.js');
+    const res = await GET();
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toMatch(/DAEMON_URL/);
+    vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
   });
 });
