@@ -102,6 +102,64 @@ describe('KnowledgeStore', () => {
       expect(count).toBe(0); // deduped
     });
 
+    it('elevates existing autonomous record to operator when duplicate is stored with operator origin (#376)', async () => {
+      // Step 1: Store an autonomous record
+      await store.storeRecord(
+        [makeMarker({ description: 'Always validate user input before SQL queries' })],
+        'issue-10',
+        'autonomous',
+        'technical_pitfall',
+      );
+      const before = await store.loadAll();
+      expect(before).toHaveLength(1);
+      expect(before[0]!.originType).toBe('autonomous');
+      expect(before[0]!.priorityTier).toBe('normal');
+      expect(before[0]!.hitCount).toBe(1);
+
+      // Step 2: Store a duplicate with operator origin (simulating operator submitting same finding)
+      const count = await store.storeRecord(
+        [makeMarker({ description: 'Always validate user input before SQL queries' })],
+        'review-5',
+        'operator',
+        'technical_pitfall',
+      );
+      expect(count).toBe(0); // deduped, not a new record
+
+      // Step 3: Verify the existing record was elevated
+      const after = await store.loadAll();
+      expect(after).toHaveLength(1);
+      expect(after[0]!.originType).toBe('operator');
+      expect(after[0]!.priorityTier).toBe('elevated');
+      expect(after[0]!.hitCount).toBe(2); // incremented by dedup
+    });
+
+    it('does not re-elevate when duplicate operator record matches an already-operator record (#376)', async () => {
+      // Store as operator directly
+      await store.storeRecord(
+        [makeMarker({ description: 'Operator correction about imports' })],
+        'review-1',
+        'operator',
+        'operator_correction',
+      );
+      const before = await store.loadAll();
+      expect(before[0]!.originType).toBe('operator');
+      expect(before[0]!.priorityTier).toBe('elevated');
+
+      // Store a duplicate also with operator origin
+      await store.storeRecord(
+        [makeMarker({ description: 'Operator correction about imports' })],
+        'review-2',
+        'operator',
+        'operator_correction',
+      );
+      const after = await store.loadAll();
+      expect(after).toHaveLength(1);
+      // Should remain operator/elevated (no-op, since it already was)
+      expect(after[0]!.originType).toBe('operator');
+      expect(after[0]!.priorityTier).toBe('elevated');
+      expect(after[0]!.hitCount).toBe(2); // hitCount still increments on dedup
+    });
+
     it('stores rootCauseTag and reasoning when provided', async () => {
       await store.storeRecord(
         [makeMarker({ rootCauseTag: 'race-cond', reasoning: 'Found during cleanup' })],
