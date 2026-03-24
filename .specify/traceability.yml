@@ -384,6 +384,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/app/(dashboard)/command-center/new-project/page.tsx
     - packages/dashboard/actions/new-project.ts
     - packages/dashboard/lib/auth.ts
+    - packages/dashboard/lib/daemon-fetch.ts
     - packages/dashboard/lib/github-api.ts
     - packages/dashboard/components/page-error.tsx
     - packages/dashboard/components/budget-badge.tsx
@@ -425,6 +426,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/lib/classify-issues.test.ts
     - packages/dashboard/components/budget-badge.test.tsx
     - packages/dashboard/app/api/daemon/daemon-routes.test.ts
+    - packages/dashboard/lib/daemon-fetch.test.ts
     - packages/dashboard/app/(dashboard)/runs/[id]/page.test.tsx
     - packages/dashboard/lib/supabase/env.test.ts
   status: draft
