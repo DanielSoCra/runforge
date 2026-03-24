@@ -30,7 +30,7 @@ services:
       NODE_ENV: production
       PLUGINS_DIR: /app/plugins
     ports:
-      - "${DASHBOARD_PORT:-3000}"
+      - "${DASHBOARD_PORT:-127.0.0.1:3000:3000}"
     volumes:
       - ./plugins:/app/plugins:ro
     networks:
