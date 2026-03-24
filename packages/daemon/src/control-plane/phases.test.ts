@@ -687,6 +687,47 @@ describe('createPhaseHandlers', () => {
         undefined, undefined, expect.any(String), '', undefined, undefined,
       );
     });
+
+    it('returns escalated when review escalates with max-cycles-exceeded (#383)', async () => {
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({
+        passed: false,
+        gateResults: [{ gate: 'deterministic', passed: false, findings: [] }],
+        fixCycles: 3,
+        escalated: true,
+        escalationReason: 'max-cycles-exceeded',
+      });
+      const { handlers } = createHandlers();
+      const result = await handlers.review!(makeRun());
+      expect(result).toBe('escalated');
+    });
+
+    it('returns escalated when review escalates with diminishing-returns (#383)', async () => {
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({
+        passed: false,
+        gateResults: [{ gate: 'deterministic', passed: false, findings: [] }],
+        fixCycles: 4,
+        escalated: true,
+        escalationReason: 'diminishing-returns',
+      });
+      const { handlers } = createHandlers();
+      const result = await handlers.review!(makeRun());
+      expect(result).toBe('escalated');
+    });
+
+    it('returns failure (not escalated) when review fails without escalation (#383)', async () => {
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({
+        passed: false,
+        gateResults: [{ gate: 'deterministic', passed: false, findings: [] }],
+        fixCycles: 0,
+        escalated: false,
+      });
+      const { handlers } = createHandlers();
+      const result = await handlers.review!(makeRun());
+      expect(result).toBe('failure');
+    });
   });
 
   describe('diagnose (#48)', () => {

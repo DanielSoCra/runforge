@@ -324,7 +324,14 @@ export function createPhaseHandlers(
       const result = await runReview(gates, cwd, {
         maxFixCycles: config.validation.maxFixCycles,
       });
-      if (!result.passed) { console.error(`[review] Failed:`, JSON.stringify(result.gateResults)); return 'failure'; }
+      if (!result.passed) {
+        if (result.escalated) {
+          console.error(`[review] Escalated (${result.escalationReason ?? 'unknown'}):`, JSON.stringify(result.gateResults));
+          return 'escalated';
+        }
+        console.error(`[review] Failed:`, JSON.stringify(result.gateResults));
+        return 'failure';
+      }
       console.log(`[review] Passed (${result.fixCycles} fix cycles)`);
       return 'success';
     },

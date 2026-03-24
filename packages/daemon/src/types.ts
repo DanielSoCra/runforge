@@ -10,7 +10,7 @@ export type Phase =
   | 'seo' | 'content' | 'assets' | 'build' | 'qa' | 'launch'
   | 'l2-design' | 'l2-gate' | 'l3-generate' | 'l3-compliance';
 
-export type PhaseEvent = 'success' | 'success:simple' | 'failure' | 'budget-exceeded' | 'per-run-budget-exceeded' | 'rate-limited' | 'containment-breach' | 'feedback' | 'unchanged';
+export type PhaseEvent = 'success' | 'success:simple' | 'failure' | 'escalated' | 'budget-exceeded' | 'per-run-budget-exceeded' | 'rate-limited' | 'containment-breach' | 'feedback' | 'unchanged';
 
 export type PipelineVariant = 'feature' | 'feature-simple' | 'bug' | 'website' | 'spec-driven';
 

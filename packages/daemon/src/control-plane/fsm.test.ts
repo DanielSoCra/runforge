@@ -74,8 +74,34 @@ describe('FSM', () => {
       expect(transition(table, 'review', 'success')?.next).toBe('integrate');
     });
 
+    it('review → escalated → stuck (#383)', () => {
+      expect(transition(table, 'review', 'escalated')?.next).toBe('stuck');
+    });
+
     it('report → failure → stuck (#107)', () => {
       expect(transition(table, 'report', 'failure')?.next).toBe('stuck');
+    });
+  });
+
+  describe('review escalation (#383)', () => {
+    it('feature: review → escalated → stuck', () => {
+      const table = getPipeline('feature');
+      expect(transition(table, 'review', 'escalated')?.next).toBe('stuck');
+    });
+
+    it('feature-simple: review → escalated → stuck', () => {
+      const table = getPipeline('feature-simple');
+      expect(transition(table, 'review', 'escalated')?.next).toBe('stuck');
+    });
+
+    it('bug: review → escalated → stuck', () => {
+      const table = getPipeline('bug');
+      expect(transition(table, 'review', 'escalated')?.next).toBe('stuck');
+    });
+
+    it('spec-driven: review → escalated → stuck', () => {
+      const table = getPipeline('spec-driven');
+      expect(transition(table, 'review', 'escalated')?.next).toBe('stuck');
     });
   });
 
