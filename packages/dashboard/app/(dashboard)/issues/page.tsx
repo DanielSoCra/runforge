@@ -41,7 +41,7 @@ export default async function IssuesPage() {
 
   const [{ data: repos }, { data: runs }] = await Promise.all([
     supabase.from('repos').select('id, owner, name, connection_id').eq('enabled', true).is('deleted_at', null),
-    supabase.from('runs').select('issue_number, repo_owner, repo_name, issue_title, outcome, current_phase').order('started_at', { ascending: false }).limit(200),
+    supabase.from('runs').select('issue_number, repo_owner, repo_name, issue_title, outcome, current_phase').order('started_at', { ascending: false }),
   ]);
 
   const repoList = (repos ?? []) as RepoRow[];
