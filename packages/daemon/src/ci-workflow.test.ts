@@ -49,6 +49,10 @@ describe('auto-claude CI workflow', () => {
     expect(found, 'Expected at least one .ts file reference in the workflow').toBe(true);
   });
 
+  it('has timeout-minutes to prevent stuck jobs from blocking runner (#392)', () => {
+    expect(raw).toMatch(/timeout-minutes:\s*\d+/);
+  });
+
   it('uses pnpm --filter for tsx instead of npx to pin version via lockfile (#381)', () => {
     // npx tsx at repo root downloads an unpinned version — must use pnpm --filter
     expect(raw).not.toMatch(/npx\s+tsx/);
