@@ -281,13 +281,21 @@ export class KnowledgeStore {
     try {
       await access(this.path);
       return; // already exists, no migration needed
-    } catch {
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        this.migrated = false;
+        throw err;
+      }
       // doesn't exist, check for v1 file
     }
 
     try {
       await access(this.v1GotchaPath);
-    } catch {
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        this.migrated = false;
+        throw err;
+      }
       return; // no v1 file either
     }
 

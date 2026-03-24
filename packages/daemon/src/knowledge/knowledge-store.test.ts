@@ -1,6 +1,6 @@
 // src/knowledge/knowledge-store.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, writeFile, readFile, rename } from 'fs/promises';
+import { mkdtemp, rm, writeFile, readFile, rename, chmod, mkdir } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { KnowledgeStore } from './knowledge-store.js';
@@ -559,6 +559,48 @@ describe('KnowledgeStore', () => {
       // Old file renamed
       const migratedExists = await readFile(gotchaPath + '.migrated', 'utf-8').then(() => true).catch(() => false);
       expect(migratedExists).toBe(true);
+    });
+
+    it('re-throws non-ENOENT errors and resets migrated flag for retry (#377)', async () => {
+      // Create a directory where the knowledge.jsonl path would be —
+      // access() on a path inside an unreadable dir throws EACCES, not ENOENT
+      const restrictedDir = join(dir, 'restricted');
+      await mkdir(restrictedDir);
+      const restrictedStorePath = join(restrictedDir, 'knowledge.jsonl');
+
+      const gotchaPath = join(dir, 'gotchas.jsonl');
+      const v1Entry = {
+        id: 'old-1',
+        artifactPatterns: ['src/**/*.ts'],
+        description: 'V1 gotcha',
+        sourceIssue: 10,
+        confidence: 1,
+        createdAt: '2026-01-01T00:00:00Z',
+        hitCount: 3,
+        promoted: false,
+        archived: false,
+        originType: 'autonomous',
+        priorityTier: 'normal',
+      };
+      await writeFile(gotchaPath, JSON.stringify(v1Entry) + '\n');
+
+      const migratingStore = new KnowledgeStore(restrictedStorePath, DEFAULT_POLICIES, gotchaPath);
+
+      // Remove all permissions on the directory so access() throws EACCES
+      await chmod(restrictedDir, 0o000);
+
+      try {
+        // First call should throw — EACCES, not ENOENT
+        await expect(migratingStore.loadAll()).rejects.toThrow(/EACCES/);
+      } finally {
+        // Restore permissions so cleanup works
+        await chmod(restrictedDir, 0o755);
+      }
+
+      // Verify retry works — migrated flag was reset so migration is re-attempted
+      const records = await migratingStore.loadAll();
+      expect(records).toHaveLength(1);
+      expect(records[0]!.recordType).toBe('technical_pitfall');
     });
   });
 
