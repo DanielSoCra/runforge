@@ -216,6 +216,7 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
     techLeadInterval: 7200000, techLeadEventDebounce: 300000,
     techLeadProposalExpiryMs: 604800000, techLeadLookbackWindowMs: 172800000,
     techLeadMaxEntriesPerSection: 50,
+    maxConsecutiveTickErrors: 5,
   },
   diagnosis: { confidenceThreshold: 0.7 },
   warmup: { threshold: 10, regressionThreshold: 3, samplingRate: 0.1, minSamplingRate: 0.01 },

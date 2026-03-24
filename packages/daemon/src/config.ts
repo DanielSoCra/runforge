@@ -133,6 +133,7 @@ export const ConfigSchema = z.object({
     techLeadProposalExpiryMs: z.number().int().min(60000).default(7 * 24 * 60 * 60 * 1000),
     techLeadLookbackWindowMs: z.number().int().min(60000).default(48 * 60 * 60 * 1000),
     techLeadMaxEntriesPerSection: z.number().int().min(1).default(50),
+    maxConsecutiveTickErrors: z.number().int().min(1).default(5),
   }).default({
     useCoordinator: false,
     tickInterval: 5000,
@@ -155,6 +156,7 @@ export const ConfigSchema = z.object({
     techLeadProposalExpiryMs: 7 * 24 * 60 * 60 * 1000,
     techLeadLookbackWindowMs: 48 * 60 * 60 * 1000,
     techLeadMaxEntriesPerSection: 50,
+    maxConsecutiveTickErrors: 5,
   }),
 });
 

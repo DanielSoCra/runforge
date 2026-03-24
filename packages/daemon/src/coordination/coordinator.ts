@@ -12,6 +12,7 @@ export interface CoordinatorConfig {
   maxAgents: number;
   diskSpaceThreshold: number;
   perRepoLimits: Record<string, number>;
+  maxConsecutiveTickErrors: number;
 }
 
 export interface PendingDecision {
@@ -33,6 +34,7 @@ export interface CoordinatorDeps {
   onMergeAgentCrash: (callback: () => void) => void;
   isPaused: () => boolean;
   isShuttingDown: () => boolean;
+  onTickErrorThresholdReached: (consecutiveErrors: number, lastError: unknown) => void;
 }
 
 export interface Coordinator {
@@ -44,6 +46,7 @@ export function createCoordinator(deps: CoordinatorDeps, config: CoordinatorConf
     let stopped = false;
     let tickInProgress = false;
     let tickTimer: ReturnType<typeof setInterval> | null = null;
+    let consecutiveTickErrors = 0;
 
     // Start Merge Agent
     const stopMergeAgent = deps.mergeAgent.start();
@@ -115,6 +118,7 @@ export function createCoordinator(deps: CoordinatorDeps, config: CoordinatorConf
 
           await deps.spawnWorker(claimResult.value, decision);
         }
+        consecutiveTickErrors = 0;
       } finally {
         tickInProgress = false;
       }
@@ -122,7 +126,12 @@ export function createCoordinator(deps: CoordinatorDeps, config: CoordinatorConf
 
     tickTimer = setInterval(() => {
       tick().catch((e) => {
-        console.error('[coordinator] tick error:', e);
+        consecutiveTickErrors++;
+        console.error(`[coordinator] tick error (${consecutiveTickErrors}/${config.maxConsecutiveTickErrors}):`, e);
+        if (consecutiveTickErrors >= config.maxConsecutiveTickErrors) {
+          console.error(`[coordinator] ${consecutiveTickErrors} consecutive tick errors — triggering error recovery`);
+          deps.onTickErrorThresholdReached(consecutiveTickErrors, e);
+        }
       });
     }, config.tickIntervalMs);
 

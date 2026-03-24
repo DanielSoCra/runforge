@@ -28,6 +28,7 @@ function makeConfig(overrides: Partial<CoordinatorConfig> = {}): CoordinatorConf
     maxAgents: 10,
     diskSpaceThreshold: 2_000_000_000,
     perRepoLimits: {},
+    maxConsecutiveTickErrors: 5,
     ...overrides,
   };
 }
@@ -61,6 +62,7 @@ function makeDeps(overrides: Partial<CoordinatorDeps> = {}): CoordinatorDeps {
     onMergeAgentCrash: vi.fn(),
     isPaused: vi.fn().mockReturnValue(false),
     isShuttingDown: vi.fn().mockReturnValue(false),
+    onTickErrorThresholdReached: vi.fn(),
     ...overrides,
   };
 }
@@ -457,6 +459,69 @@ describe('Coordinator', () => {
     await vi.advanceTimersByTimeAsync(150);
 
     expect(callOrder).toEqual(['inference', 'diskCheck']);
+    stop();
+  });
+
+  it('calls onTickErrorThresholdReached after maxConsecutiveTickErrors consecutive failures', async () => {
+    const deps = makeDeps({
+      checkDiskSpace: vi.fn().mockRejectedValue(new Error('disk check failed')),
+    });
+    const config = makeConfig({ tickIntervalMs: 100, maxConsecutiveTickErrors: 3 });
+    const coordinator = createCoordinator(deps, config);
+    const stop = coordinator.start();
+
+    // Advance through 3 ticks — each will throw
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(deps.onTickErrorThresholdReached).toHaveBeenCalledTimes(1);
+    expect(deps.onTickErrorThresholdReached).toHaveBeenCalledWith(3, expect.any(Error));
+    stop();
+  });
+
+  it('does not call onTickErrorThresholdReached before threshold is reached', async () => {
+    const deps = makeDeps({
+      checkDiskSpace: vi.fn().mockRejectedValue(new Error('disk check failed')),
+    });
+    const config = makeConfig({ tickIntervalMs: 100, maxConsecutiveTickErrors: 5 });
+    const coordinator = createCoordinator(deps, config);
+    const stop = coordinator.start();
+
+    // Only 2 ticks — below threshold of 5
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(deps.onTickErrorThresholdReached).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('resets consecutive error count after a successful tick', async () => {
+    let callCount = 0;
+    const deps = makeDeps({
+      checkDiskSpace: vi.fn().mockImplementation(() => {
+        callCount++;
+        // First 2 calls fail, third succeeds, then 2 more fail
+        if (callCount <= 2) return Promise.reject(new Error('fail'));
+        if (callCount === 3) return Promise.resolve(true);
+        return Promise.reject(new Error('fail again'));
+      }),
+      getDispatchQueue: vi.fn().mockResolvedValue([]),
+    });
+    const config = makeConfig({ tickIntervalMs: 100, maxConsecutiveTickErrors: 3 });
+    const coordinator = createCoordinator(deps, config);
+    const stop = coordinator.start();
+
+    // 2 failures
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(100);
+    // 1 success — resets counter
+    await vi.advanceTimersByTimeAsync(100);
+    // 2 more failures — still below threshold of 3
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(deps.onTickErrorThresholdReached).not.toHaveBeenCalled();
     stop();
   });
 

@@ -277,6 +277,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       maxAgents: config.coordination.maxAgents,
       diskSpaceThreshold: config.coordination.diskSpaceThreshold,
       perRepoLimits: {},
+      maxConsecutiveTickErrors: config.coordination.maxConsecutiveTickErrors,
     };
 
     const coord = createCoordinator(
@@ -298,6 +299,18 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         onMergeAgentCrash: () => {},
         isPaused: () => paused,
         isShuttingDown: () => shuttingDown,
+        onTickErrorThresholdReached: (consecutiveErrors, lastError) => {
+          if (!paused) {
+            paused = true;
+            console.warn(`[daemon] Auto-paused: coordinator hit ${consecutiveErrors} consecutive tick errors`);
+            void notify(config.webhooks, {
+              event: 'auto-paused',
+              issueNumber: 0,
+              phase: 'tick-error',
+              message: `Daemon auto-paused after ${consecutiveErrors} consecutive coordinator tick errors: ${lastError}`,
+            });
+          }
+        },
       },
       coordinatorConfig,
     );
