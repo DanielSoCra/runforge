@@ -30,6 +30,23 @@ export interface BatchManager {
 export function createBatchManager(stateDir: string): BatchManager {
   const batchesPath = join(stateDir, 'coordination', 'batches.json');
 
+  /** Promise-based mutex — serializes all file-mutating operations so
+   *  concurrent async callers don't interleave read-modify-write cycles. */
+  let mutex: Promise<void> = Promise.resolve();
+
+  async function withMutex<T>(fn: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const gate = new Promise<void>(r => { release = r; });
+    const prev = mutex;
+    mutex = gate;
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
   async function loadBatches(): Promise<Batch[]> {
     const result = await readJsonSafe<Batch[]>(batchesPath);
     if (result.ok) return result.value;
@@ -42,69 +59,73 @@ export function createBatchManager(stateDir: string): BatchManager {
 
   return {
     async create(items, targetWorkerCount, budgetEstimate): Promise<Batch> {
-      const batches = await loadBatches();
+      return withMutex(async () => {
+        const batches = await loadBatches();
 
-      // Only one active batch at a time
-      const activeBatch = batches.find((b) => b.status === 'active');
-      if (activeBatch) {
-        throw new Error('active batch already exists');
-      }
+        // Only one active batch at a time
+        const activeBatch = batches.find((b) => b.status === 'active');
+        if (activeBatch) {
+          throw new Error('active batch already exists');
+        }
 
-      const now = new Date().toISOString();
-      const batch: Batch = {
-        id: randomUUID(),
-        status: 'planning',
-        targetWorkerCount,
-        budgetEstimate,
-        items: items.map((item) => ({
+        const now = new Date().toISOString();
+        const batch: Batch = {
           id: randomUUID(),
-          issueNumber: item.issueNumber,
-          repoKey: item.repoKey,
-          status: 'pending' as const,
-          dependencies: item.dependencies,
-        })),
-        createdAt: now,
-        activatedAt: null,
-        completedAt: null,
-      };
+          status: 'planning',
+          targetWorkerCount,
+          budgetEstimate,
+          items: items.map((item) => ({
+            id: randomUUID(),
+            issueNumber: item.issueNumber,
+            repoKey: item.repoKey,
+            status: 'pending' as const,
+            dependencies: item.dependencies,
+          })),
+          createdAt: now,
+          activatedAt: null,
+          completedAt: null,
+        };
 
-      batches.push(batch);
-      await saveBatches(batches);
-      return batch;
+        batches.push(batch);
+        await saveBatches(batches);
+        return batch;
+      });
     },
 
     async transition(batchId, event): Promise<Result<Batch>> {
-      const batches = await loadBatches();
-      const batch = batches.find((b) => b.id === batchId);
-      if (!batch) {
-        return err(new Error(`Batch not found: ${batchId}`));
-      }
+      return withMutex(async () => {
+        const batches = await loadBatches();
+        const batch = batches.find((b) => b.id === batchId);
+        if (!batch) {
+          return err(new Error(`Batch not found: ${batchId}`));
+        }
 
-      const transitions = batchTransitions[batch.status];
-      const nextStatus = transitions[event];
-      if (!nextStatus) {
-        return err(
-          new Error(
-            `Invalid transition: cannot apply '${event}' to batch in '${batch.status}' state`,
-          ),
-        );
-      }
+        const transitions = batchTransitions[batch.status];
+        const nextStatus = transitions[event];
+        if (!nextStatus) {
+          return err(
+            new Error(
+              `Invalid transition: cannot apply '${event}' to batch in '${batch.status}' state`,
+            ),
+          );
+        }
 
-      batch.status = nextStatus;
-      const now = new Date().toISOString();
-      if (nextStatus === 'active') {
-        batch.activatedAt = now;
-      }
-      if (nextStatus === 'completed' || nextStatus === 'cancelled') {
-        batch.completedAt = now;
-      }
+        batch.status = nextStatus;
+        const now = new Date().toISOString();
+        if (nextStatus === 'active') {
+          batch.activatedAt = now;
+        }
+        if (nextStatus === 'completed' || nextStatus === 'cancelled') {
+          batch.completedAt = now;
+        }
 
-      try {
-        await saveBatches(batches);
-      } catch (e) {
-        return err(new Error(`Failed to save batch after transition: ${e instanceof Error ? e.message : String(e)}`));
-      }
-      return ok(batch);
+        try {
+          await saveBatches(batches);
+        } catch (e) {
+          return err(new Error(`Failed to save batch after transition: ${e instanceof Error ? e.message : String(e)}`));
+        }
+        return ok(batch);
+      });
     },
 
     async getActive(): Promise<Batch | null> {
@@ -136,24 +157,26 @@ export function createBatchManager(stateDir: string): BatchManager {
     },
 
     async updateItemStatus(batchId, itemId, status): Promise<Result<void>> {
-      const batches = await loadBatches();
-      const batch = batches.find((b) => b.id === batchId);
-      if (!batch) {
-        return err(new Error(`Batch not found: ${batchId}`));
-      }
+      return withMutex(async () => {
+        const batches = await loadBatches();
+        const batch = batches.find((b) => b.id === batchId);
+        if (!batch) {
+          return err(new Error(`Batch not found: ${batchId}`));
+        }
 
-      const item = batch.items.find((i) => i.id === itemId);
-      if (!item) {
-        return err(new Error(`BatchItem not found: ${itemId}`));
-      }
+        const item = batch.items.find((i) => i.id === itemId);
+        if (!item) {
+          return err(new Error(`BatchItem not found: ${itemId}`));
+        }
 
-      item.status = status;
-      try {
-        await saveBatches(batches);
-      } catch (e) {
-        return err(new Error(`Failed to save batch after item status update: ${e instanceof Error ? e.message : String(e)}`));
-      }
-      return ok(undefined);
+        item.status = status;
+        try {
+          await saveBatches(batches);
+        } catch (e) {
+          return err(new Error(`Failed to save batch after item status update: ${e instanceof Error ? e.message : String(e)}`));
+        }
+        return ok(undefined);
+      });
     },
 
     async list(): Promise<Batch[]> {

@@ -294,6 +294,71 @@ describe('batch-manager', () => {
     expect(result.ok).toBe(false);
   });
 
+  // Regression: #379 — concurrent updateItemStatus calls must not lose updates
+  it('serializes concurrent updateItemStatus calls with mutex (#379)', async () => {
+    const batch = await mgr.create(
+      [
+        { issueNumber: 1, dependencies: [] },
+        { issueNumber: 2, dependencies: [] },
+        { issueNumber: 3, dependencies: [] },
+      ],
+      3,
+      300,
+    );
+    await mgr.transition(batch.id, 'finalize');
+
+    const item1Id = batch.items[0]!.id;
+    const item2Id = batch.items[1]!.id;
+    const item3Id = batch.items[2]!.id;
+
+    // Fire three concurrent status updates — without mutex, at least one would be lost
+    const [r1, r2, r3] = await Promise.all([
+      mgr.updateItemStatus(batch.id, item1Id, 'completed'),
+      mgr.updateItemStatus(batch.id, item2Id, 'in_progress'),
+      mgr.updateItemStatus(batch.id, item3Id, 'failed'),
+    ]);
+
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+    expect(r3.ok).toBe(true);
+
+    // All three updates must be reflected — no lost writes
+    const active = await mgr.getActive();
+    expect(active).not.toBeNull();
+    const statuses = new Map(active!.items.map(i => [i.id, i.status]));
+    expect(statuses.get(item1Id)).toBe('completed');
+    expect(statuses.get(item2Id)).toBe('in_progress');
+    expect(statuses.get(item3Id)).toBe('failed');
+  });
+
+  // Regression: #379 — concurrent transition and updateItemStatus must not conflict
+  it('serializes concurrent transition and updateItemStatus (#379)', async () => {
+    const batch = await mgr.create(
+      [
+        { issueNumber: 1, dependencies: [] },
+        { issueNumber: 2, dependencies: [] },
+      ],
+      2,
+      200,
+    );
+    await mgr.transition(batch.id, 'finalize');
+
+    // Concurrently: update item status + transition to cancelled
+    const [itemResult, transitionResult] = await Promise.all([
+      mgr.updateItemStatus(batch.id, batch.items[0]!.id, 'completed'),
+      mgr.transition(batch.id, 'cancel'),
+    ]);
+
+    expect(itemResult.ok).toBe(true);
+    expect(transitionResult.ok).toBe(true);
+
+    // Both operations should be persisted
+    const batches = await mgr.list();
+    const b = batches.find(x => x.id === batch.id)!;
+    expect(b.status).toBe('cancelled');
+    expect(b.items[0]!.status).toBe('completed');
+  });
+
   // Regression: #257 — saveBatches() throw must not bypass Result contract
   describe('saveBatches failure returns err instead of throwing (#257)', () => {
     let brokenMgr: BatchManager;
