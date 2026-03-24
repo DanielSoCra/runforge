@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { executeBatch, type UnitResult } from './batch.js';
 import type { Unit, SessionResult } from '../types.js';
 import { ok, err } from '../lib/result.js';
+import { SessionError } from '../session-runtime/session-error.js';
 import { createWorktree, getWorktreeDiffSize } from './worktree.js';
 
 // Mock the worktree module
@@ -319,6 +320,37 @@ describe('executeBatch', () => {
     const spawnCall = runtime.spawnSession.mock.calls[0];
     const context = spawnCall?.[1];
     expect(context).toHaveProperty('activePlugins', plugins);
+  });
+
+  it('propagates containmentBreach flag when session returns SessionError with containmentBreach (#373)', async () => {
+    const breachError = SessionError.containmentBreached('wrote to /etc/hosts', 0.3);
+    const runtime = {
+      spawnSession: vi.fn().mockResolvedValueOnce(err(breachError)),
+      getCostTracker: vi.fn(),
+    } as any;
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    expect(result.results[0]?.exitStatus).toBe('failed');
+    expect(result.results[0]?.containmentBreach).toBe(true);
+    expect(result.results[0]?.cost).toBe(0.3);
+    expect(result.results[0]?.error).toContain('Containment breach');
+  });
+
+  it('does not set containmentBreach flag for regular SessionError (#373)', async () => {
+    const regularError = new SessionError('something went wrong', 0.2);
+    const runtime = {
+      spawnSession: vi.fn().mockResolvedValueOnce(err(regularError)),
+      getCostTracker: vi.fn(),
+    } as any;
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    expect(result.results[0]?.exitStatus).toBe('failed');
+    expect(result.results[0]?.containmentBreach).toBeUndefined();
+    expect(result.results[0]?.cost).toBe(0.2);
   });
 
   it('propagates timed-out exit status through UnitResult (#64)', async () => {
