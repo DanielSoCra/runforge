@@ -22,7 +22,7 @@ vi.mock('@/lib/auth', () => ({
 
 vi.stubEnv('GITHUB_OAUTH_CLIENT_ID', 'cid');
 vi.stubEnv('GITHUB_OAUTH_CLIENT_SECRET', 'csec');
-vi.stubEnv('SITE_URL', 'http://localhost:3000');
+vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'http://localhost:3000');
 
 // Mock fetch for GitHub API calls
 const mockFetch = vi.fn();

@@ -25,15 +25,15 @@ const SYNTHETIC_ADMIN = {
  *
  * SECURITY: Never trusts X-Forwarded-Host/Proto headers — an attacker can
  * inject arbitrary values to redirect OAuth callbacks to a controlled domain.
- * SITE_URL must be set explicitly; in development we fall back to request.url.
+ * NEXT_PUBLIC_SITE_URL must be set explicitly; in development we fall back to request.url.
  */
 export function getOrigin(request?: Request): string {
-  if (process.env.SITE_URL) {
+  if (process.env.NEXT_PUBLIC_SITE_URL) {
     // Strip trailing slash for consistency
-    return process.env.SITE_URL.replace(/\/+$/, '');
+    return process.env.NEXT_PUBLIC_SITE_URL.replace(/\/+$/, '');
   }
   if (process.env.NODE_ENV === 'production') {
-    throw new Error('SITE_URL environment variable is required in production');
+    throw new Error('NEXT_PUBLIC_SITE_URL environment variable is required in production');
   }
   // Development only: derive from request.url (localhost origin, not headers)
   if (request) {

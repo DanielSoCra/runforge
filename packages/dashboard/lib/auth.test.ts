@@ -12,44 +12,44 @@ describe('getOrigin', () => {
     process.env = { ...originalEnv };
   });
 
-  it('returns SITE_URL when set', () => {
-    vi.stubEnv('SITE_URL', 'https://dashboard.example.com');
+  it('returns NEXT_PUBLIC_SITE_URL when set', () => {
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://dashboard.example.com');
     expect(getOrigin()).toBe('https://dashboard.example.com');
   });
 
-  it('strips trailing slash from SITE_URL', () => {
-    vi.stubEnv('SITE_URL', 'https://dashboard.example.com/');
+  it('strips trailing slash from NEXT_PUBLIC_SITE_URL', () => {
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://dashboard.example.com/');
     expect(getOrigin()).toBe('https://dashboard.example.com');
   });
 
-  it('throws in production when SITE_URL is not set', () => {
+  it('throws in production when NEXT_PUBLIC_SITE_URL is not set', () => {
     vi.stubEnv('NODE_ENV', 'production');
-    delete process.env.SITE_URL;
-    expect(() => getOrigin()).toThrow('SITE_URL environment variable is required in production');
+    delete process.env.NEXT_PUBLIC_SITE_URL;
+    expect(() => getOrigin()).toThrow('NEXT_PUBLIC_SITE_URL environment variable is required in production');
   });
 
   it('ignores X-Forwarded-Host header even when provided (regression: SEC-4)', () => {
-    vi.stubEnv('SITE_URL', 'https://dashboard.example.com');
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://dashboard.example.com');
     const maliciousRequest = new Request('http://internal:3000/auth/login', {
       headers: {
         'x-forwarded-host': 'evil.attacker.com',
         'x-forwarded-proto': 'https',
       },
     });
-    // Must return SITE_URL, never the attacker-controlled header
+    // Must return NEXT_PUBLIC_SITE_URL, never the attacker-controlled header
     expect(getOrigin(maliciousRequest)).toBe('https://dashboard.example.com');
   });
 
-  it('uses request.url origin in development when SITE_URL is not set', () => {
+  it('uses request.url origin in development when NEXT_PUBLIC_SITE_URL is not set', () => {
     vi.stubEnv('NODE_ENV', 'development');
-    delete process.env.SITE_URL;
+    delete process.env.NEXT_PUBLIC_SITE_URL;
     const request = new Request('http://localhost:3000/auth/callback');
     expect(getOrigin(request)).toBe('http://localhost:3000');
   });
 
   it('never uses X-Forwarded-Host even in development (regression: SEC-4)', () => {
     vi.stubEnv('NODE_ENV', 'development');
-    delete process.env.SITE_URL;
+    delete process.env.NEXT_PUBLIC_SITE_URL;
     const maliciousRequest = new Request('http://localhost:3000/auth/login', {
       headers: {
         'x-forwarded-host': 'evil.attacker.com',
@@ -62,8 +62,16 @@ describe('getOrigin', () => {
 
   it('falls back to localhost:3000 in development with no request', () => {
     vi.stubEnv('NODE_ENV', 'development');
-    delete process.env.SITE_URL;
+    delete process.env.NEXT_PUBLIC_SITE_URL;
     expect(getOrigin()).toBe('http://localhost:3000');
+  });
+
+  it('reads NEXT_PUBLIC_SITE_URL not SITE_URL (regression: INFRA-06 #361)', () => {
+    // Operators set NEXT_PUBLIC_SITE_URL per .env examples; the old SITE_URL
+    // variable should NOT be read, even if accidentally present.
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://correct.example.com');
+    vi.stubEnv('SITE_URL', 'https://wrong.example.com');
+    expect(getOrigin()).toBe('https://correct.example.com');
   });
 });
 
