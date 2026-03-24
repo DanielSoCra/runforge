@@ -104,7 +104,8 @@ describe('merge-agent', () => {
       const gitMock = deps.git as ReturnType<typeof vi.fn>;
       gitMock
         .mockResolvedValueOnce(ok('')) // checkout
-        .mockResolvedValueOnce(err(new Error('rebase conflict'))); // rebase fails
+        .mockResolvedValueOnce(err(new Error('rebase conflict'))) // rebase fails
+        .mockResolvedValueOnce(ok('')); // rebase --abort
 
       const agent = createMergeAgent(deps, defaultConfig);
       const result = await agent.processEntry('entry-1');
@@ -153,7 +154,8 @@ describe('merge-agent', () => {
         .mockResolvedValueOnce(ok('')) // checkout headRef
         .mockResolvedValueOnce(ok('')) // rebase
         .mockResolvedValueOnce(ok('')) // checkout integration
-        .mockResolvedValueOnce(err(new Error('merge conflict'))); // merge --no-ff fails
+        .mockResolvedValueOnce(err(new Error('merge conflict'))) // merge --no-ff fails
+        .mockResolvedValueOnce(ok('')); // merge --abort
 
       (deps.resolveConflicts as ReturnType<typeof vi.fn>).mockResolvedValue({
         resolved: false,
@@ -198,6 +200,82 @@ describe('merge-agent', () => {
         ['revert', '--no-edit', 'abc123'],
         '/tmp/merge-worktree',
       );
+    });
+
+    it('rebase failure → calls git rebase --abort before marking failed (#378)', async () => {
+      const entry = makeEntry();
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.getEntry.mockResolvedValue(entry);
+
+      const gitMock = deps.git as ReturnType<typeof vi.fn>;
+      gitMock
+        .mockResolvedValueOnce(ok('')) // checkout
+        .mockResolvedValueOnce(err(new Error('rebase conflict'))) // rebase fails
+        .mockResolvedValueOnce(ok('')); // rebase --abort
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      const result = await agent.processEntry('entry-1');
+
+      expect(result.ok).toBe(false);
+      expect(gitMock).toHaveBeenCalledWith(['rebase', '--abort'], '/tmp/merge-worktree');
+      expect(queue.updateStatus).toHaveBeenCalledWith('entry-1', 'failed', 'rebase conflict');
+    });
+
+    it('merge conflict needsHuman → calls git merge --abort (#378)', async () => {
+      const entry = makeEntry();
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.getEntry.mockResolvedValue(entry);
+
+      const gitMock = deps.git as ReturnType<typeof vi.fn>;
+      gitMock
+        .mockResolvedValueOnce(ok('')) // checkout headRef
+        .mockResolvedValueOnce(ok('')) // rebase
+        .mockResolvedValueOnce(ok('')) // checkout integration
+        .mockResolvedValueOnce(err(new Error('merge conflict'))) // merge --no-ff fails
+        .mockResolvedValueOnce(ok('')); // merge --abort
+
+      (deps.resolveConflicts as ReturnType<typeof vi.fn>).mockResolvedValue({
+        resolved: false,
+        needsHuman: true,
+        reason: 'Conflict too large',
+      });
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      const result = await agent.processEntry('entry-1');
+
+      expect(result.ok).toBe(false);
+      expect(gitMock).toHaveBeenCalledWith(['merge', '--abort'], '/tmp/merge-worktree');
+      expect(queue.updateStatus).toHaveBeenCalledWith('entry-1', 'needs_human', 'Conflict too large');
+    });
+
+    it('merge conflict resolution failed → calls git merge --abort (#378)', async () => {
+      const entry = makeEntry();
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.getEntry.mockResolvedValue(entry);
+
+      const gitMock = deps.git as ReturnType<typeof vi.fn>;
+      gitMock
+        .mockResolvedValueOnce(ok('')) // checkout headRef
+        .mockResolvedValueOnce(ok('')) // rebase
+        .mockResolvedValueOnce(ok('')) // checkout integration
+        .mockResolvedValueOnce(err(new Error('merge conflict'))) // merge --no-ff fails
+        .mockResolvedValueOnce(ok('')); // merge --abort
+
+      (deps.resolveConflicts as ReturnType<typeof vi.fn>).mockResolvedValue({
+        resolved: false,
+        needsHuman: false,
+        reason: 'LLM resolution failed',
+      });
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      const result = await agent.processEntry('entry-1');
+
+      expect(result.ok).toBe(false);
+      expect(gitMock).toHaveBeenCalledWith(['merge', '--abort'], '/tmp/merge-worktree');
+      expect(queue.updateStatus).toHaveBeenCalledWith('entry-1', 'failed', 'LLM resolution failed');
     });
 
     it('checkout integration branch failure → status failed (#252)', async () => {
@@ -460,9 +538,35 @@ describe('merge-agent', () => {
       const queue = deps.queue as any;
       queue.list.mockResolvedValue([entry]);
 
+      const gitMock = deps.git as ReturnType<typeof vi.fn>;
+      gitMock.mockResolvedValue(ok(''));
+
       const agent = createMergeAgent(deps, defaultConfig);
       await agent.recoverStuckEntries();
 
+      // Worktree cleanup before reset (#378)
+      expect(gitMock).toHaveBeenCalledWith(['rebase', '--abort'], '/tmp/merge-worktree');
+      expect(gitMock).toHaveBeenCalledWith(['merge', '--abort'], '/tmp/merge-worktree');
+      expect(gitMock).toHaveBeenCalledWith(['checkout', 'dev'], '/tmp/merge-worktree');
+      expect(queue.updatePhase).toHaveBeenCalledWith('entry-1', 'queued');
+    });
+
+    it('rebasing phase without commit → cleans worktree before reset (#378)', async () => {
+      const entry = makeEntry({ mergePhase: 'rebasing', mergeCommit: null });
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.list.mockResolvedValue([entry]);
+
+      const gitMock = deps.git as ReturnType<typeof vi.fn>;
+      gitMock.mockResolvedValue(ok(''));
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      await agent.recoverStuckEntries();
+
+      // Should attempt cleanup before resetting to queued
+      expect(gitMock).toHaveBeenCalledWith(['rebase', '--abort'], '/tmp/merge-worktree');
+      expect(gitMock).toHaveBeenCalledWith(['merge', '--abort'], '/tmp/merge-worktree');
+      expect(gitMock).toHaveBeenCalledWith(['checkout', 'dev'], '/tmp/merge-worktree');
       expect(queue.updatePhase).toHaveBeenCalledWith('entry-1', 'queued');
     });
 

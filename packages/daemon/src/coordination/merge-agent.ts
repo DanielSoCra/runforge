@@ -57,6 +57,8 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
 
     const rebaseResult = await git(['rebase', integrationBranch], mergeWorktreePath);
     if (!rebaseResult.ok) {
+      // Best-effort: clean up dirty worktree state
+      await git(['rebase', '--abort'], mergeWorktreePath);
       const statusResult = await queue.updateStatus(entryId, 'failed', rebaseResult.error.message);
       return !statusResult.ok ? statusResult : err(rebaseResult.error);
     }
@@ -81,12 +83,16 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
       const resolution = await resolveConflicts(mergeWorktreePath, conflictConfig, resolveSession);
 
       if (resolution.needsHuman) {
+        // Best-effort: clean up dirty worktree state
+        await git(['merge', '--abort'], mergeWorktreePath);
         const statusResult = await queue.updateStatus(entryId, 'needs_human', resolution.reason);
         if (!statusResult.ok) return statusResult;
         return err(new Error(resolution.reason ?? 'needs human intervention'));
       }
 
       if (!resolution.resolved) {
+        // Best-effort: clean up dirty worktree state
+        await git(['merge', '--abort'], mergeWorktreePath);
         const statusResult = await queue.updateStatus(entryId, 'failed', resolution.reason ?? 'conflict resolution failed');
         if (!statusResult.ok) return statusResult;
         return err(new Error(resolution.reason ?? 'conflict resolution failed'));
@@ -173,6 +179,10 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
               if (!statusResult.ok) continue;
             }
           } else {
+            // Clean up potentially dirty worktree state before retry (best-effort)
+            await git(['rebase', '--abort'], mergeWorktreePath);
+            await git(['merge', '--abort'], mergeWorktreePath);
+            await git(['checkout', integrationBranch], mergeWorktreePath);
             const phaseResult = await queue.updatePhase(entry.id, 'queued');
             if (!phaseResult.ok) continue;
           }
