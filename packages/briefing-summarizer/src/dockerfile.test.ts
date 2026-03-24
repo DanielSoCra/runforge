@@ -29,4 +29,10 @@ describe('Briefing-summarizer Dockerfile', () => {
       /pnpm install.*--filter.*@auto-claude\/briefing-summarizer/,
     );
   });
+
+  it('should install git for git-based signals (#362)', () => {
+    // signals.ts calls `git log` and index.ts calls `git remote get-url origin`.
+    // Without git installed, these fail silently and degrade briefing quality.
+    expect(DOCKERFILE).toMatch(/apk add.*git/);
+  });
 });

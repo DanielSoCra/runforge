@@ -5,6 +5,9 @@ WORKDIR /app
 # corepack reads the pinned version from root package.json (pnpm@10.32.1)
 RUN corepack enable
 
+# git is needed by signals.ts (git log) and index.ts (git remote get-url)
+RUN apk add --no-cache git
+
 # Copy package files
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/briefing-summarizer/package.json packages/briefing-summarizer/
