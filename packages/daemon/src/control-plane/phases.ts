@@ -23,6 +23,10 @@ import { routeDiagnosis } from '../diagnosis/router.js';
 import { loadSpecContent, loadImplementationContent } from '../infra/spec-loader.js';
 import { classify as runClassify } from './classifier.js';
 import { SessionError } from '../session-runtime/session-error.js';
+import { runHoldout } from '../validation/holdout.js';
+import { integrateToStaging } from './integration.js';
+import { runDeploy } from '../validation/deploy.js';
+import { runPostDeployTests } from '../validation/post-deploy-test.js';
 
 // Serializes git operations on the shared repoRoot across concurrent pipeline runs.
 // Currently protects detect (which modifies checkout state via git checkout).
@@ -333,6 +337,96 @@ export function createPhaseHandlers(
         return 'failure';
       }
       console.log(`[review] Passed (${result.fixCycles} fix cycles)`);
+      return 'success';
+    },
+
+    holdout: async (_run: RunState): Promise<PhaseEvent> => {
+      if (!config.validation.holdoutCommand) {
+        console.log(`[holdout] No holdout command configured — skipping`);
+        return 'success';
+      }
+      const cwd = repoRoot ?? process.cwd();
+      console.log(`[holdout] Running holdout tests for #${workRequest.issueNumber}`);
+      const result = await runHoldout(config.validation.holdoutCommand, featureBranch, cwd);
+      if (!result.ok) {
+        console.error(`[holdout] Error:`, result.error.message);
+        return 'failure';
+      }
+      if (!result.value.passed) {
+        const failedIds = result.value.failures.map((f) => f.id).join(', ');
+        console.error(`[holdout] Failed scenarios: ${failedIds}`);
+        return 'failure';
+      }
+      console.log(`[holdout] All scenarios passed`);
+      return 'success';
+    },
+
+    integrate: async (_run: RunState): Promise<PhaseEvent> => {
+      console.log(`[integrate] Merging ${featureBranch} into ${config.branches.staging}`);
+      const result = await integrateToStaging(featureBranch, config.branches.staging, repoRoot);
+      if (!result.ok) {
+        console.error(`[integrate] Error:`, result.error.message);
+        return 'failure';
+      }
+      if (!result.value.success) {
+        console.error(`[integrate] Failed:`, result.value.error);
+        return 'failure';
+      }
+      console.log(`[integrate] Successfully merged to ${config.branches.staging}`);
+      return 'success';
+    },
+
+    deploy: async (_run: RunState): Promise<PhaseEvent> => {
+      if (!config.validation.deployCommand || !config.validation.healthCheckUrl) {
+        console.log(`[deploy] No deploy command or health check URL configured — skipping`);
+        return 'success';
+      }
+      const cwd = repoRoot ?? process.cwd();
+      console.log(`[deploy] Running deploy for #${workRequest.issueNumber}`);
+      const result = await runDeploy({
+        deployCommand: config.validation.deployCommand,
+        healthCheckUrl: config.validation.healthCheckUrl,
+        healthCheckIntervalMs: config.validation.healthCheckIntervalMs,
+        deployTimeoutMs: config.validation.deployTimeoutMs,
+        maxAttempts: config.validation.maxDeployAttempts,
+        cwd,
+      });
+      if (!result.ok) {
+        console.error(`[deploy] Error:`, result.error.message);
+        return 'failure';
+      }
+      if (result.value.status !== 'healthy') {
+        console.error(`[deploy] Deploy status: ${result.value.status} after ${result.value.attempts} attempt(s)`);
+        return 'failure';
+      }
+      console.log(`[deploy] Healthy after ${result.value.attempts} attempt(s)`);
+      return 'success';
+    },
+
+    test: async (run: RunState): Promise<PhaseEvent> => {
+      if (config.validation.testCommands.length === 0) {
+        console.log(`[test] No post-deploy test commands configured — skipping`);
+        return 'success';
+      }
+      const cwd = repoRoot ?? process.cwd();
+      console.log(`[test] Running post-deploy tests for #${workRequest.issueNumber}`);
+      const result = await runPostDeployTests({
+        testCommands: config.validation.testCommands,
+        maxFixAttempts: config.validation.maxTestFixAttempts,
+        failureExcerptLines: config.validation.failureExcerptLines,
+        cwd,
+      });
+      if (result.escalated) {
+        console.error(`[test] Escalated after ${result.fixAttempts} fix attempt(s): ${result.failedCommand}`);
+        run.fixAttempts.push({ phase: 'test', attempt: result.fixAttempts, errorHash: result.failureExcerpt ?? '' });
+        return 'failure';
+      }
+      if (!result.passed) {
+        console.error(`[test] Failed: ${result.failedCommand}`);
+        run.fixAttempts.push({ phase: 'test', attempt: result.fixAttempts, errorHash: result.failureExcerpt ?? '' });
+        return 'failure';
+      }
+      console.log(`[test] All post-deploy tests passed`);
       return 'success';
     },
 

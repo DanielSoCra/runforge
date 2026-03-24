@@ -60,6 +60,22 @@ vi.mock('./classifier.js', () => ({
   classify: vi.fn(),
 }));
 
+vi.mock('../validation/holdout.js', () => ({
+  runHoldout: vi.fn(),
+}));
+
+vi.mock('./integration.js', () => ({
+  integrateToStaging: vi.fn(),
+}));
+
+vi.mock('../validation/deploy.js', () => ({
+  runDeploy: vi.fn(),
+}));
+
+vi.mock('../validation/post-deploy-test.js', () => ({
+  runPostDeployTests: vi.fn(),
+}));
+
 // Import after mocks are set up
 import { createPhaseHandlers, acquireDetectLock, releaseDetectLock, isDetectLocked } from './phases.js';
 import { git } from '../lib/git.js';
@@ -75,6 +91,10 @@ import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
 import { loadSpecContent } from '../infra/spec-loader.js';
 import { classify as runClassify } from './classifier.js';
+import { runHoldout } from '../validation/holdout.js';
+import { integrateToStaging } from './integration.js';
+import { runDeploy } from '../validation/deploy.js';
+import { runPostDeployTests } from '../validation/post-deploy-test.js';
 
 const mockGit = vi.mocked(git);
 const mockClassify = vi.mocked(runClassify);
@@ -91,6 +111,10 @@ const mockNotify = vi.mocked(notify);
 const mockAppendResult = vi.mocked(appendResult);
 const mockCreateWorkDetector = vi.mocked(createWorkDetector);
 const mockLoadSpecContent = vi.mocked(loadSpecContent);
+const mockRunHoldout = vi.mocked(runHoldout);
+const mockIntegrateToStaging = vi.mocked(integrateToStaging);
+const mockRunDeploy = vi.mocked(runDeploy);
+const mockRunPostDeployTests = vi.mocked(runPostDeployTests);
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
@@ -1004,6 +1028,163 @@ describe('createPhaseHandlers', () => {
       expect(detector.completeWork).toHaveBeenCalled();
       expect(mockAppendResult).toHaveBeenCalled();
       expect(mockNotify).toHaveBeenCalled();
+    });
+  });
+
+  describe('holdout handler (#384)', () => {
+    it('returns success when holdout scenarios pass', async () => {
+      mockRunHoldout.mockResolvedValue({ ok: true, value: { passed: true, skipped: false, failures: [] } } as any);
+      const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
+      const result = await handlers.holdout!(makeRun());
+      expect(result).toBe('success');
+      expect(mockRunHoldout).toHaveBeenCalledWith('run-holdout', 'feature/42', expect.any(String));
+    });
+
+    it('returns success when no holdout command configured (skipped)', async () => {
+      const { handlers } = createHandlers();
+      const result = await handlers.holdout!(makeRun());
+      expect(result).toBe('success');
+      expect(mockRunHoldout).not.toHaveBeenCalled();
+    });
+
+    it('returns failure when holdout scenarios fail', async () => {
+      mockRunHoldout.mockResolvedValue({
+        ok: true, value: { passed: false, skipped: false, failures: [{ id: 'scenario-1', passed: false }] },
+      } as any);
+      const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
+      const result = await handlers.holdout!(makeRun());
+      expect(result).toBe('failure');
+    });
+
+    it('returns failure when holdout runner errors', async () => {
+      mockRunHoldout.mockResolvedValue({ ok: false, error: new Error('runner crashed') } as any);
+      const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
+      const result = await handlers.holdout!(makeRun());
+      expect(result).toBe('failure');
+    });
+  });
+
+  describe('integrate handler (#384)', () => {
+    it('returns success on successful integration', async () => {
+      mockIntegrateToStaging.mockResolvedValue({ ok: true, value: { success: true, conflicted: false } } as any);
+      const { handlers } = createHandlers();
+      const result = await handlers.integrate!(makeRun());
+      expect(result).toBe('success');
+      expect(mockIntegrateToStaging).toHaveBeenCalledWith('feature/42', 'staging', undefined);
+    });
+
+    it('returns failure on merge conflict', async () => {
+      mockIntegrateToStaging.mockResolvedValue({
+        ok: true, value: { success: false, conflicted: true, error: 'Merge conflicts detected' },
+      } as any);
+      const { handlers } = createHandlers();
+      const result = await handlers.integrate!(makeRun());
+      expect(result).toBe('failure');
+    });
+
+    it('returns failure when integration errors', async () => {
+      mockIntegrateToStaging.mockResolvedValue({ ok: false, error: new Error('lock held') } as any);
+      const { handlers } = createHandlers();
+      const result = await handlers.integrate!(makeRun());
+      expect(result).toBe('failure');
+    });
+  });
+
+  describe('deploy handler (#384)', () => {
+    it('returns success when no deploy command configured (skip)', async () => {
+      const { handlers } = createHandlers();
+      const result = await handlers.deploy!(makeRun());
+      expect(result).toBe('success');
+      expect(mockRunDeploy).not.toHaveBeenCalled();
+    });
+
+    it('returns success when deploy is healthy', async () => {
+      mockRunDeploy.mockResolvedValue({ ok: true, value: { status: 'healthy', attempts: 1 } } as any);
+      const { handlers } = createHandlers({
+        validation: { ...makeConfig().validation, deployCommand: 'deploy.sh', healthCheckUrl: 'http://localhost:3000/health' },
+      });
+      const result = await handlers.deploy!(makeRun());
+      expect(result).toBe('success');
+      expect(mockRunDeploy).toHaveBeenCalledWith(expect.objectContaining({
+        deployCommand: 'deploy.sh',
+        healthCheckUrl: 'http://localhost:3000/health',
+      }));
+    });
+
+    it('returns failure when deploy times out', async () => {
+      mockRunDeploy.mockResolvedValue({ ok: true, value: { status: 'timeout', attempts: 2 } } as any);
+      const { handlers } = createHandlers({
+        validation: { ...makeConfig().validation, deployCommand: 'deploy.sh', healthCheckUrl: 'http://localhost:3000/health' },
+      });
+      const result = await handlers.deploy!(makeRun());
+      expect(result).toBe('failure');
+    });
+
+    it('returns failure when deploy errors', async () => {
+      mockRunDeploy.mockResolvedValue({ ok: false, error: new Error('SSRF blocked') } as any);
+      const { handlers } = createHandlers({
+        validation: { ...makeConfig().validation, deployCommand: 'deploy.sh', healthCheckUrl: 'http://localhost:3000/health' },
+      });
+      const result = await handlers.deploy!(makeRun());
+      expect(result).toBe('failure');
+    });
+  });
+
+  describe('test handler (#384)', () => {
+    it('returns success when no test commands configured (skip)', async () => {
+      const { handlers } = createHandlers();
+      const result = await handlers.test!(makeRun());
+      expect(result).toBe('success');
+      expect(mockRunPostDeployTests).not.toHaveBeenCalled();
+    });
+
+    it('returns success when all tests pass', async () => {
+      mockRunPostDeployTests.mockResolvedValue({ passed: true, fixAttempts: 0, escalated: false });
+      const { handlers } = createHandlers({
+        validation: { ...makeConfig().validation, testCommands: ['npm test'] },
+      });
+      const result = await handlers.test!(makeRun());
+      expect(result).toBe('success');
+    });
+
+    it('returns failure when tests fail', async () => {
+      mockRunPostDeployTests.mockResolvedValue({
+        passed: false, fixAttempts: 0, escalated: false, failedCommand: 'npm test', failureExcerpt: 'FAIL',
+      });
+      const { handlers } = createHandlers({
+        validation: { ...makeConfig().validation, testCommands: ['npm test'] },
+      });
+      const run = makeRun();
+      const result = await handlers.test!(run);
+      expect(result).toBe('failure');
+      expect(run.fixAttempts.length).toBe(1);
+    });
+
+    it('returns failure when tests escalate', async () => {
+      mockRunPostDeployTests.mockResolvedValue({
+        passed: false, fixAttempts: 3, escalated: true, failedCommand: 'npm test', failureExcerpt: 'Error',
+      });
+      const { handlers } = createHandlers({
+        validation: { ...makeConfig().validation, testCommands: ['npm test'] },
+      });
+      const run = makeRun();
+      const result = await handlers.test!(run);
+      expect(result).toBe('failure');
+      expect(run.fixAttempts[0]!.phase).toBe('test');
+    });
+  });
+
+  describe('createPhaseHandlers returns all expected handlers (#384)', () => {
+    it('includes holdout, integrate, deploy, and test handlers', () => {
+      const { handlers } = createHandlers();
+      expect(handlers.holdout).toBeDefined();
+      expect(handlers.integrate).toBeDefined();
+      expect(handlers.deploy).toBeDefined();
+      expect(handlers.test).toBeDefined();
+      expect(typeof handlers.holdout).toBe('function');
+      expect(typeof handlers.integrate).toBe('function');
+      expect(typeof handlers.deploy).toBe('function');
+      expect(typeof handlers.test).toBe('function');
     });
   });
 });
