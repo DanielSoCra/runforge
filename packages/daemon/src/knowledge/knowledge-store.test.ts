@@ -437,6 +437,27 @@ describe('KnowledgeStore', () => {
       expect(records).toHaveLength(0);
     });
 
+    it('does not archive technical_pitfall records with operator originType (#363)', async () => {
+      // Create a store with aggressive archival to trigger the bug
+      const shortPolicies = { ...DEFAULT_POLICIES };
+      shortPolicies.technical_pitfall = {
+        ...shortPolicies.technical_pitfall,
+        archivalMaxAgeDays: -1, // any age triggers archival
+        archivalMinHitCount: 100, // effectively all records are "low hit"
+      };
+      const shortStore = new KnowledgeStore(join(dir, 'archival-operator.jsonl'), shortPolicies);
+      // Store as operator origin — simulates dedup upgrade path
+      await shortStore.storeRecord(
+        [makeMarker({ description: 'Operator-elevated pitfall' })],
+        'issue-1', 'operator', 'technical_pitfall',
+      );
+      const archived = await shortStore.scanForArchival();
+      // Operator-origin records must be exempt from archival regardless of recordType
+      expect(archived).toHaveLength(0);
+      const records = await shortStore.loadAll();
+      expect(records[0]?.lifecycleStatus).toBe('active');
+    });
+
     it('does not archive operator_correction records (Infinity archivalMaxAge)', async () => {
       await store.storeRecord(
         [makeMarker({ description: 'Op correction' })],

@@ -217,6 +217,8 @@ export class KnowledgeStore {
       const toArchive: string[] = [];
       for (const r of all) {
         if (r.lifecycleStatus !== 'active') continue;
+        // Operator-origin records are exempt from automatic archival (ARCH-AC-KNOWLEDGE)
+        if (r.originType === 'operator') continue;
         const policy = this.policies[r.recordType];
         if (policy.archivalMaxAgeDays === Infinity) continue;
         const age = (now - new Date(r.createdAt).getTime()) / (1000 * 60 * 60 * 24);
