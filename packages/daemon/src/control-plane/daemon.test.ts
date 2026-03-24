@@ -10,7 +10,7 @@ const {
   mockStateMgr, mockCostTracker, mockRemoteControl, mockDetector,
   mockServer, mockServerStart, mockRunPipeline, mockNotify,
   mockRunWriter, mockConfigReader, mockLoadConfig, mockSelectVariant, phaseHandlerCalls, mockCreateReviewScheduler,
-  mockCreatePOAgent, mockCreateTechLeadScheduler,
+  mockCreatePOAgent, mockCreateTechLeadScheduler, mockCreateCoordinator,
 } = vi.hoisted(() => ({
   mockStateMgr: {
     initialize: vi.fn().mockResolvedValue(undefined),
@@ -60,6 +60,9 @@ const {
     stop: vi.fn(),
     triggerEvent: vi.fn(),
     getStatus: vi.fn().mockReturnValue({ cyclesRun: 0, running: false }),
+  }),
+  mockCreateCoordinator: vi.fn().mockReturnValue({
+    start: vi.fn().mockReturnValue(vi.fn()),
   }),
 }));
 
@@ -138,6 +141,21 @@ vi.mock('../coordination/po-agent.js', () => ({
 vi.mock('../coordination/tech-lead-scheduler.js', () => ({
   createTechLeadScheduler: (...args: unknown[]) => mockCreateTechLeadScheduler(...args),
 }));
+vi.mock('../coordination/coordinator.js', () => ({
+  createCoordinator: (...args: unknown[]) => mockCreateCoordinator(...args),
+}));
+vi.mock('../coordination/work-claimer.js', () => ({
+  createWorkClaimer: vi.fn().mockReturnValue({}),
+}));
+vi.mock('../coordination/batch-manager.js', () => ({
+  createBatchManager: vi.fn().mockReturnValue({}),
+}));
+vi.mock('../coordination/merge-agent.js', () => ({
+  createMergeAgent: vi.fn().mockReturnValue({}),
+}));
+vi.mock('../coordination/merge-queue.js', () => ({
+  createMergeQueue: vi.fn().mockReturnValue({}),
+}));
 vi.mock('../coordination/tech-lead/proposal-store.js', () => ({
   TechProposalStore: class { init = vi.fn().mockResolvedValue(undefined); loadActiveProposals = vi.fn().mockResolvedValue([]); loadRejectedProposals = vi.fn().mockResolvedValue([]); loadAllProposals = vi.fn().mockResolvedValue([]); findDuplicate = vi.fn().mockResolvedValue(undefined); saveProposal = vi.fn().mockResolvedValue(undefined); },
 }));
@@ -177,6 +195,7 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
     proactiveRecentCommits: 20,
   },
   coordination: {
+    useCoordinator: false, tickInterval: 5000,
     maxAgents: 10, reviewerInterval: 3600000, poInterval: 3600000,
     poIdeaDebounce: 300000,
     plannerTimeout: 60000, maxAttemptsPerIssue: 3, diskSpaceThreshold: 2_000_000_000,
@@ -242,9 +261,19 @@ describe('daemon', () => {
     mockRemoteControl.stop.mockResolvedValue(undefined);
     mockCostTracker.getDailyCost.mockReturnValue(0);
     mockRunWriter.upsertRun.mockResolvedValue(undefined);
+    mockCreateReviewScheduler.mockReturnValue({ start: () => () => {}, getStatus: () => ({}) });
     mockCreatePOAgent.mockReturnValue({
       start: vi.fn().mockReturnValue(vi.fn()),
       submitIdea: vi.fn().mockResolvedValue({ id: 'idea-1', submittedBy: 'operator', description: 'test', status: 'pending', proposalId: null, createdAt: '2026-03-23T00:00:00Z' }),
+    });
+    mockCreateTechLeadScheduler.mockReturnValue({
+      start: vi.fn().mockReturnValue(vi.fn()),
+      stop: vi.fn(),
+      triggerEvent: vi.fn(),
+      getStatus: vi.fn().mockReturnValue({ cyclesRun: 0, running: false }),
+    });
+    mockCreateCoordinator.mockReturnValue({
+      start: vi.fn().mockReturnValue(vi.fn()),
     });
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -270,6 +299,7 @@ describe('daemon', () => {
       mockCreateReviewScheduler,
       mockCreatePOAgent,
       mockCreateTechLeadScheduler,
+      mockCreateCoordinator,
     ]) {
       mock.mockClear();
     }
@@ -1511,6 +1541,108 @@ describe('daemon', () => {
       // Must use coordination.reviewerInterval, not validation.proactiveIntervalMs
       expect(schedulerConfig.intervalMs).toBe(5400000);
       expect(schedulerConfig.intervalMs).not.toBe(900000);
+    });
+  });
+
+  describe('coordinator wiring (#345)', () => {
+    it('does not instantiate coordinator when useCoordinator is false (default)', async () => {
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      expect(mockCreateCoordinator).not.toHaveBeenCalled();
+    });
+
+    it('instantiates coordinator when useCoordinator is true', async () => {
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      expect(mockCreateCoordinator).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes CoordinatorConfig with correct values from config', async () => {
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true, tickInterval: 3000, maxAgents: 5, diskSpaceThreshold: 1_000_000_000 },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      const [, coordConfig] = mockCreateCoordinator.mock.calls[0]!;
+      expect(coordConfig).toMatchObject({ tickIntervalMs: 3000, maxAgents: 5, diskSpaceThreshold: 1_000_000_000 });
+    });
+
+    it('calls coordinator.start() and receives stop function', async () => {
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      const coordinator = mockCreateCoordinator.mock.results[0]!.value;
+      expect(coordinator.start).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT start legacy poll loop when coordinator is enabled', async () => {
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const request = makeWorkRequest({ issueNumber: 42 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(60000);
+      expect(mockDetector.detectReadyWork).not.toHaveBeenCalled();
+    });
+
+    it('does NOT start standalone PO agent when coordinator is enabled', async () => {
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      const agent = mockCreatePOAgent.mock.results[0];
+      if (agent) {
+        expect(agent.value.start).not.toHaveBeenCalled();
+      }
+    });
+
+    it('does NOT start standalone TL scheduler when coordinator is enabled', async () => {
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      const scheduler = mockCreateTechLeadScheduler.mock.results[0];
+      if (scheduler) {
+        expect(scheduler.value.start).not.toHaveBeenCalled();
+      }
+    });
+
+    it('stops coordinator on shutdown', async () => {
+      const mockStopCoordinator = vi.fn();
+      mockCreateCoordinator.mockReturnValue({ start: vi.fn().mockReturnValue(mockStopCoordinator) });
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await signalHandlers['SIGTERM']!();
+      expect(mockStopCoordinator).toHaveBeenCalledTimes(1);
+    });
+
+    it('still starts review scheduler when coordinator is enabled', async () => {
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      expect(mockCreateReviewScheduler).toHaveBeenCalledTimes(1);
     });
   });
 });

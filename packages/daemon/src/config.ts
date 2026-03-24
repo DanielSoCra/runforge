@@ -112,6 +112,8 @@ export const ConfigSchema = z.object({
     prospectiveSeverityThreshold: 5,
   }),
   coordination: z.object({
+    useCoordinator: z.boolean().default(false),
+    tickInterval: z.number().int().min(1000).default(5000),
     maxAgents: z.number().int().min(1).default(10),
     reviewerInterval: z.number().int().min(60000).default(3600000),
     poInterval: z.number().int().min(60000).default(3600000),
@@ -132,6 +134,8 @@ export const ConfigSchema = z.object({
     techLeadLookbackWindowMs: z.number().int().min(60000).default(48 * 60 * 60 * 1000),
     techLeadMaxEntriesPerSection: z.number().int().min(1).default(50),
   }).default({
+    useCoordinator: false,
+    tickInterval: 5000,
     maxAgents: 10,
     reviewerInterval: 3600000,
     poInterval: 3600000,
