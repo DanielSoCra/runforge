@@ -1,12 +1,13 @@
 // src/session-runtime/adapters/cli.ts
 import { spawn } from 'child_process';
-import { writeFileSync, mkdirSync, unlinkSync, existsSync, readFileSync } from 'fs';
+import { writeFileSync, mkdirSync, mkdtempSync, unlinkSync, existsSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { ok, err, type Result } from '../../lib/result.js';
 import type { AgentDefinition, SessionContext, SessionResult, ExitStatus, PitfallMarker } from '../../types.js';
 import type { ContainmentPolicy } from '../containment-hooks.js';
 import type { ProviderAdapter } from './types.js';
+import type { McpConfig } from '../plugin-injection.js';
 import { generateContainmentScript } from '../generate-containment-script.js';
 import { generateTimeoutHookScript } from '../timeout-hook-script.js';
 import { SessionError } from '../session-error.js';
@@ -60,11 +61,12 @@ export class CliAdapter implements ProviderAdapter {
         : typeof json['output'] === 'string'
           ? json['output']
           : JSON.stringify(json);
-      const cost = typeof json['cost_usd'] === 'number'
+      const rawCost = typeof json['cost_usd'] === 'number'
         ? json['cost_usd']
         : typeof json['cost'] === 'number'
           ? json['cost']
           : 0;
+      const cost = Number.isFinite(rawCost) && rawCost > 0 ? rawCost : 0;
       return ok({
         output,
         cost,
@@ -92,6 +94,7 @@ export class CliAdapter implements ProviderAdapter {
     policy: ContainmentPolicy | undefined,
     timeoutMs: number,
     sessionStartTime?: number,
+    mcpConfigs?: McpConfig[],
   ): { scriptPaths: string[]; settingsPath: string; markerPath?: string } {
     const now = sessionStartTime ?? Date.now();
     const scriptPaths: string[] = [];
@@ -134,6 +137,27 @@ export class CliAdapter implements ProviderAdapter {
       ...(settings.hooks as Record<string, unknown> ?? {}),
       PreToolUse: preToolUseHooks,
     };
+
+    // Inject plugin MCP server configs (ARCH-AC-PLUGINS Flow 4 step 3)
+    // Merge with any pre-existing mcpServers — plugin configs take precedence on name collision
+    if (mcpConfigs && mcpConfigs.length > 0) {
+      const existing = (settings.mcpServers ?? {}) as Record<string, unknown>;
+      const pluginServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
+      for (const mcp of mcpConfigs) {
+        const entry: { command: string; args: string[]; env?: Record<string, string> } = {
+          command: mcp.command,
+          args: mcp.args,
+        };
+        if (mcp.env && Object.keys(mcp.env).length > 0) {
+          entry.env = mcp.env;
+        }
+        pluginServers[mcp.name] = entry;
+      }
+      settings.mcpServers = { ...existing, ...pluginServers };
+      // Store injected names so cleanup only removes plugin-injected keys
+      settings._pluginMcpNames = Object.keys(pluginServers);
+    }
+
     writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
     return { scriptPaths, settingsPath, markerPath };
@@ -146,7 +170,7 @@ export class CliAdapter implements ProviderAdapter {
     if (paths.markerPath) {
       try { unlinkSync(paths.markerPath); } catch { /* may not exist */ }
     }
-    // Remove only our hooks from settings — restore previous state
+    // Remove only our hooks and plugin MCP configs from settings — restore previous state
     try {
       const content = readFileSync(paths.settingsPath, 'utf8');
       const settings = JSON.parse(content) as Record<string, unknown>;
@@ -155,6 +179,18 @@ export class CliAdapter implements ProviderAdapter {
         delete hooks.PreToolUse;
         if (Object.keys(hooks).length === 0) delete settings.hooks;
       }
+      // Remove only plugin-injected MCP servers, preserve pre-existing ones
+      const injectedNames = settings._pluginMcpNames as string[] | undefined;
+      if (injectedNames && settings.mcpServers) {
+        const servers = settings.mcpServers as Record<string, unknown>;
+        for (const name of injectedNames) {
+          delete servers[name];
+        }
+        if (Object.keys(servers).length === 0) {
+          delete settings.mcpServers;
+        }
+      }
+      delete settings._pluginMcpNames;
       if (Object.keys(settings).length === 0) {
         unlinkSync(paths.settingsPath);
       } else {
@@ -166,7 +202,7 @@ export class CliAdapter implements ProviderAdapter {
   async spawn(
     def: AgentDefinition,
     prompt: string,
-    options?: { cwd?: string; jsonSchema?: string; containmentPolicy?: ContainmentPolicy },
+    options?: { cwd?: string; jsonSchema?: string; containmentPolicy?: ContainmentPolicy; mcpConfigs?: McpConfig[] },
   ): Promise<Result<SessionResult>> {
     const args = this.buildArgs(def, prompt, options?.jsonSchema);
     const sessionStartTime = Date.now();
@@ -176,19 +212,28 @@ export class CliAdapter implements ProviderAdapter {
     };
     const env = this.buildEnv(extraEnv);
 
-    // Set up hooks whenever cwd is known — timeout hooks are always needed,
-    // containment hooks only when a policy is provided
+    // Set up hooks for EVERY session — timeout hooks are always needed,
+    // containment hooks only when a policy is provided.
+    // When cwd is not provided (e.g., codebase-reviewer), create a temp directory
+    // so hooks can still be installed via .claude/settings.local.json.
+    // SEC-34: Without this, sessions spawned without workspacePath run uncontained.
     let hookPaths: { scriptPaths: string[]; settingsPath: string; markerPath?: string } | undefined;
+    let tempCwd: string | undefined;
+    let effectiveCwd: string;
     if (options?.cwd) {
-      hookPaths = this.setupHooks(options.cwd, options.containmentPolicy, def.timeoutMs, sessionStartTime);
+      effectiveCwd = options.cwd;
+    } else {
+      tempCwd = mkdtempSync(join(tmpdir(), 'session-cwd-'));
+      effectiveCwd = tempCwd;
     }
+    hookPaths = this.setupHooks(effectiveCwd, options?.containmentPolicy, def.timeoutMs, sessionStartTime, options?.mcpConfigs);
 
     return new Promise((resolve) => {
       const chunks: Buffer[] = [];
       const errChunks: Buffer[] = [];
 
       const proc = spawn('claude', args, {
-        cwd: options?.cwd,
+        cwd: effectiveCwd,
         env,
       });
 
@@ -210,6 +255,7 @@ export class CliAdapter implements ProviderAdapter {
         clearTimeout(timer);
         if (killTimer) clearTimeout(killTimer);
         if (hookPaths) this.cleanupHooks(hookPaths);
+        if (tempCwd) { try { rmSync(tempCwd, { recursive: true, force: true }); } catch { /* best-effort */ } }
         const stdout = Buffer.concat(chunks).toString();
         const stderr = Buffer.concat(errChunks).toString();
 
@@ -242,7 +288,9 @@ export class CliAdapter implements ProviderAdapter {
           return;
         }
 
-        const exitStatus: ExitStatus = code === 0 ? 'completed' : 'failed';
+        const exitStatus: ExitStatus = code === 0
+          ? this.parseExitStatusFromOutput(parsed.value.output)
+          : 'failed';
 
         resolve(ok({
           output: parsed.value.output,
@@ -258,6 +306,7 @@ export class CliAdapter implements ProviderAdapter {
         clearTimeout(timer);
         if (killTimer) clearTimeout(killTimer);
         if (hookPaths) this.cleanupHooks(hookPaths);
+        if (tempCwd) { try { rmSync(tempCwd, { recursive: true, force: true }); } catch { /* best-effort */ } }
         const partialStdout = Buffer.concat(chunks).toString();
         const parsed = this.parseOutput(partialStdout);
         const cost = parsed.ok ? parsed.value.cost : 0;
@@ -293,6 +342,31 @@ export class CliAdapter implements ProviderAdapter {
     );
   }
 
+  /**
+   * Parse the agent's textual exit status from session output.
+   * Agents report DONE_WITH_CONCERNS, BLOCKED, or NEEDS_CONTEXT per prompt templates.
+   * Falls back to 'completed' if no status marker is found (agent said DONE or omitted status).
+   */
+  parseExitStatusFromOutput(output: string): ExitStatus {
+    // Search from the end of output — status is reported at the end of the session.
+    // Match the LAST occurrence of a status keyword to avoid false positives in earlier text.
+    // DONE_WITH_CONCERNS and NEEDS_CONTEXT are compound tokens unlikely to appear in prose.
+    // BLOCKED requires structured format (**BLOCKED**, - BLOCKED, or line-start BLOCKED)
+    // to avoid false positives from narrative mentions like "the PR was BLOCKED by...".
+    const reversed = output.split('\n').reverse();
+    for (const line of reversed) {
+      const upper = line.toUpperCase();
+      if (upper.includes('DONE_WITH_CONCERNS')) return 'completed-with-concerns';
+      if (upper.includes('NEEDS_CONTEXT')) return 'needs-context';
+      // Require BLOCKED in structured position: bold (**BLOCKED**), list item (- BLOCKED),
+      // or at line start (BLOCKED —). Prompt templates instruct "**BLOCKED**" format.
+      if (/(?:^|\*\*|^-\s+)\s*BLOCKED\s*(?:\*\*|$|\s*—|\s*:)/.test(upper)) {
+        return 'blocked';
+      }
+    }
+    return 'completed';
+  }
+
   private extractPitfalls(output: string): PitfallMarker[] {
     // Extract structured pitfall markers from session output
     // Format: <!-- PITFALL: {"artifactPatterns":["src/**"],"description":"..."} -->
@@ -301,9 +375,12 @@ export class CliAdapter implements ProviderAdapter {
     let match;
     while ((match = regex.exec(output)) !== null) {
       try {
-        const marker = JSON.parse(match[1] ?? '') as PitfallMarker;
-        if (marker.artifactPatterns && marker.description) {
-          markers.push(marker);
+        const parsed = JSON.parse(match[1] ?? '') as Record<string, unknown>;
+        if (Array.isArray(parsed.artifactPatterns) && typeof parsed.description === 'string') {
+          markers.push({
+            artifactPatterns: parsed.artifactPatterns.map(String),
+            description: parsed.description,
+          });
         }
       } catch {
         // skip malformed markers

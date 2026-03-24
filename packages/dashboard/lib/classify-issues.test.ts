@@ -100,6 +100,16 @@ describe('classifyIssues', () => {
     expect(cards[0]?.issueNumber).toBe(7);
   });
 
+  it('surfaces all complete runs even when count exceeds 200 (#386)', () => {
+    // Regression: page.tsx had .limit(200) on the runs query, which silently
+    // dropped completed issues from the Complete column once total runs > 200.
+    // The spec requires fetching ALL runs to populate the Complete column.
+    const completeRuns = Array.from({ length: 250 }, (_, i) => run(i + 1, 'complete'));
+    const cards = classifyIssues([{ ...REPO, issues: [] }], completeRuns);
+    expect(cards).toHaveLength(250);
+    expect(cards.every((c) => c.column === 'complete')).toBe(true);
+  });
+
   it('aggregates issues from multiple repos', () => {
     const cards = classifyIssues(
       [

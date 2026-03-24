@@ -1,8 +1,11 @@
 import { ok, err, type Result } from '../lib/result.js';
+import { SessionError } from '../session-runtime/session-error.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { WorkRequest, TaskGraph, Gotcha, PipelineVariant } from '../types.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import type { GotchaStore } from '../knowledge/gotcha-store.js';
+import type { KnowledgeStore } from '../knowledge/knowledge-store.js';
+import type { KnowledgeRecord } from '../knowledge/record-types.js';
 import { createSingleUnitGraph, getUnitsByBatch } from './task-graph.js';
 import { executeBatch, type UnitResult } from './batch.js';
 import { deleteUnitBranch } from './worktree.js';
@@ -28,6 +31,7 @@ export class ImplementationCoordinator {
     private maxDiffLines: number = 300,
     private staggerMs: number = 2000,
     private gotchaStore?: GotchaStore,
+    private knowledgeStore?: KnowledgeStore,
   ) {}
 
   /**
@@ -39,7 +43,7 @@ export class ImplementationCoordinator {
     featureBranch: string,
     runWriter?: SupabaseRunWriter,
     runId?: string,
-    options?: { complexity?: 'simple' | 'standard' | 'complex'; specContent?: string; checkpoint?: number; handoffNotes?: Map<string, string>; variant?: PipelineVariant; diagnosisDetail?: string },
+    options?: { complexity?: 'simple' | 'standard' | 'complex'; specContent?: string; checkpoint?: number; handoffNotes?: Map<string, string>; variant?: PipelineVariant; diagnosisDetail?: string; activePlugins?: Array<{ id: string; activatedAt: string }> },
   ): Promise<Result<ImplementResult>> {
     // 1. Get task graph
     let graph: TaskGraph;
@@ -58,8 +62,12 @@ export class ImplementationCoordinator {
         options.specContent ?? '',
         runWriter,
         runId,
+        options.activePlugins,
       );
       if (!decomposeResult.ok) {
+        if (decomposeResult.error instanceof SessionError) {
+          return err(decomposeResult.error);
+        }
         return err(new Error(`Decomposition failed: ${decomposeResult.error.message}`));
       }
       graph = decomposeResult.value;
@@ -74,20 +82,38 @@ export class ImplementationCoordinator {
     for (let i = startBatch; i < batches.length; i++) {
       const batch = batches[i]!;
 
-      // Match gotchas for each unit's expected artifacts (ARCH-AC-KNOWLEDGE: Gotcha injection flow)
+      // Match knowledge records for each unit's expected artifacts (ARCH-AC-KNOWLEDGE: Record injection flow)
       const unitPitfalls = new Map<string, string>();
-      if (this.gotchaStore) {
-        for (const unit of batch) {
-          if (unit.expectedArtifacts.length > 0) {
-            try {
-              const matched = await this.gotchaStore.match(unit.expectedArtifacts);
-              if (matched.length > 0) {
-                unitPitfalls.set(unit.id, formatGotchas(matched));
-              }
-            } catch (e) {
-              console.warn(`[coordinator] Failed to match gotchas for ${unit.id}:`, e);
+      for (const unit of batch) {
+        if (unit.expectedArtifacts.length === 0) continue;
+        const sections: string[] = [];
+
+        // v1 GotchaStore (legacy)
+        if (this.gotchaStore) {
+          try {
+            const matched = await this.gotchaStore.match(unit.expectedArtifacts);
+            if (matched.length > 0) {
+              sections.push(formatGotchas(matched));
             }
+          } catch (e) {
+            console.warn(`[coordinator] Failed to match gotchas for ${unit.id}:`, e);
           }
+        }
+
+        // v2 KnowledgeStore — query with 'implementation' session type
+        if (this.knowledgeStore) {
+          try {
+            const records = await this.knowledgeStore.matchRecords(unit.expectedArtifacts, 'implementation');
+            if (records.length > 0) {
+              sections.push(formatKnowledgeRecords(records));
+            }
+          } catch (e) {
+            console.warn(`[coordinator] Failed to match knowledge records for ${unit.id}:`, e);
+          }
+        }
+
+        if (sections.length > 0) {
+          unitPitfalls.set(unit.id, sections.join('\n'));
         }
       }
 
@@ -106,6 +132,8 @@ export class ImplementationCoordinator {
         options?.handoffNotes,
         options?.variant,
         options?.variant === 'bug' ? { bugReport: request.body, diagnosis: options?.diagnosisDetail ?? '' } : undefined,
+        options?.activePlugins,
+        this.knowledgeStore,
       );
 
       allResults.push(...batchResult.results);
@@ -113,10 +141,10 @@ export class ImplementationCoordinator {
 
       // Check for failures
       const failures = batchResult.results.filter(
-        (r) => r.exitStatus === 'failed' || r.exitStatus === 'timed-out',
+        (r) => r.exitStatus === 'failed' || r.exitStatus === 'timed-out' || r.exitStatus === 'needs-context',
       );
       const blocked = batchResult.results.filter(
-        (r) => r.exitStatus === 'blocked' || r.exitStatus === 'needs-context',
+        (r) => r.exitStatus === 'blocked',
       );
 
       // Check for containment breach — terminal, no retries (STACK-AC-OPERATIONAL-SAFETY)
@@ -155,7 +183,18 @@ export class ImplementationCoordinator {
       }
 
       // 3. Merge successful units sequentially into feature branch (STACK-AC-IMPLEMENTATION: merge.ts)
-      await git(['checkout', featureBranch], this.repoRoot);
+      const checkoutResult = await git(['checkout', featureBranch], this.repoRoot);
+      if (!checkoutResult.ok) {
+        return ok({
+          success: false,
+          unitResults: allResults,
+          totalCost,
+          batchesCompleted: i,
+          error: `Checkout failed: ${checkoutResult.error.message}`,
+          handoffNotes: collectHandoffNotes(allResults),
+          containmentBreach: breached || undefined,
+        });
+      }
       const successfulUnits = batchResult.results.filter((r) => isMergeable(r.exitStatus));
       const nonMergedUnits = batchResult.results.filter((r) => !isMergeable(r.exitStatus));
 
@@ -208,5 +247,11 @@ function collectHandoffNotes(results: UnitResult[]): Map<string, string> | undef
 function formatGotchas(gotchas: Gotcha[]): string {
   return gotchas
     .map((g) => `- [${g.priorityTier === 'elevated' ? 'IMPORTANT' : 'note'}] ${g.description} (patterns: ${g.artifactPatterns.join(', ')})`)
+    .join('\n');
+}
+
+function formatKnowledgeRecords(records: KnowledgeRecord[]): string {
+  return records
+    .map((r) => `- [${r.priorityTier === 'elevated' ? 'IMPORTANT' : 'note'}] ${r.description} (patterns: ${r.artifactPatterns.join(', ')})`)
     .join('\n');
 }

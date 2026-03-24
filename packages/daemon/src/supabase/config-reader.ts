@@ -2,6 +2,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { RepoConfig, GlobalConfig } from '../config.js';
 
+const DEFAULT_SYNC_INTERVAL_MS = 60_000;
+
 const DEFAULT_GLOBAL: GlobalConfig = {
   concurrencyLimit: 1,
   dailyBudgetLimit: null,
@@ -17,7 +19,9 @@ export class SupabaseConfigReader {
 
   async start(): Promise<void> {
     await this.fetch(); // throws if Supabase is unreachable
-    this.timer = setInterval(() => { void this.fetchSafe(); }, 60_000);
+    const raw = Number(process.env.DAEMON_SYNC_INTERVAL_MS);
+    const intervalMs = (Number.isFinite(raw) && raw > 0) ? raw : DEFAULT_SYNC_INTERVAL_MS;
+    this.timer = setInterval(() => { void this.fetchSafe(); }, intervalMs);
   }
 
   stop(): void {

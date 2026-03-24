@@ -60,6 +60,22 @@ vi.mock('./classifier.js', () => ({
   classify: vi.fn(),
 }));
 
+vi.mock('../validation/holdout.js', () => ({
+  runHoldout: vi.fn(),
+}));
+
+vi.mock('./integration.js', () => ({
+  integrateToStaging: vi.fn(),
+}));
+
+vi.mock('../validation/deploy.js', () => ({
+  runDeploy: vi.fn(),
+}));
+
+vi.mock('../validation/post-deploy-test.js', () => ({
+  runPostDeployTests: vi.fn(),
+}));
+
 // Import after mocks are set up
 import { createPhaseHandlers, acquireDetectLock, releaseDetectLock, isDetectLocked } from './phases.js';
 import { git } from '../lib/git.js';
@@ -75,6 +91,10 @@ import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
 import { loadSpecContent } from '../infra/spec-loader.js';
 import { classify as runClassify } from './classifier.js';
+import { runHoldout } from '../validation/holdout.js';
+import { integrateToStaging } from './integration.js';
+import { runDeploy } from '../validation/deploy.js';
+import { runPostDeployTests } from '../validation/post-deploy-test.js';
 
 const mockGit = vi.mocked(git);
 const mockClassify = vi.mocked(runClassify);
@@ -91,6 +111,10 @@ const mockNotify = vi.mocked(notify);
 const mockAppendResult = vi.mocked(appendResult);
 const mockCreateWorkDetector = vi.mocked(createWorkDetector);
 const mockLoadSpecContent = vi.mocked(loadSpecContent);
+const mockRunHoldout = vi.mocked(runHoldout);
+const mockIntegrateToStaging = vi.mocked(integrateToStaging);
+const mockRunDeploy = vi.mocked(runDeploy);
+const mockRunPostDeployTests = vi.mocked(runPostDeployTests);
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
@@ -113,6 +137,10 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
       testCommands: [],
       maxTestFixAttempts: 3,
       failureExcerptLines: 50,
+      proactiveIntervalMs: 1200000,
+      proactiveMaxConcurrent: 1,
+      proactiveThrottleThreshold: 0.8,
+      proactiveRecentCommits: 20,
     },
     diagnosis: { confidenceThreshold: 0.7 },
     warmup: { threshold: 10, regressionThreshold: 3, samplingRate: 0.1, minSamplingRate: 0.01 },
@@ -261,6 +289,23 @@ describe('createPhaseHandlers', () => {
       expect(result).toBe('failure');
     });
 
+    it('returns failure when staging checkout fails before branch creation (#255)', async () => {
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('error: pathspec \'staging\' did not match') }); // checkout staging fails
+      const { handlers } = createHandlers();
+      const result = await handlers.detect!(makeRun());
+      expect(result).toBe('failure');
+      // Branch creation should never be attempted if staging checkout failed
+      expect(mockGit).toHaveBeenCalledTimes(1);
+      expect(mockGit).toHaveBeenCalledWith(['checkout', 'staging'], undefined);
+    });
+
+    it('releases detect lock when staging checkout fails (#255)', async () => {
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('checkout staging failed') });
+      const { handlers } = createHandlers();
+      await handlers.detect!(makeRun());
+      expect(isDetectLocked()).toBe(false);
+    });
+
     it('returns failure when detect lock is held by another run', async () => {
       acquireDetectLock();
       const { handlers } = createHandlers();
@@ -300,7 +345,7 @@ describe('createPhaseHandlers', () => {
       expect(run.classificationComplexity).toBe('standard');
       expect(mockClassify).toHaveBeenCalledWith(
         mockRuntime, expect.objectContaining({ issueNumber: 42 }),
-        undefined, undefined, undefined,
+        undefined, undefined, undefined, undefined,
       );
     });
 
@@ -328,7 +373,7 @@ describe('createPhaseHandlers', () => {
       await handlers.classify!(makeRun());
       expect(mockClassify).toHaveBeenCalledWith(
         mockRuntime, expect.anything(),
-        undefined, undefined, '/custom/repo/root',
+        undefined, undefined, '/custom/repo/root', undefined,
       );
     });
   });
@@ -483,17 +528,17 @@ describe('createPhaseHandlers', () => {
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'spec-compliance', 'reviewer-spec',
         expect.any(String), mockRuntime, 42,
-        undefined, undefined, expect.any(String), '',
+        undefined, undefined, expect.any(String), '', undefined, undefined,
       );
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'quality', 'reviewer-quality',
         expect.any(String), mockRuntime, 42,
-        undefined, undefined, expect.any(String),
+        undefined, undefined, expect.any(String), undefined, undefined, undefined,
       );
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'security', 'reviewer-security',
         expect.any(String), mockRuntime, 42,
-        undefined, undefined, expect.any(String),
+        undefined, undefined, expect.any(String), undefined, undefined, undefined,
       );
     });
 
@@ -519,7 +564,7 @@ describe('createPhaseHandlers', () => {
         'spec-compliance', 'reviewer-spec',
         expect.any(String), mockRuntime, 42,
         undefined, undefined, expect.any(String),
-        '# FUNC-AC-PIPELINE\n\nAcceptance criteria here',
+        '# FUNC-AC-PIPELINE\n\nAcceptance criteria here', undefined, undefined,
       );
 
       // Verify workRequest.body is NOT passed as specs
@@ -612,6 +657,10 @@ describe('createPhaseHandlers', () => {
           testCommands: [],
           maxTestFixAttempts: 3,
           failureExcerptLines: 50,
+          proactiveIntervalMs: 1200000,
+          proactiveMaxConcurrent: 1,
+          proactiveThrottleThreshold: 0.8,
+          proactiveRecentCommits: 20,
         },
       });
       await handlers.review!(makeRun());
@@ -659,8 +708,49 @@ describe('createPhaseHandlers', () => {
       expect(mockCreateReviewerGate).toHaveBeenCalledWith(
         'spec-compliance', 'reviewer-spec',
         expect.any(String), mockRuntime, 42,
-        undefined, undefined, expect.any(String), '',
+        undefined, undefined, expect.any(String), '', undefined, undefined,
       );
+    });
+
+    it('returns escalated when review escalates with max-cycles-exceeded (#383)', async () => {
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({
+        passed: false,
+        gateResults: [{ gate: 'deterministic', passed: false, findings: [] }],
+        fixCycles: 3,
+        escalated: true,
+        escalationReason: 'max-cycles-exceeded',
+      });
+      const { handlers } = createHandlers();
+      const result = await handlers.review!(makeRun());
+      expect(result).toBe('escalated');
+    });
+
+    it('returns escalated when review escalates with diminishing-returns (#383)', async () => {
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({
+        passed: false,
+        gateResults: [{ gate: 'deterministic', passed: false, findings: [] }],
+        fixCycles: 4,
+        escalated: true,
+        escalationReason: 'diminishing-returns',
+      });
+      const { handlers } = createHandlers();
+      const result = await handlers.review!(makeRun());
+      expect(result).toBe('escalated');
+    });
+
+    it('returns failure (not escalated) when review fails without escalation (#383)', async () => {
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({
+        passed: false,
+        gateResults: [{ gate: 'deterministic', passed: false, findings: [] }],
+        fixCycles: 0,
+        escalated: false,
+      });
+      const { handlers } = createHandlers();
+      const result = await handlers.review!(makeRun());
+      expect(result).toBe('failure');
     });
   });
 
@@ -693,7 +783,7 @@ describe('createPhaseHandlers', () => {
       expect(run.diagnosisConfidence).toBe(0.9);
       // specContent is loaded via loadSpecContent (returns '' by default mock)
       expect(mockDiagnose).toHaveBeenCalledWith(
-        mockRuntime, 42, 'Fix something', '', '', undefined, undefined, undefined,
+        mockRuntime, 42, 'Fix something', '', '', undefined, undefined, undefined, undefined,
       );
       expect(mockRouteDiagnosis).toHaveBeenCalledWith(typeADiagnosis, 0.7);
     });
@@ -729,7 +819,7 @@ describe('createPhaseHandlers', () => {
       expect(mockDiagnose).toHaveBeenCalledWith(
         mockRuntime, 42, 'Fix something', '',
         '# FUNC-AC-PIPELINE\n\nFull spec markdown content',
-        undefined, undefined, undefined,
+        undefined, undefined, undefined, undefined,
       );
     });
 
@@ -740,7 +830,7 @@ describe('createPhaseHandlers', () => {
       await handlers.diagnose!(makeRun({ variant: 'bug' }));
       // specContent loaded via loadSpecContent (returns '' by default mock)
       expect(mockDiagnose).toHaveBeenCalledWith(
-        mockRuntime, 42, 'Fix something', '', '', undefined, undefined, '/custom/repo/root',
+        mockRuntime, 42, 'Fix something', '', '', undefined, undefined, '/custom/repo/root', undefined,
       );
       // loadSpecContent should use repoRoot-based .specify path
       expect(mockLoadSpecContent).toHaveBeenCalledWith(
@@ -802,6 +892,40 @@ describe('createPhaseHandlers', () => {
           body: expect.stringContaining('Diagnosis Failed'),
         }),
       );
+    });
+
+    it('returns rate-limited when diagnose errors with SessionError.rateLimited (#266)', async () => {
+      const { SessionError } = await import('../session-runtime/session-error.js');
+      mockDiagnose.mockResolvedValue({ ok: false, error: SessionError.rateLimited(0.5) });
+
+      const { handlers } = createHandlers();
+      const result = await handlers.diagnose!(makeRun({ variant: 'bug' }));
+
+      expect(result).toBe('rate-limited');
+      // Should NOT label needs-human — this is a pause, not a failure
+      expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('returns budget-exceeded when diagnose errors with SessionError.budgetExceeded (#266)', async () => {
+      const { SessionError } = await import('../session-runtime/session-error.js');
+      mockDiagnose.mockResolvedValue({ ok: false, error: SessionError.budgetExceeded('daily limit') });
+
+      const { handlers } = createHandlers();
+      const result = await handlers.diagnose!(makeRun({ variant: 'bug' }));
+
+      expect(result).toBe('budget-exceeded');
+      expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
+    });
+
+    it('returns containment-breach when diagnose errors with SessionError.containmentBreached (#266)', async () => {
+      const { SessionError } = await import('../session-runtime/session-error.js');
+      mockDiagnose.mockResolvedValue({ ok: false, error: SessionError.containmentBreached('bad access', 0.1) });
+
+      const { handlers } = createHandlers();
+      const result = await handlers.diagnose!(makeRun({ variant: 'bug' }));
+
+      expect(result).toBe('containment-breach');
+      expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
     });
 
     it('uses config.diagnosis.confidenceThreshold', async () => {
@@ -904,6 +1028,163 @@ describe('createPhaseHandlers', () => {
       expect(detector.completeWork).toHaveBeenCalled();
       expect(mockAppendResult).toHaveBeenCalled();
       expect(mockNotify).toHaveBeenCalled();
+    });
+  });
+
+  describe('holdout handler (#384)', () => {
+    it('returns success when holdout scenarios pass', async () => {
+      mockRunHoldout.mockResolvedValue({ ok: true, value: { passed: true, skipped: false, failures: [] } } as any);
+      const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
+      const result = await handlers.holdout!(makeRun());
+      expect(result).toBe('success');
+      expect(mockRunHoldout).toHaveBeenCalledWith('run-holdout', 'feature/42', expect.any(String));
+    });
+
+    it('returns success when no holdout command configured (skipped)', async () => {
+      const { handlers } = createHandlers();
+      const result = await handlers.holdout!(makeRun());
+      expect(result).toBe('success');
+      expect(mockRunHoldout).not.toHaveBeenCalled();
+    });
+
+    it('returns failure when holdout scenarios fail', async () => {
+      mockRunHoldout.mockResolvedValue({
+        ok: true, value: { passed: false, skipped: false, failures: [{ id: 'scenario-1', passed: false }] },
+      } as any);
+      const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
+      const result = await handlers.holdout!(makeRun());
+      expect(result).toBe('failure');
+    });
+
+    it('returns failure when holdout runner errors', async () => {
+      mockRunHoldout.mockResolvedValue({ ok: false, error: new Error('runner crashed') } as any);
+      const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
+      const result = await handlers.holdout!(makeRun());
+      expect(result).toBe('failure');
+    });
+  });
+
+  describe('integrate handler (#384)', () => {
+    it('returns success on successful integration', async () => {
+      mockIntegrateToStaging.mockResolvedValue({ ok: true, value: { success: true, conflicted: false } } as any);
+      const { handlers } = createHandlers();
+      const result = await handlers.integrate!(makeRun());
+      expect(result).toBe('success');
+      expect(mockIntegrateToStaging).toHaveBeenCalledWith('feature/42', 'staging', undefined);
+    });
+
+    it('returns failure on merge conflict', async () => {
+      mockIntegrateToStaging.mockResolvedValue({
+        ok: true, value: { success: false, conflicted: true, error: 'Merge conflicts detected' },
+      } as any);
+      const { handlers } = createHandlers();
+      const result = await handlers.integrate!(makeRun());
+      expect(result).toBe('failure');
+    });
+
+    it('returns failure when integration errors', async () => {
+      mockIntegrateToStaging.mockResolvedValue({ ok: false, error: new Error('lock held') } as any);
+      const { handlers } = createHandlers();
+      const result = await handlers.integrate!(makeRun());
+      expect(result).toBe('failure');
+    });
+  });
+
+  describe('deploy handler (#384)', () => {
+    it('returns success when no deploy command configured (skip)', async () => {
+      const { handlers } = createHandlers();
+      const result = await handlers.deploy!(makeRun());
+      expect(result).toBe('success');
+      expect(mockRunDeploy).not.toHaveBeenCalled();
+    });
+
+    it('returns success when deploy is healthy', async () => {
+      mockRunDeploy.mockResolvedValue({ ok: true, value: { status: 'healthy', attempts: 1 } } as any);
+      const { handlers } = createHandlers({
+        validation: { ...makeConfig().validation, deployCommand: 'deploy.sh', healthCheckUrl: 'http://localhost:3000/health' },
+      });
+      const result = await handlers.deploy!(makeRun());
+      expect(result).toBe('success');
+      expect(mockRunDeploy).toHaveBeenCalledWith(expect.objectContaining({
+        deployCommand: 'deploy.sh',
+        healthCheckUrl: 'http://localhost:3000/health',
+      }));
+    });
+
+    it('returns failure when deploy times out', async () => {
+      mockRunDeploy.mockResolvedValue({ ok: true, value: { status: 'timeout', attempts: 2 } } as any);
+      const { handlers } = createHandlers({
+        validation: { ...makeConfig().validation, deployCommand: 'deploy.sh', healthCheckUrl: 'http://localhost:3000/health' },
+      });
+      const result = await handlers.deploy!(makeRun());
+      expect(result).toBe('failure');
+    });
+
+    it('returns failure when deploy errors', async () => {
+      mockRunDeploy.mockResolvedValue({ ok: false, error: new Error('SSRF blocked') } as any);
+      const { handlers } = createHandlers({
+        validation: { ...makeConfig().validation, deployCommand: 'deploy.sh', healthCheckUrl: 'http://localhost:3000/health' },
+      });
+      const result = await handlers.deploy!(makeRun());
+      expect(result).toBe('failure');
+    });
+  });
+
+  describe('test handler (#384)', () => {
+    it('returns success when no test commands configured (skip)', async () => {
+      const { handlers } = createHandlers();
+      const result = await handlers.test!(makeRun());
+      expect(result).toBe('success');
+      expect(mockRunPostDeployTests).not.toHaveBeenCalled();
+    });
+
+    it('returns success when all tests pass', async () => {
+      mockRunPostDeployTests.mockResolvedValue({ passed: true, fixAttempts: 0, escalated: false });
+      const { handlers } = createHandlers({
+        validation: { ...makeConfig().validation, testCommands: ['npm test'] },
+      });
+      const result = await handlers.test!(makeRun());
+      expect(result).toBe('success');
+    });
+
+    it('returns failure when tests fail', async () => {
+      mockRunPostDeployTests.mockResolvedValue({
+        passed: false, fixAttempts: 0, escalated: false, failedCommand: 'npm test', failureExcerpt: 'FAIL',
+      });
+      const { handlers } = createHandlers({
+        validation: { ...makeConfig().validation, testCommands: ['npm test'] },
+      });
+      const run = makeRun();
+      const result = await handlers.test!(run);
+      expect(result).toBe('failure');
+      expect(run.fixAttempts.length).toBe(1);
+    });
+
+    it('returns failure when tests escalate', async () => {
+      mockRunPostDeployTests.mockResolvedValue({
+        passed: false, fixAttempts: 3, escalated: true, failedCommand: 'npm test', failureExcerpt: 'Error',
+      });
+      const { handlers } = createHandlers({
+        validation: { ...makeConfig().validation, testCommands: ['npm test'] },
+      });
+      const run = makeRun();
+      const result = await handlers.test!(run);
+      expect(result).toBe('failure');
+      expect(run.fixAttempts[0]!.phase).toBe('test');
+    });
+  });
+
+  describe('createPhaseHandlers returns all expected handlers (#384)', () => {
+    it('includes holdout, integrate, deploy, and test handlers', () => {
+      const { handlers } = createHandlers();
+      expect(handlers.holdout).toBeDefined();
+      expect(handlers.integrate).toBeDefined();
+      expect(handlers.deploy).toBeDefined();
+      expect(handlers.test).toBeDefined();
+      expect(typeof handlers.holdout).toBe('function');
+      expect(typeof handlers.integrate).toBe('function');
+      expect(typeof handlers.deploy).toBe('function');
+      expect(typeof handlers.test).toBe('function');
     });
   });
 });

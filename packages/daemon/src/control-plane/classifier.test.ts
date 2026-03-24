@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { classify } from './classifier.js';
+import { SessionError } from '../session-runtime/session-error.js';
 
 const mockRuntime = {
   spawnSession: vi.fn(),
@@ -100,14 +101,47 @@ describe('classify (#145)', () => {
     expect(result.complexity).toBe('complex');
   });
 
-  it('falls back to success:simple with no complexity when session fails', async () => {
+  it('falls back to success:simple with no complexity when session fails with generic Error', async () => {
     mockRuntime.spawnSession.mockResolvedValue({
       ok: false,
-      error: new Error('Budget exceeded'),
+      error: new Error('Some generic failure'),
     });
 
     const result = await classify(mockRuntime, makeWorkRequest());
     expect(result.event).toBe('success:simple');
+    expect(result.complexity).toBeUndefined();
+  });
+
+  it('returns budget-exceeded when session fails with SessionError.budgetExceeded (#265)', async () => {
+    mockRuntime.spawnSession.mockResolvedValue({
+      ok: false,
+      error: SessionError.budgetExceeded('daily-budget-exceeded'),
+    });
+
+    const result = await classify(mockRuntime, makeWorkRequest());
+    expect(result.event).toBe('budget-exceeded');
+    expect(result.complexity).toBeUndefined();
+  });
+
+  it('returns rate-limited when session fails with SessionError.rateLimited (#265)', async () => {
+    mockRuntime.spawnSession.mockResolvedValue({
+      ok: false,
+      error: SessionError.rateLimited(0.5, 30000),
+    });
+
+    const result = await classify(mockRuntime, makeWorkRequest());
+    expect(result.event).toBe('rate-limited');
+    expect(result.complexity).toBeUndefined();
+  });
+
+  it('returns containment-breach when session fails with SessionError.containmentBreached (#265)', async () => {
+    mockRuntime.spawnSession.mockResolvedValue({
+      ok: false,
+      error: SessionError.containmentBreached('shell escape detected', 0.3),
+    });
+
+    const result = await classify(mockRuntime, makeWorkRequest());
+    expect(result.event).toBe('containment-breach');
     expect(result.complexity).toBeUndefined();
   });
 

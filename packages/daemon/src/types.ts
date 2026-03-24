@@ -10,7 +10,7 @@ export type Phase =
   | 'seo' | 'content' | 'assets' | 'build' | 'qa' | 'launch'
   | 'l2-design' | 'l2-gate' | 'l3-generate' | 'l3-compliance';
 
-export type PhaseEvent = 'success' | 'success:simple' | 'failure' | 'budget-exceeded' | 'per-run-budget-exceeded' | 'rate-limited' | 'containment-breach' | 'feedback' | 'unchanged';
+export type PhaseEvent = 'success' | 'success:simple' | 'failure' | 'escalated' | 'budget-exceeded' | 'per-run-budget-exceeded' | 'rate-limited' | 'containment-breach' | 'feedback' | 'unchanged';
 
 export type PipelineVariant = 'feature' | 'feature-simple' | 'bug' | 'website' | 'spec-driven';
 
@@ -21,8 +21,9 @@ export type Outcome = 'complete' | 'stuck' | 'escalated';
 export type SessionType =
   | 'coordinator' | 'classifier' | 'worker'
   | 'reviewer-spec' | 'reviewer-quality' | 'reviewer-security'
-  | 'conflict-resolver' | 'bug-worker' | 'tester'
-  | 'diagnostician' | 'prompt-optimizer';
+  | 'bug-worker' | 'diagnostician'
+  | 'codebase-reviewer'
+  | 'product-owner' | 'tech-lead';
 
 export type ExitStatus =
   | 'completed' | 'completed-with-concerns'
@@ -53,6 +54,7 @@ export interface SessionResult {
   pitfallMarkers: PitfallMarker[];
   exitStatus: ExitStatus;
   handoffNote?: string;
+  pluginGates?: string[];  // Gate scripts from active plugins — additive with repo validation commands
 }
 
 export interface PitfallMarker {
@@ -62,6 +64,8 @@ export interface PitfallMarker {
 
 // --- Work Request ---
 
+export type DetectedWorkType = 'feature' | 'bug-fix' | 'implementation' | 'l3-generate' | 'l2-brainstorm';
+
 export interface WorkRequest {
   issueNumber: number;
   title: string;
@@ -69,6 +73,7 @@ export interface WorkRequest {
   labels: string[];
   specRefs: string[];
   scopeDescription?: string;
+  workType?: DetectedWorkType;
 }
 
 // --- Run State ---
@@ -98,6 +103,7 @@ export interface RunState {
   diagnosisDetail?: string; // Serialized BugDiagnosis JSON — passed to bug-worker sessions
   classificationComplexity?: 'simple' | 'standard' | 'complex';
   handoffNotes?: Record<string, string>;
+  workerClaimId?: string;
 }
 
 // --- Daemon State ---
@@ -172,10 +178,16 @@ export interface ReviewFinding {
   description: string;
 }
 
+export interface DiscoveredIssue {
+  artifactPatterns: string[];
+  description: string;
+}
+
 export interface GateResult {
   gate: GateType;
   passed: boolean;
   findings: ReviewFinding[];
+  discoveredIssues?: DiscoveredIssue[];
 }
 
 // --- Bug Diagnosis ---
@@ -239,4 +251,15 @@ export interface PromptVersionEntry {
   content: string;
   timestamp: string;
   status: 'approved' | 'rejected' | 'rollback';
+}
+
+export interface SystemicProposal {
+  id: string;
+  rootCauseTag: string;
+  description: string;
+  relatedRecordIds: string[];
+  remediation: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  cooldownUntil?: string;
 }

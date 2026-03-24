@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { loadTemplate, renderTemplate } from './templates.js';
+import { loadTemplate, renderTemplate, findUnsubstitutedVars } from './templates.js';
 
 let dir: string;
 
@@ -74,5 +74,55 @@ describe('renderTemplate', () => {
   it('handles template with no placeholders', () => {
     const result = renderTemplate('plain text', { name: 'World' });
     expect(result).toBe('plain text');
+  });
+
+  it('throws in strict mode when variables are missing (#372)', () => {
+    expect(() =>
+      renderTemplate('Hello {{name}}, your {{role}} is ready.', {}, { strict: true }),
+    ).toThrow('missing variables: name, role');
+  });
+
+  it('does not throw in strict mode when all variables are provided', () => {
+    const result = renderTemplate(
+      'Hello {{name}}, your {{role}} is ready.',
+      { name: 'Alice', role: 'admin' },
+      { strict: true },
+    );
+    expect(result).toBe('Hello Alice, your admin is ready.');
+  });
+
+  it('strict mode ignores extra variables', () => {
+    const result = renderTemplate('Hi {{name}}!', { name: 'Bob', extra: 'ignored' }, { strict: true });
+    expect(result).toBe('Hi Bob!');
+  });
+});
+
+describe('findUnsubstitutedVars', () => {
+  it('returns missing variable names (#372)', () => {
+    const missing = findUnsubstitutedVars('{{a}} and {{b}} and {{c}}', { a: 'x' });
+    expect(missing).toEqual(['b', 'c']);
+  });
+
+  it('returns empty array when all variables are provided', () => {
+    const missing = findUnsubstitutedVars('{{a}} {{b}}', { a: 'x', b: 'y' });
+    expect(missing).toEqual([]);
+  });
+
+  it('deduplicates repeated placeholders', () => {
+    const missing = findUnsubstitutedVars('{{x}} {{x}} {{x}}', {});
+    expect(missing).toEqual(['x']);
+  });
+
+  it('returns empty array for templates with no placeholders', () => {
+    const missing = findUnsubstitutedVars('plain text', {});
+    expect(missing).toEqual([]);
+  });
+
+  it('detects empty variables map as the daemon.ts:148 scenario (#372)', () => {
+    // Simulates the concrete bug: product-owner template expects {{signal_snapshot}}
+    // but daemon.ts passed { variables: {} }
+    const template = 'Analyze signals:\n{{signal_snapshot}}\n\nPrioritize {{focus_area}}.';
+    const missing = findUnsubstitutedVars(template, {});
+    expect(missing).toEqual(['signal_snapshot', 'focus_area']);
   });
 });

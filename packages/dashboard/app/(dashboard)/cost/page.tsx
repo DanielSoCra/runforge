@@ -26,7 +26,7 @@ export default async function CostPage({
 
   const { data: events, error: eventsError } = await supabase
     .from('cost_events')
-    .select('cost, recorded_at, session_type, runs(repo_name)')
+    .select('cost, recorded_at, session_type, runs(repo_owner, repo_name)')
     .gte('recorded_at', since.toISOString())
     .order('recorded_at');
   if (eventsError) {
@@ -53,9 +53,9 @@ export default async function CostPage({
   // By repository
   const byRepo: Record<string, number> = {};
   events?.forEach((e) => {
-    const run = e.runs as { repo_name: string } | null;
-    const repoName = run?.repo_name ?? 'unknown';
-    byRepo[repoName] = (byRepo[repoName] ?? 0) + Number(e.cost);
+    const run = e.runs as { repo_owner: string; repo_name: string } | null;
+    const repoKey = run ? `${run.repo_owner}/${run.repo_name}` : 'unknown';
+    byRepo[repoKey] = (byRepo[repoKey] ?? 0) + Number(e.cost);
   });
 
   // By session type

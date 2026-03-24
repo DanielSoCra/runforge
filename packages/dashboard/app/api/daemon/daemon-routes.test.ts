@@ -24,6 +24,17 @@ function mockSupabaseNonAdmin() {
   };
 }
 
+function mockSupabaseNoTeamMember() {
+  return {
+    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-3' } } }) },
+    from: vi.fn().mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: null, error: { code: 'PGRST116', message: 'not found' } }),
+    }),
+  };
+}
+
 function mockSupabaseUnauthenticated() {
   return {
     auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null } }) },
@@ -109,6 +120,18 @@ describe.each(inlineAuthRoutes)('POST /api/daemon/$name', ({ path, daemonPath })
     const res = await POST();
     expect(res.status).toBe(503);
   });
+
+  it('returns 500 when DAEMON_URL is not configured', async () => {
+    vi.stubEnv('DAEMON_URL', '');
+    const createClient = await getCreateClient();
+    createClient.mockResolvedValueOnce(mockSupabaseAdmin());
+    const { POST } = await import(path);
+    const res = await POST();
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toMatch(/DAEMON_URL/);
+    vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
+  });
 });
 
 // ---------- remote-control/restart (uses requireAdmin — returns 403 for both unauth and non-admin) ----------
@@ -156,6 +179,18 @@ describe('POST /api/daemon/remote-control/restart', () => {
     const res = await POST();
     expect(res.status).toBe(503);
   });
+
+  it('returns 500 when DAEMON_URL is not configured', async () => {
+    vi.stubEnv('DAEMON_URL', '');
+    const createClient = await getCreateClient();
+    createClient.mockResolvedValueOnce(mockSupabaseAdmin());
+    const { POST } = await import('./remote-control/restart/route.js');
+    const res = await POST();
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toMatch(/DAEMON_URL/);
+    vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
+  });
 });
 
 // ---------- status route (GET, auth-only, no admin check) ----------
@@ -170,7 +205,16 @@ describe('GET /api/daemon/status', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('allows non-admin authenticated users', async () => {
+  it('returns 403 when user has no team membership (#276)', async () => {
+    const createClient = await getCreateClient();
+    createClient.mockResolvedValueOnce(mockSupabaseNoTeamMember());
+    const { GET } = await import('./status/route.js');
+    const res = await GET();
+    expect(res.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('allows non-admin team members', async () => {
     const createClient = await getCreateClient();
     createClient.mockResolvedValueOnce(mockSupabaseNonAdmin());
     fetchMock.mockResolvedValueOnce(
@@ -223,5 +267,17 @@ describe('GET /api/daemon/status', () => {
     expect(res.status).toBe(503);
     const body = await res.json();
     expect(body.state).toBe('offline');
+  });
+
+  it('returns 500 when DAEMON_URL is not configured', async () => {
+    vi.stubEnv('DAEMON_URL', '');
+    const createClient = await getCreateClient();
+    createClient.mockResolvedValueOnce(mockSupabaseAdmin());
+    const { GET } = await import('./status/route.js');
+    const res = await GET();
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toMatch(/DAEMON_URL/);
+    vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
   });
 });

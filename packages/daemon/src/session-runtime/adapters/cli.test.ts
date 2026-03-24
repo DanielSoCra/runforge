@@ -110,6 +110,35 @@ describe('CliAdapter', () => {
       expect(parsed.error.message).toContain('(empty output)');
     }
   });
+
+  // Regression tests for BUG-16: NaN/negative/Infinity cost_usd sanitized to 0
+  it('parseOutput sanitizes NaN cost_usd to 0', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(JSON.stringify({ result: 'ok', cost_usd: NaN }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0);
+  });
+
+  it('parseOutput sanitizes negative cost_usd to 0', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(JSON.stringify({ result: 'ok', cost_usd: -5 }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0);
+  });
+
+  it('parseOutput sanitizes Infinity cost_usd to 0', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(JSON.stringify({ result: 'ok', cost_usd: Infinity }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0);
+  });
+
+  it('parseOutput sanitizes -Infinity cost_usd to 0', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(JSON.stringify({ result: 'ok', cost_usd: -Infinity }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0);
+  });
 });
 
 describe('CliAdapter.extractHandoff (#11)', () => {
@@ -180,6 +209,66 @@ describe('CliAdapter.isRateLimitError (#91)', () => {
   it('returns false for unrelated errors', () => {
     const adapter = new CliAdapter();
     expect(adapter.isRateLimitError('TypeError: cannot read property')).toBe(false);
+  });
+});
+
+describe('CliAdapter.parseExitStatusFromOutput (#329)', () => {
+  const adapter = new CliAdapter();
+
+  it('returns completed when output has DONE but no concerns/blocked/needs-context', () => {
+    expect(adapter.parseExitStatusFromOutput('Task complete\n**DONE**\n')).toBe('completed');
+  });
+
+  it('returns completed when output has no status marker', () => {
+    expect(adapter.parseExitStatusFromOutput('some generic output')).toBe('completed');
+  });
+
+  it('returns completed-with-concerns for DONE_WITH_CONCERNS', () => {
+    const output = 'Work finished\n**DONE_WITH_CONCERNS** — tests pass but coverage dropped';
+    expect(adapter.parseExitStatusFromOutput(output)).toBe('completed-with-concerns');
+  });
+
+  it('returns blocked for BLOCKED status', () => {
+    const output = 'Attempted fix\n**BLOCKED** — cannot proceed safely, missing API credentials';
+    expect(adapter.parseExitStatusFromOutput(output)).toBe('blocked');
+  });
+
+  it('returns needs-context for NEEDS_CONTEXT status', () => {
+    const output = 'Started work\n**NEEDS_CONTEXT** — missing L2 spec for authentication module';
+    expect(adapter.parseExitStatusFromOutput(output)).toBe('needs-context');
+  });
+
+  it('uses the LAST status marker (agent may mention earlier statuses)', () => {
+    const output = 'I considered reporting BLOCKED but resolved the issue\n**DONE_WITH_CONCERNS** — fixed but uncertain about edge case';
+    expect(adapter.parseExitStatusFromOutput(output)).toBe('completed-with-concerns');
+  });
+
+  it('is case-insensitive for status markers', () => {
+    expect(adapter.parseExitStatusFromOutput('done_with_concerns — needs review')).toBe('completed-with-concerns');
+    expect(adapter.parseExitStatusFromOutput('needs_context — missing info')).toBe('needs-context');
+    expect(adapter.parseExitStatusFromOutput('**Blocked** — cannot proceed')).toBe('blocked');
+  });
+
+  it('does not false-positive on blockedPaths or blockedCommands', () => {
+    const output = 'Checked blockedPaths and blockedCommands — all good\n**DONE**';
+    expect(adapter.parseExitStatusFromOutput(output)).toBe('completed');
+  });
+
+  it('does not false-positive on BLOCKED in narrative prose', () => {
+    // Agent resolved a blocker and reported DONE — should not match narrative BLOCKED
+    const output = 'I was BLOCKED by a missing config but resolved it\n**DONE**';
+    expect(adapter.parseExitStatusFromOutput(output)).toBe('completed');
+  });
+
+  it('matches BLOCKED in structured formats from prompt templates', () => {
+    expect(adapter.parseExitStatusFromOutput('**BLOCKED** — cannot proceed')).toBe('blocked');
+    expect(adapter.parseExitStatusFromOutput('BLOCKED — missing credentials')).toBe('blocked');
+    expect(adapter.parseExitStatusFromOutput('- BLOCKED: scope too large')).toBe('blocked');
+    expect(adapter.parseExitStatusFromOutput('BLOCKED:')).toBe('blocked');
+  });
+
+  it('returns completed for empty output', () => {
+    expect(adapter.parseExitStatusFromOutput('')).toBe('completed');
   });
 });
 
@@ -303,6 +392,45 @@ describe('CliAdapter containment hook setup', () => {
     for (const p of paths.scriptPaths) {
       expect(p).toContain(String(fixedTime));
     }
+
+    adapter.cleanupHooks(paths);
+  });
+
+  it('writes plugin MCP configs to settings.local.json (#314)', () => {
+    const adapter = new CliAdapter();
+    const mcpConfigs = [
+      { name: 'figma-mcp', command: 'npx', args: ['figma-server'], env: { TOKEN: 'secret' } },
+      { name: 'sentry-mcp', command: 'node', args: ['sentry.js'] },
+    ];
+    const paths = adapter.setupHooks(tempDir, DEFAULT_POLICY, 30000, undefined, mcpConfigs);
+
+    const settings = JSON.parse(readFileSync(paths.settingsPath, 'utf8'));
+    expect(settings.mcpServers).toBeDefined();
+    expect(settings.mcpServers['figma-mcp']).toEqual({
+      command: 'npx',
+      args: ['figma-server'],
+      env: { TOKEN: 'secret' },
+    });
+    expect(settings.mcpServers['sentry-mcp']).toEqual({
+      command: 'node',
+      args: ['sentry.js'],
+    });
+
+    adapter.cleanupHooks(paths);
+
+    // mcpServers should be removed after cleanup
+    if (existsSync(paths.settingsPath)) {
+      const restored = JSON.parse(readFileSync(paths.settingsPath, 'utf8'));
+      expect(restored.mcpServers).toBeUndefined();
+    }
+  });
+
+  it('does not write mcpServers when mcpConfigs is empty (#314)', () => {
+    const adapter = new CliAdapter();
+    const paths = adapter.setupHooks(tempDir, DEFAULT_POLICY, 30000, undefined, []);
+
+    const settings = JSON.parse(readFileSync(paths.settingsPath, 'utf8'));
+    expect(settings.mcpServers).toBeUndefined();
 
     adapter.cleanupHooks(paths);
   });
@@ -538,7 +666,7 @@ describe('CliAdapter.spawn() (#102)', () => {
       containmentPolicy: DEFAULT_POLICY,
     });
 
-    expect(setupSpy).toHaveBeenCalledWith(tempDir, DEFAULT_POLICY, mockDef.timeoutMs, expect.any(Number));
+    expect(setupSpy).toHaveBeenCalledWith(tempDir, DEFAULT_POLICY, mockDef.timeoutMs, expect.any(Number), undefined);
 
     mockProc.stdout.emit('data', Buffer.from(JSON.stringify({ result: 'ok' })));
     mockProc.emit('close', 0);
@@ -602,19 +730,138 @@ describe('CliAdapter.spawn() (#102)', () => {
     }
   });
 
-  it('skips hook setup when cwd is not provided', async () => {
+  it('rejects non-array artifactPatterns in pitfall markers (#296)', async () => {
     const mockProc = createMockProcess();
     vi.mocked(spawnMock).mockReturnValue(mockProc as never);
 
     const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    // LLM outputs string instead of array for artifactPatterns
+    const output = JSON.stringify({
+      result: 'done <!-- PITFALL: {"artifactPatterns":"src/**","description":"bad marker"} --> <!-- PITFALL: {"artifactPatterns":["src/**"],"description":"good marker"} --> more',
+      cost_usd: 0.01,
+    });
+    mockProc.stdout.emit('data', Buffer.from(output));
+    mockProc.emit('close', 0);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Only the valid array marker should be accepted
+      expect(result.value.pitfallMarkers).toHaveLength(1);
+      expect(result.value.pitfallMarkers[0]?.description).toBe('good marker');
+    }
+  });
+
+  it('parses DONE_WITH_CONCERNS from output on exit code 0 (#329)', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+      result: 'Work complete\n**DONE_WITH_CONCERNS** — tests pass but coverage dropped from 85% to 72%',
+      cost_usd: 0.05,
+    })));
+    mockProc.emit('close', 0);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.exitStatus).toBe('completed-with-concerns');
+    }
+  });
+
+  it('parses BLOCKED from output on exit code 0 (#329)', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+      result: 'Cannot proceed\n**BLOCKED** — missing API credentials',
+      cost_usd: 0.02,
+    })));
+    mockProc.emit('close', 0);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.exitStatus).toBe('blocked');
+    }
+  });
+
+  it('parses NEEDS_CONTEXT from output on exit code 0 (#329)', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+      result: 'Started but stuck\n**NEEDS_CONTEXT** — need L2 spec for auth module',
+      cost_usd: 0.01,
+    })));
+    mockProc.emit('close', 0);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.exitStatus).toBe('needs-context');
+    }
+  });
+
+  it('does not parse exit status from output on non-zero exit code (#329)', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+      result: 'Crashed\n**DONE_WITH_CONCERNS** — this should not matter',
+      cost_usd: 0.01,
+    })));
+    mockProc.emit('close', 1);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.exitStatus).toBe('failed');
+    }
+  });
+
+  it('installs hooks in temp cwd when no cwd provided (SEC-34 regression)', async () => {
+    const mockProc = createMockProcess();
+    const spawnFn = vi.mocked(spawnMock);
+    spawnFn.mockClear();
+    spawnFn.mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
     const setupSpy = vi.spyOn(adapter, 'setupHooks');
+    const cleanupSpy = vi.spyOn(adapter, 'cleanupHooks');
 
     const promise = adapter.spawn(mockDef, 'do work');
+
+    // Hooks MUST be set up even without explicit cwd — this was the SEC-34 bug
+    expect(setupSpy).toHaveBeenCalledTimes(1);
+
+    // The effective cwd passed to setupHooks should be a temp directory
+    const hookCwd = setupSpy.mock.calls[0]?.[0] as string;
+    expect(hookCwd).toContain('session-cwd-');
+
+    // The spawned process should use the same temp cwd
+    const spawnCall = spawnFn.mock.calls[0];
+    const spawnOpts = spawnCall?.[2] as { cwd: string };
+    expect(spawnOpts.cwd).toBe(hookCwd);
 
     mockProc.stdout.emit('data', Buffer.from(JSON.stringify({ result: 'ok' })));
     mockProc.emit('close', 0);
 
     await promise;
-    expect(setupSpy).not.toHaveBeenCalled();
+    expect(cleanupSpy).toHaveBeenCalled();
   });
 });

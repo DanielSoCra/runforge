@@ -11,6 +11,7 @@ export interface ControlHandlers {
   reloadRepos?: () => Promise<{ active: number }>;
   restartRemoteControl?: () => void | Promise<void>;
   scanIssues?: () => Promise<{ scanned: number }>;
+  submitIdea?: (submittedBy: string, description: string) => Promise<{ id: string }>;
   stateDir?: string;
 }
 
@@ -84,6 +85,38 @@ export function createControlServer(
         });
       } else {
         json(res, 501, { error: 'not configured' });
+      }
+    } else if (method === 'POST' && url.pathname === '/ideas') {
+      if (handlers.submitIdea) {
+        const MAX_BODY = 10240; // 10KB
+        let body = '';
+        let oversize = false;
+        req.on('data', (chunk: Buffer) => {
+          body += chunk.toString();
+          if (body.length > MAX_BODY) oversize = true;
+        });
+        req.on('error', () => { json(res, 400, { error: 'request error' }); });
+        req.on('end', () => {
+          if (oversize) { json(res, 413, { error: 'body too large' }); return; }
+          try {
+            const parsed = JSON.parse(body) as { submittedBy?: string; description?: string };
+            if (!parsed.description || typeof parsed.description !== 'string') {
+              json(res, 400, { error: 'description is required' });
+              return;
+            }
+            const submittedBy = typeof parsed.submittedBy === 'string' ? parsed.submittedBy : 'operator';
+            handlers.submitIdea!(submittedBy, parsed.description).then((result) => {
+              json(res, 201, result);
+            }).catch((e: unknown) => {
+              console.error('[control-plane] POST /ideas failed:', e);
+              json(res, 500, { error: 'submit failed' });
+            });
+          } catch {
+            json(res, 400, { error: 'invalid JSON body' });
+          }
+        });
+      } else {
+        json(res, 501, { error: 'PO agent not configured' });
       }
     } else if (method === 'POST' && url.pathname.startsWith('/retry/')) {
       const issue = Number(url.pathname.split('/')[2]);

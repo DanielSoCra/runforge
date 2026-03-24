@@ -52,7 +52,7 @@ ARCH-SDD-SPEC-LIFECYCLE:
 # --- Auto-Claude L0 spec (vision — root of all Auto-Claude specs) ---
 
 L0-AC-VISION:
-  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, FUNC-AC-PLUGINS, STACK-AC-CONVENTIONS]
+  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, FUNC-AC-PLUGINS, FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, STACK-AC-CONVENTIONS]
   status: draft
 
 # --- Auto-Claude L1 specs ---
@@ -101,6 +101,14 @@ FUNC-AC-PLUGINS:
   children: [ARCH-AC-PLUGINS]
   status: draft
 
+FUNC-AC-PRODUCT-OWNER:
+  children: [ARCH-AC-PRODUCT-OWNER]
+  status: draft
+
+FUNC-AC-TECH-LEAD:
+  children: [ARCH-AC-TECH-LEAD]
+  status: draft
+
 # --- Auto-Claude Plugins L2 spec ---
 
 ARCH-AC-PLUGINS:
@@ -112,6 +120,7 @@ ARCH-AC-PLUGINS:
 
 ARCH-AC-COORDINATION:
   parent: FUNC-AC-COORDINATION
+  children: [STACK-AC-COORDINATION, STACK-AC-MERGE-AGENT, STACK-AC-COORDINATION-DAEMON-WIRING]
   status: draft
 
 ARCH-AC-CONTROL-PLANE:
@@ -167,6 +176,16 @@ ARCH-AC-HANDOFF:
 ARCH-AC-DASHBOARD:
   parent: FUNC-AC-DASHBOARD
   children: [STACK-AC-DASHBOARD, STACK-AC-DASHBOARD-BRIEFING]
+  status: draft
+
+ARCH-AC-PRODUCT-OWNER:
+  parent: FUNC-AC-PRODUCT-OWNER
+  children: [STACK-AC-PRODUCT-OWNER]
+  status: draft
+
+ARCH-AC-TECH-LEAD:
+  parent: FUNC-AC-TECH-LEAD
+  children: [STACK-AC-TECH-LEAD]
   status: draft
 
 ARCH-AC-ENRICHED-COMMITS:
@@ -230,6 +249,9 @@ STACK-AC-VALIDATION:
     - packages/daemon/src/validation/holdout.ts
     - packages/daemon/src/validation/deploy.ts
     - packages/daemon/src/validation/post-deploy-test.ts
+    - packages/daemon/src/validation/proactive-reviewer.ts
+    - packages/daemon/src/validation/proactive-scheduler.ts
+    - packages/daemon/src/validation/knowledge-injector.ts
     - packages/daemon/src/infra/spec-loader.ts
   test_paths:
     - packages/daemon/src/validation/**/*.test.ts
@@ -242,6 +264,9 @@ STACK-AC-VALIDATION:
     - packages/daemon/src/validation/holdout.test.ts
     - packages/daemon/src/validation/deploy.test.ts
     - packages/daemon/src/validation/post-deploy-test.test.ts
+    - packages/daemon/src/validation/proactive-reviewer.test.ts
+    - packages/daemon/src/validation/proactive-scheduler.test.ts
+    - packages/daemon/src/validation/knowledge-injector.test.ts
     - packages/daemon/src/infra/spec-loader.test.ts
   status: draft
 
@@ -290,7 +315,12 @@ STACK-AC-KNOWLEDGE:
   parent: ARCH-AC-KNOWLEDGE
   children: []
   code_paths:
-    - packages/daemon/src/knowledge/gotcha-store.ts
+    - packages/daemon/src/knowledge/knowledge-store.ts
+    - packages/daemon/src/knowledge/record-types.ts
+    - packages/daemon/src/knowledge/policy-registry.ts
+    - packages/daemon/src/knowledge/candidate-queue.ts
+    - packages/daemon/src/knowledge/systemic-proposals.ts
+    - packages/daemon/src/knowledge/prospective-check.ts
     - packages/daemon/src/knowledge/extractor.ts
     - packages/daemon/src/knowledge/promotion.ts
     - packages/daemon/src/knowledge/templates.ts
@@ -298,13 +328,7 @@ STACK-AC-KNOWLEDGE:
     - packages/daemon/src/knowledge/pattern-extractor.ts
     - packages/daemon/src/knowledge/proposal-store.ts
   test_paths:
-    - packages/daemon/src/knowledge/gotcha-store.test.ts
-    - packages/daemon/src/knowledge/extractor.test.ts
-    - packages/daemon/src/knowledge/promotion.test.ts
-    - packages/daemon/src/knowledge/templates.test.ts
-    - packages/daemon/src/knowledge/exemplar-store.test.ts
-    - packages/daemon/src/knowledge/pattern-extractor.test.ts
-    - packages/daemon/src/knowledge/proposal-store.test.ts
+    - packages/daemon/src/knowledge/**/*.test.ts
   status: draft
 
 STACK-AC-DASHBOARD:
@@ -323,6 +347,8 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/proxy.ts
     - packages/dashboard/app/layout.tsx
     - packages/dashboard/app/(dashboard)/layout.tsx
+    - packages/dashboard/app/(dashboard)/layout.test.tsx
+    - packages/dashboard/components/sign-out-button.tsx
     - packages/dashboard/app/(dashboard)/page.tsx
     - packages/dashboard/app/login/page.tsx
     - packages/dashboard/app/auth/login/route.ts
@@ -358,6 +384,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/app/(dashboard)/command-center/new-project/page.tsx
     - packages/dashboard/actions/new-project.ts
     - packages/dashboard/lib/auth.ts
+    - packages/dashboard/lib/daemon-fetch.ts
     - packages/dashboard/lib/github-api.ts
     - packages/dashboard/components/page-error.tsx
     - packages/dashboard/components/budget-badge.tsx
@@ -399,6 +426,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/lib/classify-issues.test.ts
     - packages/dashboard/components/budget-badge.test.tsx
     - packages/dashboard/app/api/daemon/daemon-routes.test.ts
+    - packages/dashboard/lib/daemon-fetch.test.ts
     - packages/dashboard/app/(dashboard)/runs/[id]/page.test.tsx
     - packages/dashboard/lib/supabase/env.test.ts
   status: draft
@@ -457,6 +485,7 @@ STACK-AC-PLUGINS-DASHBOARD:
     - packages/dashboard/app/(dashboard)/repos/[id]/plugins/page.tsx
     - packages/dashboard/app/(dashboard)/repos/[id]/plugins/realtime-refresh.tsx
     - packages/dashboard/components/plugin-card.tsx
+    - packages/dashboard/components/enable-all-form.tsx
     - packages/dashboard/components/trigger-recommendation-button.tsx
     - packages/dashboard/lib/plugins/registry.ts
     - packages/dashboard/components/repo-tab-nav.tsx
@@ -464,6 +493,7 @@ STACK-AC-PLUGINS-DASHBOARD:
   test_paths:
     - supabase/tests/rls-plugins.test.ts
     - packages/dashboard/actions/plugins.test.ts
+    - packages/dashboard/components/enable-all-form.test.tsx
     - packages/dashboard/lib/plugins/registry.test.ts
   status: draft
 
@@ -505,6 +535,36 @@ STACK-AC-DASHBOARD-BRIEFING:
     - supabase/tests/rls-briefing.test.ts
   status: draft
 
+STACK-AC-COORDINATION:
+  parent: ARCH-AC-COORDINATION
+  children: []
+  code_paths:
+    - packages/daemon/src/coordination/
+    - packages/daemon/src/coordination/coordinator.ts
+    - packages/daemon/src/coordination/concurrency.ts
+    - packages/daemon/src/coordination/batch-manager.ts
+    - packages/daemon/src/coordination/work-claimer.ts
+    - packages/daemon/src/coordination/inference-decision.ts
+    - packages/daemon/src/coordination/protocol-orchestrator.ts
+    - packages/daemon/src/coordination/terminal-server.ts
+    - packages/daemon/src/coordination/types.ts
+  test_paths:
+    - packages/daemon/src/coordination/**/*.test.ts
+  status: draft
+
+STACK-AC-MERGE-AGENT:
+  parent: ARCH-AC-COORDINATION
+  children: []
+  code_paths:
+    - packages/daemon/src/coordination/merge-agent.ts
+    - packages/daemon/src/coordination/conflict-resolver.ts
+    - packages/daemon/src/coordination/merge-queue.ts
+  test_paths:
+    - packages/daemon/src/coordination/merge-agent.test.ts
+    - packages/daemon/src/coordination/conflict-resolver.test.ts
+    - packages/daemon/src/coordination/merge-queue.test.ts
+  status: draft
+
 STACK-AC-SPEC-PIPELINE:
   parent: ARCH-AC-SPEC-PIPELINE
   children: []
@@ -527,6 +587,59 @@ STACK-AC-PIPELINE-DISPATCH:
     - packages/daemon/src/pipeline-dispatch/dispatch.ts
     - packages/daemon/src/pipeline-dispatch/session-types.ts
     - packages/daemon/src/pipeline-dispatch/fallback.ts
+    - prompts/l2-designer.md
+    - prompts/l3-generator.md
+    - prompts/compliance-reviewer.md
+    - prompts/spec-implementer.md
   test_paths:
     - packages/daemon/src/pipeline-dispatch/**/*.test.ts
+  status: draft
+
+STACK-AC-TECH-LEAD:
+  parent: ARCH-AC-TECH-LEAD
+  children: []
+  code_paths:
+    - packages/daemon/src/coordination/tech-lead/
+    - packages/daemon/src/coordination/tech-lead/schemas.ts
+    - packages/daemon/src/coordination/tech-lead/signal-digest.ts
+    - packages/daemon/src/coordination/tech-lead/proposal-store.ts
+    - packages/daemon/src/coordination/tech-lead/proposal-lifecycle.ts
+    - packages/daemon/src/coordination/tech-lead/enrichment.ts
+    - packages/daemon/src/coordination/tech-lead/metrics.ts
+    - packages/daemon/src/coordination/tech-lead/session-output-parser.ts
+    - packages/daemon/src/coordination/tech-lead/retrospective.ts
+    - packages/daemon/src/coordination/tech-lead-scheduler.ts
+    - prompts/tech-lead.md
+    - prompts/tech-lead-enrichment.md
+  test_paths:
+    - packages/daemon/src/coordination/tech-lead/**/*.test.ts
+    - packages/daemon/src/coordination/tech-lead-scheduler.test.ts
+  status: draft
+
+STACK-AC-COORDINATION-DAEMON-WIRING:
+  parent: ARCH-AC-COORDINATION
+  children: []
+  code_paths:
+    - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/coordination/coordinator.ts
+  test_paths:
+    - packages/daemon/src/control-plane/daemon.test.ts
+    - packages/daemon/src/coordination/coordinator.test.ts
+  status: draft
+
+STACK-AC-PRODUCT-OWNER:
+  parent: ARCH-AC-PRODUCT-OWNER
+  children: []
+  code_paths:
+    - packages/daemon/src/coordination/product-owner/
+    - packages/daemon/src/coordination/product-owner/schemas.ts
+    - packages/daemon/src/coordination/product-owner/signal-analyzer.ts
+    - packages/daemon/src/coordination/product-owner/proposal-generator.ts
+    - packages/daemon/src/coordination/product-owner/session-output-parser.ts
+    - packages/daemon/src/coordination/product-owner/protocol-round-formatter.ts
+    - packages/daemon/src/coordination/product-owner/idea-processor.ts
+    - prompts/product-owner.md
+    - prompts/product-owner-enrichment.md
+  test_paths:
+    - packages/daemon/src/coordination/product-owner/**/*.test.ts
   status: draft

@@ -72,6 +72,45 @@ describe('SupabaseConfigReader', () => {
     reader.stop();
   });
 
+  it('uses DAEMON_SYNC_INTERVAL_MS env var for poll interval', async () => {
+    const original = process.env.DAEMON_SYNC_INTERVAL_MS;
+    process.env.DAEMON_SYNC_INTERVAL_MS = '5000';
+    try {
+      const client = makeClient();
+      const reader = new SupabaseConfigReader(client as any);
+      await reader.start();
+      const callsBefore = (client.from as ReturnType<typeof vi.fn>).mock.calls.length;
+      await vi.advanceTimersByTimeAsync(5_000);
+      const callsAfter = (client.from as ReturnType<typeof vi.fn>).mock.calls.length;
+      expect(callsAfter).toBeGreaterThan(callsBefore);
+      reader.stop();
+    } finally {
+      if (original === undefined) delete process.env.DAEMON_SYNC_INTERVAL_MS;
+      else process.env.DAEMON_SYNC_INTERVAL_MS = original;
+    }
+  });
+
+  it('falls back to 60s default for invalid DAEMON_SYNC_INTERVAL_MS', async () => {
+    const original = process.env.DAEMON_SYNC_INTERVAL_MS;
+    process.env.DAEMON_SYNC_INTERVAL_MS = 'notanumber';
+    try {
+      const client = makeClient();
+      const reader = new SupabaseConfigReader(client as any);
+      await reader.start();
+      const callsBefore = (client.from as ReturnType<typeof vi.fn>).mock.calls.length;
+      // Should NOT poll at 5s since value is invalid — falls back to 60s
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect((client.from as ReturnType<typeof vi.fn>).mock.calls.length).toBe(callsBefore);
+      // Should poll at 60s
+      await vi.advanceTimersByTimeAsync(55_000);
+      expect((client.from as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(callsBefore);
+      reader.stop();
+    } finally {
+      if (original === undefined) delete process.env.DAEMON_SYNC_INTERVAL_MS;
+      else process.env.DAEMON_SYNC_INTERVAL_MS = original;
+    }
+  });
+
   it('polls again after 60s', async () => {
     const client = makeClient();
     const reader = new SupabaseConfigReader(client as any);

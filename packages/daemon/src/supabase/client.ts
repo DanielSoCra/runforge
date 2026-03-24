@@ -7,7 +7,17 @@ export function getSupabaseClient(): SupabaseClient | null {
   if (_client) return _client;
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return null;
+  if (!url || !key) {
+    if (url || key) {
+      const missing = url ? 'SUPABASE_SERVICE_ROLE_KEY' : 'SUPABASE_URL';
+      console.warn(
+        `[supabase] Partial configuration detected: ${missing} is not set. ` +
+        `Both SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set to enable DB mode. ` +
+        `Falling back to legacy mode.`,
+      );
+    }
+    return null;
+  }
   _client = createClient(url, key, { auth: { persistSession: false } });
   return _client;
 }

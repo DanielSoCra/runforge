@@ -50,7 +50,7 @@ const PIPELINE_AGENT_DEFS: Record<PipelineSessionType, AgentDefinition> = {
   'l2-designer': {
     name: 'l2-designer',
     description: 'Designs L2 architecture specs from approved L1 functional specs',
-    systemPrompt: '', // loaded from skill reference at runtime
+    systemPrompt: '', // loaded from prompts/{name}.md at runtime
     allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
     modelOverride: undefined, // higher-capability model tier (default)
     maxTurns: 50,
@@ -60,7 +60,7 @@ const PIPELINE_AGENT_DEFS: Record<PipelineSessionType, AgentDefinition> = {
   'l3-generator': {
     name: 'l3-generator',
     description: 'Generates L3 stack-specific specs from approved L2 architecture specs',
-    systemPrompt: '', // loaded from skill reference at runtime
+    systemPrompt: '', // loaded from prompts/{name}.md at runtime
     allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
     modelOverride: undefined,
     maxTurns: 50,
@@ -70,7 +70,7 @@ const PIPELINE_AGENT_DEFS: Record<PipelineSessionType, AgentDefinition> = {
   'compliance-reviewer': {
     name: 'compliance-reviewer',
     description: 'Reviews L3 specs against L1/L2 for compliance',
-    systemPrompt: '', // loaded from skill reference at runtime
+    systemPrompt: '', // loaded from prompts/{name}.md at runtime
     allowedTools: ['Read', 'Glob', 'Grep'],
     modelOverride: undefined,
     maxTurns: 10,
@@ -80,7 +80,7 @@ const PIPELINE_AGENT_DEFS: Record<PipelineSessionType, AgentDefinition> = {
   'spec-implementer': {
     name: 'spec-implementer',
     description: 'Implements code from approved L3 specs using TDD',
-    systemPrompt: '', // loaded from skill reference at runtime
+    systemPrompt: '', // loaded from prompts/{name}.md at runtime
     allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
     modelOverride: undefined,
     maxTurns: 80,

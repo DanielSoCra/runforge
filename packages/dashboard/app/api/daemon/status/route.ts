@@ -1,25 +1,30 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { isAuthDisabled } from '@/lib/auth';
+import { requireUser } from '@/lib/auth';
+import { daemonFetch, DaemonConfigError } from '@/lib/daemon-fetch';
 
 export async function GET() {
-  // Auth check — require authenticated user to view daemon status
-  if (!isAuthDisabled()) {
+  try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    await requireUser(supabase);
+  } catch (e: any) {
+    const status = e.message === 'Unauthorized' ? 401 : 403;
+    return NextResponse.json({ error: e.message }, { status });
   }
 
   try {
-    const res = await fetch(`${process.env.DAEMON_URL}/status`, {
+    const res = await daemonFetch('/status', {
       signal: AbortSignal.timeout(3000),
       cache: 'no-store',
     });
     return NextResponse.json(await res.json(), { status: res.status });
-  } catch {
+  } catch (e) {
+    if (e instanceof DaemonConfigError) {
+      return NextResponse.json({ error: e.message }, { status: 500 });
+    }
     return NextResponse.json(
       { state: 'offline', active_runs: 0, version: 'unknown' },
-      { status: 503 }
+      { status: 503 },
     );
   }
 }

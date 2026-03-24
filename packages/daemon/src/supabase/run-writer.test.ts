@@ -9,10 +9,33 @@ describe('toDbOutcome', () => {
 });
 
 describe('toDbSessionType', () => {
+  // planning group
   it('maps coordinator → planning',       () => expect(toDbSessionType('coordinator')).toBe('planning'));
-  it('maps worker → implementation',      () => expect(toDbSessionType('worker')).toBe('implementation'));
-  it('maps reviewer-spec → validation',   () => expect(toDbSessionType('reviewer-spec')).toBe('validation'));
+  it('maps classifier → planning',        () => expect(toDbSessionType('classifier')).toBe('planning'));
+
+  // implementation group
+  it('maps worker → implementation',           () => expect(toDbSessionType('worker')).toBe('implementation'));
+  it('maps bug-worker → implementation',        () => expect(toDbSessionType('bug-worker')).toBe('implementation'));
+
+  // validation group
+  it('maps reviewer-spec → validation',     () => expect(toDbSessionType('reviewer-spec')).toBe('validation'));
+  it('maps reviewer-quality → validation',  () => expect(toDbSessionType('reviewer-quality')).toBe('validation'));
+  it('maps reviewer-security → validation', () => expect(toDbSessionType('reviewer-security')).toBe('validation'));
+
+  // diagnosis group
   it('maps diagnostician → diagnosis',    () => expect(toDbSessionType('diagnostician')).toBe('diagnosis'));
+
+  // codebase-reviewer (was missing — #319)
+  it('maps codebase-reviewer → validation', () => expect(toDbSessionType('codebase-reviewer')).toBe('validation'));
+
+  // product-owner and tech-lead (#342)
+  it('maps product-owner → planning', () => expect(toDbSessionType('product-owner')).toBe('planning'));
+  it('maps tech-lead → planning',     () => expect(toDbSessionType('tech-lead')).toBe('planning'));
+
+  // exhaustiveness guard
+  it('throws on unknown session type', () => {
+    expect(() => toDbSessionType('nonexistent' as any)).toThrow('Unknown session type');
+  });
 });
 
 describe('SupabaseRunWriter', () => {

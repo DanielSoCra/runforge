@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
 import { requireAdmin } from '@/lib/auth';
 import { loadDashboardRegistry } from '@/lib/plugins/registry';
 import Anthropic from '@anthropic-ai/sdk';
@@ -55,7 +56,7 @@ export async function enableAllSuggested(
     .eq('active', false);
   if (selectError) {
     console.error('[plugins] enableAllSuggested select failed:', selectError);
-    return { succeeded: [], failed: [] };
+    return { succeeded: [], failed: [], error: selectError.message };
   }
 
   const allIds = (suggested ?? []).map((r: { plugin_id: string }) => r.plugin_id);
@@ -109,9 +110,14 @@ export async function triggerRecommendation(repoId: string, repoOwner: string, r
     return;
   }
 
-  // Fire-and-forget: returns immediately, writes to DB asynchronously
+  // Fire-and-forget: returns immediately, writes to DB asynchronously.
+  // Uses service-role client because the cookie-based client from the request
+  // becomes invalid once the server action response is sent (Next.js invalidates
+  // the async local storage context). See #278.
   void (async () => {
     try {
+      // Note: serviceSupabase bypasses RLS; admin authorization was verified above.
+      const serviceSupabase = createServiceClient();
       const registry = await loadDashboardRegistry();
       const catalog = registry.plugins.map(p => `- ${p.id}: ${p.description} [${p.tags.join(', ')}]`).join('\n');
 
@@ -138,14 +144,14 @@ export async function triggerRecommendation(repoId: string, repoOwner: string, r
 
       for (const rec of parsed.recommendations) {
         if (!registry.plugins.find(p => p.id === rec.pluginId)) continue;
-        await supabase.from('repo_plugins').upsert(
+        await serviceSupabase.from('repo_plugins').upsert(
           { repo_id: repoId, plugin_id: rec.pluginId, recommended: true,
             recommendation_reason: `[${rec.confidence}] ${rec.reason}`, recommended_at: new Date().toISOString() },
           { onConflict: 'repo_id,plugin_id' },
         );
       }
-    } catch {
-      // Fail silently — user can re-trigger via dashboard
+    } catch (err) {
+      console.error('[plugins] triggerRecommendation background task failed:', err);
     }
   })();
 }

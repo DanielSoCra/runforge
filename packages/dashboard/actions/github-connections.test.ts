@@ -7,8 +7,9 @@ const makeEqChain = (result: { error: null | { message: string } }) => {
   return { outer, inner };
 };
 
-const mockRepos = {
+const mockRepos: Record<string, ReturnType<typeof vi.fn>> = {
   update: vi.fn(),
+  select: vi.fn(),
 };
 const mockConnections = {
   delete: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) }),
@@ -25,18 +26,37 @@ vi.mock('@/lib/auth', () => ({ requireAdmin: vi.fn().mockResolvedValue(undefined
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 
 describe('removeConnection', () => {
+  function setupRemoveConnectionMocks(opts?: { deleteError?: boolean; linkedRepos?: Array<{ id: string }> }) {
+    const repos = opts?.linkedRepos ?? [{ id: 'r1' }, { id: 'r2' }];
+    // select('id').eq('connection_id', connectionId) → { data: repos }
+    mockRepos.select = vi.fn().mockReturnValue({
+      eq: vi.fn().mockResolvedValue({ data: repos }),
+    });
+    // update({...}).in('id', repoIds) → { error: null }
+    mockRepos.update = vi.fn().mockReturnValue({
+      in: vi.fn().mockResolvedValue({ error: null }),
+    });
+    mockConnections.delete = vi.fn().mockReturnValue({
+      eq: vi.fn().mockResolvedValue({
+        error: opts?.deleteError ? { message: 'DB error' } : null,
+      }),
+    });
+  }
+
   beforeEach(() => {
     vi.resetModules();
-    mockRepos.update.mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
-    mockConnections.delete.mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
+    setupRemoveConnectionMocks();
   });
 
-  it('sets repos enabled=false and connection_id=null before deleting', async () => {
+  it('disables repos after deleting connection (cascade handles connection_id)', async () => {
     const { removeConnection } = await import('./github-connections.js');
     await removeConnection('conn-1');
+    // update should set enabled=false but NOT connection_id (handled by ON DELETE SET NULL)
     expect(mockRepos.update).toHaveBeenCalledWith(
-      expect.objectContaining({ enabled: false, connection_id: null })
+      expect.objectContaining({ enabled: false })
     );
+    const updateArg = mockRepos.update.mock.calls[0][0];
+    expect(updateArg).not.toHaveProperty('connection_id');
   });
 
   it('fires POST to DAEMON_URL/repos/reload after removal (#179)', async () => {
@@ -74,16 +94,21 @@ describe('removeConnection', () => {
     }
   });
 
-  it('throws and does not delete connection when repos update fails (#173)', async () => {
+  it('does not disable repos when connection delete fails (#277)', async () => {
     vi.resetModules();
-    mockRepos.update.mockReturnValue({
-      eq: vi.fn().mockResolvedValue({ error: { message: 'RLS violation' } }),
-    });
-    const deleteSpy = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
-    mockConnections.delete = deleteSpy;
+    setupRemoveConnectionMocks({ deleteError: true });
+    const updateSpy = mockRepos.update;
     const { removeConnection } = await import('./github-connections.js');
-    await expect(removeConnection('conn-1')).rejects.toThrow('Failed to disconnect repos');
-    expect(deleteSpy).not.toHaveBeenCalled();
+    await expect(removeConnection('conn-1')).rejects.toThrow('Failed to remove connection');
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it('skips repo disable when no repos are linked to connection (#277)', async () => {
+    vi.resetModules();
+    setupRemoveConnectionMocks({ linkedRepos: [] });
+    const { removeConnection } = await import('./github-connections.js');
+    await removeConnection('conn-1');
+    expect(mockRepos.update).not.toHaveBeenCalled();
   });
 });
 

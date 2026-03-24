@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { executeBatch, type UnitResult } from './batch.js';
 import type { Unit, SessionResult } from '../types.js';
 import { ok, err } from '../lib/result.js';
+import { SessionError } from '../session-runtime/session-error.js';
 import { createWorktree, getWorktreeDiffSize } from './worktree.js';
 
 // Mock the worktree module
@@ -303,6 +304,129 @@ describe('executeBatch', () => {
       undefined,
       undefined,
     );
+  });
+
+  it('passes activePlugins through to SessionContext (#262)', async () => {
+    const runtime = createMockRuntime();
+    const units = [makeUnit('a')];
+    const plugins = [{ id: 'plugin-1', activatedAt: '2026-01-01T00:00:00Z' }];
+
+    await executeBatch(
+      units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 },
+      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, plugins,
+    );
+
+    const spawnCall = runtime.spawnSession.mock.calls[0];
+    const context = spawnCall?.[1];
+    expect(context).toHaveProperty('activePlugins', plugins);
+  });
+
+  it('propagates containmentBreach flag when session returns SessionError with containmentBreach (#373)', async () => {
+    const breachError = SessionError.containmentBreached('wrote to /etc/hosts', 0.3);
+    const runtime = {
+      spawnSession: vi.fn().mockResolvedValueOnce(err(breachError)),
+      getCostTracker: vi.fn(),
+    } as any;
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    expect(result.results[0]?.exitStatus).toBe('failed');
+    expect(result.results[0]?.containmentBreach).toBe(true);
+    expect(result.results[0]?.cost).toBe(0.3);
+    expect(result.results[0]?.error).toContain('Containment breach');
+  });
+
+  it('does not set containmentBreach flag for regular SessionError (#373)', async () => {
+    const regularError = new SessionError('something went wrong', 0.2);
+    const runtime = {
+      spawnSession: vi.fn().mockResolvedValueOnce(err(regularError)),
+      getCostTracker: vi.fn(),
+    } as any;
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    expect(result.results[0]?.exitStatus).toBe('failed');
+    expect(result.results[0]?.containmentBreach).toBeUndefined();
+    expect(result.results[0]?.cost).toBe(0.2);
+  });
+
+  it('extracts and stores v2 knowledge markers when knowledgeStore is provided (#375)', async () => {
+    const outputWithMarkers = 'some output <!-- KNOWLEDGE: {"artifactPatterns":["src/**"],"description":"Always check nulls"} --> more output';
+    const resultWithKnowledge: SessionResult = {
+      output: outputWithMarkers, structuredData: null, cost: 0.5,
+      pitfallMarkers: [], exitStatus: 'completed',
+    };
+    const runtime = createMockRuntime(resultWithKnowledge);
+    const knowledgeStore = { storeRecord: vi.fn().mockResolvedValue(1) } as any;
+    const units = [makeUnit('a')];
+
+    await executeBatch(
+      units, 'feature/42', 42, runtime, '/tmp/repo', { staggerMs: 0 },
+      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, knowledgeStore,
+    );
+
+    expect(knowledgeStore.storeRecord).toHaveBeenCalledWith(
+      [{ artifactPatterns: ['src/**'], description: 'Always check nulls' }],
+      'issue-42',
+      'autonomous',
+      'technical_pitfall',
+    );
+  });
+
+  it('does not call knowledgeStore.storeRecord when output has no knowledge markers (#375)', async () => {
+    const runtime = createMockRuntime(); // successResult output is 'done' — no markers
+    const knowledgeStore = { storeRecord: vi.fn().mockResolvedValue(0) } as any;
+    const units = [makeUnit('a')];
+
+    await executeBatch(
+      units, 'feature/42', 42, runtime, '/tmp/repo', { staggerMs: 0 },
+      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, knowledgeStore,
+    );
+
+    expect(knowledgeStore.storeRecord).not.toHaveBeenCalled();
+  });
+
+  it('handles knowledgeStore.storeRecord failure gracefully (#375)', async () => {
+    const outputWithMarkers = 'output <!-- KNOWLEDGE: {"artifactPatterns":["src/foo.ts"],"description":"Avoid re-entry"} --> end';
+    const resultWithKnowledge: SessionResult = {
+      output: outputWithMarkers, structuredData: null, cost: 0.5,
+      pitfallMarkers: [], exitStatus: 'completed',
+    };
+    const runtime = createMockRuntime(resultWithKnowledge);
+    const knowledgeStore = { storeRecord: vi.fn().mockRejectedValue(new Error('disk full')) } as any;
+    const units = [makeUnit('a')];
+
+    // Should not throw — knowledge storage failure should not break the batch
+    const result = await executeBatch(
+      units, 'feature/42', 42, runtime, '/tmp/repo', { staggerMs: 0 },
+      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, knowledgeStore,
+    );
+
+    expect(result.results[0]?.exitStatus).toBe('completed');
+    expect(knowledgeStore.storeRecord).toHaveBeenCalled();
+  });
+
+  it('does not call knowledgeStore when knowledgeStore is not provided (#375)', async () => {
+    const outputWithMarkers = 'output <!-- KNOWLEDGE: {"artifactPatterns":["src/**"],"description":"test"} --> end';
+    const resultWithKnowledge: SessionResult = {
+      output: outputWithMarkers, structuredData: null, cost: 0.5,
+      pitfallMarkers: [], exitStatus: 'completed',
+    };
+    const runtime = createMockRuntime(resultWithKnowledge);
+    const units = [makeUnit('a')];
+
+    // No knowledgeStore passed — should not throw
+    const result = await executeBatch(
+      units, 'feature/42', 42, runtime, '/tmp/repo', { staggerMs: 0 },
+    );
+
+    expect(result.results[0]?.exitStatus).toBe('completed');
   });
 
   it('propagates timed-out exit status through UnitResult (#64)', async () => {

@@ -15,16 +15,20 @@ export function toDbOutcome(outcome: PipelineResult['outcome']): DbOutcome {
 export function toDbSessionType(type: SessionType): DbSessionType {
   switch (type) {
     case 'coordinator':
-    case 'classifier':
-    case 'prompt-optimizer': return 'planning';
+    case 'classifier':       return 'planning';
     case 'worker':
-    case 'conflict-resolver':
     case 'bug-worker':       return 'implementation';
     case 'reviewer-spec':
     case 'reviewer-quality':
     case 'reviewer-security':
-    case 'tester':           return 'validation';
+    case 'codebase-reviewer': return 'validation';
     case 'diagnostician':    return 'diagnosis';
+    case 'product-owner':
+    case 'tech-lead':        return 'planning';
+    default: {
+      const _exhaustive: never = type;
+      throw new Error(`Unknown session type: ${_exhaustive}`);
+    }
   }
 }
 

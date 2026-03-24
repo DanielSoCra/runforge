@@ -4,14 +4,52 @@ import { SessionRuntime } from '../session-runtime/runtime.js';
 import { CostTracker } from '../session-runtime/cost.js';
 import { ImplementationCoordinator } from '../implementation/coordinator.js';
 import { StateManager } from './state.js';
-import { createWorkDetector } from './work-detection.js';
+import { createWorkDetector, type FeaturePipelineWorkType } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
 import { runPipeline } from './pipeline.js';
 import { getPipeline, getStartPhase } from './fsm.js';
 import { selectVariant } from './variants.js';
 import { notify } from './notify.js';
-import type { RunState } from '../types.js';
+import type { RunState, DetectedWorkType } from '../types.js';
 import { ok, err, type Result } from '../lib/result.js';
+
+/** Feature-pipeline label → work type mapping. Checked in priority order. */
+const FEATURE_PIPELINE_TIERS: ReadonlyArray<{ required: string; workType: FeaturePipelineWorkType }> = [
+  { required: 'ready-to-implement', workType: 'implementation' },
+  { required: 'l2-approved', workType: 'l3-generate' },
+  { required: 'l2-in-progress', workType: 'l2-brainstorm' },
+  { required: 'l1-approved', workType: 'l2-brainstorm' },
+];
+
+export type ClaimAction =
+  | { type: 'standard' }
+  | { type: 'bug-fix' }
+  | { type: 'feature-pipeline'; workType: FeaturePipelineWorkType };
+
+/**
+ * Infers work type from issue labels so selectVariant can route correctly.
+ * Mirrors the detection logic in daemon.ts polling (detectBugFixWork, detectFeaturePipelineWork).
+ */
+export function inferWorkType(labels: string[]): DetectedWorkType | undefined {
+  const labelSet = new Set(labels);
+  if (labelSet.has('review-finding')) return 'bug-fix';
+  if (labelSet.has('feature-pipeline')) {
+    const tier = FEATURE_PIPELINE_TIERS.find(t => labelSet.has(t.required));
+    if (tier) return tier.workType;
+  }
+  return undefined;
+}
+
+/** Determines the correct claim action based on variant and labels. */
+export function resolveClaimAction(variant: string, labels: string[]): ClaimAction {
+  if (variant === 'bug') return { type: 'bug-fix' };
+  if (variant === 'spec-driven' && labels.includes('feature-pipeline')) {
+    const labelSet = new Set(labels);
+    const tier = FEATURE_PIPELINE_TIERS.find(t => labelSet.has(t.required));
+    if (tier) return { type: 'feature-pipeline', workType: tier.workType };
+  }
+  return { type: 'standard' };
+}
 
 export async function processSingleIssue(issueNumber: number, configPath: string): Promise<Result<void>> {
   console.log(`[process] Processing issue #${issueNumber}`);
@@ -47,18 +85,28 @@ export async function processSingleIssue(issueNumber: number, configPath: string
     return err(new Error(`Failed to fetch issue #${issueNumber}: ${e instanceof Error ? e.message : String(e)}`));
   }
 
+  const labels = issueData.labels.map((l) => (typeof l === 'string' ? l : l.name ?? ''));
   const request = {
     issueNumber,
     title: issueData.title,
     body: issueData.body ?? '',
-    labels: issueData.labels.map((l) => (typeof l === 'string' ? l : l.name ?? '')),
+    labels,
     specRefs: (issueData.body ?? '').match(/[A-Z]+-[A-Z]+-[A-Z0-9-]+/g) ?? [],
+    workType: inferWorkType(labels),
   };
 
-  console.log(`[process] Claiming issue #${issueNumber}`);
-  await detector.claimWork(issueNumber);
-
   const variant = selectVariant(request);
+
+  // Dispatch to the correct claim function based on variant (matches daemon.ts polling behavior)
+  const claimAction = resolveClaimAction(variant, request.labels);
+  console.log(`[process] Claiming issue #${issueNumber} (variant: ${variant}, claim: ${claimAction.type})`);
+  if (claimAction.type === 'bug-fix') {
+    await detector.claimBugFixWork(issueNumber);
+  } else if (claimAction.type === 'feature-pipeline') {
+    await detector.claimFeaturePipelineWork(issueNumber, claimAction.workType);
+  } else {
+    await detector.claimWork(issueNumber);
+  }
   const run: RunState = {
     id: crypto.randomUUID(),
     issueNumber, title: request.title,

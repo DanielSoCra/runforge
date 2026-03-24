@@ -18,6 +18,7 @@ interface PollEntry {
   pendingDisable: boolean;
   owner: string;
   name: string;
+  connectionId: string | null;
 }
 
 type SupabaseClient = ReturnType<typeof createClient>;
@@ -170,6 +171,7 @@ export class RepoManager {
       pendingDisable: false,
       owner: repo.owner,
       name: repo.name,
+      connectionId: repo.connection_id,
     });
   }
 
@@ -177,5 +179,11 @@ export class RepoManager {
     const entry = this.pollers.get(repoId);
     if (entry) { clearInterval(entry.intervalHandle); }
     this.pollers.delete(repoId);
+  }
+
+  async resolveTokenForRepo(repoId: string): Promise<string | undefined> {
+    const entry = this.pollers.get(repoId);
+    if (!entry) return process.env.GITHUB_TOKEN;
+    return this.resolveToken(entry.connectionId);
   }
 }

@@ -116,6 +116,51 @@ describe('GotchaStore', () => {
 
     });
 
+    it('upgrades originType and priorityTier when operator correction deduplicates against autonomous gotcha (#280)', async () => {
+      // Store an autonomous gotcha first
+      await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'Validate input carefully' }],
+        1,
+        'autonomous',
+      );
+      const before = await store.match(['foo.ts']);
+      expect(before[0]!.originType).toBe('autonomous');
+      expect(before[0]!.priorityTier).toBe('normal');
+
+      // Store an operator correction that deduplicates against the autonomous one
+      const count = await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'validate input carefully' }],
+        2,
+        'operator',
+      );
+      expect(count).toBe(0); // deduped, not new
+
+      // Verify the existing gotcha was upgraded to operator/elevated
+      const after = await store.match(['foo.ts']);
+      expect(after).toHaveLength(1);
+      expect(after[0]!.originType).toBe('operator');
+      expect(after[0]!.priorityTier).toBe('elevated');
+    });
+
+    it('does not downgrade operator gotcha when autonomous dedup occurs (#280)', async () => {
+      // Store an operator gotcha first
+      await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'Check permissions' }],
+        1,
+        'operator',
+      );
+      // Store an autonomous duplicate
+      await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'check permissions' }],
+        2,
+        'autonomous',
+      );
+      const after = await store.match(['foo.ts']);
+      expect(after).toHaveLength(1);
+      expect(after[0]!.originType).toBe('operator');
+      expect(after[0]!.priorityTier).toBe('elevated');
+    });
+
     it('sets originType autonomous and priorityTier normal by default', async () => {
       await store.store(
         [{ artifactPatterns: ['**/*.ts'], description: 'Auto gotcha' }],
@@ -333,6 +378,41 @@ describe('GotchaStore', () => {
 
     });
 
+    it('serializes with mutex during concurrent file access (#298)', async () => {
+      // Seed a gotcha that qualifies for promotion
+      await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'Concurrent promo test' }],
+        1,
+      );
+      const m = await store.match(['foo.ts']);
+      const id = m[0]!.id;
+      for (let i = 0; i < 4; i++) {
+        await store.incrementHitCount(id);
+      }
+
+      // Fire concurrent getPromotionCandidates + store operations.
+      // Before the fix, getPromotionCandidates read outside the mutex,
+      // so a concurrent appendJsonl could produce a partial line that
+      // readJsonl silently drops — causing the candidate to vanish.
+      const [candidates1, , candidates2] = await Promise.all([
+        store.getPromotionCandidates(5),
+        store.store(
+          [{ artifactPatterns: ['**/*.js'], description: 'Concurrent new entry' }],
+          99,
+        ),
+        store.getPromotionCandidates(5),
+      ]);
+
+      // Both calls must see the promotion candidate — no silent data loss
+      expect(candidates1).toHaveLength(1);
+      expect(candidates2).toHaveLength(1);
+
+      // Verify the new entry also survived
+      const freshStore = new GotchaStore(storePath);
+      const newEntry = await freshStore.match(['foo.js']);
+      expect(newEntry.length).toBeGreaterThanOrEqual(1);
+    });
+
     it('excludes already promoted gotchas', async () => {
       await store.store(
         [{ artifactPatterns: ['**/*.ts'], description: 'Already promoted' }],
@@ -430,6 +510,58 @@ describe('GotchaStore', () => {
       for (let i = 0; i < 26; i++) {
         const result = await freshStore.match([`src/${i}/foo.ts`]);
         expect(result.length).toBeGreaterThanOrEqual(1);
+      }
+    });
+
+    it('concurrent store+compact do not lose entries appended between loadAll and writeTextSafe (#295)', async () => {
+      // Seed 26 unique gotchas to reach compaction threshold
+      for (let i = 0; i < 26; i++) {
+        await store.store(
+          [{ artifactPatterns: [`compact-race/${i}/**`], description: `Compact race ${i}` }],
+          i,
+        );
+      }
+      // Generate enough JSONL bloat to trigger compaction (need 50+ lines, 2x ratio)
+      for (let i = 0; i < 26; i++) {
+        await store.incrementHitCount(
+          (await store.match([`compact-race/${i}/foo.ts`]))[0]!.id,
+        );
+      }
+
+      // Fire concurrent operations — some will trigger compactIfNeeded internally.
+      // Before the fix, a store() appending between compact's loadAll() and
+      // writeTextSafe() would have its entry permanently lost.
+      const concurrentOps = [
+        store.store(
+          [{ artifactPatterns: ['compact-race/new-a/**'], description: 'New entry A during compact' }],
+          100,
+        ),
+        store.store(
+          [{ artifactPatterns: ['compact-race/new-b/**'], description: 'New entry B during compact' }],
+          101,
+        ),
+        store.match(['compact-race/0/foo.ts']),
+        store.match(['compact-race/1/foo.ts']),
+        store.store(
+          [{ artifactPatterns: ['compact-race/new-c/**'], description: 'New entry C during compact' }],
+          102,
+        ),
+      ];
+      await Promise.all(concurrentOps);
+
+      // Verify all new entries survive — read from fresh store to confirm disk state
+      const freshStore = new GotchaStore(storePath);
+      const newA = await freshStore.match(['compact-race/new-a/foo.ts']);
+      const newB = await freshStore.match(['compact-race/new-b/foo.ts']);
+      const newC = await freshStore.match(['compact-race/new-c/foo.ts']);
+      expect(newA.length, 'entry A lost during concurrent compact').toBeGreaterThanOrEqual(1);
+      expect(newB.length, 'entry B lost during concurrent compact').toBeGreaterThanOrEqual(1);
+      expect(newC.length, 'entry C lost during concurrent compact').toBeGreaterThanOrEqual(1);
+
+      // Verify original entries also survive
+      for (let i = 0; i < 26; i++) {
+        const fromDisk = await freshStore.match([`compact-race/${i}/foo.ts`]);
+        expect(fromDisk.length, `original entry compact-race/${i} lost`).toBeGreaterThanOrEqual(1);
       }
     });
 
@@ -544,13 +676,33 @@ describe('GotchaStore', () => {
       const m = await store.match(['foo.ts']);
       const id = m[0]!.id;
 
-      // scanForArchival with maxAgeDays=0 to treat everything as old
-      const archived = await store.scanForArchival(0, 100);
+      // scanForArchival with maxAgeDays=-1 so any positive age triggers archival
+      const archived = await store.scanForArchival(-1, 100);
       expect(archived).toContain(id);
 
       // Verify excluded from match
       const afterMatch = await store.match(['foo.ts']);
       expect(afterMatch).toHaveLength(0);
+    });
+
+    it('does not archive operator corrections regardless of age or hit count (#313)', async () => {
+      // Operator corrections are exempt from automatic archival per ARCH-AC-KNOWLEDGE §archival-flow
+      await store.store(
+        [{ artifactPatterns: ['**/*.ts'], description: 'Operator correction never archived' }],
+        1,
+        'operator',
+      );
+      const m = await store.match(['foo.ts']);
+      const id = m[0]!.id;
+
+      // maxAgeDays=0 treats everything as old, minHitCount=100 means low hits
+      const archived = await store.scanForArchival(0, 100);
+      expect(archived).not.toContain(id);
+
+      // Verify still matchable
+      const afterMatch = await store.match(['foo.ts']);
+      expect(afterMatch).toHaveLength(1);
+      expect(afterMatch[0]!.originType).toBe('operator');
     });
 
     it('does not archive gotchas with sufficient hits', async () => {

@@ -1,4 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// Mock auth — requireUser resolves by default; tests override to reject
+const mockRequireUser = vi.fn().mockResolvedValue({ id: 'user-1', email: 'viewer@test.com' });
+vi.mock('@/lib/auth', () => ({
+  requireUser: (...args: unknown[]) => mockRequireUser(...args),
+}));
 
 // Mock Supabase client
 const mockFrom = vi.fn();
@@ -8,8 +14,40 @@ vi.mock('@/lib/supabase/server', () => ({
   }),
 }));
 
+// Mock service client for getUpNext (needs service-role to decrypt tokens)
+const mockServiceFrom = vi.fn();
+const mockServiceRpc = vi.fn();
+vi.mock('@/lib/supabase/service', () => ({
+  createServiceClient: vi.fn().mockReturnValue({
+    from: mockServiceFrom,
+    rpc: mockServiceRpc,
+  }),
+}));
+
+// Mock fetch for GitHub API calls
+const originalFetch = globalThis.fetch;
+const mockFetch = vi.fn();
+
+let savedGithubToken: string | undefined;
+
 beforeEach(() => {
+  mockRequireUser.mockReset().mockResolvedValue({ id: 'user-1', email: 'viewer@test.com' });
   mockFrom.mockReset();
+  mockServiceFrom.mockReset();
+  mockServiceRpc.mockReset();
+  mockFetch.mockReset();
+  globalThis.fetch = mockFetch;
+  savedGithubToken = process.env.GITHUB_TOKEN;
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  // Restore GITHUB_TOKEN to prevent env leaks between tests
+  if (savedGithubToken !== undefined) {
+    process.env.GITHUB_TOKEN = savedGithubToken;
+  } else {
+    delete process.env.GITHUB_TOKEN;
+  }
 });
 
 describe('getLatestBriefing', () => {
@@ -55,6 +93,44 @@ describe('getLatestBriefing', () => {
     const result = await getLatestBriefing();
 
     expect(result).toBeNull();
+  });
+
+  it('returns null when Supabase returns PGRST116 (no rows)', async () => {
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        order: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({
+              data: null,
+              error: { code: 'PGRST116', message: 'No rows found' },
+            }),
+          }),
+        }),
+      }),
+    });
+
+    const { getLatestBriefing } = await import('./briefing');
+    const result = await getLatestBriefing();
+
+    expect(result).toBeNull();
+  });
+
+  it('throws when Supabase returns a non-PGRST116 error', async () => {
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        order: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({
+              data: null,
+              error: { code: '42P01', message: 'relation does not exist' },
+            }),
+          }),
+        }),
+      }),
+    });
+
+    const { getLatestBriefing } = await import('./briefing');
+    await expect(getLatestBriefing()).rejects.toThrow('Failed to fetch latest briefing');
   });
 });
 
@@ -102,6 +178,22 @@ describe('getActiveRuns', () => {
     const result = await getActiveRuns();
 
     expect(result).toEqual([]);
+  });
+
+  it('throws when Supabase returns an error', async () => {
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          order: vi.fn().mockResolvedValue({
+            data: null,
+            error: { code: '42P01', message: 'relation does not exist' },
+          }),
+        }),
+      }),
+    });
+
+    const { getActiveRuns } = await import('./briefing');
+    await expect(getActiveRuns()).rejects.toThrow('Failed to fetch active runs');
   });
 });
 
@@ -203,14 +295,210 @@ describe('getNeedsAttention', () => {
 
     expect(result[0].waitDuration).toBe('2h');
   });
+
+  it('throws when stuck runs query fails', async () => {
+    // stuck query returns error
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({
+          data: null,
+          error: { code: '42P01', message: 'relation does not exist' },
+        }),
+      }),
+    });
+    // escalated query succeeds
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }),
+    });
+
+    const { getNeedsAttention } = await import('./briefing');
+    await expect(getNeedsAttention()).rejects.toThrow('Failed to fetch stuck runs');
+  });
+
+  it('throws when escalated runs query fails', async () => {
+    // stuck query succeeds
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }),
+    });
+    // escalated query returns error
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({
+          data: null,
+          error: { code: '42P01', message: 'relation does not exist' },
+        }),
+      }),
+    });
+
+    const { getNeedsAttention } = await import('./briefing');
+    await expect(getNeedsAttention()).rejects.toThrow('Failed to fetch escalated runs');
+  });
 });
 
 describe('getUpNext', () => {
-  it('returns empty array (pending daemon integration)', async () => {
+  function setupReposQuery(repos: Array<{ id: string; owner: string; name: string; connection_id: string | null }>) {
+    mockServiceFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          is: vi.fn().mockResolvedValue({ data: repos, error: null }),
+        }),
+      }),
+    });
+  }
+
+  function setupActiveRunsQuery(runs: Array<{ issue_number: number; repo_owner: string; repo_name: string }>) {
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: runs, error: null }),
+      }),
+    });
+  }
+
+  function setupGitHubIssuesResponse(issues: Array<{ number: number; title: string; html_url: string; labels: Array<{ name: string }> }>) {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => issues,
+    } as Response);
+  }
+
+  it('returns issues with pipeline labels sorted by priority', async () => {
+    setupReposQuery([{ id: 'r1', owner: 'acme', name: 'web', connection_id: null }]);
+    setupActiveRunsQuery([]);
+    // Mock GITHUB_TOKEN env
+    process.env.GITHUB_TOKEN = 'test-token';
+
+    setupGitHubIssuesResponse([
+      { number: 10, title: 'L1 approved', html_url: 'https://github.com/acme/web/issues/10', labels: [{ name: 'feature-pipeline' }, { name: 'l1-approved' }] },
+      { number: 20, title: 'Ready to implement', html_url: 'https://github.com/acme/web/issues/20', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }] },
+      { number: 30, title: 'L3 approved', html_url: 'https://github.com/acme/web/issues/30', labels: [{ name: 'feature-pipeline' }, { name: 'l3-approved' }] },
+    ]);
+
+    const { getUpNext } = await import('./briefing');
+    const result = await getUpNext();
+
+    // Should be sorted: ready-to-implement > l3-approved > l2-approved > l1-approved
+    expect(result).toHaveLength(3);
+    expect(result[0].pipelineLabel).toBe('ready-to-implement');
+    expect(result[0].issueNumber).toBe(20);
+    expect(result[1].pipelineLabel).toBe('l3-approved');
+    expect(result[1].issueNumber).toBe(30);
+    expect(result[2].pipelineLabel).toBe('l1-approved');
+    expect(result[2].issueNumber).toBe(10);
+  });
+
+  it('excludes issues that have in-progress runs', async () => {
+    setupReposQuery([{ id: 'r1', owner: 'acme', name: 'web', connection_id: null }]);
+    setupActiveRunsQuery([{ issue_number: 20, repo_owner: 'acme', repo_name: 'web' }]);
+    process.env.GITHUB_TOKEN = 'test-token';
+
+    setupGitHubIssuesResponse([
+      { number: 20, title: 'Already running', html_url: 'https://github.com/acme/web/issues/20', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }] },
+      { number: 30, title: 'Queued', html_url: 'https://github.com/acme/web/issues/30', labels: [{ name: 'feature-pipeline' }, { name: 'l3-approved' }] },
+    ]);
+
+    const { getUpNext } = await import('./briefing');
+    const result = await getUpNext();
+
+    expect(result).toHaveLength(1);
+    expect(result[0].issueNumber).toBe(30);
+  });
+
+  it('returns empty array when no repos are enabled', async () => {
+    setupReposQuery([]);
+    setupActiveRunsQuery([]);
+
     const { getUpNext } = await import('./briefing');
     const result = await getUpNext();
 
     expect(result).toEqual([]);
+  });
+
+  it('skips repos without a GitHub token', async () => {
+    setupReposQuery([{ id: 'r1', owner: 'acme', name: 'web', connection_id: null }]);
+    setupActiveRunsQuery([]);
+    // No GITHUB_TOKEN env var, no connection_id → no token
+    delete process.env.GITHUB_TOKEN;
+
+    const { getUpNext } = await import('./briefing');
+    const result = await getUpNext();
+
+    expect(result).toEqual([]);
+    // Should not have called GitHub API
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('excludes issues without feature-pipeline label', async () => {
+    setupReposQuery([{ id: 'r1', owner: 'acme', name: 'web', connection_id: null }]);
+    setupActiveRunsQuery([]);
+    process.env.GITHUB_TOKEN = 'test-token';
+
+    setupGitHubIssuesResponse([
+      { number: 10, title: 'Not pipeline', html_url: 'https://github.com/acme/web/issues/10', labels: [{ name: 'bug' }] },
+      { number: 20, title: 'Pipeline issue', html_url: 'https://github.com/acme/web/issues/20', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }] },
+    ]);
+
+    const { getUpNext } = await import('./briefing');
+    const result = await getUpNext();
+
+    expect(result).toHaveLength(1);
+    expect(result[0].issueNumber).toBe(20);
+  });
+
+  it('throws when repos query fails (ERR-32 regression — #388)', async () => {
+    mockServiceFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          is: vi.fn().mockResolvedValue({
+            data: null,
+            error: { code: '42P01', message: 'relation does not exist' },
+          }),
+        }),
+      }),
+    });
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }),
+    });
+
+    const { getUpNext } = await import('./briefing');
+    await expect(getUpNext()).rejects.toThrow('Failed to fetch repos for up-next');
+  });
+
+  it('throws when runs query fails (ERR-32 regression — #388)', async () => {
+    setupReposQuery([{ id: 'r1', owner: 'acme', name: 'web', connection_id: null }]);
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({
+          data: null,
+          error: { code: '42P01', message: 'relation does not exist' },
+        }),
+      }),
+    });
+
+    const { getUpNext } = await import('./briefing');
+    await expect(getUpNext()).rejects.toThrow('Failed to fetch runs for up-next');
+  });
+
+  it('excludes issues with implementing label (already being worked on)', async () => {
+    setupReposQuery([{ id: 'r1', owner: 'acme', name: 'web', connection_id: null }]);
+    setupActiveRunsQuery([]);
+    process.env.GITHUB_TOKEN = 'test-token';
+
+    setupGitHubIssuesResponse([
+      { number: 10, title: 'Being implemented', html_url: 'https://github.com/acme/web/issues/10', labels: [{ name: 'feature-pipeline' }, { name: 'implementing' }] },
+      { number: 20, title: 'Queued', html_url: 'https://github.com/acme/web/issues/20', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }] },
+    ]);
+
+    const { getUpNext } = await import('./briefing');
+    const result = await getUpNext();
+
+    expect(result).toHaveLength(1);
+    expect(result[0].issueNumber).toBe(20);
   });
 });
 
@@ -284,6 +572,75 @@ describe('getActivityFeed', () => {
     await getActivityFeed({ pageSize: 10 });
 
     expect(limitMock).toHaveBeenCalledWith(10);
+  });
+
+  it('throws when Supabase returns an error', async () => {
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        order: vi.fn().mockReturnValue({
+          limit: vi.fn().mockResolvedValue({
+            data: null,
+            error: { code: '42P01', message: 'relation does not exist' },
+          }),
+        }),
+      }),
+    });
+
+    const { getActivityFeed } = await import('./briefing');
+    await expect(getActivityFeed()).rejects.toThrow('Failed to fetch activity feed');
+  });
+});
+
+describe('requireUser guard (SEC-25 regression — auth required)', () => {
+  it('every exported server action calls requireUser before querying', async () => {
+    // Setup: requireUser rejects (unauthenticated user)
+    mockRequireUser.mockRejectedValue(new Error('Unauthorized'));
+
+    const {
+      getLatestBriefing,
+      getActiveRuns,
+      getNeedsAttention,
+      getUpNext,
+      getActivityFeed,
+      refreshLivePanels,
+    } = await import('./briefing');
+
+    // Each action should throw Unauthorized before touching Supabase
+    await expect(getLatestBriefing()).rejects.toThrow('Unauthorized');
+    await expect(getActiveRuns()).rejects.toThrow('Unauthorized');
+    await expect(getNeedsAttention()).rejects.toThrow('Unauthorized');
+    await expect(getUpNext()).rejects.toThrow('Unauthorized');
+    await expect(getActivityFeed()).rejects.toThrow('Unauthorized');
+    await expect(refreshLivePanels()).rejects.toThrow('Unauthorized');
+
+    // requireUser was called 6 times (once per action), Supabase was never queried
+    expect(mockRequireUser).toHaveBeenCalledTimes(6);
+    expect(mockFrom).not.toHaveBeenCalled();
+    expect(mockServiceFrom).not.toHaveBeenCalled();
+  });
+});
+
+describe('viewer access (SPEC-38 / #273 regression)', () => {
+  it('briefing actions use requireUser, not requireAdmin — viewers can access', async () => {
+    // requireUser resolves for any authenticated team member (admin or viewer)
+    mockRequireUser.mockResolvedValue({ id: 'viewer-1', email: 'viewer@test.com' });
+
+    // Setup minimal mocks so getLatestBriefing doesn't throw on Supabase calls
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        order: vi.fn().mockReturnValue({
+          limit: vi.fn().mockReturnValue({
+            single: vi.fn().mockResolvedValue({ data: null, error: { code: 'PGRST116', message: 'No rows' } }),
+          }),
+        }),
+      }),
+    });
+
+    const { getLatestBriefing } = await import('./briefing');
+    // Should NOT throw — viewers are allowed
+    const result = await getLatestBriefing();
+    expect(result).toBeNull();
+    expect(mockRequireUser).toHaveBeenCalled();
   });
 });
 

@@ -73,6 +73,34 @@ describe('CostTracker', () => {
     expect(result).toEqual({ available: false, reason: 'per-run-budget-exceeded' });
   });
 
+  // Regression tests for BUG-16: NaN/negative/Infinity cost corrupts budget tracking
+  it('recordCost ignores NaN — dailyCost stays valid', () => {
+    tracker.recordCost(1, 5);
+    tracker.recordCost(1, NaN);
+    expect(tracker.getDailyCost()).toBe(5);
+    expect(tracker.getRunCost(1)).toBe(5);
+  });
+
+  it('recordCost ignores negative values — prevents budget deflation', () => {
+    tracker.recordCost(1, 5);
+    tracker.recordCost(1, -3);
+    expect(tracker.getDailyCost()).toBe(5);
+    expect(tracker.getRunCost(1)).toBe(5);
+  });
+
+  it('recordCost ignores Infinity — budget check remains functional', () => {
+    tracker.recordCost(1, Infinity);
+    expect(tracker.getDailyCost()).toBe(0);
+    // Budget check should still work (NaN >= budget would return false, granting infinite budget)
+    expect(tracker.checkBudget(1)).toEqual({ available: true, remaining: 50 });
+  });
+
+  it('recordCost ignores negative Infinity', () => {
+    tracker.recordCost(1, -Infinity);
+    expect(tracker.getDailyCost()).toBe(0);
+    expect(tracker.getRunCost(1)).toBe(0);
+  });
+
   it('getSnapshot returns serializable state', () => {
     tracker.recordCost(1, 5);
     const snapshot = tracker.getSnapshot();
@@ -216,6 +244,35 @@ describe('CostTracker', () => {
         available: false,
         reason: 'per-run-budget-exceeded',
       });
+    });
+
+    // Regression tests for BUG-16: restoreFromSnapshot must sanitize corrupted values
+    it('sanitizes NaN dailyCost in snapshot to 0', () => {
+      tracker.restoreFromSnapshot({
+        dailyCost: NaN,
+        runCosts: {},
+        resetAt: new Date(Date.now() + 3600_000).toISOString(),
+      });
+      expect(tracker.getDailyCost()).toBe(0);
+    });
+
+    it('sanitizes negative dailyCost in snapshot to 0', () => {
+      tracker.restoreFromSnapshot({
+        dailyCost: -10,
+        runCosts: {},
+        resetAt: new Date(Date.now() + 3600_000).toISOString(),
+      });
+      expect(tracker.getDailyCost()).toBe(0);
+    });
+
+    it('sanitizes NaN runCost values in snapshot to 0', () => {
+      tracker.restoreFromSnapshot({
+        dailyCost: 5,
+        runCosts: { '1': NaN, '2': 3 },
+        resetAt: new Date(Date.now() + 3600_000).toISOString(),
+      });
+      expect(tracker.getRunCost(1)).toBe(0);
+      expect(tracker.getRunCost(2)).toBe(3);
     });
 
     it('handles empty runCosts in snapshot', () => {

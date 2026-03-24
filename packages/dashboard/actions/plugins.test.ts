@@ -4,6 +4,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 vi.mock('@/lib/supabase/server', () => ({ createClient: vi.fn() }));
+vi.mock('@/lib/supabase/service', () => ({ createServiceClient: vi.fn() }));
 vi.mock('@/lib/plugins/registry', () => ({ loadDashboardRegistry: vi.fn() }));
 vi.mock('@/lib/auth', () => ({ requireAdmin: vi.fn() }));
 vi.mock('@anthropic-ai/sdk', () => ({
@@ -14,6 +15,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
 
 import { togglePlugin, enableAllSuggested, triggerRecommendation, exportPlugin } from './plugins.js';
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
 import { loadDashboardRegistry } from '@/lib/plugins/registry';
 import { requireAdmin } from '@/lib/auth';
 import Anthropic from '@anthropic-ai/sdk';
@@ -130,7 +132,7 @@ describe('enableAllSuggested', () => {
     expect(upsert).toHaveBeenCalledTimes(2);
   });
 
-  it('returns empty arrays when the DB query errors', async () => {
+  it('returns error field when the DB select query fails (#360)', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'u1' } as never);
     const eqActive = vi.fn().mockResolvedValue({ data: null, error: { message: 'rls violation' } });
     const eqRecommended = vi.fn().mockReturnValue({ eq: eqActive });
@@ -142,6 +144,7 @@ describe('enableAllSuggested', () => {
     const result = await enableAllSuggested('repo-id');
     expect(result.succeeded).toHaveLength(0);
     expect(result.failed).toHaveLength(0);
+    expect(result.error).toBe('rls violation');
   });
 
   it('assigns distinct activated_at timestamps to each plugin for deterministic merge order', async () => {
@@ -244,7 +247,9 @@ describe('triggerRecommendation', () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
     vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
     const upsert = vi.fn().mockResolvedValue({ error: null });
-    vi.mocked(createClient).mockResolvedValue({ from: () => ({ upsert }) } as never);
+    // The IIFE uses createServiceClient (not the request-scoped createClient)
+    vi.mocked(createServiceClient).mockReturnValue({ from: () => ({ upsert }) } as never);
+    vi.mocked(createClient).mockResolvedValue({} as never);
     const mockCreate = vi.fn().mockResolvedValue(llmResponse);
     // Must use mockImplementation (not mockReturnValue) — the factory's
     // mockImplementation takes precedence over mockReturnValue.
@@ -326,11 +331,13 @@ describe('triggerRecommendation', () => {
     expect(upsert).not.toHaveBeenCalled();
   });
 
-  it('fails silently when Anthropic API throws', async () => {
+  it('logs error when Anthropic API throws (no longer silently swallowed)', async () => {
     vi.mocked(requireAdmin).mockResolvedValue({ id: 'user-1' } as never);
     vi.mocked(loadDashboardRegistry).mockResolvedValue(mockRegistry);
     const upsert = vi.fn();
-    vi.mocked(createClient).mockResolvedValue({ from: () => ({ upsert }) } as never);
+    vi.mocked(createServiceClient).mockReturnValue({ from: () => ({ upsert }) } as never);
+    vi.mocked(createClient).mockResolvedValue({} as never);
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.mocked(Anthropic).mockImplementation(function (this: unknown) {
       return { messages: { create: vi.fn().mockRejectedValue(new Error('API rate limit')) } } as never;
     });
@@ -339,6 +346,31 @@ describe('triggerRecommendation', () => {
     await flushFireAndForget();
 
     expect(upsert).not.toHaveBeenCalled();
+    expect(consoleSpy).toHaveBeenCalledWith(
+      '[plugins] triggerRecommendation background task failed:',
+      expect.any(Error),
+    );
+    consoleSpy.mockRestore();
+  });
+
+  it('uses service-role client (not request-scoped) for background DB writes (#278)', async () => {
+    const { upsert } = setupLLMTest({
+      content: [{ type: 'text', text: '{ "recommendations": [{ "pluginId": "web-stack", "confidence": "high", "reason": "Has package.json" }] }' }],
+    });
+
+    // Track whether the request-scoped client's from() is ever called
+    const requestScopedFrom = vi.fn();
+    vi.mocked(createClient).mockResolvedValue({ from: requestScopedFrom } as never);
+
+    await triggerRecommendation('repo-id', 'owner', 'repo');
+    await flushFireAndForget();
+
+    // Service client should have been used for the upsert
+    expect(upsert).toHaveBeenCalledOnce();
+    // Request-scoped client should NOT have been used inside the IIFE
+    expect(requestScopedFrom).not.toHaveBeenCalled();
+    // Verify createServiceClient was called
+    expect(vi.mocked(createServiceClient)).toHaveBeenCalled();
   });
 });
 

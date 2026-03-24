@@ -36,6 +36,7 @@ export interface PreviousSnapshot {
 export function extractActivityEvents(
   signals: SignalResult,
   previousSnapshot?: PreviousSnapshot | null,
+  repoUrl?: string | null,
 ): ActivityEventInsert[] {
   const events: ActivityEventInsert[] = [];
   const now = new Date().toISOString();
@@ -50,7 +51,7 @@ export function extractActivityEvents(
   events.push(...transitions);
 
   // --- Merges from git log ---
-  events.push(...detectMerges(signals.gitLog, previousSnapshot?.gitLog ?? [], now));
+  events.push(...detectMerges(signals.gitLog, previousSnapshot?.gitLog ?? [], now, repoUrl));
 
   // --- Errors from stuck runs (skip those already captured as transitions) ---
   events.push(...detectErrors(signals.runs, now, transitionRunIds));
@@ -97,7 +98,7 @@ function detectRunTransitions(
       const severity: ActivitySeverity =
         run.outcome === 'stuck' ? 'error' : run.outcome === 'success' ? 'info' : 'warning';
       const eventType: ActivityEventType =
-        run.outcome === 'success' ? 'completion' : 'state-transition';
+        run.outcome === 'stuck' ? 'error' : run.outcome === 'success' ? 'completion' : 'state-transition';
 
       events.push({
         occurred_at: (run.updated_at as string) ?? now,
@@ -127,6 +128,7 @@ function detectMerges(
   currentLog: string[],
   previousLog: string[],
   now: string,
+  repoUrl?: string | null,
 ): ActivityEventInsert[] {
   const events: ActivityEventInsert[] = [];
   const prevSet = new Set(previousLog);
@@ -141,7 +143,8 @@ function detectMerges(
     const prMatch = line.match(/#(\d+)/);
     const links: { label: string; url: string }[] = [];
     if (prMatch) {
-      links.push({ label: `PR #${prMatch[1]}`, url: `#${prMatch[1]}` });
+      const prUrl = repoUrl ? `${repoUrl}/pull/${prMatch[1]}` : `#${prMatch[1]}`;
+      links.push({ label: `PR #${prMatch[1]}`, url: prUrl });
     }
 
     events.push({

@@ -9,12 +9,12 @@ import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import { CostTracker } from './cost.js';
 import { RateLimiter } from './rate-limiter.js';
 import { createAdapter, type ProviderAdapter } from './adapters/index.js';
-import { buildCompositeContext } from './plugin-injection.js';
+import { buildCompositeContext, type McpConfig } from './plugin-injection.js';
 import { readPluginsForContext } from './plugin-loader.js';
 import { DEFAULT_POLICY } from './containment-hooks.js';
 import { SessionError } from './session-error.js';
 import { auditSessionOutput } from './audit.js';
-import { renderTemplate } from '../knowledge/templates.js';
+import { renderTemplate, findUnsubstitutedVars } from '../knowledge/templates.js';
 
 /** Resolve the prompts/ directory at the repo root. */
 function promptsDir(): string {
@@ -36,6 +36,13 @@ export async function loadPromptTemplate(
   const filePath = join(promptsDir(), `${name}.md`);
   try {
     const template = await readFile(filePath, 'utf-8');
+    const missing = findUnsubstitutedVars(template, variables);
+    if (missing.length > 0) {
+      console.warn(
+        `[prompt-template] ${name}.md has unsubstituted variables: ${missing.join(', ')}. ` +
+        `These will appear as literal {{var}} in the LLM prompt.`,
+      );
+    }
     return renderTemplate(template, variables);
   } catch (e: unknown) {
     // Only treat "file not found" as a graceful fallback.
@@ -106,15 +113,6 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     timeoutMs: 180_000,
     budgetCap: 2,
   },
-  'conflict-resolver': {
-    name: 'conflict-resolver',
-    description: 'Resolves merge conflicts favoring spec intent',
-    systemPrompt: '', // loaded from prompts/conflict-resolver.md
-    allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep'],
-    maxTurns: 10,
-    timeoutMs: 120_000,
-    budgetCap: 1,
-  },
   'bug-worker': {
     name: 'bug-worker',
     description: 'Fixes Type A bugs with regression-test-first protocol',
@@ -123,15 +121,6 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     maxTurns: 30,
     timeoutMs: 600_000,
     budgetCap: 5,
-  },
-  tester: {
-    name: 'tester',
-    description: 'Runs post-deployment tests and reports results',
-    systemPrompt: '', // loaded from prompts/tester.md
-    allowedTools: ['Read', 'Bash', 'Glob', 'Grep'],
-    maxTurns: 10,
-    timeoutMs: 300_000,
-    budgetCap: 1,
   },
   diagnostician: {
     name: 'diagnostician',
@@ -142,12 +131,30 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     timeoutMs: 120_000,
     budgetCap: 1,
   },
-  'prompt-optimizer': {
-    name: 'prompt-optimizer',
-    description: 'Proposes improvements to mutable instruction templates',
-    systemPrompt: '', // loaded from prompts/prompt-optimizer.md
+  'codebase-reviewer': {
+    name: 'codebase-reviewer',
+    description: 'Periodic codebase review — discovery, verification, filtered issue creation',
+    systemPrompt: '', // loaded from prompts/codebase-reviewer.md
+    allowedTools: ['Read', 'Glob', 'Grep', 'Bash'],
+    maxTurns: 30,
+    timeoutMs: 600_000,
+    budgetCap: 3,
+  },
+  'product-owner': {
+    name: 'product-owner',
+    description: 'Analyzes signals and generates business-level proposals',
+    systemPrompt: '', // loaded from prompts/product-owner.md
     allowedTools: ['Read', 'Glob', 'Grep'],
-    maxTurns: 5,
+    maxTurns: 10,
+    timeoutMs: 300_000,
+    budgetCap: 3,
+  },
+  'tech-lead': {
+    name: 'tech-lead',
+    description: 'Analyzes technical signals and generates improvement proposals',
+    systemPrompt: '', // loaded from prompts/tech-lead.md
+    allowedTools: ['Read', 'Glob', 'Grep'],
+    maxTurns: 10,
     timeoutMs: 300_000,
     budgetCap: 3,
   },
@@ -201,14 +208,15 @@ export class SessionRuntime {
     }
     this.lastSpawnTime = Date.now();
 
-    // 5. Assemble prompt
-    const prompt = await this.assemblePrompt(def, context);
+    // 5. Assemble prompt and extract plugin artifacts (ARCH-AC-PLUGINS Flow 4 step 3)
+    const assembled = await this.assemblePrompt(def, context);
 
-    // 6. Delegate to adapter — with containment policy enforced via PreToolUse hooks
-    const result = await this.adapter.spawn(def, prompt, {
+    // 6. Delegate to adapter — with containment policy and plugin MCP configs
+    const result = await this.adapter.spawn(def, assembled.prompt, {
       cwd: context.workspacePath,
       jsonSchema: options?.jsonSchema,
       containmentPolicy: DEFAULT_POLICY,
+      mcpConfigs: assembled.mcpConfigs,
     });
 
     // 7. Record cost — always, even on failure (ARCH-AC-SESSION-RUNTIME step 10)
@@ -231,7 +239,7 @@ export class SessionRuntime {
 
     // 9. Post-session audit — containment layer 6 (detective)
     // Scan output for references to prohibited paths (ARCH-AC-SESSION-RUNTIME step 9)
-    // Note: currently scans path references only; "suspicious operations" audit is a known gap.
+    // Scans path references and blocked command evidence (SEC-35).
     if (result.ok) {
       const audit = auditSessionOutput(result.value.output, DEFAULT_POLICY);
       if (!audit.clean) {
@@ -244,10 +252,18 @@ export class SessionRuntime {
       }
     }
 
+    // 10. Attach plugin gates to result for downstream validation (ARCH-AC-PLUGINS Flow 4 step 3)
+    if (result.ok && assembled.gates.length > 0) {
+      result.value.pluginGates = assembled.gates;
+    }
+
     return result;
   }
 
-  private async assemblePrompt(def: AgentDefinition, context: SessionContext): Promise<string> {
+  private async assemblePrompt(
+    def: AgentDefinition,
+    context: SessionContext,
+  ): Promise<{ prompt: string; mcpConfigs: McpConfig[]; gates: string[] }> {
     // Load the prompt template from prompts/{name}.md with {{variable}} substitution.
     // Falls back to def.systemPrompt + appended variables if template file is missing.
     const template = await loadPromptTemplate(def.name, context.variables);
@@ -261,8 +277,8 @@ export class SessionRuntime {
       }
     }
 
-    // If no active plugins, return prompt as-is
-    if (!context.activePlugins?.length) return prompt;
+    // If no active plugins, return prompt with empty plugin artifacts
+    if (!context.activePlugins?.length) return { prompt, mcpConfigs: [], gates: [] };
 
     const pluginIds = context.activePlugins.map(e => e.id);
     const activations = new Map(context.activePlugins.map(e => [e.id, e.activatedAt]));
@@ -277,8 +293,11 @@ export class SessionRuntime {
     for (const agent of composite.agents) {
       if (agent.content) parts.push(agent.content);
     }
-    if (parts.length === 0) return prompt;
-    return `${parts.join('\n\n---\n\n')}\n\n---\n\n${prompt}`;
+    if (parts.length > 0) {
+      prompt = `${parts.join('\n\n---\n\n')}\n\n---\n\n${prompt}`;
+    }
+
+    return { prompt, mcpConfigs: composite.mcpConfigs, gates: composite.gates };
   }
 
   getCostTracker(): CostTracker {

@@ -9,6 +9,8 @@ import { createGate1, selectGates, type Gate } from '../validation/gates.js';
 import { createReviewerGate } from '../validation/reviewer-session.js';
 import { isRiskSensitive } from '../validation/risk-detection.js';
 import { runReview } from '../validation/review.js';
+import { injectKnowledge } from '../validation/knowledge-injector.js';
+import type { KnowledgeStore } from '../knowledge/knowledge-store.js';
 import { formatReport, postReport } from './reporter.js';
 import { notify } from './notify.js';
 import { appendResult } from './results.js';
@@ -18,8 +20,13 @@ import { git } from '../lib/git.js';
 import { join } from 'node:path';
 import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
-import { loadSpecContent } from '../infra/spec-loader.js';
+import { loadSpecContent, loadImplementationContent } from '../infra/spec-loader.js';
 import { classify as runClassify } from './classifier.js';
+import { SessionError } from '../session-runtime/session-error.js';
+import { runHoldout } from '../validation/holdout.js';
+import { integrateToStaging } from './integration.js';
+import { runDeploy } from '../validation/deploy.js';
+import { runPostDeployTests } from '../validation/post-deploy-test.js';
 
 // Serializes git operations on the shared repoRoot across concurrent pipeline runs.
 // Currently protects detect (which modifies checkout state via git checkout).
@@ -58,6 +65,8 @@ export function createPhaseHandlers(
   runWriter?: SupabaseRunWriter,
   runId?: string,
   repoRoot?: string,
+  activePlugins?: Array<{ id: string; activatedAt: string }>,
+  knowledgeStore?: KnowledgeStore,
 ): PhaseHandlerMap {
   const repo = repoName;
   const detector = createWorkDetector(octokit, owner, repo);
@@ -71,7 +80,11 @@ export function createPhaseHandlers(
       }
       try {
         console.log(`[detect] Creating branch ${featureBranch} from ${config.branches.staging}`);
-        await git(['checkout', config.branches.staging], repoRoot);
+        const stagingCheckout = await git(['checkout', config.branches.staging], repoRoot);
+        if (!stagingCheckout.ok) {
+          console.error(`[detect] Checkout staging failed:`, stagingCheckout.error.message);
+          return 'failure';
+        }
         const branchResult = await git(['checkout', '-b', featureBranch, config.branches.staging], repoRoot);
         if (!branchResult.ok) {
           console.log(`[detect] Branch exists, checking out`);
@@ -86,7 +99,7 @@ export function createPhaseHandlers(
 
     classify: async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[classify] Classifying work request #${workRequest.issueNumber}`);
-      const result = await runClassify(runtime, workRequest, runWriter, runId, repoRoot);
+      const result = await runClassify(runtime, workRequest, runWriter, runId, repoRoot, activePlugins);
       run.classificationComplexity = result.complexity;
       return result.event;
     },
@@ -105,18 +118,44 @@ export function createPhaseHandlers(
         console.warn(`[diagnose] Failed to load spec content:`, e);
       }
 
+      // Load implementation content from code_paths in traceability.yml (#263)
+      let implementationContent = '';
+      try {
+        implementationContent = await loadImplementationContent(workRequest.specRefs, cwd);
+      } catch (e) {
+        console.warn(`[diagnose] Failed to load implementation content:`, e);
+      }
+
       const result = await diagnose(
         runtime,
         workRequest.issueNumber,
         workRequest.body,
-        '',  // implementation content — not yet available at this phase
+        implementationContent,
         specContent,
         runWriter,
         runId,
         repoRoot,
+        activePlugins,
       );
 
       if (!result.ok) {
+        // Extract safety signals from SessionError before falling back (ARCH-AC-OPERATIONAL-SAFETY)
+        if (result.error instanceof SessionError) {
+          if (result.error.rateLimited) {
+            console.warn(`[diagnose] Diagnosis session rate-limited: ${result.error.message} — signaling pipeline to pause`);
+            return 'rate-limited';
+          }
+          if (result.error.containmentBreach) {
+            console.warn(`[diagnose] Diagnosis session containment breach: ${result.error.message} — signaling pipeline`);
+            return 'containment-breach';
+          }
+          // SessionError.budgetExceeded() has cost=0, rateLimited=false, containmentBreach=false —
+          // no dedicated boolean, so detect via message prefix (matches factory method format)
+          if (result.error.message.startsWith('Budget exceeded')) {
+            console.warn(`[diagnose] Diagnosis session budget exceeded: ${result.error.message} — signaling pipeline to pause`);
+            return 'budget-exceeded';
+          }
+        }
         console.error(`[diagnose] Diagnosis failed:`, result.error.message);
         // Diagnosis failed — route to human
         try {
@@ -189,6 +228,7 @@ export function createPhaseHandlers(
         handoffNotes,
         variant: run.variant,
         diagnosisDetail: run.diagnosisDetail,
+        activePlugins,
       });
       if (!result.ok) { console.error(`[implement] Error:`, result.error.message); return 'failure'; }
       if (!result.value.success) {
@@ -246,24 +286,39 @@ export function createPhaseHandlers(
       }
 
       // Create all four gates
+      // Inject knowledge context (STACK-AC-VALIDATION: knowledge injection before reviewer spawn)
+      let knowledgeContext: string | undefined;
+      if (knowledgeStore) {
+        try {
+          const nameOnlyResult = await git(['diff', '--name-only', config.branches.staging + '..' + featureBranch], repoRoot);
+          const artifactPaths = nameOnlyResult.ok
+            ? nameOnlyResult.value.split('\n').filter(Boolean)
+            : [];
+          const ctx = await injectKnowledge(artifactPaths, knowledgeStore);
+          if (ctx) knowledgeContext = ctx;
+        } catch (e) {
+          console.warn(`[review] Knowledge injection failed:`, e);
+        }
+      }
+
       const gate1 = createGate1(config.validation.gate1Commands);
       const gate2 = createReviewerGate(
         'spec-compliance', 'reviewer-spec',
         'Verify implementation against spec acceptance criteria.',
         runtime, workRequest.issueNumber, runWriter, runId,
-        diff, specContent,
+        diff, specContent, activePlugins, knowledgeContext,
       );
       const gate3 = createReviewerGate(
         'quality', 'reviewer-quality',
         'Evaluate code quality, pattern consistency, and test quality.',
         runtime, workRequest.issueNumber, runWriter, runId,
-        diff,
+        diff, undefined, activePlugins, knowledgeContext,
       );
       const gate4 = createReviewerGate(
         'security', 'reviewer-security',
         'Evaluate injection risks, authentication, data validation, and concurrency safety.',
         runtime, workRequest.issueNumber, runWriter, runId,
-        diff,
+        diff, undefined, activePlugins, knowledgeContext,
       );
 
       // Select gates based on complexity and risk
@@ -273,8 +328,105 @@ export function createPhaseHandlers(
       const result = await runReview(gates, cwd, {
         maxFixCycles: config.validation.maxFixCycles,
       });
-      if (!result.passed) { console.error(`[review] Failed:`, JSON.stringify(result.gateResults)); return 'failure'; }
+      if (!result.passed) {
+        if (result.escalated) {
+          console.error(`[review] Escalated (${result.escalationReason ?? 'unknown'}):`, JSON.stringify(result.gateResults));
+          return 'escalated';
+        }
+        console.error(`[review] Failed:`, JSON.stringify(result.gateResults));
+        return 'failure';
+      }
       console.log(`[review] Passed (${result.fixCycles} fix cycles)`);
+      return 'success';
+    },
+
+    holdout: async (_run: RunState): Promise<PhaseEvent> => {
+      if (!config.validation.holdoutCommand) {
+        console.log(`[holdout] No holdout command configured — skipping`);
+        return 'success';
+      }
+      const cwd = repoRoot ?? process.cwd();
+      console.log(`[holdout] Running holdout tests for #${workRequest.issueNumber}`);
+      const result = await runHoldout(config.validation.holdoutCommand, featureBranch, cwd);
+      if (!result.ok) {
+        console.error(`[holdout] Error:`, result.error.message);
+        return 'failure';
+      }
+      if (!result.value.passed) {
+        const failedIds = result.value.failures.map((f) => f.id).join(', ');
+        console.error(`[holdout] Failed scenarios: ${failedIds}`);
+        return 'failure';
+      }
+      console.log(`[holdout] All scenarios passed`);
+      return 'success';
+    },
+
+    integrate: async (_run: RunState): Promise<PhaseEvent> => {
+      console.log(`[integrate] Merging ${featureBranch} into ${config.branches.staging}`);
+      const result = await integrateToStaging(featureBranch, config.branches.staging, repoRoot);
+      if (!result.ok) {
+        console.error(`[integrate] Error:`, result.error.message);
+        return 'failure';
+      }
+      if (!result.value.success) {
+        console.error(`[integrate] Failed:`, result.value.error);
+        return 'failure';
+      }
+      console.log(`[integrate] Successfully merged to ${config.branches.staging}`);
+      return 'success';
+    },
+
+    deploy: async (_run: RunState): Promise<PhaseEvent> => {
+      if (!config.validation.deployCommand || !config.validation.healthCheckUrl) {
+        console.log(`[deploy] No deploy command or health check URL configured — skipping`);
+        return 'success';
+      }
+      const cwd = repoRoot ?? process.cwd();
+      console.log(`[deploy] Running deploy for #${workRequest.issueNumber}`);
+      const result = await runDeploy({
+        deployCommand: config.validation.deployCommand,
+        healthCheckUrl: config.validation.healthCheckUrl,
+        healthCheckIntervalMs: config.validation.healthCheckIntervalMs,
+        deployTimeoutMs: config.validation.deployTimeoutMs,
+        maxAttempts: config.validation.maxDeployAttempts,
+        cwd,
+      });
+      if (!result.ok) {
+        console.error(`[deploy] Error:`, result.error.message);
+        return 'failure';
+      }
+      if (result.value.status !== 'healthy') {
+        console.error(`[deploy] Deploy status: ${result.value.status} after ${result.value.attempts} attempt(s)`);
+        return 'failure';
+      }
+      console.log(`[deploy] Healthy after ${result.value.attempts} attempt(s)`);
+      return 'success';
+    },
+
+    test: async (run: RunState): Promise<PhaseEvent> => {
+      if (config.validation.testCommands.length === 0) {
+        console.log(`[test] No post-deploy test commands configured — skipping`);
+        return 'success';
+      }
+      const cwd = repoRoot ?? process.cwd();
+      console.log(`[test] Running post-deploy tests for #${workRequest.issueNumber}`);
+      const result = await runPostDeployTests({
+        testCommands: config.validation.testCommands,
+        maxFixAttempts: config.validation.maxTestFixAttempts,
+        failureExcerptLines: config.validation.failureExcerptLines,
+        cwd,
+      });
+      if (result.escalated) {
+        console.error(`[test] Escalated after ${result.fixAttempts} fix attempt(s): ${result.failedCommand}`);
+        run.fixAttempts.push({ phase: 'test', attempt: result.fixAttempts, errorHash: result.failureExcerpt ?? '' });
+        return 'failure';
+      }
+      if (!result.passed) {
+        console.error(`[test] Failed: ${result.failedCommand}`);
+        run.fixAttempts.push({ phase: 'test', attempt: result.fixAttempts, errorHash: result.failureExcerpt ?? '' });
+        return 'failure';
+      }
+      console.log(`[test] All post-deploy tests passed`);
       return 'success';
     },
 

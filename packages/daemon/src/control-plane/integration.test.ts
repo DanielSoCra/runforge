@@ -1,5 +1,5 @@
 // src/control-plane/integration.test.ts
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -198,6 +198,42 @@ describe('integrateToStaging', () => {
     expect(result.ok).toBe(false);
     // Lock must be released even on failure
     expect(isIntegrationLocked()).toBe(false);
+  });
+
+  it('returns err when merge abort fails (regression #253)', async () => {
+    // Set up a conflict scenario
+    sh('git', ['checkout', '-b', 'staging'], repoDir);
+    await writeFile(join(repoDir, 'conflict.ts'), 'const x = "staging";\n');
+    sh('git', ['add', 'conflict.ts'], repoDir);
+    sh('git', ['commit', '-m', 'staging change'], repoDir);
+
+    sh('git', ['checkout', 'main'], repoDir);
+    sh('git', ['checkout', '-b', 'feature/abort-fail'], repoDir);
+    await writeFile(join(repoDir, 'conflict.ts'), 'const x = "feature";\n');
+    sh('git', ['add', 'conflict.ts'], repoDir);
+    sh('git', ['commit', '-m', 'feature change'], repoDir);
+
+    // Mock git to make merge --abort fail while letting other commands through
+    const gitModule = await import('../lib/git.js');
+    const originalGit = gitModule.git;
+    const gitSpy = vi.spyOn(gitModule, 'git').mockImplementation(async (args, cwd) => {
+      if (args[0] === 'merge' && args[1] === '--abort') {
+        return { ok: false, error: new Error('abort failed: not in a merge state') };
+      }
+      return originalGit(args, cwd);
+    });
+
+    const result = await integrateToStaging('feature/abort-fail', 'staging', repoDir);
+    // Must return err, not ok, when abort fails
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toContain('abort failed');
+    }
+
+    // Lock must be released even when abort fails
+    expect(isIntegrationLocked()).toBe(false);
+
+    gitSpy.mockRestore();
   });
 
   it('releases the lock after conflict detection', async () => {

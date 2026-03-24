@@ -9,7 +9,9 @@ import type { WorkRequest } from '../types.js';
 const {
   mockStateMgr, mockCostTracker, mockRemoteControl, mockDetector,
   mockServer, mockServerStart, mockRunPipeline, mockNotify,
-  mockRunWriter, mockConfigReader, mockLoadConfig, phaseHandlerCalls,
+  mockRunWriter, mockConfigReader, mockLoadConfig, mockSelectVariant, phaseHandlerCalls, mockCreateReviewScheduler,
+  mockCreatePOAgent, mockCreateTechLeadScheduler, mockCreateCoordinator,
+  knowledgeStoreCtorArgs,
 } = vi.hoisted(() => ({
   mockStateMgr: {
     initialize: vi.fn().mockResolvedValue(undefined),
@@ -28,7 +30,11 @@ const {
   },
   mockDetector: {
     detectReadyWork: vi.fn(),
+    detectBugFixWork: vi.fn(),
+    detectFeaturePipelineWork: vi.fn(),
     claimWork: vi.fn(),
+    claimBugFixWork: vi.fn(),
+    claimFeaturePipelineWork: vi.fn(),
     markStuck: vi.fn(),
   },
   mockServer: { close: vi.fn((cb?: () => void) => { if (cb) cb(); }) },
@@ -43,7 +49,23 @@ const {
     getRepoConfig: vi.fn().mockReturnValue(null),
   },
   mockLoadConfig: vi.fn(),
+  mockSelectVariant: vi.fn(),
   phaseHandlerCalls: [] as unknown[][],
+  mockCreateReviewScheduler: vi.fn().mockReturnValue({ start: () => () => {}, getStatus: () => ({}) }),
+  mockCreatePOAgent: vi.fn().mockReturnValue({
+    start: vi.fn().mockReturnValue(vi.fn()),
+    submitIdea: vi.fn().mockResolvedValue({ id: 'idea-1', submittedBy: 'operator', description: 'test', status: 'pending', proposalId: null, createdAt: '2026-03-23T00:00:00Z' }),
+  }),
+  mockCreateTechLeadScheduler: vi.fn().mockReturnValue({
+    start: vi.fn().mockReturnValue(vi.fn()),
+    stop: vi.fn(),
+    triggerEvent: vi.fn(),
+    getStatus: vi.fn().mockReturnValue({ cyclesRun: 0, running: false }),
+  }),
+  mockCreateCoordinator: vi.fn().mockReturnValue({
+    start: vi.fn().mockReturnValue(vi.fn()),
+  }),
+  knowledgeStoreCtorArgs: [] as unknown[],
 }));
 
 // --- Module mocks (use classes for constructors to work with `new`) ---
@@ -57,6 +79,15 @@ vi.mock('../session-runtime/cost.js', () => {
 vi.mock('../session-runtime/runtime.js', () => {
   return { SessionRuntime: class {} };
 });
+vi.mock('../knowledge/gotcha-store.js', () => {
+  return { GotchaStore: class {} };
+});
+vi.mock('../knowledge/knowledge-store.js', () => {
+  return { KnowledgeStore: class { constructor(...args: unknown[]) { knowledgeStoreCtorArgs.length = 0; knowledgeStoreCtorArgs.push(...args); } } };
+});
+vi.mock('../knowledge/policy-registry.js', () => ({
+  DEFAULT_POLICIES: {},
+}));
 vi.mock('../implementation/coordinator.js', () => {
   return { ImplementationCoordinator: class {} };
 });
@@ -89,7 +120,7 @@ vi.mock('./fsm.js', () => ({
   getStartPhase: () => 'detect',
 }));
 vi.mock('./variants.js', () => ({
-  selectVariant: () => 'feature',
+  selectVariant: (...args: unknown[]) => mockSelectVariant(...args),
 }));
 vi.mock('./notify.js', () => ({
   notify: (...args: unknown[]) => mockNotify(...args),
@@ -111,6 +142,39 @@ vi.mock('@octokit/rest', () => {
 });
 vi.mock('../config.js', () => ({
   loadConfig: (...args: unknown[]) => mockLoadConfig(...args),
+}));
+vi.mock('../coordination/review-scheduler.js', () => ({
+  createReviewScheduler: (...args: unknown[]) => mockCreateReviewScheduler(...args),
+}));
+vi.mock('../coordination/po-agent.js', () => ({
+  createPOAgent: (...args: unknown[]) => mockCreatePOAgent(...args),
+}));
+vi.mock('../coordination/tech-lead-scheduler.js', () => ({
+  createTechLeadScheduler: (...args: unknown[]) => mockCreateTechLeadScheduler(...args),
+}));
+vi.mock('../coordination/coordinator.js', () => ({
+  createCoordinator: (...args: unknown[]) => mockCreateCoordinator(...args),
+}));
+vi.mock('../coordination/work-claimer.js', () => ({
+  createWorkClaimer: vi.fn().mockReturnValue({}),
+}));
+vi.mock('../coordination/batch-manager.js', () => ({
+  createBatchManager: vi.fn().mockReturnValue({}),
+}));
+vi.mock('../coordination/merge-agent.js', () => ({
+  createMergeAgent: vi.fn().mockReturnValue({}),
+}));
+vi.mock('../coordination/merge-queue.js', () => ({
+  createMergeQueue: vi.fn().mockReturnValue({}),
+}));
+vi.mock('../coordination/tech-lead/proposal-store.js', () => ({
+  TechProposalStore: class { init = vi.fn().mockResolvedValue(undefined); loadActiveProposals = vi.fn().mockResolvedValue([]); loadRejectedProposals = vi.fn().mockResolvedValue([]); loadAllProposals = vi.fn().mockResolvedValue([]); findDuplicate = vi.fn().mockResolvedValue(undefined); saveProposal = vi.fn().mockResolvedValue(undefined); },
+}));
+vi.mock('../coordination/tech-lead/signal-digest.js', () => ({
+  assembleSignalDigest: vi.fn().mockResolvedValue({ id: 'digest-1', trigger: 'scheduled', reviewFindings: [], runOutcomes: [], driftIndicators: [], deferredWork: [], testHealth: [], dependencyRisks: [], activeProposals: [], priorRejections: [], missingSources: [], assembledAt: '2026-03-23T00:00:00Z' }),
+}));
+vi.mock('../coordination/tech-lead/proposal-lifecycle.js', () => ({
+  isTerminalStatus: vi.fn().mockReturnValue(false),
 }));
 
 // --- Helpers ---
@@ -136,6 +200,23 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
     testCommands: [],
     maxTestFixAttempts: 3,
     failureExcerptLines: 50,
+    proactiveIntervalMs: 1200000,
+    proactiveMaxConcurrent: 1,
+    proactiveThrottleThreshold: 0.8,
+    proactiveRecentCommits: 20,
+  },
+  coordination: {
+    useCoordinator: false, tickInterval: 5000,
+    maxAgents: 10, reviewerInterval: 3600000, poInterval: 3600000,
+    poIdeaDebounce: 300000,
+    plannerTimeout: 60000, maxAttemptsPerIssue: 3, diskSpaceThreshold: 2_000_000_000,
+    gcInterval: 600000, conflictFileThreshold: 3, conflictLineThreshold: 100,
+    mergeDependencyTimeout: 1800000, mergeValidationTimeout: 600000,
+    mergePollInterval: 5000, mergePollMaxInterval: 60000,
+    techLeadInterval: 7200000, techLeadEventDebounce: 300000,
+    techLeadProposalExpiryMs: 604800000, techLeadLookbackWindowMs: 172800000,
+    techLeadMaxEntriesPerSection: 50,
+    maxConsecutiveTickErrors: 5,
   },
   diagnosis: { confidenceThreshold: 0.7 },
   warmup: { threshold: 10, regressionThreshold: 3, samplingRate: 0.1, minSamplingRate: 0.01 },
@@ -176,8 +257,13 @@ describe('daemon', () => {
     // Reset all mock state
     mockLoadConfig.mockResolvedValue(ok(makeConfig()));
     mockDetector.detectReadyWork.mockResolvedValue(ok([]));
+    mockDetector.detectBugFixWork.mockResolvedValue(ok(null));
+    mockDetector.detectFeaturePipelineWork.mockResolvedValue(ok(null));
     mockDetector.claimWork.mockResolvedValue(ok(undefined));
+    mockDetector.claimBugFixWork.mockResolvedValue(ok(undefined));
+    mockDetector.claimFeaturePipelineWork.mockResolvedValue(ok(undefined));
     mockDetector.markStuck.mockResolvedValue(ok(undefined));
+    mockSelectVariant.mockReturnValue('feature');
     mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
     mockServerStart.mockResolvedValue(ok(undefined));
     mockNotify.mockResolvedValue(undefined);
@@ -187,6 +273,20 @@ describe('daemon', () => {
     mockRemoteControl.stop.mockResolvedValue(undefined);
     mockCostTracker.getDailyCost.mockReturnValue(0);
     mockRunWriter.upsertRun.mockResolvedValue(undefined);
+    mockCreateReviewScheduler.mockReturnValue({ start: () => () => {}, getStatus: () => ({}) });
+    mockCreatePOAgent.mockReturnValue({
+      start: vi.fn().mockReturnValue(vi.fn()),
+      submitIdea: vi.fn().mockResolvedValue({ id: 'idea-1', submittedBy: 'operator', description: 'test', status: 'pending', proposalId: null, createdAt: '2026-03-23T00:00:00Z' }),
+    });
+    mockCreateTechLeadScheduler.mockReturnValue({
+      start: vi.fn().mockReturnValue(vi.fn()),
+      stop: vi.fn(),
+      triggerEvent: vi.fn(),
+      getStatus: vi.fn().mockReturnValue({ cyclesRun: 0, running: false }),
+    });
+    mockCreateCoordinator.mockReturnValue({
+      start: vi.fn().mockReturnValue(vi.fn()),
+    });
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -199,7 +299,7 @@ describe('daemon', () => {
     vi.restoreAllMocks();
     // vi.restoreAllMocks only restores spies, not hoisted vi.fn() — clear them explicitly
     for (const mock of [
-      mockDetector.detectReadyWork, mockDetector.claimWork, mockDetector.markStuck,
+      mockDetector.detectReadyWork, mockDetector.detectBugFixWork, mockDetector.detectFeaturePipelineWork, mockDetector.claimWork, mockDetector.claimBugFixWork, mockDetector.claimFeaturePipelineWork, mockDetector.markStuck,
       mockRunPipeline, mockNotify, mockServerStart, mockLoadConfig,
       mockStateMgr.initialize, mockStateMgr.saveRunState, mockStateMgr.findIncompleteRuns,
       mockServer.close, mockRemoteControl.start, mockRemoteControl.stop,
@@ -207,6 +307,11 @@ describe('daemon', () => {
       mockRunWriter.upsertRun,
       mockConfigReader.start, mockConfigReader.stop,
       mockConfigReader.getGlobalConfig, mockConfigReader.getRepoConfig,
+      mockSelectVariant,
+      mockCreateReviewScheduler,
+      mockCreatePOAgent,
+      mockCreateTechLeadScheduler,
+      mockCreateCoordinator,
     ]) {
       mock.mockClear();
     }
@@ -475,6 +580,89 @@ describe('daemon', () => {
       await vi.advanceTimersByTimeAsync(30000);
       await vi.advanceTimersByTimeAsync(0);
       expect(mockDetector.claimWork).toHaveBeenCalledWith(99);
+    });
+
+    it('auto-pauses after maxConsecutiveStuck crash-resumed stuck runs (#291)', async () => {
+      const config = makeConfig({ maxConsecutiveStuck: 2, webhooks: ['https://hooks.example.com/test'] });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      // Two incomplete runs that will both finish stuck
+      const run1 = {
+        id: 'run-stuck-1',
+        issueNumber: 80,
+        title: 'Stuck resumed run 1',
+        phase: 'implement',
+        variant: 'feature',
+        phaseCompletions: {},
+        checkpoints: [],
+        cost: 0,
+        perRunBudget: 10,
+        fixAttempts: [],
+        errorHashes: {},
+        repoOwner: 'test-owner',
+        repoName: 'test-repo',
+        startedAt: '2026-03-21T00:00:00Z',
+        updatedAt: '2026-03-21T01:00:00Z',
+      };
+      const run2 = { ...run1, id: 'run-stuck-2', issueNumber: 81, title: 'Stuck resumed run 2' };
+      mockStateMgr.findIncompleteRuns.mockResolvedValue([run1, run2]);
+      mockRunPipeline.mockResolvedValue({ outcome: 'stuck', error: 'test failure' });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(0);
+
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(true);
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(2);
+      expect(mockNotify).toHaveBeenCalledWith(
+        ['https://hooks.example.com/test'],
+        expect.objectContaining({
+          event: 'auto-paused',
+          message: expect.stringContaining('2 consecutive stuck runs'),
+        }),
+      );
+    });
+
+    it('resets consecutive stuck count when crash-resumed run completes successfully (#291)', async () => {
+      const config = makeConfig({ maxConsecutiveStuck: 3 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      const incompleteRun = {
+        id: 'run-success',
+        issueNumber: 82,
+        title: 'Successful resumed run',
+        phase: 'implement',
+        variant: 'feature',
+        phaseCompletions: {},
+        checkpoints: [],
+        cost: 0,
+        perRunBudget: 10,
+        fixAttempts: [],
+        errorHashes: {},
+        repoOwner: 'test-owner',
+        repoName: 'test-repo',
+        startedAt: '2026-03-21T00:00:00Z',
+        updatedAt: '2026-03-21T01:00:00Z',
+      };
+      mockStateMgr.findIncompleteRuns.mockResolvedValue([incompleteRun]);
+      mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      // First, cause a stuck run via polling to set consecutiveStuckCount to 1
+      mockRunPipeline.mockResolvedValue({ outcome: 'stuck', error: 'fail' });
+      const request = makeWorkRequest({ issueNumber: 90 });
+      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request]));
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      // The crash-resumed run completed first (resetting count to 0), then poll run stuck (count = 1)
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
     });
   });
 
@@ -793,7 +981,7 @@ describe('daemon', () => {
       expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(0);
     });
 
-    it('resets consecutive stuck count on paused outcome (#109)', async () => {
+    it('resets stuck count and pauses daemon on paused outcome (#109, #293)', async () => {
       const config = makeConfig({ maxConsecutiveStuck: 3 });
       mockLoadConfig.mockResolvedValue(ok(config));
 
@@ -812,25 +1000,50 @@ describe('daemon', () => {
       const handlers = vi.mocked(createControlServer).mock.lastCall![1];
       expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
 
-      // Second run: paused (budget/rate-limit) → should reset count
+      // Second run: paused (budget exceeded) → resets count AND pauses daemon
       mockRunPipeline.mockResolvedValueOnce({ outcome: 'paused' });
       const request2 = makeWorkRequest({ issueNumber: 2 });
       mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request2]));
 
       await vi.advanceTimersByTimeAsync(30000);
       await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
 
       expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(0);
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(true);
 
-      // Third run: stuck → count starts fresh at 1, not 2
-      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail again' });
-      const request3 = makeWorkRequest({ issueNumber: 3 });
-      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request3]));
+      // Daemon is paused — no new work will be processed, so stuck count stays 0
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(0);
+    });
+
+    it('auto-pauses daemon on budget-exceeded paused outcome (#293)', async () => {
+      const config = makeConfig({ webhooks: ['https://hooks.example.com/test'] });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      mockRunPipeline.mockResolvedValueOnce({ outcome: 'paused' });
+      const request1 = makeWorkRequest({ issueNumber: 1 });
+      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request1]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
 
       await vi.advanceTimersByTimeAsync(30000);
       await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
 
-      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(true);
+      expect(mockNotify).toHaveBeenCalledWith(
+        ['https://hooks.example.com/test'],
+        expect.objectContaining({
+          event: 'auto-paused',
+          message: expect.stringContaining('daily budget exceeded'),
+        }),
+      );
     });
 
     it('exposes consecutiveStuckCount in status endpoint', async () => {
@@ -943,6 +1156,517 @@ describe('daemon', () => {
       expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(true);
       handlers.resume();
       expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(false);
+    });
+  });
+
+  describe('bug-fix pipeline routing (#284)', () => {
+    it('polls detectBugFixWork after ready work processing', async () => {
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(mockDetector.detectBugFixWork).toHaveBeenCalledTimes(1);
+    });
+
+    it('claims and processes bug-fix work when detected', async () => {
+      const bugRequest = makeWorkRequest({
+        issueNumber: 50,
+        title: 'Fix null check',
+        labels: ['review-finding', 'P1'],
+        workType: 'bug-fix',
+      });
+      mockDetector.detectBugFixWork.mockResolvedValue(ok(bugRequest));
+      mockSelectVariant.mockReturnValue('bug');
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(mockDetector.claimBugFixWork).toHaveBeenCalledWith(50);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockRunPipeline).toHaveBeenCalled();
+    });
+
+    it('uses bug variant for bug-fix work requests', async () => {
+      const bugRequest = makeWorkRequest({
+        issueNumber: 50,
+        title: 'Fix null check',
+        labels: ['review-finding', 'P1'],
+        workType: 'bug-fix',
+      });
+      mockDetector.detectBugFixWork.mockResolvedValue(ok(bugRequest));
+      mockSelectVariant.mockReturnValue('bug');
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockStateMgr.saveRunState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          issueNumber: 50,
+          variant: 'bug',
+        }),
+      );
+    });
+
+    it('skips bug-fix detection when at max concurrency from ready work', async () => {
+      const config = makeConfig({ maxConcurrentRuns: 1 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      // Ready work fills concurrency
+      const readyRequest = makeWorkRequest({ issueNumber: 1 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([readyRequest]));
+      mockRunPipeline.mockImplementation(() => new Promise(() => {})); // never resolves
+
+      const bugRequest = makeWorkRequest({
+        issueNumber: 50,
+        labels: ['review-finding', 'P1'],
+        workType: 'bug-fix',
+      });
+      mockDetector.detectBugFixWork.mockResolvedValue(ok(bugRequest));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      // Ready work claimed, but bug-fix should be skipped due to concurrency
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(1);
+      expect(mockDetector.claimBugFixWork).not.toHaveBeenCalled();
+    });
+
+    it('skips bug-fix when claim fails', async () => {
+      const bugRequest = makeWorkRequest({
+        issueNumber: 50,
+        labels: ['review-finding', 'P1'],
+        workType: 'bug-fix',
+      });
+      mockDetector.detectBugFixWork.mockResolvedValue(ok(bugRequest));
+      mockDetector.claimBugFixWork.mockResolvedValue(err(new Error('already claimed')));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockDetector.claimBugFixWork).toHaveBeenCalledWith(50);
+      expect(mockRunPipeline).not.toHaveBeenCalled();
+    });
+
+    it('handles detectBugFixWork returning an error gracefully', async () => {
+      mockDetector.detectBugFixWork.mockResolvedValue(err(new Error('API error')));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockDetector.detectBugFixWork).toHaveBeenCalled();
+      expect(mockDetector.claimBugFixWork).not.toHaveBeenCalled();
+      expect(mockRunPipeline).not.toHaveBeenCalled();
+    });
+
+    it('does not call detectBugFixWork when paused', async () => {
+      const { startDaemon } = await loadDaemon();
+      const { createControlServer } = await import('./server.js');
+
+      await startDaemon('config.json');
+
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      handlers.pause();
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(mockDetector.detectBugFixWork).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('feature-pipeline routing (#282)', () => {
+    it('polls detectFeaturePipelineWork after bug-fix processing', async () => {
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(mockDetector.detectFeaturePipelineWork).toHaveBeenCalledTimes(1);
+    });
+
+    it('claims and processes feature-pipeline work when detected', async () => {
+      const fpRequest = makeWorkRequest({
+        issueNumber: 60,
+        title: 'Brainstorm L2 spec',
+        labels: ['feature-pipeline', 'l1-approved'],
+        workType: 'l2-brainstorm',
+      });
+      mockDetector.detectFeaturePipelineWork.mockResolvedValue(ok(fpRequest));
+      mockSelectVariant.mockReturnValue('spec-driven');
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(mockDetector.claimFeaturePipelineWork).toHaveBeenCalledWith(60, 'l2-brainstorm');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockRunPipeline).toHaveBeenCalled();
+    });
+
+    it('routes feature-pipeline work to spec-driven variant via selectVariant', async () => {
+      const fpRequest = makeWorkRequest({
+        issueNumber: 61,
+        title: 'Generate L3',
+        labels: ['feature-pipeline', 'l2-approved'],
+        workType: 'l3-generate',
+      });
+      mockDetector.detectFeaturePipelineWork.mockResolvedValue(ok(fpRequest));
+      mockSelectVariant.mockReturnValue('spec-driven');
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockStateMgr.saveRunState).toHaveBeenCalledWith(
+        expect.objectContaining({
+          issueNumber: 61,
+          variant: 'spec-driven',
+        }),
+      );
+    });
+
+    it('skips feature-pipeline detection when at max concurrency', async () => {
+      const config = makeConfig({ maxConcurrentRuns: 1 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      // Ready work fills concurrency
+      const readyRequest = makeWorkRequest({ issueNumber: 1 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([readyRequest]));
+      mockRunPipeline.mockImplementation(() => new Promise(() => {})); // never resolves
+
+      const fpRequest = makeWorkRequest({
+        issueNumber: 60,
+        labels: ['feature-pipeline', 'l1-approved'],
+        workType: 'l2-brainstorm',
+      });
+      mockDetector.detectFeaturePipelineWork.mockResolvedValue(ok(fpRequest));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(1);
+      expect(mockDetector.claimFeaturePipelineWork).not.toHaveBeenCalled();
+    });
+
+    it('skips feature-pipeline when claim fails', async () => {
+      const fpRequest = makeWorkRequest({
+        issueNumber: 60,
+        labels: ['feature-pipeline', 'l1-approved'],
+        workType: 'l2-brainstorm',
+      });
+      mockDetector.detectFeaturePipelineWork.mockResolvedValue(ok(fpRequest));
+      mockDetector.claimFeaturePipelineWork.mockResolvedValue(err(new Error('already claimed')));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockDetector.claimFeaturePipelineWork).toHaveBeenCalledWith(60, 'l2-brainstorm');
+      expect(mockRunPipeline).not.toHaveBeenCalled();
+    });
+
+    it('handles detectFeaturePipelineWork returning an error gracefully', async () => {
+      mockDetector.detectFeaturePipelineWork.mockResolvedValue(err(new Error('API error')));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockDetector.detectFeaturePipelineWork).toHaveBeenCalled();
+      expect(mockDetector.claimFeaturePipelineWork).not.toHaveBeenCalled();
+      expect(mockRunPipeline).not.toHaveBeenCalled();
+    });
+
+    it('does not call detectFeaturePipelineWork when paused', async () => {
+      const { startDaemon } = await loadDaemon();
+      const { createControlServer } = await import('./server.js');
+
+      await startDaemon('config.json');
+
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      handlers.pause();
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(mockDetector.detectFeaturePipelineWork).not.toHaveBeenCalled();
+    });
+
+    it('deduplicates: skips feature-pipeline work if same issue already claimed by ready work', async () => {
+      // Ready work detects issue #60
+      const readyRequest = makeWorkRequest({ issueNumber: 60 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([readyRequest]));
+
+      // Feature pipeline also detects issue #60
+      const fpRequest = makeWorkRequest({
+        issueNumber: 60,
+        labels: ['feature-pipeline', 'l1-approved'],
+        workType: 'l2-brainstorm',
+      });
+      mockDetector.detectFeaturePipelineWork.mockResolvedValue(ok(fpRequest));
+
+      const config = makeConfig({ maxConcurrentRuns: 5 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Ready work was claimed
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(60);
+      // Feature pipeline should NOT try to claim the same issue
+      expect(mockDetector.claimFeaturePipelineWork).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('PO agent wiring (#343)', () => {
+    it('creates PO agent with config intervals on startup', async () => {
+      const config = makeConfig({
+        coordination: {
+          ...makeConfig().coordination,
+          poInterval: 1800000,
+          poIdeaDebounce: 300000,
+        },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      expect(mockCreatePOAgent).toHaveBeenCalledTimes(1);
+      const [, poConfig] = mockCreatePOAgent.mock.calls[0]!;
+      expect((poConfig as { intervalMs: number }).intervalMs).toBe(1800000);
+      expect((poConfig as { debounceMs: number }).debounceMs).toBe(300000);
+    });
+
+    it('starts PO agent and calls start()', async () => {
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      const agent = mockCreatePOAgent.mock.results[0]!.value;
+      expect(agent.start).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops PO agent on shutdown', async () => {
+      const mockStopPO = vi.fn();
+      mockCreatePOAgent.mockReturnValue({
+        start: vi.fn().mockReturnValue(mockStopPO),
+        submitIdea: vi.fn(),
+      });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await signalHandlers['SIGTERM']!();
+
+      expect(mockStopPO).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes submitIdea handler to control server', async () => {
+      const { startDaemon } = await loadDaemon();
+      const { createControlServer } = await import('./server.js');
+
+      await startDaemon('config.json');
+
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      expect(handlers.submitIdea).toBeDefined();
+    });
+
+    it('submitIdea handler delegates to PO agent', async () => {
+      const { startDaemon } = await loadDaemon();
+      const { createControlServer } = await import('./server.js');
+
+      await startDaemon('config.json');
+
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      const result = await handlers.submitIdea!('operator', 'Build dark mode');
+
+      const agent = mockCreatePOAgent.mock.results[0]!.value;
+      expect(agent.submitIdea).toHaveBeenCalledWith('operator', 'Build dark mode');
+      expect(result.id).toBe('idea-1');
+    });
+  });
+
+  describe('review scheduler config (#334)', () => {
+    it('passes coordination.reviewerInterval to createReviewScheduler (#356)', async () => {
+      const config = makeConfig({
+        coordination: {
+          ...makeConfig().coordination,
+          reviewerInterval: 7200000,  // 2 hours — non-default
+        },
+        validation: {
+          ...makeConfig().validation,
+          proactiveThrottleThreshold: 0.75,  // non-default
+        },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      expect(mockCreateReviewScheduler).toHaveBeenCalledTimes(1);
+      const [, schedulerConfig] = mockCreateReviewScheduler.mock.calls[0]!;
+      expect(schedulerConfig.intervalMs).toBe(7200000);
+      expect(schedulerConfig.signalRatioThreshold).toBe(0.75);
+    });
+
+    it('does NOT use validation.proactiveIntervalMs for review scheduler interval (#356)', async () => {
+      const config = makeConfig({
+        coordination: {
+          ...makeConfig().coordination,
+          reviewerInterval: 5400000,  // 90 minutes
+        },
+        validation: {
+          ...makeConfig().validation,
+          proactiveIntervalMs: 900000,  // 15 minutes — must be ignored
+        },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      const [, schedulerConfig] = mockCreateReviewScheduler.mock.calls[0]!;
+      // Must use coordination.reviewerInterval, not validation.proactiveIntervalMs
+      expect(schedulerConfig.intervalMs).toBe(5400000);
+      expect(schedulerConfig.intervalMs).not.toBe(900000);
+    });
+  });
+
+  describe('coordinator wiring (#345)', () => {
+    it('does not instantiate coordinator when useCoordinator is false (default)', async () => {
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      expect(mockCreateCoordinator).not.toHaveBeenCalled();
+    });
+
+    it('instantiates coordinator when useCoordinator is true', async () => {
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      expect(mockCreateCoordinator).toHaveBeenCalledTimes(1);
+    });
+
+    it('passes CoordinatorConfig with correct values from config', async () => {
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true, tickInterval: 3000, maxAgents: 5, diskSpaceThreshold: 1_000_000_000 },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      const [, coordConfig] = mockCreateCoordinator.mock.calls[0]!;
+      expect(coordConfig).toMatchObject({ tickIntervalMs: 3000, maxAgents: 5, diskSpaceThreshold: 1_000_000_000 });
+    });
+
+    it('calls coordinator.start() and receives stop function', async () => {
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      const coordinator = mockCreateCoordinator.mock.results[0]!.value;
+      expect(coordinator.start).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT start legacy poll loop when coordinator is enabled', async () => {
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const request = makeWorkRequest({ issueNumber: 42 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(60000);
+      expect(mockDetector.detectReadyWork).not.toHaveBeenCalled();
+    });
+
+    it('does NOT start standalone PO agent when coordinator is enabled', async () => {
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      const agent = mockCreatePOAgent.mock.results[0];
+      if (agent) {
+        expect(agent.value.start).not.toHaveBeenCalled();
+      }
+    });
+
+    it('does NOT start standalone TL scheduler when coordinator is enabled', async () => {
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      const scheduler = mockCreateTechLeadScheduler.mock.results[0];
+      if (scheduler) {
+        expect(scheduler.value.start).not.toHaveBeenCalled();
+      }
+    });
+
+    it('stops coordinator on shutdown', async () => {
+      const mockStopCoordinator = vi.fn();
+      mockCreateCoordinator.mockReturnValue({ start: vi.fn().mockReturnValue(mockStopCoordinator) });
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await signalHandlers['SIGTERM']!();
+      expect(mockStopCoordinator).toHaveBeenCalledTimes(1);
+    });
+
+    it('still starts review scheduler when coordinator is enabled', async () => {
+      const config = makeConfig({
+        coordination: { ...makeConfig().coordination, useCoordinator: true },
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      expect(mockCreateReviewScheduler).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('knowledge store v1 migration wiring (#369)', () => {
+    it('passes v1GotchaPath to KnowledgeStore constructor', async () => {
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      // KnowledgeStore(path, policies, v1GotchaPath)
+      expect(knowledgeStoreCtorArgs).toHaveLength(3);
+      expect(knowledgeStoreCtorArgs[0]).toMatch(/knowledge\.jsonl$/);
+      expect(knowledgeStoreCtorArgs[2]).toMatch(/gotchas\.jsonl$/);
     });
   });
 });

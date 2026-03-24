@@ -135,6 +135,80 @@ supabase db push
 4. Run state (status, cost, logs) syncs to Supabase in real time.
 5. The dashboard displays active runs, repo status, and operator controls.
 
+## Daemon Mode
+
+The daemon control plane (`auto-claude start`) replaces the legacy shell scripts (`scripts/pipeline.sh`, `scripts/developer.sh`, `scripts/reviewer.sh`). A single process now handles all work detection modes:
+
+| Legacy script | Daemon equivalent |
+|---------------|-------------------|
+| `scripts/pipeline.sh` | Built-in feature pipeline variant (full FSM) |
+| `scripts/developer.sh` | Built-in bug-fix variant |
+| `scripts/reviewer.sh` | Not yet migrated — still runs as a standalone script |
+
+### Starting the daemon
+
+```bash
+# Via pnpm (development)
+cd packages/daemon && pnpm start
+
+# Via CLI directly
+npx tsx packages/daemon/src/main.ts start
+
+# With custom config
+auto-claude start -c /path/to/auto-claude.config.json
+```
+
+### Process supervision (macOS)
+
+On macOS, use the provided install script to set up a single launchd plist that keeps the daemon running. This replaces the 3 legacy shell-script plists (pipeline, developer, reviewer).
+
+```bash
+# Install: unloads legacy plists, substitutes env vars from .env.mac, loads daemon plist
+./scripts/install-daemon.sh
+
+# Verify
+launchctl list | grep autoclaude
+# Should show: com.autoclaude.daemon (single entry)
+
+# Rollback (if needed)
+./scripts/uninstall-daemon.sh
+```
+
+The install script reads `.env.mac` for `GITHUB_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and Supabase public keys, then substitutes them into the plist template at `scripts/com.autoclaude.daemon.plist`.
+
+The daemon writes a heartbeat file to `~/logs/claude-daemon.heartbeat` on each poll interval. Check it with:
+
+```bash
+./scripts/health.sh
+```
+
+**Plist details:**
+- Label: `com.autoclaude.daemon`
+- KeepAlive: `true` (restarts on crash)
+- ThrottleInterval: 30 seconds (prevents rapid restart loops)
+- Logs: `~/logs/claude-daemon.log`
+
+### Operator commands
+
+The daemon exposes a control API on `localhost:3847`:
+
+```bash
+auto-claude status          # Show active runs, daily cost, uptime
+auto-claude pause           # Stop claiming new work (active runs finish)
+auto-claude resume          # Resume claiming work
+auto-claude retry <issue>   # Re-run a stuck issue from the beginning
+auto-claude process <issue>  # Process a single issue (one-shot, no daemon)
+auto-claude health          # Health check (for process supervisors)
+```
+
+### Work detection modes
+
+The daemon polls the configured GitHub repo for issues and selects a pipeline variant based on labels and content:
+
+- **Feature pipeline** — issues with a `feature-pipeline` label and spec references in the body. Full pipeline: detect, classify, decompose, implement, review, holdout, integrate, deploy, test, report.
+- **Bug fix** — issues labelled as bugs. Streamlined: detect, diagnose, implement, review, integrate, deploy, test, report.
+- **Codebase review** — not yet migrated to the daemon. Currently runs via `scripts/reviewer.sh`.
+
 ## Stopping
 
 ```bash

@@ -20,18 +20,38 @@ describe('auto-claude CI workflow', () => {
 
   it('should reference existing .ts file paths in run commands', () => {
     // Extract all .ts file paths referenced in tsx/node run commands
-    const tsFileRefs = raw.matchAll(/(?:npx\s+tsx|node)\s+(\S+\.ts)/g);
+    const tsFileRefs = raw.matchAll(/(?:exec\s+tsx|npx\s+tsx|node)\s+(\S+\.ts)/g);
 
     let found = false;
     for (const match of tsFileRefs) {
       found = true;
       const filePath = match[1]!;
-      const absPath = resolve(REPO_ROOT, filePath);
+      // For pnpm --filter commands, resolve relative to the package dir
+      const filterMatch = raw.match(
+        new RegExp(`pnpm\\s+--filter\\s+(\\S+)\\s+exec\\s+tsx\\s+${filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+      );
+      let absPath: string;
+      if (filterMatch) {
+        // Resolve relative to the matched package directory
+        const pkgName = filterMatch[1]!;
+        const pkgDir = pkgName.startsWith('@')
+          ? resolve(REPO_ROOT, 'packages', pkgName.split('/')[1]!)
+          : resolve(REPO_ROOT, 'packages', pkgName);
+        absPath = resolve(pkgDir, filePath);
+      } else {
+        absPath = resolve(REPO_ROOT, filePath);
+      }
       expect(
         existsSync(absPath),
         `Workflow references ${filePath} which does not exist at ${absPath}`,
       ).toBe(true);
     }
     expect(found, 'Expected at least one .ts file reference in the workflow').toBe(true);
+  });
+
+  it('uses pnpm --filter for tsx instead of npx to pin version via lockfile (#381)', () => {
+    // npx tsx at repo root downloads an unpinned version — must use pnpm --filter
+    expect(raw).not.toMatch(/npx\s+tsx/);
+    expect(raw).toMatch(/pnpm\s+--filter\s+\S+\s+exec\s+tsx/);
   });
 });

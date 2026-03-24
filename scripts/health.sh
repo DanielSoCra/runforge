@@ -1,20 +1,47 @@
 #!/bin/bash
 echo "=== Auto-Claude Health Check ==="
 echo ""
-for role in reviewer developer pipeline; do
-  HB=~/logs/claude-$role.heartbeat
-  if [ ! -f "$HB" ]; then
-    echo "$role: NEVER RAN"
-  else
-    LAST=$(cat "$HB")
-    AGE=$(( $(date +%s) - $(date -j -f '%Y-%m-%d %H:%M:%S' "$LAST" +%s 2>/dev/null || echo 0) ))
-    if [ $AGE -gt 3600 ]; then
-      echo "$role: STALE ($AGE seconds since last heartbeat)"
+
+# Check daemon heartbeat (unified process replaces legacy per-role heartbeats)
+HB=~/logs/claude-daemon.heartbeat
+if [ ! -f "$HB" ]; then
+  echo "daemon: NEVER RAN"
+
+  # Fall back to legacy heartbeats if daemon heartbeat doesn't exist
+  echo ""
+  echo "=== Legacy Heartbeats (deprecated) ==="
+  for role in reviewer developer pipeline; do
+    LEGACY_HB=~/logs/claude-$role.heartbeat
+    if [ ! -f "$LEGACY_HB" ]; then
+      echo "$role: NEVER RAN"
     else
-      echo "$role: OK (last: $LAST)"
+      LAST=$(cat "$LEGACY_HB")
+      AGE=$(( $(date +%s) - $(date -j -f '%Y-%m-%d %H:%M:%S' "$LAST" +%s 2>/dev/null || echo 0) ))
+      if [ $AGE -gt 3600 ]; then
+        echo "$role: STALE ($AGE seconds since last heartbeat)"
+      else
+        echo "$role: OK (last: $LAST)"
+      fi
     fi
+  done
+else
+  LAST=$(cat "$HB")
+  AGE=$(( $(date +%s) - $(date -j -f '%Y-%m-%d %H:%M:%S' "$LAST" +%s 2>/dev/null || echo 0) ))
+  if [ $AGE -gt 120 ]; then
+    echo "daemon: STALE ($AGE seconds since last heartbeat)"
+  else
+    echo "daemon: OK (last: $LAST)"
   fi
-done
+
+  # Also check the control API
+  STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3847/health 2>/dev/null)
+  if [ "$STATUS" = "200" ]; then
+    echo "control API: OK (port 3847)"
+  else
+    echo "control API: UNREACHABLE (HTTP $STATUS)"
+  fi
+fi
+
 echo ""
 echo "=== Open Issues ==="
 gh issue list --label "review-finding" --state open --json number,title,labels --template '{{range .}}#{{.number}} [{{range .labels}}{{.name}} {{end}}] {{.title}}{{"\n"}}{{end}}'

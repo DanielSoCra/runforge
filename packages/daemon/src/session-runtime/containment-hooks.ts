@@ -131,15 +131,39 @@ function extractCommandPaths(command: string): string[] {
 
 /**
  * Normalize a shell command by stripping common evasion techniques:
+ * - ANSI-C quoting: $'\x63\x75\x72\x6c' → curl (SEC-33)
  * - Empty quote pairs: cu''rl → curl, cu""rl → curl
  * - Backslash escapes: cu\rl → curl
  */
 function normalizeShellCommand(command: string): string {
   return command
+    // ANSI-C quoting MUST run before backslash stripping (backslash removal
+    // would destroy \xHH sequences, making them unrecognizable)
+    .replace(/\$'([^']*)'/g, (_match, inner: string) => expandAnsiCEscapes(inner))
     .replace(/''/g, '')       // remove empty single-quote pairs
     .replace(/""/g, '')       // remove empty double-quote pairs
     .replace(/\\(?=\w)/g, '') // remove backslash before word chars
     ;
+}
+
+/**
+ * Expand ANSI-C quoting escape sequences to their literal characters.
+ * Handles \xHH (hex), \0NNN and \NNN (octal), \uHHHH and \UHHHHHHHH (unicode),
+ * and common single-char escapes (\n, \t, \r, \\, \', \").
+ */
+function expandAnsiCEscapes(s: string): string {
+  return s.replace(
+    /\\x([0-9a-fA-F]{1,2})|\\0([0-7]{1,3})|\\([1-7][0-7]{1,2})|\\U([0-9a-fA-F]{8})|\\u([0-9a-fA-F]{4})|\\([nrt\\'"])/g,
+    (_m, hex?: string, oct0?: string, oct?: string, uniLong?: string, uni?: string, single?: string) => {
+      if (hex) return String.fromCharCode(parseInt(hex, 16));
+      if (oct0) return String.fromCharCode(parseInt(oct0, 8));
+      if (oct) return String.fromCharCode(parseInt(oct, 8));
+      if (uniLong) return String.fromCodePoint(parseInt(uniLong, 16));
+      if (uni) return String.fromCharCode(parseInt(uni, 16));
+      const map: Record<string, string> = { n: '\n', r: '\r', t: '\t', '\\': '\\', "'": "'", '"': '"' };
+      return map[single!] ?? single!;
+    },
+  );
 }
 
 /**
@@ -230,6 +254,12 @@ export const DEFAULT_POLICY: ContainmentPolicy = {
     'deno ', 'bun ', 'bunx ', 'npx ',
     // Symlink creation — prevents bypassing path checks via symlink indirection
     'ln ',
+    // Shell interpreters — can fetch and execute arbitrary scripts.
+    // SEC-31: git can clone+exec, sh/bash/source can run fetched scripts,
+    // find -exec can invoke any binary while bypassing substring checks.
+    'git ', 'sh ', 'bash ', 'zsh ', 'find ', 'source ', '/bin/sh ',
+    // NOTE: POSIX dot-source (`. script.sh`) is not blocked — '. ' causes
+    // massive false positives. Mitigated by blocking fetch vectors (git/curl/wget).
     // Destructive disk commands
     'rm -rf /', 'mkfs', 'dd if=',
   ],

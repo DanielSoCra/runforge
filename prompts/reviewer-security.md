@@ -6,6 +6,7 @@ You evaluate implementation security. This review runs only for complex or secur
 
 - `{{diff}}` — the implementation diff
 - `{{rubric}}` — structured evaluation rubric
+- `{{knownIssues}}` — previously identified issues in the reviewed area (may be empty)
 
 ## Evaluation Dimensions
 
@@ -31,6 +32,12 @@ Produce a JSON review:
   "approved": false
 }
 ```
+
+## Known Issues
+
+{{knownIssues}}
+
+If known issues are listed above, pay special attention to whether the implementation addresses or reintroduces them. Flag any known issue that remains unresolved.
 
 ## Rules
 

@@ -1,8 +1,14 @@
 // src/validation/reviewer-session.ts
 import { z } from 'zod';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
-import type { GateType, GateResult, ReviewFinding } from '../types.js';
+import type { GateType, GateResult, ReviewFinding, DiscoveredIssue } from '../types.js';
+import { SessionError } from '../session-runtime/session-error.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
+
+export const DiscoveredIssueSchema = z.object({
+  artifactPatterns: z.array(z.string()),
+  description: z.string(),
+});
 
 export const ReviewFindingsSchema = z.object({
   findings: z.array(z.object({
@@ -12,6 +18,7 @@ export const ReviewFindingsSchema = z.object({
   })),
   summary: z.string(),
   approved: z.boolean(),
+  discoveredIssues: z.array(DiscoveredIssueSchema).optional(),
 });
 
 export type ReviewFindings = z.infer<typeof ReviewFindingsSchema>;
@@ -28,17 +35,21 @@ export function createReviewerGate(
   runId?: string,
   diff?: string,
   specs?: string,
+  activePlugins?: Array<{ id: string; activatedAt: string }>,
+  knowledgeContext?: string,
 ): { type: GateType; execute: (cwd: string) => Promise<GateResult> } {
   return {
     type,
     async execute(cwd: string): Promise<GateResult> {
       const variables: Record<string, string> = { rubric, cwd };
-      if (diff !== undefined) variables.diff = diff;
+      variables.diff = diff ?? '(diff unavailable — git diff failed or returned no output)';
       variables.specs = specs || 'No spec content available for this review.';
+      variables.knownIssues = knowledgeContext || '';
 
       const sessionOpts = {
         variables,
         workspacePath: cwd,
+        activePlugins,
       };
 
       // Retry logic: one retry on session failure or invalid structured output
@@ -53,6 +64,15 @@ export function createReviewerGate(
         );
 
         if (!result.ok) {
+          // Propagate budget/rate-limit/containment signals immediately — never consume a retry attempt.
+          // ARCH-AC-OPERATIONAL-SAFETY invariant: "rate limit handling never consumes a retry attempt."
+          if (result.error instanceof SessionError && (result.error.rateLimited || result.error.containmentBreach || result.error.message.startsWith('Budget exceeded'))) {
+            return {
+              gate: type,
+              passed: false,
+              findings: [{ severity: 'critical', location: 'session', description: result.error.message }],
+            };
+          }
           if (attempt === 0) continue; // retry once
           return {
             gate: type,
@@ -77,6 +97,7 @@ export function createReviewerGate(
           gate: type,
           passed: parsed.data.approved && !hasCritical,
           findings: parsed.data.findings as ReviewFinding[],
+          discoveredIssues: parsed.data.discoveredIssues,
         };
       }
 
@@ -88,4 +109,16 @@ export function createReviewerGate(
       };
     },
   };
+}
+
+/**
+ * Extract discovered issues from a gate result for write-back to the knowledge store.
+ * Returns only issues from gates that included discoveredIssues in their output.
+ * Per L3 spec: discovered issues are stored as candidate observations (lifecycleStatus: 'candidate')
+ * requiring Operator approval before becoming permanent knowledge.
+ */
+export function extractDiscoveredIssues(
+  gateResult: GateResult,
+): DiscoveredIssue[] {
+  return gateResult.discoveredIssues ?? [];
 }
