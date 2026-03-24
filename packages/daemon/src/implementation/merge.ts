@@ -14,9 +14,20 @@ export async function mergeUnitsSequentially(
   failedUnitIds?: string[],
 ): Promise<Result<void>> {
   // Merge each successful unit sequentially
-  for (const unitId of successfulUnitIds) {
+  for (let i = 0; i < successfulUnitIds.length; i++) {
+    const unitId = successfulUnitIds[i]!;
     const mergeResult = await mergeWorktree(unitId, featureBranch, repoRoot);
     if (!mergeResult.ok) {
+      // Clean up branches for remaining unmerged units (#385)
+      for (let j = i; j < successfulUnitIds.length; j++) {
+        await deleteUnitBranch(successfulUnitIds[j]!, repoRoot).catch(() => {});
+      }
+      // Also clean up failed unit branches before returning
+      if (failedUnitIds) {
+        for (const fid of failedUnitIds) {
+          await deleteUnitBranch(fid, repoRoot).catch(() => {});
+        }
+      }
       return err(new Error(`Merge failed for ${unitId}: ${mergeResult.error.message}`));
     }
     // Clean up unit branch after successful merge

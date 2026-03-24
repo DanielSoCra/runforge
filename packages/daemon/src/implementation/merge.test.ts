@@ -58,6 +58,32 @@ describe('mergeUnitsSequentially', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('cleans up remaining unmerged and failed branches on partial merge failure (#385)', async () => {
+    const { mergeWorktree, deleteUnitBranch } = await import('./worktree.js');
+    vi.mocked(mergeWorktree)
+      .mockResolvedValueOnce({ ok: true, value: undefined })
+      .mockResolvedValueOnce(err(new Error('CONFLICT')));
+
+    const result = await mergeUnitsSequentially(
+      ['unit-a', 'unit-b', 'unit-c'],
+      'feature/42',
+      '/tmp/repo',
+      ['unit-fail-1', 'unit-fail-2'],
+    );
+
+    expect(result.ok).toBe(false);
+    // unit-a branch cleaned up after successful merge
+    expect(deleteUnitBranch).toHaveBeenCalledWith('unit-a', '/tmp/repo');
+    // unit-b (failed merge) and unit-c (never attempted) should be cleaned up
+    expect(deleteUnitBranch).toHaveBeenCalledWith('unit-b', '/tmp/repo');
+    expect(deleteUnitBranch).toHaveBeenCalledWith('unit-c', '/tmp/repo');
+    // Failed unit branches should also be cleaned up
+    expect(deleteUnitBranch).toHaveBeenCalledWith('unit-fail-1', '/tmp/repo');
+    expect(deleteUnitBranch).toHaveBeenCalledWith('unit-fail-2', '/tmp/repo');
+    // Total: unit-a (post-merge) + unit-b + unit-c (remaining) + unit-fail-1 + unit-fail-2
+    expect(deleteUnitBranch).toHaveBeenCalledTimes(5);
+  });
+
   it('cleans up branches for failed units', async () => {
     const { deleteUnitBranch } = await import('./worktree.js');
     const result = await mergeUnitsSequentially(
