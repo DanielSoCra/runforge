@@ -29,6 +29,12 @@ import { join } from 'path';
 import { createReviewScheduler } from '../coordination/review-scheduler.js';
 import { createPOAgent } from '../coordination/po-agent.js';
 import { createTechLeadScheduler } from '../coordination/tech-lead-scheduler.js';
+import { createCoordinator, type CoordinatorConfig } from '../coordination/coordinator.js';
+import { createWorkClaimer } from '../coordination/work-claimer.js';
+import { createBatchManager } from '../coordination/batch-manager.js';
+import { createMergeAgent } from '../coordination/merge-agent.js';
+import { createMergeQueue } from '../coordination/merge-queue.js';
+import { statfs } from 'fs/promises';
 import { TechProposalStore } from '../coordination/tech-lead/proposal-store.js';
 import { assembleSignalDigest } from '../coordination/tech-lead/signal-digest.js';
 import { isTerminalStatus } from '../coordination/tech-lead/proposal-lifecycle.js';
@@ -74,7 +80,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   const gotchaStore = new GotchaStore(join(stateDir, 'gotchas.jsonl'));
   const knowledgeStore = new KnowledgeStore(join(stateDir, 'knowledge.jsonl'), DEFAULT_POLICIES);
   const repoRoot = process.cwd();
-  const coordinator = new ImplementationCoordinator(runtime, repoRoot, 300, 2000, gotchaStore);
+  const coordinator = new ImplementationCoordinator(runtime, repoRoot, 300, 2000, gotchaStore, knowledgeStore);
 
   // 3b. Start Remote Control
   const remoteControl = new RemoteControlManager();
@@ -148,7 +154,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       debounceMs: config.coordination.poIdeaDebounce,
     },
   );
-  const stopPOAgent = poAgent.start();
+  let stopPOAgent: (() => void) | null = null;
+  if (!config.coordination.useCoordinator) {
+    stopPOAgent = poAgent.start();
+  }
 
   // 3e. Start Tech Lead Scheduler
   const techLeadStateDir = join(stateDir, 'coordination', 'tech-lead');
@@ -230,7 +239,69 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       maxEntriesPerSection: config.coordination.techLeadMaxEntriesPerSection,
     },
   );
-  const stopTechLeadScheduler = techLeadScheduler.start();
+  let stopTechLeadScheduler: (() => void) | null = null;
+  if (!config.coordination.useCoordinator) {
+    stopTechLeadScheduler = techLeadScheduler.start();
+  }
+
+  // 3f. Coordinator (feature-flagged)
+  let stopCoordinator: (() => void) | null = null;
+  if (config.coordination.useCoordinator) {
+    const workClaimer = createWorkClaimer(stateDir);
+    const batchManager = createBatchManager(stateDir);
+    const mergeQueue = createMergeQueue(stateDir);
+    const mergeAgent = createMergeAgent(
+      {
+        queue: mergeQueue,
+        git: async (args: string[], cwd?: string) => ok('' as string),
+        resolveConflicts: async (_cwd, _cfg, _session) => ({ resolved: false, needsHuman: true }),
+        validate: async (_issueNumber, _signal) => ok(undefined as void),
+        resolveSession: async (_files, _cwd) => ok(undefined as void),
+        integrationBranch: config.branches.staging,
+        mergeWorktreePath: join(stateDir, 'coordination', 'merge-worktree'),
+      },
+      {
+        pollIntervalMs: config.coordination.mergePollInterval,
+        maxPollIntervalMs: config.coordination.mergePollMaxInterval,
+        conflictFileThreshold: config.coordination.conflictFileThreshold,
+        conflictLineThreshold: config.coordination.conflictLineThreshold,
+        validationTimeoutMs: config.coordination.mergeValidationTimeout,
+        dependencyTimeoutMs: config.coordination.mergeDependencyTimeout,
+      },
+    );
+
+    const coordinatorConfig: CoordinatorConfig = {
+      tickIntervalMs: config.coordination.tickInterval,
+      maxAgents: config.coordination.maxAgents,
+      diskSpaceThreshold: config.coordination.diskSpaceThreshold,
+      perRepoLimits: {},
+    };
+
+    const coord = createCoordinator(
+      {
+        workClaimer,
+        batchManager,
+        mergeAgent,
+        spawnWorker: async () => { /* wired in future — processWorkRequest will be called here */ },
+        checkDiskSpace: async () => {
+          try {
+            const stats = await statfs(process.cwd());
+            return stats.bavail * stats.bsize > config.coordination.diskSpaceThreshold;
+          } catch {
+            return true; // default to allowing spawns on error
+          }
+        },
+        getDispatchQueue: async () => [],
+        getActiveClaimRepoKeys: async () => new Map(),
+        onMergeAgentCrash: () => {},
+        isPaused: () => paused,
+        isShuttingDown: () => shuttingDown,
+      },
+      coordinatorConfig,
+    );
+
+    stopCoordinator = coord.start();
+  }
 
   // 4. State tracking
   let paused = false;
@@ -488,9 +559,9 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       });
   }
 
-  // 7. Legacy polling loop (only used when repoManager is null)
+  // 7. Legacy polling loop (only used when repoManager is null AND coordinator is off)
   let legacyPoller: ReturnType<typeof setInterval> | null = null;
-  if (legacyDetector) {
+  if (legacyDetector && !config.coordination.useCoordinator) {
     const detector = legacyDetector;
     legacyPoller = setInterval(async () => {
       if (paused || shuttingDown) return;
@@ -553,9 +624,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     shuttingDown = true;
     console.log('Shutting down...');
     if (legacyPoller) clearInterval(legacyPoller);
+    if (stopCoordinator) stopCoordinator();
     stopReviewScheduler();
-    stopPOAgent();
-    stopTechLeadScheduler();
+    stopPOAgent?.();
+    stopTechLeadScheduler?.();
     repoManager?.stop();
     configReader?.stop();
     const deadline = Date.now() + config.gracePeriodMs;

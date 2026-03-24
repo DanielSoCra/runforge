@@ -54,6 +54,13 @@ describe('injectKnowledge', () => {
     expect(store.matchRecords).toHaveBeenCalledWith(['src/a.ts', 'src/b.ts'], 'review');
   });
 
+  it('accepts custom session type parameter (#364)', async () => {
+    const store = makeStore([makeRecord()]);
+    const result = await injectKnowledge(['src/foo.ts'], store, 'implementation');
+    expect(store.matchRecords).toHaveBeenCalledWith(['src/foo.ts'], 'implementation');
+    expect(result).toContain('## Known Issues');
+  });
+
   it('does not call matchRecords when artifact paths are empty', async () => {
     const store = makeStore([]);
     const result = await injectKnowledge([], store);

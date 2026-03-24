@@ -187,6 +187,148 @@ describe('ImplementationCoordinator', () => {
     expect(workerCall[1].variables.pitfalls).toContain('Always check null returns from database queries');
   });
 
+  it('injects v2 KnowledgeStore records into implementation sessions (#364)', async () => {
+    const unitWithArtifacts = {
+      id: 'unit-knowledge', title: 'Unit with artifacts', specIds: [], specContent: '',
+      expectedArtifacts: ['src/models/*.ts'], dependencies: [], batchNumber: 0,
+      verificationCommand: '', context: 'implement model',
+    };
+
+    const mockKnowledgeStore = {
+      matchRecords: vi.fn().mockResolvedValue([
+        {
+          id: 'kr-1',
+          recordType: 'technical_pitfall',
+          artifactPatterns: ['src/**/*.ts'],
+          description: 'Database connections must be closed in finally blocks',
+          sourceId: 'issue-20',
+          confidence: 1,
+          createdAt: '2026-01-01T00:00:00Z',
+          hitCount: 4,
+          lifecycleStatus: 'active',
+          originType: 'autonomous',
+          priorityTier: 'normal',
+        },
+        {
+          id: 'kr-2',
+          recordType: 'operator_correction',
+          artifactPatterns: ['src/models/**'],
+          description: 'Always use parameterized queries — never string interpolation',
+          sourceId: 'issue-25',
+          confidence: 1,
+          createdAt: '2026-02-01T00:00:00Z',
+          hitCount: 2,
+          lifecycleStatus: 'active',
+          originType: 'operator',
+          priorityTier: 'elevated',
+        },
+      ]),
+    } as any;
+
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce(ok({
+          output: 'decomposed',
+          structuredData: { units: [unitWithArtifacts] },
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        } as SessionResult))
+        .mockResolvedValueOnce(ok(successResult)),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    // No v1 gotchaStore — only v2 knowledgeStore
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0, undefined, mockKnowledgeStore);
+    await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'standard',
+      specContent: 'spec',
+    });
+
+    // KnowledgeStore.matchRecords should be called with 'implementation' session type
+    expect(mockKnowledgeStore.matchRecords).toHaveBeenCalledWith(['src/models/*.ts'], 'implementation');
+
+    // Worker session should receive pitfalls containing v2 knowledge records
+    const workerCall = runtime.spawnSession.mock.calls[1];
+    expect(workerCall[1].variables.pitfalls).toContain('Database connections must be closed in finally blocks');
+    expect(workerCall[1].variables.pitfalls).toContain('Always use parameterized queries');
+    // Elevated record should be tagged IMPORTANT
+    expect(workerCall[1].variables.pitfalls).toContain('[IMPORTANT]');
+  });
+
+  it('combines v1 gotchas and v2 knowledge records when both stores are provided (#364)', async () => {
+    const unitWithArtifacts = {
+      id: 'unit-combined', title: 'Unit', specIds: [], specContent: '',
+      expectedArtifacts: ['src/models/*.ts'], dependencies: [], batchNumber: 0,
+      verificationCommand: '', context: 'implement model',
+    };
+
+    const mockGotchaStore = {
+      match: vi.fn().mockResolvedValue([
+        {
+          id: 'gotcha-1',
+          artifactPatterns: ['src/**/*.ts'],
+          description: 'V1 gotcha: check null returns',
+          sourceIssue: 10,
+          confidence: 1,
+          createdAt: '2026-01-01T00:00:00Z',
+          hitCount: 3,
+          promoted: false,
+          archived: false,
+          originType: 'autonomous' as const,
+          priorityTier: 'normal' as const,
+        },
+      ]),
+      store: vi.fn().mockResolvedValue(0),
+    } as any;
+
+    const mockKnowledgeStore = {
+      matchRecords: vi.fn().mockResolvedValue([
+        {
+          id: 'kr-1',
+          recordType: 'operator_correction',
+          artifactPatterns: ['src/models/**'],
+          description: 'V2 record: use parameterized queries',
+          sourceId: 'issue-25',
+          confidence: 1,
+          createdAt: '2026-02-01T00:00:00Z',
+          hitCount: 2,
+          lifecycleStatus: 'active',
+          originType: 'operator',
+          priorityTier: 'elevated',
+        },
+      ]),
+    } as any;
+
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce(ok({
+          output: 'decomposed',
+          structuredData: { units: [unitWithArtifacts] },
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        } as SessionResult))
+        .mockResolvedValueOnce(ok(successResult)),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0, mockGotchaStore, mockKnowledgeStore);
+    await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'standard',
+      specContent: 'spec',
+    });
+
+    // Both stores should have been queried
+    expect(mockGotchaStore.match).toHaveBeenCalledWith(['src/models/*.ts']);
+    expect(mockKnowledgeStore.matchRecords).toHaveBeenCalledWith(['src/models/*.ts'], 'implementation');
+
+    // Worker session should receive combined pitfalls from both v1 and v2
+    const workerCall = runtime.spawnSession.mock.calls[1];
+    expect(workerCall[1].variables.pitfalls).toContain('V1 gotcha: check null returns');
+    expect(workerCall[1].variables.pitfalls).toContain('V2 record: use parameterized queries');
+  });
+
   it('does not include pitfalls variable when no gotchas match (#45)', async () => {
     const unitWithArtifacts = {
       id: 'unit-no-match', title: 'Unit', specIds: [], specContent: '',

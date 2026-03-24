@@ -4,6 +4,8 @@ import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { WorkRequest, TaskGraph, Gotcha, PipelineVariant } from '../types.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import type { GotchaStore } from '../knowledge/gotcha-store.js';
+import type { KnowledgeStore } from '../knowledge/knowledge-store.js';
+import type { KnowledgeRecord } from '../knowledge/record-types.js';
 import { createSingleUnitGraph, getUnitsByBatch } from './task-graph.js';
 import { executeBatch, type UnitResult } from './batch.js';
 import { deleteUnitBranch } from './worktree.js';
@@ -29,6 +31,7 @@ export class ImplementationCoordinator {
     private maxDiffLines: number = 300,
     private staggerMs: number = 2000,
     private gotchaStore?: GotchaStore,
+    private knowledgeStore?: KnowledgeStore,
   ) {}
 
   /**
@@ -79,20 +82,38 @@ export class ImplementationCoordinator {
     for (let i = startBatch; i < batches.length; i++) {
       const batch = batches[i]!;
 
-      // Match gotchas for each unit's expected artifacts (ARCH-AC-KNOWLEDGE: Gotcha injection flow)
+      // Match knowledge records for each unit's expected artifacts (ARCH-AC-KNOWLEDGE: Record injection flow)
       const unitPitfalls = new Map<string, string>();
-      if (this.gotchaStore) {
-        for (const unit of batch) {
-          if (unit.expectedArtifacts.length > 0) {
-            try {
-              const matched = await this.gotchaStore.match(unit.expectedArtifacts);
-              if (matched.length > 0) {
-                unitPitfalls.set(unit.id, formatGotchas(matched));
-              }
-            } catch (e) {
-              console.warn(`[coordinator] Failed to match gotchas for ${unit.id}:`, e);
+      for (const unit of batch) {
+        if (unit.expectedArtifacts.length === 0) continue;
+        const sections: string[] = [];
+
+        // v1 GotchaStore (legacy)
+        if (this.gotchaStore) {
+          try {
+            const matched = await this.gotchaStore.match(unit.expectedArtifacts);
+            if (matched.length > 0) {
+              sections.push(formatGotchas(matched));
             }
+          } catch (e) {
+            console.warn(`[coordinator] Failed to match gotchas for ${unit.id}:`, e);
           }
+        }
+
+        // v2 KnowledgeStore — query with 'implementation' session type
+        if (this.knowledgeStore) {
+          try {
+            const records = await this.knowledgeStore.matchRecords(unit.expectedArtifacts, 'implementation');
+            if (records.length > 0) {
+              sections.push(formatKnowledgeRecords(records));
+            }
+          } catch (e) {
+            console.warn(`[coordinator] Failed to match knowledge records for ${unit.id}:`, e);
+          }
+        }
+
+        if (sections.length > 0) {
+          unitPitfalls.set(unit.id, sections.join('\n'));
         }
       }
 
@@ -225,5 +246,11 @@ function collectHandoffNotes(results: UnitResult[]): Map<string, string> | undef
 function formatGotchas(gotchas: Gotcha[]): string {
   return gotchas
     .map((g) => `- [${g.priorityTier === 'elevated' ? 'IMPORTANT' : 'note'}] ${g.description} (patterns: ${g.artifactPatterns.join(', ')})`)
+    .join('\n');
+}
+
+function formatKnowledgeRecords(records: KnowledgeRecord[]): string {
+  return records
+    .map((r) => `- [${r.priorityTier === 'elevated' ? 'IMPORTANT' : 'note'}] ${r.description} (patterns: ${r.artifactPatterns.join(', ')})`)
     .join('\n');
 }

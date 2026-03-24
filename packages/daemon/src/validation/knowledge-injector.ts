@@ -12,9 +12,10 @@ import type { KnowledgeStore } from '../knowledge/knowledge-store.js';
 export async function injectKnowledge(
   artifactPaths: string[],
   store: KnowledgeStore,
+  sessionType: string = 'review',
 ): Promise<string> {
   if (artifactPaths.length === 0) return '';
-  const records = await store.matchRecords(artifactPaths, 'review');
+  const records = await store.matchRecords(artifactPaths, sessionType);
   if (records.length === 0) return '';
   return '## Known Issues\n' + records.map(r => `- ${r.description}`).join('\n');
 }
