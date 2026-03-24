@@ -247,7 +247,7 @@ export async function getUpNext(): Promise<UpNextItem[]> {
           // Skip PRs (GitHub issues endpoint includes them)
           if ('pull_request' in issue && issue.pull_request) continue;
 
-          const labelNames = issue.labels.map((l) => l.name);
+          const labelNames = (issue.labels ?? []).map((l) => typeof l === 'string' ? l : l.name);
 
           // Skip actively being worked on
           if (labelNames.some((l) => ACTIVE_LABELS.has(l))) continue;

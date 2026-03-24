@@ -158,6 +158,33 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     timeoutMs: 300_000,
     budgetCap: 3,
   },
+  'l2-designer': {
+    name: 'l2-designer',
+    description: 'Generates L2 architecture spec from L1 functional spec using spec-brainstorm-l2 skill',
+    systemPrompt: '', // loaded from prompts/l2-designer.md
+    allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
+    maxTurns: 30,
+    timeoutMs: 600_000,
+    budgetCap: 5,
+  },
+  'l3-generator': {
+    name: 'l3-generator',
+    description: 'Generates L3 stack-specific spec from L2 architecture spec using spec-generate-l3 skill',
+    systemPrompt: '', // loaded from prompts/l3-generator.md
+    allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
+    maxTurns: 30,
+    timeoutMs: 600_000,
+    budgetCap: 5,
+  },
+  'compliance-reviewer': {
+    name: 'compliance-reviewer',
+    description: 'Reviews L3 spec against L1/L2 for compliance using spec-review-compliance skill',
+    systemPrompt: '', // loaded from prompts/compliance-reviewer.md
+    allowedTools: ['Read', 'Glob', 'Grep', 'Bash'],
+    maxTurns: 15,
+    timeoutMs: 300_000,
+    budgetCap: 3,
+  },
 };
 
 export class SessionRuntime {

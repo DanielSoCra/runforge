@@ -43,6 +43,9 @@ import { readJsonSafe, writeJsonSafe } from '../lib/json-store.js';
 import { mkdir } from 'fs/promises';
 import type { Proposal, IdeaSubmission } from '../coordination/types.js';
 
+let dailyRunCount = 0;
+let dailyRunCountResetDate = new Date().toISOString().split('T')[0];
+
 export async function startDaemon(configPath: string): Promise<Result<void>> {
   // 0. Validate GITHUB_TOKEN — required for Octokit (labeling, commenting, notifications)
   if (!process.env.GITHUB_TOKEN) {
@@ -475,6 +478,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       const { remote_control_url: _, ...safeState } = remoteControl.getState() ?? {};
       return {
         activeRuns,
+        dailyRunCount,
         dailyCost: costTracker.getDailyCost(),
         paused,
         consecutiveStuckCount,
@@ -684,6 +688,12 @@ async function processWorkRequest(
   knowledgeStore?: KnowledgeStore,
   repoManager?: RepoManager | null,
 ): Promise<string> {
+  const today = new Date().toISOString().split('T')[0];
+  if (today !== dailyRunCountResetDate) {
+    dailyRunCount = 0;
+    dailyRunCountResetDate = today;
+  }
+  dailyRunCount++;
   const repoConfig = configReader?.getRepoConfig(owner, repoName);
   const variant = selectVariant(request);
   const run: RunState = {
@@ -709,7 +719,7 @@ async function processWorkRequest(
 
   await stateMgr.saveRunState(run);
 
-  await runWriter?.upsertRun(run.id, {
+  await runWriter?.insertRun(run.id, {
     repo_id: repoId || null,
     repo_owner: owner,
     repo_name: repoName,

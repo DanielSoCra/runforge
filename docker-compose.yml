@@ -73,6 +73,9 @@ services:
     env_file: ${ENV_FILE:-.env.prod}
     environment:
       NODE_ENV: production
+      GIT_REPO_PATH: /repo
+    volumes:
+      - .:/repo:ro
     networks:
       - app
     extra_hosts:

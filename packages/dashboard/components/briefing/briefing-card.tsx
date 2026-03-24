@@ -100,7 +100,7 @@ export function BriefingCard({ briefing, intervalMs = 300_000 }: BriefingCardPro
               {briefing.changes.map((change, i) => (
                 <li key={i} className="text-sm">
                   <span>{change.summary}</span>
-                  {change.links.length > 0 && (
+                  {(change.links ?? []).length > 0 && (
                     <span className="ml-2 inline-flex gap-2">
                       {change.links.map((link, j) => (
                         <a

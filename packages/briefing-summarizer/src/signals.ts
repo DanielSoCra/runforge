@@ -92,7 +92,7 @@ async function collectRuns(
   const { data, error } = await supabase
     .from('runs')
     .select('*')
-    .gte('updated_at', since);
+    .gte('started_at', since);
 
   if (error) throw new Error(`Supabase runs query failed: ${error.message}`);
   return (data ?? []) as Record<string, unknown>[];
@@ -114,9 +114,11 @@ async function collectDaemonStatus(daemonUrl: string): Promise<DaemonStatus> {
 async function collectGitLog(since: string): Promise<string[]> {
   try {
     const sinceDate = new Date(since).toISOString().split('T')[0];
+    const cwd = process.env.GIT_REPO_PATH || process.cwd();
     const output = execSync(`git log --oneline --since="${sinceDate}"`, {
       encoding: 'utf-8',
       timeout: 10_000,
+      cwd,
     });
     return output
       .trim()
