@@ -448,6 +448,42 @@ describe('getUpNext', () => {
     expect(result[0].issueNumber).toBe(20);
   });
 
+  it('throws when repos query fails (ERR-32 regression — #388)', async () => {
+    mockServiceFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          is: vi.fn().mockResolvedValue({
+            data: null,
+            error: { code: '42P01', message: 'relation does not exist' },
+          }),
+        }),
+      }),
+    });
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }),
+    });
+
+    const { getUpNext } = await import('./briefing');
+    await expect(getUpNext()).rejects.toThrow('Failed to fetch repos for up-next');
+  });
+
+  it('throws when runs query fails (ERR-32 regression — #388)', async () => {
+    setupReposQuery([{ id: 'r1', owner: 'acme', name: 'web', connection_id: null }]);
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({
+          data: null,
+          error: { code: '42P01', message: 'relation does not exist' },
+        }),
+      }),
+    });
+
+    const { getUpNext } = await import('./briefing');
+    await expect(getUpNext()).rejects.toThrow('Failed to fetch runs for up-next');
+  });
+
   it('excludes issues with implementing label (already being worked on)', async () => {
     setupReposQuery([{ id: 'r1', owner: 'acme', name: 'web', connection_id: null }]);
     setupActiveRunsQuery([]);

@@ -194,11 +194,11 @@ export async function getUpNext(): Promise<UpNextItem[]> {
 
   if (reposResult.error) {
     console.error('[briefing] getUpNext repos query failed:', reposResult.error);
-    return [];
+    throw new Error('Failed to fetch repos for up-next');
   }
   if (runsResult.error) {
     console.error('[briefing] getUpNext runs query failed:', runsResult.error);
-    return [];
+    throw new Error('Failed to fetch runs for up-next');
   }
 
   const repos = (reposResult.data ?? []) as Array<{
