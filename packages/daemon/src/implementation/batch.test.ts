@@ -353,6 +353,82 @@ describe('executeBatch', () => {
     expect(result.results[0]?.cost).toBe(0.2);
   });
 
+  it('extracts and stores v2 knowledge markers when knowledgeStore is provided (#375)', async () => {
+    const outputWithMarkers = 'some output <!-- KNOWLEDGE: {"artifactPatterns":["src/**"],"description":"Always check nulls"} --> more output';
+    const resultWithKnowledge: SessionResult = {
+      output: outputWithMarkers, structuredData: null, cost: 0.5,
+      pitfallMarkers: [], exitStatus: 'completed',
+    };
+    const runtime = createMockRuntime(resultWithKnowledge);
+    const knowledgeStore = { storeRecord: vi.fn().mockResolvedValue(1) } as any;
+    const units = [makeUnit('a')];
+
+    await executeBatch(
+      units, 'feature/42', 42, runtime, '/tmp/repo', { staggerMs: 0 },
+      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, knowledgeStore,
+    );
+
+    expect(knowledgeStore.storeRecord).toHaveBeenCalledWith(
+      [{ artifactPatterns: ['src/**'], description: 'Always check nulls' }],
+      'issue-42',
+      'autonomous',
+      'technical_pitfall',
+    );
+  });
+
+  it('does not call knowledgeStore.storeRecord when output has no knowledge markers (#375)', async () => {
+    const runtime = createMockRuntime(); // successResult output is 'done' — no markers
+    const knowledgeStore = { storeRecord: vi.fn().mockResolvedValue(0) } as any;
+    const units = [makeUnit('a')];
+
+    await executeBatch(
+      units, 'feature/42', 42, runtime, '/tmp/repo', { staggerMs: 0 },
+      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, knowledgeStore,
+    );
+
+    expect(knowledgeStore.storeRecord).not.toHaveBeenCalled();
+  });
+
+  it('handles knowledgeStore.storeRecord failure gracefully (#375)', async () => {
+    const outputWithMarkers = 'output <!-- KNOWLEDGE: {"artifactPatterns":["src/foo.ts"],"description":"Avoid re-entry"} --> end';
+    const resultWithKnowledge: SessionResult = {
+      output: outputWithMarkers, structuredData: null, cost: 0.5,
+      pitfallMarkers: [], exitStatus: 'completed',
+    };
+    const runtime = createMockRuntime(resultWithKnowledge);
+    const knowledgeStore = { storeRecord: vi.fn().mockRejectedValue(new Error('disk full')) } as any;
+    const units = [makeUnit('a')];
+
+    // Should not throw — knowledge storage failure should not break the batch
+    const result = await executeBatch(
+      units, 'feature/42', 42, runtime, '/tmp/repo', { staggerMs: 0 },
+      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, knowledgeStore,
+    );
+
+    expect(result.results[0]?.exitStatus).toBe('completed');
+    expect(knowledgeStore.storeRecord).toHaveBeenCalled();
+  });
+
+  it('does not call knowledgeStore when knowledgeStore is not provided (#375)', async () => {
+    const outputWithMarkers = 'output <!-- KNOWLEDGE: {"artifactPatterns":["src/**"],"description":"test"} --> end';
+    const resultWithKnowledge: SessionResult = {
+      output: outputWithMarkers, structuredData: null, cost: 0.5,
+      pitfallMarkers: [], exitStatus: 'completed',
+    };
+    const runtime = createMockRuntime(resultWithKnowledge);
+    const units = [makeUnit('a')];
+
+    // No knowledgeStore passed — should not throw
+    const result = await executeBatch(
+      units, 'feature/42', 42, runtime, '/tmp/repo', { staggerMs: 0 },
+    );
+
+    expect(result.results[0]?.exitStatus).toBe('completed');
+  });
+
   it('propagates timed-out exit status through UnitResult (#64)', async () => {
     const timedOutResult: SessionResult = {
       output: 'timed out waiting', structuredData: null, cost: 1.2,
