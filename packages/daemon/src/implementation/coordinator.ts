@@ -133,6 +133,7 @@ export class ImplementationCoordinator {
         options?.variant,
         options?.variant === 'bug' ? { bugReport: request.body, diagnosis: options?.diagnosisDetail ?? '' } : undefined,
         options?.activePlugins,
+        this.knowledgeStore,
       );
 
       allResults.push(...batchResult.results);

@@ -3,6 +3,8 @@ import type { Unit, SessionResult, ExitStatus, PitfallMarker, PipelineVariant } 
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import type { GotchaStore } from '../knowledge/gotcha-store.js';
+import type { KnowledgeStore } from '../knowledge/knowledge-store.js';
+import { extractKnowledgeMarkers } from '../knowledge/extractor.js';
 import { SessionError } from '../session-runtime/session-error.js';
 import { createWorktree, getWorktreeDiffSize } from './worktree.js';
 import { git } from '../lib/git.js';
@@ -42,6 +44,7 @@ export async function executeBatch(
   variant?: PipelineVariant,
   bugContext?: { bugReport: string; diagnosis: string },
   activePlugins?: Array<{ id: string; activatedAt: string }>,
+  knowledgeStore?: KnowledgeStore,
 ): Promise<BatchResult> {
   const staggerMs = options?.staggerMs ?? 2000;
   const maxDiffLines = options?.maxDiffLines ?? 300;
@@ -50,7 +53,7 @@ export async function executeBatch(
     // Stagger delay between starts
     if (index > 0) await delay(index * staggerMs);
     const pitfalls = unitPitfalls?.get(unit.id) ?? '';
-    return executeUnit(unit, featureBranch, issueNumber, runtime, repoRoot, maxDiffLines, runWriter, runId, pitfalls, gotchaStore, unitHandoffs?.get(unit.id), variant, bugContext, activePlugins);
+    return executeUnit(unit, featureBranch, issueNumber, runtime, repoRoot, maxDiffLines, runWriter, runId, pitfalls, gotchaStore, unitHandoffs?.get(unit.id), variant, bugContext, activePlugins, knowledgeStore);
   });
 
   const settled = await Promise.allSettled(promises);
@@ -89,6 +92,7 @@ async function executeUnit(
   variant?: PipelineVariant,
   bugContext?: { bugReport: string; diagnosis: string },
   activePlugins?: Array<{ id: string; activatedAt: string }>,
+  knowledgeStore?: KnowledgeStore,
 ): Promise<UnitResult> {
   // 1. Create worktree
   console.log(`[batch] Creating worktree for ${unit.id} from ${featureBranch}`);
@@ -162,13 +166,31 @@ async function executeUnit(
 
     const result = sessionResult.value;
 
-    // 3. Store pitfall markers as gotchas (knowledge capture)
+    // 3. Store pitfall markers as gotchas (v1 knowledge capture)
     if (gotchaStore && result.pitfallMarkers.length > 0) {
       try {
         const stored = await gotchaStore.store(result.pitfallMarkers, issueNumber);
         if (stored > 0) console.log(`[batch] Stored ${stored} new gotchas from ${unit.id}`);
       } catch (e) {
         console.warn(`[batch] Failed to store gotchas for ${unit.id}:`, e);
+      }
+    }
+
+    // 3b. Extract and store v2 knowledge markers from session output (ARCH-AC-KNOWLEDGE: Record capture flow)
+    if (knowledgeStore && result.output) {
+      try {
+        const knowledgeMarkers = extractKnowledgeMarkers(result.output);
+        if (knowledgeMarkers.length > 0) {
+          const stored = await knowledgeStore.storeRecord(
+            knowledgeMarkers,
+            `issue-${issueNumber}`,
+            'autonomous',
+            'technical_pitfall',
+          );
+          if (stored > 0) console.log(`[batch] Stored ${stored} new knowledge records from ${unit.id}`);
+        }
+      } catch (e) {
+        console.warn(`[batch] Failed to store knowledge records for ${unit.id}:`, e);
       }
     }
 
