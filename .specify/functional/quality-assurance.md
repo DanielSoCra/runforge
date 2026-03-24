@@ -196,8 +196,9 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 **Scenario: Proactive review work detection boundary**
 - Given the proactive review agent has created a finding
 - When the work detection system scans for executable work
-- Then it excludes review findings from the executable scan
-- And findings only become executable work when the Tech Lead proposes remediation, the PO approves, the operator approves, and a new work request is created with executable labels
+- Then it excludes untriaged review findings from the executable scan
+- And findings follow the triage lifecycle: Tech Lead triages (approve/reject/promote/defer) → PO recommends or rejects → Operator confirms → finding becomes executable work
+- And findings labeled `auto-fix-approved` by the Operator bypass the triage lifecycle entirely
 
 ## Success Criteria
 
