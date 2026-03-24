@@ -780,6 +780,7 @@ describe('merge-agent', () => {
       queue.selectNext.mockRejectedValueOnce(new Error('db error'));
       queue.selectNext.mockResolvedValue(null);
 
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const agent = createMergeAgent(deps, defaultConfig);
       const stop = agent.start();
 
@@ -794,6 +795,32 @@ describe('merge-agent', () => {
       await vi.advanceTimersByTimeAsync(defaultConfig.pollIntervalMs);
       expect(queue.selectNext).toHaveBeenCalledTimes(2);
 
+      consoleSpy.mockRestore();
+      stop();
+    });
+
+    it('logs tick errors to console.error instead of swallowing silently (#389)', async () => {
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+
+      const saveError = new Error('disk write failed');
+      queue.checkDependencyTimeouts.mockRejectedValueOnce(saveError);
+      queue.checkDependencyTimeouts.mockResolvedValue([]);
+      queue.selectNext.mockResolvedValue(null);
+
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      const stop = agent.start();
+
+      await vi.advanceTimersByTimeAsync(defaultConfig.pollIntervalMs + 10);
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        '[merge-agent] tick error:',
+        'disk write failed',
+      );
+
+      consoleSpy.mockRestore();
       stop();
     });
   });
