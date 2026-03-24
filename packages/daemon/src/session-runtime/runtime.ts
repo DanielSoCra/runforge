@@ -14,7 +14,7 @@ import { readPluginsForContext } from './plugin-loader.js';
 import { DEFAULT_POLICY } from './containment-hooks.js';
 import { SessionError } from './session-error.js';
 import { auditSessionOutput } from './audit.js';
-import { renderTemplate } from '../knowledge/templates.js';
+import { renderTemplate, findUnsubstitutedVars } from '../knowledge/templates.js';
 
 /** Resolve the prompts/ directory at the repo root. */
 function promptsDir(): string {
@@ -36,6 +36,13 @@ export async function loadPromptTemplate(
   const filePath = join(promptsDir(), `${name}.md`);
   try {
     const template = await readFile(filePath, 'utf-8');
+    const missing = findUnsubstitutedVars(template, variables);
+    if (missing.length > 0) {
+      console.warn(
+        `[prompt-template] ${name}.md has unsubstituted variables: ${missing.join(', ')}. ` +
+        `These will appear as literal {{var}} in the LLM prompt.`,
+      );
+    }
     return renderTemplate(template, variables);
   } catch (e: unknown) {
     // Only treat "file not found" as a graceful fallback.
