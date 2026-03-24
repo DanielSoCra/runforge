@@ -1,9 +1,31 @@
+import { createClient } from '@/lib/supabase/server';
+import { requireUser } from '@/lib/auth';
 import { Sidebar } from '@/components/sidebar';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { ClaudePanel } from '@/components/claude-panel/claude-panel';
+import { SignOutButton } from '@/components/sign-out-button';
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export default async function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const supabase = await createClient();
+  try {
+    await requireUser(supabase);
+  } catch (e: any) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-center space-y-4">
+          <h1 className="text-2xl font-bold">Access Denied</h1>
+          <p className="text-muted-foreground">{e.message}</p>
+          <SignOutButton />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <TooltipProvider>
       <div className="flex min-h-screen">

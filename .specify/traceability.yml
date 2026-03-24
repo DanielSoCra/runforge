@@ -347,6 +347,8 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/proxy.ts
     - packages/dashboard/app/layout.tsx
     - packages/dashboard/app/(dashboard)/layout.tsx
+    - packages/dashboard/app/(dashboard)/layout.test.tsx
+    - packages/dashboard/components/sign-out-button.tsx
     - packages/dashboard/app/(dashboard)/page.tsx
     - packages/dashboard/app/login/page.tsx
     - packages/dashboard/app/auth/login/route.ts
