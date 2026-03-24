@@ -14,12 +14,13 @@ export default async function DashboardLayout({
   const supabase = await createClient();
   try {
     await requireUser(supabase);
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'An unexpected error occurred';
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center space-y-4">
           <h1 className="text-2xl font-bold">Access Denied</h1>
-          <p className="text-muted-foreground">{e.message}</p>
+          <p className="text-muted-foreground">{message}</p>
           <SignOutButton />
         </div>
       </div>
