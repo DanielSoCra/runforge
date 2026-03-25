@@ -43,6 +43,9 @@ import { readJsonSafe, writeJsonSafe } from '../lib/json-store.js';
 import { mkdir } from 'fs/promises';
 import type { Proposal, IdeaSubmission } from '../coordination/types.js';
 
+let dailyRunCount = 0;
+let dailyRunCountResetDate = new Date().toISOString().split('T')[0];
+
 export async function startDaemon(configPath: string): Promise<Result<void>> {
   // 0. Validate GITHUB_TOKEN — required for Octokit (labeling, commenting, notifications)
   if (!process.env.GITHUB_TOKEN) {
@@ -70,6 +73,18 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     configReader = new SupabaseConfigReader(supabase);
     await configReader.start(); // throws if unreachable — prevents silent misconfiguration
     runWriter = new SupabaseRunWriter(supabase);
+
+    // Mark orphaned in-progress runs as stuck (from previous daemon crash/restart)
+    const { data: orphaned, error: orphanErr } = await supabase
+      .from('runs')
+      .update({ outcome: 'stuck', completed_at: new Date().toISOString() })
+      .eq('outcome', 'in-progress')
+      .select('id');
+    if (orphanErr) {
+      console.warn('[daemon] Failed to clean orphaned runs:', orphanErr.message);
+    } else if (orphaned && orphaned.length > 0) {
+      console.log(`[daemon] Marked ${orphaned.length} orphaned in-progress runs as stuck`);
+    }
   }
 
   // 3. Initialize services
@@ -323,6 +338,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   let activeRuns = 0;
   let shuttingDown = false;
   let consecutiveStuckCount = 0;
+  const activeIssues = new Set<number>(); // Persists across poll cycles — prevents duplicate runs
 
   /** Shared handler for run outcomes — tracks stuck count and auto-pause. */
   const handleRunOutcome = (outcome: string, issueNumber: number) => {
@@ -379,18 +395,19 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         for (const request of workResult.value) {
           if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) break;
           if (paused || shuttingDown) break;
+          if (activeIssues.has(request.issueNumber)) continue; // Already running
           const claimResult = await detector.claimWork(request.issueNumber);
           if (!claimResult.ok) continue;
           claimedIssues.add(request.issueNumber);
+          activeIssues.add(request.issueNumber);
           activeRuns++;
           repoManager!.notifyRunStart(repoId);
           processWorkRequest(config, repoId, owner, name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot, knowledgeStore, repoManager)
             .then((outcome) => handleRunOutcome(outcome, request.issueNumber))
             .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
-            // CRITICAL: notifyRunEnd must be in .finally(), never only in .catch() or .then().
-            // If it is missing here, a disabled repo's poller hangs in pendingDisable forever.
             .finally(() => {
               activeRuns--;
+              activeIssues.delete(request.issueNumber);
               repoManager!.notifyRunEnd(repoId);
             });
         }
@@ -399,11 +416,12 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         if (paused || shuttingDown) return;
         if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
         const bugResult = await detector.detectBugFixWork();
-        if (bugResult.ok && bugResult.value && !claimedIssues.has(bugResult.value.issueNumber)) {
+        if (bugResult.ok && bugResult.value && !claimedIssues.has(bugResult.value.issueNumber) && !activeIssues.has(bugResult.value.issueNumber)) {
           const bugRequest = bugResult.value;
           const bugClaimResult = await detector.claimBugFixWork(bugRequest.issueNumber);
           if (bugClaimResult.ok) {
             claimedIssues.add(bugRequest.issueNumber);
+            activeIssues.add(bugRequest.issueNumber);
             activeRuns++;
             repoManager!.notifyRunStart(repoId);
             processWorkRequest(config, repoId, owner, name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot, knowledgeStore, repoManager)
@@ -411,6 +429,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
               .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
               .finally(() => {
                 activeRuns--;
+                activeIssues.delete(bugRequest.issueNumber);
                 repoManager!.notifyRunEnd(repoId);
               });
           }
@@ -420,10 +439,11 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         if (paused || shuttingDown) return;
         if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
         const fpResult = await detector.detectFeaturePipelineWork();
-        if (fpResult.ok && fpResult.value && !claimedIssues.has(fpResult.value.issueNumber)) {
+        if (fpResult.ok && fpResult.value && !claimedIssues.has(fpResult.value.issueNumber) && !activeIssues.has(fpResult.value.issueNumber)) {
           const fpRequest = fpResult.value;
           const fpClaimResult = await detector.claimFeaturePipelineWork(fpRequest.issueNumber, fpRequest.workType as FeaturePipelineWorkType);
           if (fpClaimResult.ok) {
+            activeIssues.add(fpRequest.issueNumber);
             activeRuns++;
             repoManager!.notifyRunStart(repoId);
             processWorkRequest(config, repoId, owner, name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot, knowledgeStore, repoManager)
@@ -431,6 +451,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
               .catch((e) => console.error(`Run failed for #${fpRequest.issueNumber}:`, e))
               .finally(() => {
                 activeRuns--;
+                activeIssues.delete(fpRequest.issueNumber);
                 repoManager!.notifyRunEnd(repoId);
               });
           }
@@ -475,6 +496,8 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       const { remote_control_url: _, ...safeState } = remoteControl.getState() ?? {};
       return {
         activeRuns,
+        activeIssues: [...activeIssues],
+        dailyRunCount,
         dailyCost: costTracker.getDailyCost(),
         paused,
         consecutiveStuckCount,
@@ -517,6 +540,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       continue;
     }
     console.log(`[daemon] Resuming incomplete run #${run.issueNumber} from phase '${run.phase}'`);
+    activeIssues.add(run.issueNumber);
     activeRuns++;
 
     // Look up repoId for DB-mode repo tracking
@@ -568,6 +592,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       .catch((e) => console.error(`Resumed run failed for #${run.issueNumber}:`, e))
       .finally(() => {
         activeRuns--;
+        activeIssues.delete(run.issueNumber);
         if (repoManager && resumeRepoId) {
           repoManager.notifyRunEnd(resumeRepoId);
         }
@@ -592,30 +617,33 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       for (const request of workResult.value) {
         if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) break;
         if (paused || shuttingDown) break;
+        if (activeIssues.has(request.issueNumber)) continue;
         const claimResult = await detector.claimWork(request.issueNumber);
         if (!claimResult.ok) continue;
         claimedIssues.add(request.issueNumber);
+        activeIssues.add(request.issueNumber);
         activeRuns++;
         processWorkRequest(config, '', config.repo!.owner, config.repo!.name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot, knowledgeStore)
           .then((outcome) => handleRunOutcome(outcome, request.issueNumber))
           .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
-          .finally(() => { activeRuns--; });
+          .finally(() => { activeRuns--; activeIssues.delete(request.issueNumber); });
       }
 
       // Bug-fix detection — lower priority than ready work (#284)
       if (paused || shuttingDown) return;
       if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
       const bugResult = await detector.detectBugFixWork();
-      if (bugResult.ok && bugResult.value && !claimedIssues.has(bugResult.value.issueNumber)) {
+      if (bugResult.ok && bugResult.value && !claimedIssues.has(bugResult.value.issueNumber) && !activeIssues.has(bugResult.value.issueNumber)) {
         const bugRequest = bugResult.value;
         const bugClaimResult = await detector.claimBugFixWork(bugRequest.issueNumber);
         if (bugClaimResult.ok) {
           claimedIssues.add(bugRequest.issueNumber);
+          activeIssues.add(bugRequest.issueNumber);
           activeRuns++;
           processWorkRequest(config, '', config.repo!.owner, config.repo!.name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot, knowledgeStore)
             .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber))
             .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
-            .finally(() => { activeRuns--; });
+            .finally(() => { activeRuns--; activeIssues.delete(bugRequest.issueNumber); });
         }
       }
 
@@ -623,15 +651,16 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       if (paused || shuttingDown) return;
       if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
       const fpResult = await detector.detectFeaturePipelineWork();
-      if (fpResult.ok && fpResult.value && !claimedIssues.has(fpResult.value.issueNumber)) {
+      if (fpResult.ok && fpResult.value && !claimedIssues.has(fpResult.value.issueNumber) && !activeIssues.has(fpResult.value.issueNumber)) {
         const fpRequest = fpResult.value;
         const fpClaimResult = await detector.claimFeaturePipelineWork(fpRequest.issueNumber, fpRequest.workType as FeaturePipelineWorkType);
         if (fpClaimResult.ok) {
+          activeIssues.add(fpRequest.issueNumber);
           activeRuns++;
           processWorkRequest(config, '', config.repo!.owner, config.repo!.name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot, knowledgeStore)
             .then((outcome) => handleRunOutcome(outcome, fpRequest.issueNumber))
             .catch((e) => console.error(`Run failed for #${fpRequest.issueNumber}:`, e))
-            .finally(() => { activeRuns--; });
+            .finally(() => { activeRuns--; activeIssues.delete(fpRequest.issueNumber); });
         }
       }
     }, config.pollIntervalMs);
@@ -684,6 +713,12 @@ async function processWorkRequest(
   knowledgeStore?: KnowledgeStore,
   repoManager?: RepoManager | null,
 ): Promise<string> {
+  const today = new Date().toISOString().split('T')[0];
+  if (today !== dailyRunCountResetDate) {
+    dailyRunCount = 0;
+    dailyRunCountResetDate = today;
+  }
+  dailyRunCount++;
   const repoConfig = configReader?.getRepoConfig(owner, repoName);
   const variant = selectVariant(request);
   const run: RunState = {
@@ -709,7 +744,7 @@ async function processWorkRequest(
 
   await stateMgr.saveRunState(run);
 
-  await runWriter?.upsertRun(run.id, {
+  await runWriter?.insertRun(run.id, {
     repo_id: repoId || null,
     repo_owner: owner,
     repo_name: repoName,

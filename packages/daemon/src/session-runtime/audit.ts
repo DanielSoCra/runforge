@@ -16,19 +16,10 @@ export interface AuditResult {
 export function auditSessionOutput(output: string, policy: ContainmentPolicy): AuditResult {
   const violations: string[] = [];
 
-  // 1. Check for prohibited path references
-  const paths = extractPathReferences(output);
-
-  for (const path of paths) {
-    for (const pattern of policy.blockedPaths) {
-      if (minimatch(path, pattern, { dot: true })) {
-        const msg = `Prohibited path reference: ${path} matches ${pattern}`;
-        if (!violations.includes(msg)) {
-          violations.push(msg);
-        }
-      }
-    }
-  }
+  // 1. Path reference scanning removed — preventive containment hooks (layers 1–5)
+  // already block writes to blocked paths during the session. Scanning output text
+  // for path-like strings caused false positives when sessions legitimately *discuss*
+  // daemon internals (e.g., Tech Lead planning sessions).
 
   // 2. Check for evidence of blocked command execution
   const commandViolations = detectBlockedCommandEvidence(output, policy.blockedCommands);

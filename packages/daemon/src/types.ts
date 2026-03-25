@@ -23,7 +23,8 @@ export type SessionType =
   | 'reviewer-spec' | 'reviewer-quality' | 'reviewer-security'
   | 'bug-worker' | 'diagnostician'
   | 'codebase-reviewer'
-  | 'product-owner' | 'tech-lead';
+  | 'product-owner' | 'tech-lead'
+  | 'l2-designer' | 'l3-generator' | 'compliance-reviewer';
 
 export type ExitStatus =
   | 'completed' | 'completed-with-concerns'

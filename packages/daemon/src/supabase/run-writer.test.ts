@@ -32,6 +32,11 @@ describe('toDbSessionType', () => {
   it('maps product-owner → planning', () => expect(toDbSessionType('product-owner')).toBe('planning'));
   it('maps tech-lead → planning',     () => expect(toDbSessionType('tech-lead')).toBe('planning'));
 
+  // spec-pipeline session types
+  it('maps l2-designer → planning',         () => expect(toDbSessionType('l2-designer')).toBe('planning'));
+  it('maps l3-generator → planning',        () => expect(toDbSessionType('l3-generator')).toBe('planning'));
+  it('maps compliance-reviewer → planning', () => expect(toDbSessionType('compliance-reviewer')).toBe('planning'));
+
   // exhaustiveness guard
   it('throws on unknown session type', () => {
     expect(() => toDbSessionType('nonexistent' as any)).toThrow('Unknown session type');
@@ -39,19 +44,28 @@ describe('toDbSessionType', () => {
 });
 
 describe('SupabaseRunWriter', () => {
-  const makeClient = (upsertResult: { error: { message: string } | null } = { error: null }, insertResult: { error: { message: string } | null } = { error: null }) => ({
-    from: vi.fn().mockImplementation((table: string) => {
-      if (table === 'runs') {
-        return { upsert: vi.fn().mockResolvedValue(upsertResult) };
-      }
-      return { insert: vi.fn().mockResolvedValue(insertResult) };
-    }),
-  });
+  const makeClient = (result: { error: { message: string } | null } = { error: null }) => {
+    const eqMock = vi.fn().mockResolvedValue(result);
+    return {
+      from: vi.fn().mockImplementation(() => ({
+        insert: vi.fn().mockResolvedValue(result),
+        update: vi.fn().mockReturnValue({ eq: eqMock }),
+        upsert: vi.fn().mockResolvedValue(result),
+      })),
+    };
+  };
 
-  it('upsertRun calls supabase.from("runs").upsert with the patch', async () => {
+  it('insertRun calls supabase.from("runs").insert', async () => {
     const client = makeClient();
     const writer = new SupabaseRunWriter(client as any);
-    await writer.upsertRun('run-1', { outcome: 'in-progress', repo_owner: 'org', repo_name: 'repo' });
+    await writer.insertRun('run-1', { outcome: 'in-progress', repo_owner: 'org', repo_name: 'repo' });
+    expect(client.from).toHaveBeenCalledWith('runs');
+  });
+
+  it('upsertRun calls supabase.from("runs").update with eq filter', async () => {
+    const client = makeClient();
+    const writer = new SupabaseRunWriter(client as any);
+    await writer.upsertRun('run-1', { outcome: 'in-progress' });
     expect(client.from).toHaveBeenCalledWith('runs');
   });
 
@@ -72,7 +86,7 @@ describe('SupabaseRunWriter', () => {
   });
 
   it('writeCostEvent logs warning on error, does not throw', async () => {
-    const client = makeClient(undefined, { error: { message: 'write failed' } });
+    const client = makeClient({ error: { message: 'write failed' } });
     const writer = new SupabaseRunWriter(client as any);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     await expect(writer.writeCostEvent('run-1', 'worker', 1.5)).resolves.not.toThrow();

@@ -37,6 +37,8 @@
     <string>__NEXT_PUBLIC_SUPABASE_URL__</string>
     <key>NEXT_PUBLIC_SUPABASE_ANON_KEY</key>
     <string>__NEXT_PUBLIC_SUPABASE_ANON_KEY__</string>
+    <key>ENCRYPTION_KEY</key>
+    <string>__ENCRYPTION_KEY__</string>
   </dict>
 </dict>
 </plist>

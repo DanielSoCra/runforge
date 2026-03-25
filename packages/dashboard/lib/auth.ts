@@ -5,12 +5,17 @@ type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
 /**
  * Returns true when auth is disabled (private network, single operator).
  *
- * SECURITY: Refuses AUTH_DISABLED=true in production to prevent accidental
- * deployment without authentication. Mirrors the NODE_ENV guard in getOrigin().
+ * SECURITY: Refuses AUTH_DISABLED=true in production UNLESS
+ * AUTH_DISABLED_CONFIRM_PRODUCTION=true is also set. This prevents accidental
+ * deployment without authentication while allowing intentional private-network
+ * deployments (e.g., Mac Mini on LAN).
  */
 export function isAuthDisabled(): boolean {
-  if (process.env.NODE_ENV === 'production') return false;
-  return process.env.AUTH_DISABLED === 'true';
+  if (process.env.AUTH_DISABLED !== 'true') return false;
+  if (process.env.NODE_ENV === 'production') {
+    return process.env.AUTH_DISABLED_CONFIRM_PRODUCTION === 'true';
+  }
+  return true;
 }
 
 /** Synthetic admin user for AUTH_DISABLED mode. */

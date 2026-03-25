@@ -229,8 +229,9 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
 
         // Success — reset interval
         currentInterval = config.pollIntervalMs;
-      } catch {
-        // Error — apply exponential backoff
+      } catch (tickError) {
+        // Log the error so failures are observable (#389), then apply exponential backoff
+        console.error('[merge-agent] tick error:', tickError instanceof Error ? tickError.message : tickError);
         currentInterval = Math.min(currentInterval * 2, config.maxPollIntervalMs);
       }
 

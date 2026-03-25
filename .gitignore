@@ -1,4 +1,5 @@
 .worktrees/
+.claude/worktrees/
 node_modules/
 dist/
 state/
@@ -12,4 +13,3 @@ state/
 infra/terraform.tfvars
 infra/.terraform/
 infra/*.tfstate*
-.worktrees/

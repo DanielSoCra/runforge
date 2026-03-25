@@ -78,7 +78,16 @@ export async function getActiveRuns() {
     console.error('[briefing] getActiveRuns failed:', error);
     throw new Error('Failed to fetch active runs');
   }
-  return data ?? [];
+  // Deduplicate by issue — keep latest run per issue (multiple runs can exist from retries)
+  const seen = new Map<string, typeof data[number]>();
+  for (const run of data ?? []) {
+    const key = `${run.repo_owner}/${run.repo_name}#${run.issue_number}`;
+    const existing = seen.get(key);
+    if (!existing || run.started_at > existing.started_at) {
+      seen.set(key, run);
+    }
+  }
+  return [...seen.values()];
 }
 
 /**
@@ -109,34 +118,31 @@ export async function getNeedsAttention(): Promise<AttentionItem[]> {
     throw new Error('Failed to fetch escalated runs');
   }
 
-  const items: AttentionItem[] = [];
+  // Deduplicate by issue — keep most urgent entry per issue, with latest timestamp
+  const byIssue = new Map<string, AttentionItem>();
 
-  for (const run of stuckResult.data ?? []) {
-    items.push({
-      issueNumber: run.issue_number,
-      repoOwner: run.repo_owner,
-      repoName: run.repo_name,
-      reason: 'blocked',
-      waitDuration: formatDuration(run.started_at),
-      actionLinks: [
-        { label: 'View Issue', url: `https://github.com/${run.repo_owner}/${run.repo_name}/issues/${run.issue_number}` },
-      ],
-    });
-  }
+  const addRun = (run: { issue_number: number; repo_owner: string; repo_name: string; started_at: string }, reason: AttentionItem['reason']) => {
+    const key = `${run.repo_owner}/${run.repo_name}#${run.issue_number}`;
+    const existing = byIssue.get(key);
+    // Keep the more urgent reason, or the newer run if same urgency
+    if (!existing || URGENCY_ORDER[reason] < URGENCY_ORDER[existing.reason]) {
+      byIssue.set(key, {
+        issueNumber: run.issue_number,
+        repoOwner: run.repo_owner,
+        repoName: run.repo_name,
+        reason,
+        waitDuration: formatDuration(run.started_at),
+        actionLinks: [
+          { label: 'View Issue', url: `https://github.com/${run.repo_owner}/${run.repo_name}/issues/${run.issue_number}` },
+        ],
+      });
+    }
+  };
 
-  for (const run of escalatedResult.data ?? []) {
-    items.push({
-      issueNumber: run.issue_number,
-      repoOwner: run.repo_owner,
-      repoName: run.repo_name,
-      reason: 'review',
-      waitDuration: formatDuration(run.started_at),
-      actionLinks: [
-        { label: 'View Issue', url: `https://github.com/${run.repo_owner}/${run.repo_name}/issues/${run.issue_number}` },
-      ],
-    });
-  }
+  for (const run of stuckResult.data ?? []) addRun(run, 'blocked');
+  for (const run of escalatedResult.data ?? []) addRun(run, 'review');
 
+  const items = [...byIssue.values()];
   items.sort((a, b) => URGENCY_ORDER[a.reason] - URGENCY_ORDER[b.reason]);
 
   return items;
@@ -247,7 +253,7 @@ export async function getUpNext(): Promise<UpNextItem[]> {
           // Skip PRs (GitHub issues endpoint includes them)
           if ('pull_request' in issue && issue.pull_request) continue;
 
-          const labelNames = issue.labels.map((l) => l.name);
+          const labelNames = (issue.labels ?? []).map((l) => typeof l === 'string' ? l : l.name);
 
           // Skip actively being worked on
           if (labelNames.some((l) => ACTIVE_LABELS.has(l))) continue;

@@ -24,7 +24,10 @@ export function toDbSessionType(type: SessionType): DbSessionType {
     case 'codebase-reviewer': return 'validation';
     case 'diagnostician':    return 'diagnosis';
     case 'product-owner':
-    case 'tech-lead':        return 'planning';
+    case 'tech-lead':
+    case 'l2-designer':
+    case 'l3-generator':
+    case 'compliance-reviewer': return 'planning';
     default: {
       const _exhaustive: never = type;
       throw new Error(`Unknown session type: ${_exhaustive}`);
@@ -60,10 +63,28 @@ export interface PhaseRecord {
 export class SupabaseRunWriter {
   constructor(private readonly supabase: SupabaseClient) {}
 
+  /**
+   * Insert a new run row. Use for the initial creation only.
+   * All required fields (repo_owner, repo_name, etc.) must be provided.
+   */
+  async insertRun(runId: string, data: Partial<RunRow>): Promise<void> {
+    const { error } = await this.supabase
+      .from('runs')
+      .insert({ id: runId, ...data });
+    if (error) {
+      console.warn(`[run-writer] insertRun failed for ${runId}:`, error.message);
+    }
+  }
+
+  /**
+   * Update an existing run row. Use for phase transitions and completion.
+   * Only updates provided fields — does not null out missing ones.
+   */
   async upsertRun(runId: string, patch: Partial<RunRow>): Promise<void> {
     const { error } = await this.supabase
       .from('runs')
-      .upsert({ id: runId, ...patch });
+      .update(patch)
+      .eq('id', runId);
     if (error) {
       console.warn(`[run-writer] upsertRun failed for ${runId}:`, error.message);
     }

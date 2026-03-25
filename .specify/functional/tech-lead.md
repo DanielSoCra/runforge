@@ -3,7 +3,7 @@ id: FUNC-AC-TECH-LEAD
 type: functional
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 1
 ---
 
@@ -57,6 +57,44 @@ This spec defines the technical leadership role extracted from FUNC-AC-COORDINAT
 - Given the project has external package dependencies
 - When the Tech Lead checks dependency health
 - Then it identifies outdated packages and known security advisories
+
+### Finding Triage
+
+**Scenario: Tech Lead triages new review findings**
+- Given the proactive reviewer has created findings as GitHub issues with `review-finding` label
+- When untriaged findings exist (no `tl-triaged` label)
+- Then the Tech Lead evaluates each finding for validity, proportionality, and impact
+- And produces a triage decision for each: approve, reject, promote, or defer
+
+**Scenario: Tech Lead approves a finding for fixing**
+- Given a finding is valid and the fix is proportional to the effort
+- When the Tech Lead decides to approve
+- Then it labels the issue `tl-approved` and `tl-triaged`
+- And adds a comment explaining why the fix is justified
+- And the finding enters the PO approval queue
+
+**Scenario: Tech Lead rejects a finding as invalid**
+- Given a finding is a false positive, already resolved, or not worth fixing
+- When the Tech Lead decides to reject
+- Then it closes the issue with a comment explaining the rejection reason
+- And labels it `tl-triaged` before closing
+
+**Scenario: Tech Lead promotes finding severity**
+- Given a P3 finding has higher impact than its severity suggests (e.g., it affects a critical path, or multiple P3 findings in the same area compound into a real problem)
+- When the Tech Lead decides to promote
+- Then it changes the severity label (e.g., P3 → P2) with a comment explaining the promotion reason
+- And approves the finding (applies `tl-approved` and `tl-triaged`)
+
+**Scenario: Tech Lead defers a finding**
+- Given a finding is valid but not appropriate to fix now (e.g., area is being refactored, or higher-priority work is in progress)
+- When the Tech Lead decides to defer
+- Then it labels the issue `deferred` and `tl-triaged` with a comment explaining when it should be revisited
+
+**Scenario: Tech Lead triage respects daily cap**
+- Given a configurable daily cap exists for triage approvals (default: 5)
+- When the Tech Lead has approved the maximum number of findings in the current day
+- Then it defers remaining findings to the next cycle
+- And this prevents capacity runaway from a large batch of findings
 
 ### Proposal Generation
 
@@ -177,6 +215,20 @@ This spec defines the technical leadership role extracted from FUNC-AC-COORDINAT
 - When the Tech Lead detects the pattern
 - Then it generates a technical debt proposal to address the root cause systemically
 
+### Interactive Sessions
+
+**Scenario: Operator opens interactive session with Tech Lead**
+- Given the operator starts an interactive session with the Tech Lead
+- When the session initializes
+- Then the Tech Lead loads its current state: recent findings, triage decisions, active proposals, system health signals, and failure patterns
+- And proactively surfaces technical concerns requiring operator input
+
+**Scenario: Operator discusses architecture with Tech Lead**
+- Given the operator has questions about implementation approach or technical debt
+- When they discuss during an interactive session
+- Then the Tech Lead provides analysis grounded in current codebase state, findings, and spec-code drift data
+- And any resulting decisions are recorded as proposals or triage actions
+
 ### Protocol Composition
 
 **Scenario: Batch completion triggers protocol chain**
@@ -195,6 +247,9 @@ This spec defines the technical leadership role extracted from FUNC-AC-COORDINAT
 - Spec-code drift is detected and proposed for resolution within configured cycles
 - Failure patterns are identified and proposed before the operator notices
 - All technical proposals flow through PO priority assessment before reaching operator
+- Review findings are triaged within one Tech Lead cycle of creation
+- False positives are closed with explanation rather than accumulating silently
+- P3 findings with compounding impact are promoted rather than permanently ignored
 
 ## Constraints
 
@@ -205,3 +260,6 @@ This spec defines the technical leadership role extracted from FUNC-AC-COORDINAT
 - Scheduled analysis default: 2 hours; event-driven on failures and findings
 - Proposal expiry default: 7 days
 - Recurring finding threshold: configurable, default 3
+- Finding triage daily cap: configurable, default 5 approvals per day
+- Triage decisions are always recorded as GitHub issue comments (audit trail)
+- Triage does not bypass the PO approval gate — approved findings still require PO sign-off before becoming work

@@ -10,14 +10,14 @@
   "perRunBudget": 2,
   "adapter": "cli",
   "branches": {
-    "staging": "staging",
+    "staging": "dev",
     "production": "main"
   },
   "webhooks": [],
   "validation": {
     "gate1Commands": [
-      "vitest run",
-      "tsc --noEmit"
+      "pnpm -r run test",
+      "pnpm -r run typecheck"
     ],
     "maxFixCycles": 2
   }

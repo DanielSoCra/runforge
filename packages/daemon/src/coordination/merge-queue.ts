@@ -169,7 +169,16 @@ export function createMergeQueue(stateDir: string): MergeQueue {
       }
 
       if (blockedIds.length > 0) {
-        await save(entries);
+        try {
+          await save(entries);
+        } catch (saveError) {
+          // Save failed — blocked status was not persisted (#389).
+          // Re-throw with context so the caller can log the specific failure.
+          throw new Error(
+            `Failed to persist blocked status for entries [${blockedIds.join(', ')}]: ${saveError instanceof Error ? saveError.message : saveError}`,
+            { cause: saveError },
+          );
+        }
       }
 
       return blockedIds;

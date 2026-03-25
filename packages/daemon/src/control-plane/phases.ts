@@ -97,6 +97,71 @@ export function createPhaseHandlers(
       }
     },
 
+    // --- Spec-driven pipeline phase handlers ---
+
+    'l2-design': async (run: RunState): Promise<PhaseEvent> => {
+      console.log(`[l2-design] Generating L2 architecture spec for #${workRequest.issueNumber}`);
+      const result = await runtime.spawnSession('l2-designer', {
+        variables: {
+          issueNumber: String(workRequest.issueNumber),
+          issueTitle: workRequest.title,
+          issueBody: workRequest.body,
+          owner,
+          repo: repoName,
+        },
+      }, workRequest.issueNumber, undefined, runWriter, runId);
+      if (!result.ok) {
+        console.error(`[l2-design] Session failed: ${result.error.message}`);
+        return 'failure';
+      }
+      return 'success';
+    },
+
+    'l2-gate': async (_run: RunState): Promise<PhaseEvent> => {
+      // Gate: check if L2 spec PR was created and approved.
+      // For now, auto-approve — the operator loop handles L2 review.
+      console.log(`[l2-gate] Auto-approving L2 gate for #${workRequest.issueNumber}`);
+      return 'success';
+    },
+
+    'l3-generate': async (run: RunState): Promise<PhaseEvent> => {
+      console.log(`[l3-generate] Generating L3 stack spec for #${workRequest.issueNumber}`);
+      const result = await runtime.spawnSession('l3-generator', {
+        variables: {
+          issueNumber: String(workRequest.issueNumber),
+          issueTitle: workRequest.title,
+          issueBody: workRequest.body,
+          owner,
+          repo: repoName,
+        },
+      }, workRequest.issueNumber, undefined, runWriter, runId);
+      if (!result.ok) {
+        console.error(`[l3-generate] Session failed: ${result.error.message}`);
+        return 'failure';
+      }
+      return 'success';
+    },
+
+    'l3-compliance': async (run: RunState): Promise<PhaseEvent> => {
+      console.log(`[l3-compliance] Reviewing L3 compliance for #${workRequest.issueNumber}`);
+      const result = await runtime.spawnSession('compliance-reviewer', {
+        variables: {
+          issueNumber: String(workRequest.issueNumber),
+          issueTitle: workRequest.title,
+          issueBody: workRequest.body,
+          owner,
+          repo: repoName,
+        },
+      }, workRequest.issueNumber, undefined, runWriter, runId);
+      if (!result.ok) {
+        console.error(`[l3-compliance] Session failed: ${result.error.message}`);
+        return 'failure';
+      }
+      return 'success';
+    },
+
+    // --- Standard pipeline phase handlers ---
+
     classify: async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[classify] Classifying work request #${workRequest.issueNumber}`);
       const result = await runClassify(runtime, workRequest, runWriter, runId, repoRoot, activePlugins);

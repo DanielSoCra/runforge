@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
 const REPO_ROOT = resolve(__dirname, '../../..');
@@ -38,8 +38,24 @@ describe('.dockerignore excludes secret files (#183)', () => {
   });
 });
 
+describe('docker-compose dashboard port binding (#391)', () => {
+  const raw = readFileSync(resolve(REPO_ROOT, 'docker-compose.yml'), 'utf-8');
+
+  it('should default DASHBOARD_PORT to loopback binding, not bare port', () => {
+    // A bare port like "3000" binds to 0.0.0.0 (all interfaces), exposing the
+    // dashboard publicly. The default must include 127.0.0.1 to bind to loopback.
+    expect(raw).toContain('${DASHBOARD_PORT:-127.0.0.1:3000:3000}');
+  });
+
+  it('should NOT have a bare port default for the dashboard', () => {
+    // Ensure we don't regress to a bare port number default
+    expect(raw).not.toMatch(/DASHBOARD_PORT:-\d+\}/);
+  });
+});
+
 describe('docker-compose git config', () => {
-  const composeFiles = ['docker-compose.yml', 'docker-compose.prod.yml'];
+  const composeFiles = ['docker-compose.yml', 'docker-compose.prod.yml']
+    .filter((f) => existsSync(resolve(REPO_ROOT, f)));
 
   for (const file of composeFiles) {
     describe(file, () => {

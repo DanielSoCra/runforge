@@ -236,10 +236,12 @@ const makeWorkRequest = (overrides?: Partial<WorkRequest>): WorkRequest => ({
   ...overrides,
 });
 
-// Note: dynamic import is cached after first call — all tests share the same
-// module instance. This works because mocks are reset in beforeEach/afterEach.
-// If daemon.ts ever introduces module-level state, use vi.resetModules().
-const loadDaemon = () => import('./daemon.js');
+// daemon.ts has module-level state (dailyRunCount, dailyRunCountResetDate),
+// so we reset modules before each import to ensure a fresh state per test.
+const loadDaemon = () => {
+  vi.resetModules();
+  return import('./daemon.js');
+};
 
 describe('daemon', () => {
   const signalHandlers: Record<string, (() => Promise<void>)> = {};
@@ -1156,6 +1158,38 @@ describe('daemon', () => {
       expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(true);
       handlers.resume();
       expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(false);
+    });
+
+    it('exposes dailyRunCount: 0 in status before any runs', async () => {
+      const { startDaemon } = await loadDaemon();
+      const { createControlServer } = await import('./server.js');
+
+      await startDaemon('config.json');
+
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      const status = handlers.getStatus() as Record<string, unknown>;
+
+      expect(status).toHaveProperty('dailyRunCount', 0);
+    });
+
+    it('increments dailyRunCount each time a run is processed', async () => {
+      const request = makeWorkRequest();
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+
+      const { startDaemon } = await loadDaemon();
+      const { createControlServer } = await import('./server.js');
+
+      await startDaemon('config.json');
+
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+
+      expect((handlers.getStatus() as Record<string, unknown>)['dailyRunCount']).toBe(0);
+
+      // Trigger a poll so one run is processed
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((handlers.getStatus() as Record<string, unknown>)['dailyRunCount']).toBe(1);
     });
   });
 

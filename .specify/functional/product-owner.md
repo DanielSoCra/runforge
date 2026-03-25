@@ -3,7 +3,7 @@ id: FUNC-AC-PRODUCT-OWNER
 type: functional
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 1
 ---
 
@@ -89,6 +89,56 @@ This spec defines the product ownership role extracted from FUNC-AC-COORDINATION
 - Given the PO generates any proposal
 - When it enters the proposal queue
 - Then it always requires operator approval — the system never acts on PO proposals autonomously
+
+### Finding Approval Gate
+
+**Scenario: PO evaluates Tech Lead approved finding**
+- Given the Tech Lead has labeled a review finding `tl-approved`
+- When the PO's cycle processes findings awaiting approval
+- Then the PO evaluates whether fixing this finding is justified given current priorities and capacity
+- And either recommends (adds `po-approved` label) or rejects (adds `po-rejected` label with comment)
+
+**Scenario: PO recommends finding for Operator approval**
+- Given a `tl-approved` finding aligns with current priorities
+- When the PO approves it
+- Then it adds `po-approved` label and surfaces the finding to the Operator (via briefing or interactive session)
+- And the finding becomes eligible for work detection only after the Operator confirms (adds `ready` label or equivalent)
+- And the daily recommendation count increments
+
+**Scenario: Operator confirms PO-approved finding**
+- Given a finding has both `tl-approved` and `po-approved` labels
+- When the Operator reviews the finding (via briefing, dashboard, or interactive session)
+- Then the Operator either confirms (finding becomes executable work) or rejects with reason
+- And this preserves the L0 boundary: no autonomous work creation without Operator approval
+
+**Scenario: PO rejects finding**
+- Given a `tl-approved` finding conflicts with current priorities or capacity
+- When the PO rejects it
+- Then it removes `tl-approved`, adds `po-rejected` label with a comment explaining the reason
+- And the finding remains open but is not eligible for work detection
+
+**Scenario: Tech Lead re-triages a PO-rejected finding**
+- Given a finding has been labeled `po-rejected`
+- When the Tech Lead has gathered new evidence or circumstances have changed
+- Then it may re-triage the finding with a comment referencing the prior rejection and new justification
+- And the finding re-enters the PO approval queue
+
+**Scenario: PO finding approval respects daily cap**
+- Given a configurable daily cap exists for PO finding approvals (default: 5, independent of Tech Lead triage cap)
+- When the PO has recommended the maximum number of findings in the current day
+- Then remaining `tl-approved` findings are deferred to the next cycle
+
+**Scenario: Operator overrides triage via auto-fix-approved**
+- Given the operator manually labels a finding `auto-fix-approved`
+- When work detection scans for bug-fix work
+- Then the finding is eligible regardless of TL/PO approval status
+- And this preserves the operator's ability to bypass the triage lifecycle entirely
+
+**Scenario: PO adds finding to needs-discussion queue**
+- Given a `tl-approved` finding is ambiguous — the PO cannot decide without operator input
+- When the PO encounters such a finding
+- Then it adds the finding to a needs-discussion queue with context about what input is needed
+- And the finding is surfaced in the next interactive session or briefing
 
 ### Interaction Protocols (PO Side)
 
@@ -188,12 +238,42 @@ This spec defines the product ownership role extracted from FUNC-AC-COORDINATION
 - When they submit it through the dashboard or terminal interface
 - Then the PO receives the idea and refines it into a scoped proposal on its next cycle (debounced, default 5-minute window)
 
+### Interactive Sessions
+
+**Scenario: Operator opens interactive session with PO**
+- Given the operator starts an interactive session with the PO
+- When the session initializes
+- Then the PO loads its current state: pending proposals, needs-discussion items, recent autonomous decisions, triage queue, and backlog summary
+- And proactively surfaces items requiring operator input
+
+**Scenario: PO surfaces needs-discussion items**
+- Given the needs-discussion queue contains items
+- When an interactive session starts
+- Then the PO presents each item with context: what the Tech Lead found, why the PO is uncertain, and what input would help
+- And the operator's decisions are recorded and executed immediately
+
+**Scenario: Operator makes decisions during interactive session**
+- Given the operator approves or rejects items during conversation
+- When a decision is made
+- Then the PO executes it on the spot (applies labels, closes issues, updates proposals)
+- And writes the decision to shared persistent state that the daemon reads on its next cycle
+
+**Scenario: PO reviews recent autonomous decisions with operator**
+- Given the PO has made autonomous decisions since the last interactive session
+- When the operator opens a session
+- Then the PO summarizes recent decisions for the operator's awareness
+- And the operator can override any decision they disagree with
+
 ## Success Criteria
 
 - Spec pipeline gaps are identified and proposed for advancement without operator prompting
 - Stale work items are escalated before the operator notices them
 - Operator ideas are refined into actionable proposals with business rationale and technical assessment
 - All proposals require operator approval — no autonomous work creation
+- TL-approved findings are evaluated by PO within one cycle
+- Ambiguous findings are queued for operator discussion rather than decided autonomously
+- Interactive sessions surface all pending items without operator having to ask
+- Operator decisions during interactive sessions are reflected in daemon behavior within one cycle
 
 ## Constraints
 
@@ -203,3 +283,8 @@ This spec defines the product ownership role extracted from FUNC-AC-COORDINATION
 - Operates at L0-L2 only — no code-level analysis
 - Scheduled cycle default: 30 minutes; event-driven debounce: 5 minutes
 - Proposal expiry default: 7 days
+- Finding approval daily cap: configurable, default 5 (independent of Tech Lead triage cap)
+- PO never approves findings autonomously when uncertain — uses needs-discussion queue
+- Interactive sessions share persistent state with the daemon — decisions made interactively are visible to the autonomous cycle and vice versa
+- Agent identity is defined in the repository, ensuring consistency between autonomous and interactive modes
+- L0 boundaries apply in interactive sessions — agents never write or modify specifications, even when asked by the operator
