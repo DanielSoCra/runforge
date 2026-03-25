@@ -1712,4 +1712,148 @@ describe('daemon', () => {
       expect(knowledgeStoreCtorArgs[2]).toMatch(/gotchas\.jsonl$/);
     });
   });
+
+  describe('parked outcome handling', () => {
+    it('does not increment consecutiveStuckCount on parked outcome', async () => {
+      mockRunPipeline.mockResolvedValue({ outcome: 'parked' });
+
+      const request = makeWorkRequest({ issueNumber: 10 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(0);
+    });
+
+    it('does not auto-pause daemon on parked outcome', async () => {
+      const config = makeConfig({ maxConsecutiveStuck: 1 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      mockRunPipeline.mockResolvedValue({ outcome: 'parked' });
+
+      const request = makeWorkRequest({ issueNumber: 10 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(false);
+    });
+
+    it('logs a message on parked outcome', async () => {
+      mockRunPipeline.mockResolvedValue({ outcome: 'parked' });
+
+      const request = makeWorkRequest({ issueNumber: 15 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('parked'),
+      );
+    });
+
+    it('resets consecutiveStuckCount after parked follows stuck (parked is not stuck)', async () => {
+      const config = makeConfig({ maxConsecutiveStuck: 5 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      // First run: stuck
+      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail' });
+      const request1 = makeWorkRequest({ issueNumber: 1 });
+      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request1]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
+
+      // Second run: parked — should NOT change consecutiveStuckCount
+      mockRunPipeline.mockResolvedValueOnce({ outcome: 'parked' });
+      const request2 = makeWorkRequest({ issueNumber: 2 });
+      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request2]));
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Parked is a no-op — stuck count stays at 1
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(false);
+    });
+  });
+
+  describe('retry backoff', () => {
+    it('skips issue in backoff window after it went stuck', async () => {
+      const config = makeConfig({ retryBackoffBaseMs: 60_000, retryBackoffMaxMs: 1_800_000 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      // First run: stuck
+      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail' });
+      const request = makeWorkRequest({ issueNumber: 42 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      // First poll — run goes stuck
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(42);
+
+      mockDetector.claimWork.mockClear();
+      mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+      // Second poll immediately — should be in backoff window (60s base), skip
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockDetector.claimWork).not.toHaveBeenCalledWith(42);
+    });
+
+    it('allows retry after backoff window expires', async () => {
+      const config = makeConfig({ retryBackoffBaseMs: 1_000, retryBackoffMaxMs: 5_000 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      // First run: stuck
+      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail' });
+      const request = makeWorkRequest({ issueNumber: 42 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      // First poll — run goes stuck
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(42);
+
+      mockDetector.claimWork.mockClear();
+      mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+      // Advance past backoff window (1s base, count=1 → backoff=1s)
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      // Next poll — backoff expired, should retry
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(42);
+    });
+  });
 });

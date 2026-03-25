@@ -340,8 +340,19 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   let consecutiveStuckCount = 0;
   const activeIssues = new Set<number>(); // Persists across poll cycles — prevents duplicate runs
 
+  const stuckBackoff = new Map<string, { count: number; lastStuckAt: number }>();
+  function issueKey(owner: string, repo: string, issue: number): string {
+    return `${owner}/${repo}#${issue}`;
+  }
+  function isBackedOff(key: string, cfg: Config): boolean {
+    const entry = stuckBackoff.get(key);
+    if (!entry) return false;
+    const backoff = Math.min(cfg.retryBackoffBaseMs * Math.pow(2, entry.count - 1), cfg.retryBackoffMaxMs);
+    return Date.now() - entry.lastStuckAt < backoff;
+  }
+
   /** Shared handler for run outcomes — tracks stuck count and auto-pause. */
-  const handleRunOutcome = (outcome: string, issueNumber: number) => {
+  const handleRunOutcome = (outcome: string, issueNumber: number, owner?: string, repo?: string) => {
     if (outcome === 'paused') {
       if (!paused) {
         paused = true;
@@ -356,6 +367,11 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       consecutiveStuckCount = 0;
     } else if (outcome === 'stuck') {
       consecutiveStuckCount++;
+      if (owner && repo) {
+        const key = issueKey(owner, repo, issueNumber);
+        const prev = stuckBackoff.get(key);
+        stuckBackoff.set(key, { count: (prev?.count ?? 0) + 1, lastStuckAt: Date.now() });
+      }
       console.log(`[daemon] Consecutive stuck count: ${consecutiveStuckCount}/${config.maxConsecutiveStuck}`);
       if (consecutiveStuckCount >= config.maxConsecutiveStuck && !paused) {
         paused = true;
@@ -367,7 +383,14 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           message: `Daemon auto-paused after ${consecutiveStuckCount} consecutive stuck runs`,
         });
       }
+    } else if (outcome === 'parked') {
+      // Gate-parked run — no-op, don't increment stuck or pause daemon
+      console.log(`[daemon] Run #${issueNumber} parked at gate, awaiting approval`);
     } else {
+      // Success or other non-error outcome — clear backoff for this issue
+      if (owner && repo) {
+        stuckBackoff.delete(issueKey(owner, repo, issueNumber));
+      }
       consecutiveStuckCount = 0;
     }
   };
@@ -396,6 +419,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) break;
           if (paused || shuttingDown) break;
           if (activeIssues.has(request.issueNumber)) continue; // Already running
+          if (isBackedOff(issueKey(owner, name, request.issueNumber), config)) {
+            console.log(`[daemon] Issue #${request.issueNumber} is in backoff — skipping`);
+            continue;
+          }
           const claimResult = await detector.claimWork(request.issueNumber);
           if (!claimResult.ok) continue;
           claimedIssues.add(request.issueNumber);
@@ -403,7 +430,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           activeRuns++;
           repoManager!.notifyRunStart(repoId);
           processWorkRequest(config, repoId, owner, name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot, knowledgeStore, repoManager)
-            .then((outcome) => handleRunOutcome(outcome, request.issueNumber))
+            .then((outcome) => handleRunOutcome(outcome, request.issueNumber, owner, name))
             .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
             .finally(() => {
               activeRuns--;
@@ -425,7 +452,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
             activeRuns++;
             repoManager!.notifyRunStart(repoId);
             processWorkRequest(config, repoId, owner, name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot, knowledgeStore, repoManager)
-              .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber))
+              .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber, owner, name))
               .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
               .finally(() => {
                 activeRuns--;
@@ -447,7 +474,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
             activeRuns++;
             repoManager!.notifyRunStart(repoId);
             processWorkRequest(config, repoId, owner, name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, runWriter ?? undefined, configReader ?? undefined, repoRoot, knowledgeStore, repoManager)
-              .then((outcome) => handleRunOutcome(outcome, fpRequest.issueNumber))
+              .then((outcome) => handleRunOutcome(outcome, fpRequest.issueNumber, owner, name))
               .catch((e) => console.error(`Run failed for #${fpRequest.issueNumber}:`, e))
               .finally(() => {
                 activeRuns--;
@@ -577,7 +604,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           total_cost: run.cost,
         });
 
-        handleRunOutcome(result.outcome, run.issueNumber);
+        handleRunOutcome(result.outcome, run.issueNumber, runOwner, runRepoName);
 
         if (result.outcome === 'stuck') {
           await resumeDetector.markStuck(run.issueNumber, result.error ?? 'Unknown error');
@@ -618,13 +645,17 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) break;
         if (paused || shuttingDown) break;
         if (activeIssues.has(request.issueNumber)) continue;
+        if (isBackedOff(issueKey(config.repo!.owner, config.repo!.name, request.issueNumber), config)) {
+          console.log(`[daemon] Issue #${request.issueNumber} is in backoff — skipping`);
+          continue;
+        }
         const claimResult = await detector.claimWork(request.issueNumber);
         if (!claimResult.ok) continue;
         claimedIssues.add(request.issueNumber);
         activeIssues.add(request.issueNumber);
         activeRuns++;
         processWorkRequest(config, '', config.repo!.owner, config.repo!.name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot, knowledgeStore)
-          .then((outcome) => handleRunOutcome(outcome, request.issueNumber))
+          .then((outcome) => handleRunOutcome(outcome, request.issueNumber, config.repo!.owner, config.repo!.name))
           .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
           .finally(() => { activeRuns--; activeIssues.delete(request.issueNumber); });
       }
@@ -641,7 +672,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           activeIssues.add(bugRequest.issueNumber);
           activeRuns++;
           processWorkRequest(config, '', config.repo!.owner, config.repo!.name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot, knowledgeStore)
-            .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber))
+            .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber, config.repo!.owner, config.repo!.name))
             .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
             .finally(() => { activeRuns--; activeIssues.delete(bugRequest.issueNumber); });
         }
@@ -658,7 +689,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           activeIssues.add(fpRequest.issueNumber);
           activeRuns++;
           processWorkRequest(config, '', config.repo!.owner, config.repo!.name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot, knowledgeStore)
-            .then((outcome) => handleRunOutcome(outcome, fpRequest.issueNumber))
+            .then((outcome) => handleRunOutcome(outcome, fpRequest.issueNumber, config.repo!.owner, config.repo!.name))
             .catch((e) => console.error(`Run failed for #${fpRequest.issueNumber}:`, e))
             .finally(() => { activeRuns--; activeIssues.delete(fpRequest.issueNumber); });
         }
@@ -693,6 +724,15 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   process.on('SIGINT', shutdown);
 
   return ok(undefined);
+}
+
+async function releaseClaim(octokit: Octokit, owner: string, repo: string, issueNumber: number): Promise<void> {
+  const claimLabels = ['in-progress', 'implementing', 'l2-in-progress', 'l3-in-progress', 'l3-review'];
+  for (const label of claimLabels) {
+    try {
+      await octokit.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: label });
+    } catch { /* label may not exist */ }
+  }
 }
 
 async function processWorkRequest(
@@ -755,6 +795,33 @@ async function processWorkRequest(
     started_at: run.startedAt,
     active_plugins: repoConfig?.activePlugins.map(p => p.id) ?? [],
   });
+
+  // Per-issue retry cap (DB mode only) — auto-block issues that have gone stuck too many times
+  if (runWriter) {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const { count } = await supabase
+        .from('runs')
+        .select('*', { count: 'exact', head: true })
+        .eq('issue_number', request.issueNumber)
+        .eq('repo_owner', owner)
+        .eq('repo_name', repoName)
+        .eq('outcome', 'stuck');
+      if ((count ?? 0) >= config.maxRunsPerIssue) {
+        console.warn(`[daemon] Issue #${request.issueNumber} hit retry cap (${count} stuck runs) — auto-blocking`);
+        const capOctokit = new Octokit({ auth: repoManager ? await repoManager.resolveTokenForRepo(repoId) : process.env.GITHUB_TOKEN });
+        await capOctokit.issues.addLabels({ owner, repo: repoName, issue_number: request.issueNumber, labels: ['blocked'] });
+        await capOctokit.issues.createComment({
+          owner,
+          repo: repoName,
+          issue_number: request.issueNumber,
+          body: `**Auto-blocked:** this issue went stuck ${count} times. Needs human investigation.`,
+        });
+        await releaseClaim(capOctokit, owner, repoName, request.issueNumber);
+        return 'blocked';
+      }
+    }
+  }
 
   // Build a notifyOctokit using per-connection token when available
   const resolvedToken = repoManager ? await repoManager.resolveTokenForRepo(repoId) : process.env.GITHUB_TOKEN;
