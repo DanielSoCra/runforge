@@ -89,7 +89,7 @@ export const ConfigSchema = z.object({
     samplingRate: z.number().min(0.01).max(1).default(0.1),
     minSamplingRate: z.number().min(0.01).max(1).default(0.01),
   }).default({ threshold: 10, regressionThreshold: 3, samplingRate: 0.1, minSamplingRate: 0.01 }),
-  maxConsecutiveStuck: z.number().int().min(1).default(3),
+  maxConsecutiveStuck: z.number().int().min(1).default(30),
   gracePeriodMs: z.number().int().default(30000),
   maxRunsPerIssue: z.number().int().min(1).default(3),
   retryBackoffBaseMs: z.number().int().min(1000).default(60_000),
