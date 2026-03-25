@@ -56,7 +56,6 @@ export const specDrivenTransitions: TransitionTable = {
   'l2-gate':       {
     success: { next: 'l3-generate' },
     feedback: { next: 'l2-design' },
-    unchanged: { next: 'l2-gate' },
     failure: { next: 'stuck' },
   },
   'l3-generate':   { success: { next: 'l3-compliance' }, failure: { next: 'l3-generate' } },

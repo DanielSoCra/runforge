@@ -20,7 +20,7 @@ import { git } from '../lib/git.js';
 import { join } from 'node:path';
 import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
-import { loadSpecContent, loadImplementationContent } from '../infra/spec-loader.js';
+import { loadSpecContent, loadImplementationContent, resolveCurrentSpecRefs } from '../infra/spec-loader.js';
 import { classify as runClassify } from './classifier.js';
 import { SessionError } from '../session-runtime/session-error.js';
 import { runHoldout } from '../validation/holdout.js';
@@ -101,11 +101,20 @@ export function createPhaseHandlers(
 
     'l2-design': async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[l2-design] Generating L2 architecture spec for #${workRequest.issueNumber}`);
+      const cwd = repoRoot ?? process.cwd();
+      const specifyRoot = join(cwd, '.specify');
+      let specContent = '';
+      try {
+        specContent = await loadSpecContent(workRequest.specRefs, specifyRoot);
+      } catch (e) {
+        console.warn(`[l2-design] Failed to load spec content:`, e);
+      }
       const result = await runtime.spawnSession('l2-designer', {
         variables: {
           issueNumber: String(workRequest.issueNumber),
           issueTitle: workRequest.title,
           issueBody: workRequest.body,
+          specContent,
           owner,
           repo: repoName,
         },
@@ -114,23 +123,83 @@ export function createPhaseHandlers(
         console.error(`[l2-design] Session failed: ${result.error.message}`);
         return 'failure';
       }
+      // Refresh spec refs after L2 design session generates new specs
+      try {
+        run.specRefs = await resolveCurrentSpecRefs(cwd, workRequest.specRefs);
+      } catch (e) {
+        console.warn(`[l2-design] Failed to refresh spec refs:`, e);
+      }
       return 'success';
     },
 
-    'l2-gate': async (_run: RunState): Promise<PhaseEvent> => {
-      // Gate: check if L2 spec PR was created and approved.
-      // For now, auto-approve — the operator loop handles L2 review.
-      console.log(`[l2-gate] Auto-approving L2 gate for #${workRequest.issueNumber}`);
+    'l2-gate': async (run: RunState): Promise<PhaseEvent> => {
+      console.log(`[l2-gate] Checking L2 gate labels for #${workRequest.issueNumber}`);
+      // Fetch current issue labels
+      let labels: string[];
+      try {
+        const response = await octokit.issues.get({
+          owner, repo, issue_number: workRequest.issueNumber,
+        });
+        labels = (response.data.labels as Array<{ name?: string } | string>).map(
+          (l) => (typeof l === 'string' ? l : l.name ?? ''),
+        );
+      } catch (e) {
+        console.error(`[l2-gate] Failed to fetch issue labels:`, e);
+        return 'failure';
+      }
+
+      if (labels.includes('l2-approved')) {
+        console.log(`[l2-gate] L2 approved for #${workRequest.issueNumber}`);
+        return 'success';
+      }
+      if (labels.includes('l2-rejected')) {
+        console.log(`[l2-gate] L2 rejected for #${workRequest.issueNumber} — looping back to l2-design`);
+        return 'feedback';
+      }
+      // Neither approved nor rejected — park the run
+      console.log(`[l2-gate] No L2 decision yet for #${workRequest.issueNumber} — parking`);
+      run.pausedAtPhase = 'l2-gate';
+      // First park: add label and post comment
+      if (!run.l2GateNotified) {
+        try {
+          await octokit.issues.addLabels({
+            owner, repo, issue_number: workRequest.issueNumber,
+            labels: ['awaiting-l2-review'],
+          });
+          await octokit.issues.createComment({
+            owner, repo, issue_number: workRequest.issueNumber,
+            body: `## Awaiting L2 Review\n\nThe L2 architecture spec is ready for review. Add the \`l2-approved\` label to continue, or \`l2-rejected\` to send back for revision.`,
+          });
+        } catch (e) {
+          console.error(`[l2-gate] Failed to notify:`, e);
+        }
+        run.l2GateNotified = true;
+      }
       return 'success';
     },
 
     'l3-generate': async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[l3-generate] Generating L3 stack spec for #${workRequest.issueNumber}`);
+      const cwd = repoRoot ?? process.cwd();
+      const specifyRoot = join(cwd, '.specify');
+      // Refresh spec refs before generation to pick up L2 specs
+      try {
+        run.specRefs = await resolveCurrentSpecRefs(cwd, workRequest.specRefs);
+      } catch (e) {
+        console.warn(`[l3-generate] Failed to refresh spec refs before generation:`, e);
+      }
+      let specContent = '';
+      try {
+        specContent = await loadSpecContent(run.specRefs ?? workRequest.specRefs, specifyRoot);
+      } catch (e) {
+        console.warn(`[l3-generate] Failed to load spec content:`, e);
+      }
       const result = await runtime.spawnSession('l3-generator', {
         variables: {
           issueNumber: String(workRequest.issueNumber),
           issueTitle: workRequest.title,
           issueBody: workRequest.body,
+          specContent,
           owner,
           repo: repoName,
         },
@@ -139,16 +208,31 @@ export function createPhaseHandlers(
         console.error(`[l3-generate] Session failed: ${result.error.message}`);
         return 'failure';
       }
+      // Refresh spec refs after L3 generation
+      try {
+        run.specRefs = await resolveCurrentSpecRefs(cwd, workRequest.specRefs);
+      } catch (e) {
+        console.warn(`[l3-generate] Failed to refresh spec refs after generation:`, e);
+      }
       return 'success';
     },
 
     'l3-compliance': async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[l3-compliance] Reviewing L3 compliance for #${workRequest.issueNumber}`);
+      const cwd = repoRoot ?? process.cwd();
+      const specifyRoot = join(cwd, '.specify');
+      let specContent = '';
+      try {
+        specContent = await loadSpecContent(run.specRefs ?? workRequest.specRefs, specifyRoot);
+      } catch (e) {
+        console.warn(`[l3-compliance] Failed to load spec content:`, e);
+      }
       const result = await runtime.spawnSession('compliance-reviewer', {
         variables: {
           issueNumber: String(workRequest.issueNumber),
           issueTitle: workRequest.title,
           issueBody: workRequest.body,
+          specContent,
           owner,
           repo: repoName,
         },
@@ -157,6 +241,16 @@ export function createPhaseHandlers(
         console.error(`[l3-compliance] Session failed: ${result.error.message}`);
         return 'failure';
       }
+      const structuredData = result.value?.structuredData as { passed?: boolean } | undefined;
+      if (structuredData && structuredData.passed === false) {
+        console.log(`[l3-compliance] Compliance check failed — gaps found`);
+        return 'failure';
+      }
+      return 'success';
+    },
+
+    decompose: async (_run: RunState): Promise<PhaseEvent> => {
+      console.log(`[decompose] Decompose phase for #${workRequest.issueNumber} — pass-through`);
       return 'success';
     },
 

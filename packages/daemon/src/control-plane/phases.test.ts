@@ -54,6 +54,8 @@ vi.mock('../diagnosis/router.js', () => ({
 
 vi.mock('../infra/spec-loader.js', () => ({
   loadSpecContent: vi.fn(),
+  loadImplementationContent: vi.fn(),
+  resolveCurrentSpecRefs: vi.fn(),
 }));
 
 vi.mock('./classifier.js', () => ({
@@ -89,7 +91,7 @@ import { appendResult } from './results.js';
 import { createWorkDetector } from './work-detection.js';
 import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
-import { loadSpecContent } from '../infra/spec-loader.js';
+import { loadSpecContent, loadImplementationContent, resolveCurrentSpecRefs } from '../infra/spec-loader.js';
 import { classify as runClassify } from './classifier.js';
 import { runHoldout } from '../validation/holdout.js';
 import { integrateToStaging } from './integration.js';
@@ -111,6 +113,8 @@ const mockNotify = vi.mocked(notify);
 const mockAppendResult = vi.mocked(appendResult);
 const mockCreateWorkDetector = vi.mocked(createWorkDetector);
 const mockLoadSpecContent = vi.mocked(loadSpecContent);
+const mockLoadImplementationContent = vi.mocked(loadImplementationContent);
+const mockResolveCurrentSpecRefs = vi.mocked(resolveCurrentSpecRefs);
 const mockRunHoldout = vi.mocked(runHoldout);
 const mockIntegrateToStaging = vi.mocked(integrateToStaging);
 const mockRunDeploy = vi.mocked(runDeploy);
@@ -183,6 +187,7 @@ const mockOctokit = {
   issues: {
     addLabels: vi.fn(async () => ({})),
     createComment: vi.fn(async () => ({})),
+    get: vi.fn(async () => ({ data: { labels: [] } })),
   },
 } as any;
 const mockRuntime = { spawnSession: vi.fn() } as any;
@@ -243,6 +248,11 @@ describe('createPhaseHandlers', () => {
     mockIsRiskSensitive.mockReturnValue(false);
     // Default: spec loader returns empty (no specs)
     mockLoadSpecContent.mockResolvedValue('');
+    mockLoadImplementationContent.mockResolvedValue('');
+    // Default: resolveCurrentSpecRefs returns the input refs
+    mockResolveCurrentSpecRefs.mockImplementation(async (_root, refs) => refs);
+    // Reset issues.get mock
+    mockOctokit.issues.get.mockClear();
   });
 
   afterEach(() => {
@@ -1174,6 +1184,230 @@ describe('createPhaseHandlers', () => {
     });
   });
 
+  describe('l2-design', () => {
+    it('spawns l2-designer session and returns success', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: { output: 'done', structuredData: {}, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers['l2-design']!(run);
+      expect(result).toBe('success');
+      expect(mockRuntime.spawnSession).toHaveBeenCalledWith(
+        'l2-designer',
+        expect.objectContaining({
+          variables: expect.objectContaining({
+            issueNumber: '42',
+            issueTitle: 'Test issue',
+          }),
+        }),
+        42, undefined, undefined, undefined,
+      );
+    });
+
+    it('returns failure when session fails', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: false,
+        error: new Error('session crashed'),
+      });
+      const { handlers } = createHandlers();
+      const result = await handlers['l2-design']!(makeRun());
+      expect(result).toBe('failure');
+    });
+
+    it('refreshes specRefs on the run after session', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: { output: 'done', structuredData: {}, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
+      });
+      mockResolveCurrentSpecRefs.mockResolvedValue(['FUNC-AC-FOO', 'ARCH-AC-FOO']);
+      const workReq = makeWorkRequest();
+      workReq.specRefs = ['FUNC-AC-FOO'];
+      const { handlers } = createHandlers({}, workReq);
+      const run = makeRun();
+      await handlers['l2-design']!(run);
+      expect(mockResolveCurrentSpecRefs).toHaveBeenCalled();
+      expect(run.specRefs).toEqual(['FUNC-AC-FOO', 'ARCH-AC-FOO']);
+    });
+
+    it('loads spec content and passes it to session', async () => {
+      mockLoadSpecContent.mockResolvedValue('L1 spec content here');
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: { output: 'done', structuredData: {}, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
+      });
+      const { handlers } = createHandlers();
+      await handlers['l2-design']!(makeRun());
+      expect(mockRuntime.spawnSession).toHaveBeenCalledWith(
+        'l2-designer',
+        expect.objectContaining({
+          variables: expect.objectContaining({ specContent: 'L1 spec content here' }),
+        }),
+        42, undefined, undefined, undefined,
+      );
+    });
+  });
+
+  describe('l2-gate', () => {
+    it('returns success when l2-approved label is present', async () => {
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'l2-approved' }] },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers['l2-gate']!(run);
+      expect(result).toBe('success');
+      expect(run.pausedAtPhase).toBeUndefined();
+    });
+
+    it('returns feedback when l2-rejected label is present', async () => {
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'l2-rejected' }] },
+      });
+      const { handlers } = createHandlers();
+      const result = await handlers['l2-gate']!(makeRun());
+      expect(result).toBe('feedback');
+    });
+
+    it('parks run and notifies on first check without decision labels', async () => {
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'ready' }] },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers['l2-gate']!(run);
+      expect(result).toBe('success');
+      expect(run.pausedAtPhase).toBe('l2-gate');
+      expect(run.l2GateNotified).toBe(true);
+      expect(mockOctokit.issues.addLabels).toHaveBeenCalledWith(
+        expect.objectContaining({ labels: ['awaiting-l2-review'] }),
+      );
+      expect(mockOctokit.issues.createComment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.stringContaining('Awaiting L2 Review'),
+        }),
+      );
+    });
+
+    it('parks run without re-notifying when l2GateNotified is already true', async () => {
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'ready' }] },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun({ l2GateNotified: true });
+      const result = await handlers['l2-gate']!(run);
+      expect(result).toBe('success');
+      expect(run.pausedAtPhase).toBe('l2-gate');
+      // Should NOT add labels or post comment again
+      expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
+      expect(mockOctokit.issues.createComment).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('l3-generate', () => {
+    it('spawns l3-generator session and returns success', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: { output: 'done', structuredData: {}, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers['l3-generate']!(run);
+      expect(result).toBe('success');
+      expect(mockRuntime.spawnSession).toHaveBeenCalledWith(
+        'l3-generator',
+        expect.objectContaining({
+          variables: expect.objectContaining({ issueNumber: '42' }),
+        }),
+        42, undefined, undefined, undefined,
+      );
+    });
+
+    it('returns failure when session fails', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: false,
+        error: new Error('session crashed'),
+      });
+      const { handlers } = createHandlers();
+      const result = await handlers['l3-generate']!(makeRun());
+      expect(result).toBe('failure');
+    });
+
+    it('refreshes specRefs before and after session', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: { output: 'done', structuredData: {}, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
+      });
+      mockResolveCurrentSpecRefs.mockResolvedValue(['FUNC-AC-FOO', 'ARCH-AC-FOO', 'STACK-AC-FOO']);
+      const workReq = makeWorkRequest();
+      workReq.specRefs = ['FUNC-AC-FOO'];
+      const { handlers } = createHandlers({}, workReq);
+      const run = makeRun();
+      await handlers['l3-generate']!(run);
+      // Called twice: before and after session
+      expect(mockResolveCurrentSpecRefs).toHaveBeenCalledTimes(2);
+      expect(run.specRefs).toEqual(['FUNC-AC-FOO', 'ARCH-AC-FOO', 'STACK-AC-FOO']);
+    });
+  });
+
+  describe('l3-compliance', () => {
+    it('spawns compliance-reviewer session and returns success when passed', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: { output: 'done', structuredData: { passed: true }, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
+      });
+      const { handlers } = createHandlers();
+      const result = await handlers['l3-compliance']!(makeRun());
+      expect(result).toBe('success');
+      expect(mockRuntime.spawnSession).toHaveBeenCalledWith(
+        'compliance-reviewer',
+        expect.objectContaining({
+          variables: expect.objectContaining({ issueNumber: '42' }),
+        }),
+        42, undefined, undefined, undefined,
+      );
+    });
+
+    it('returns failure when compliance check finds gaps', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: { output: 'gaps found', structuredData: { passed: false }, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
+      });
+      const { handlers } = createHandlers();
+      const result = await handlers['l3-compliance']!(makeRun());
+      expect(result).toBe('failure');
+    });
+
+    it('returns failure when session errors', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: false,
+        error: new Error('session crashed'),
+      });
+      const { handlers } = createHandlers();
+      const result = await handlers['l3-compliance']!(makeRun());
+      expect(result).toBe('failure');
+    });
+
+    it('returns success when structuredData has no passed field', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: { output: 'done', structuredData: {}, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
+      });
+      const { handlers } = createHandlers();
+      const result = await handlers['l3-compliance']!(makeRun());
+      expect(result).toBe('success');
+    });
+  });
+
+  describe('decompose', () => {
+    it('returns success always', async () => {
+      const { handlers } = createHandlers();
+      const result = await handlers.decompose!(makeRun());
+      expect(result).toBe('success');
+    });
+  });
+
   describe('createPhaseHandlers returns all expected handlers (#384)', () => {
     it('includes holdout, integrate, deploy, and test handlers', () => {
       const { handlers } = createHandlers();
@@ -1185,6 +1419,20 @@ describe('createPhaseHandlers', () => {
       expect(typeof handlers.integrate).toBe('function');
       expect(typeof handlers.deploy).toBe('function');
       expect(typeof handlers.test).toBe('function');
+    });
+
+    it('includes spec pipeline and decompose handlers', () => {
+      const { handlers } = createHandlers();
+      expect(handlers['l2-design']).toBeDefined();
+      expect(handlers['l2-gate']).toBeDefined();
+      expect(handlers['l3-generate']).toBeDefined();
+      expect(handlers['l3-compliance']).toBeDefined();
+      expect(handlers.decompose).toBeDefined();
+      expect(typeof handlers['l2-design']).toBe('function');
+      expect(typeof handlers['l2-gate']).toBe('function');
+      expect(typeof handlers['l3-generate']).toBe('function');
+      expect(typeof handlers['l3-compliance']).toBe('function');
+      expect(typeof handlers.decompose).toBe('function');
     });
   });
 });
