@@ -84,7 +84,7 @@ export function isPrivateIP(ip: string): boolean {
   // Handle IPv6-mapped IPv4 in dotted notation (e.g. ::ffff:127.0.0.1)
   const v4Mapped = bare.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
   if (v4Mapped) {
-    return isPrivateIP(v4Mapped[1]);
+    return isPrivateIP(v4Mapped[1]!);
   }
 
   for (const pattern of BLOCKED_HOSTNAME_PATTERNS) {

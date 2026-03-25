@@ -220,6 +220,12 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
   },
   diagnosis: { confidenceThreshold: 0.7 },
   warmup: { threshold: 10, regressionThreshold: 3, samplingRate: 0.1, minSamplingRate: 0.01 },
+  knowledge: {
+    systemicProposalThreshold: 3,
+    systemicProposalCooldownDays: 30,
+    candidateTimeoutDays: 14,
+    prospectiveSeverityThreshold: 5,
+  },
   maxConsecutiveStuck: 3,
   gracePeriodMs: 100,
   activePlugins: [],
