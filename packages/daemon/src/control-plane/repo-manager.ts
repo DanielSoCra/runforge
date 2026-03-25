@@ -61,7 +61,7 @@ export class RepoManager {
   async upsertRepo(owner: string, name: string): Promise<Result<string>> {
     const { data, error } = await this.supabase
       .from('repos')
-      .upsert({ owner, name, enabled: true }, { onConflict: 'owner,name' })
+      .upsert({ owner, name, enabled: true } as any, { onConflict: 'owner,name' })
       .select('id')
       .single();
     if (error) return err(new Error(error.message));
@@ -138,7 +138,7 @@ export class RepoManager {
 
   private async resolveToken(connectionId: string | null): Promise<string | undefined> {
     if (!connectionId) return process.env.GITHUB_TOKEN;
-    const { data, error } = await this.supabase.rpc('decrypt_github_token', {
+    const { data, error } = await (this.supabase.rpc as any)('decrypt_github_token', {
       p_connection_id: connectionId,
     });
     if (error) {

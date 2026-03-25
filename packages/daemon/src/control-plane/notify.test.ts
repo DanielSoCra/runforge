@@ -11,6 +11,9 @@ vi.mock('node:dns/promises', () => ({
 }));
 import { lookup as mockLookup } from 'node:dns/promises';
 
+// Cast to any to work around overloaded lookup() signature — tests always use the { all: true } variant
+const mockLookupAny = mockLookup as any;
+
 const makePayload = (overrides?: Partial<NotificationPayload>): NotificationPayload => ({
   event: 'phase.complete',
   issueNumber: 42,
@@ -308,7 +311,7 @@ describe('validateWebhookUrl', () => {
 describe('DNS rebinding protection (#153)', () => {
   beforeEach(() => {
     // Reset DNS mock to safe default before each test
-    vi.mocked(mockLookup).mockResolvedValue([{ address: '203.0.113.1', family: 4 }]);
+    vi.mocked(mockLookupAny).mockResolvedValue([{ address: '203.0.113.1', family: 4 }]);
   });
 
   it('isPrivateIP detects all private/internal address ranges', () => {
@@ -350,20 +353,20 @@ describe('DNS rebinding protection (#153)', () => {
   });
 
   it('validateResolvedIP rejects IPv6 unspecified address :: (#158)', async () => {
-    vi.mocked(mockLookup).mockResolvedValueOnce([{ address: '::', family: 6 }]);
+    vi.mocked(mockLookupAny).mockResolvedValueOnce([{ address: '::', family: 6 }]);
     const result = await validateResolvedIP('https://evil.example.com/hook');
     expect(result).toContain('blocked');
   });
 
   it('validateResolvedIP rejects when DNS resolves to a private IP', async () => {
-    vi.mocked(mockLookup).mockResolvedValueOnce([{ address: '127.0.0.1', family: 4 }]);
+    vi.mocked(mockLookupAny).mockResolvedValueOnce([{ address: '127.0.0.1', family: 4 }]);
     const result = await validateResolvedIP('https://evil.example.com/hook');
     expect(result).toContain('blocked');
     expect(result).toContain('DNS rebinding');
   });
 
   it('validateResolvedIP rejects when any resolved address is private (dual-stack)', async () => {
-    vi.mocked(mockLookup).mockResolvedValueOnce([
+    vi.mocked(mockLookupAny).mockResolvedValueOnce([
       { address: '203.0.113.1', family: 4 },
       { address: 'fd00::1', family: 6 },
     ]);
@@ -372,7 +375,7 @@ describe('DNS rebinding protection (#153)', () => {
   });
 
   it('validateResolvedIP returns error when DNS resolution fails', async () => {
-    vi.mocked(mockLookup).mockRejectedValueOnce(new Error('ENOTFOUND'));
+    vi.mocked(mockLookupAny).mockRejectedValueOnce(new Error('ENOTFOUND'));
     const result = await validateResolvedIP('https://no-such-host.invalid/hook');
     expect(result).toContain('DNS resolution failed');
   });
@@ -388,7 +391,7 @@ describe('DNS rebinding protection (#153)', () => {
   });
 
   it('notify rejects URLs that pass hostname check but resolve to private IPs', async () => {
-    vi.mocked(mockLookup).mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
+    vi.mocked(mockLookupAny).mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
 
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -412,7 +415,7 @@ describe('DNS rebinding protection (#153)', () => {
 
   it('notify re-validates resolved IP before retry to catch rebinding between attempts', async () => {
     let callCount = 0;
-    vi.mocked(mockLookup).mockImplementation(async () => {
+    vi.mocked(mockLookupAny).mockImplementation(async () => {
       callCount++;
       if (callCount === 1) {
         return [{ address: '203.0.113.1', family: 4 }];
@@ -471,7 +474,7 @@ describe('transient DNS failure retry (#159)', () => {
 
   it('retries after transient DNS failure and succeeds on retry', async () => {
     let dnsCallCount = 0;
-    vi.mocked(mockLookup).mockImplementation(async () => {
+    vi.mocked(mockLookupAny).mockImplementation(async () => {
       dnsCallCount++;
       if (dnsCallCount === 1) {
         throw new Error('ETIMEOUT');
@@ -498,7 +501,7 @@ describe('transient DNS failure retry (#159)', () => {
   });
 
   it('reports failure when DNS fails on both initial and retry attempts', async () => {
-    vi.mocked(mockLookup).mockRejectedValue(new Error('ETIMEOUT'));
+    vi.mocked(mockLookupAny).mockRejectedValue(new Error('ETIMEOUT'));
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -517,7 +520,7 @@ describe('transient DNS failure retry (#159)', () => {
   });
 
   it('does NOT retry when DNS resolves to a blocked internal address', async () => {
-    vi.mocked(mockLookup).mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
+    vi.mocked(mockLookupAny).mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -542,7 +545,7 @@ describe('notify SSRF protection (#29)', () => {
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     // Reset DNS mock to safe default
-    vi.mocked(mockLookup).mockResolvedValue([{ address: '203.0.113.1', family: 4 }]);
+    vi.mocked(mockLookupAny).mockResolvedValue([{ address: '203.0.113.1', family: 4 }]);
   });
 
   afterEach(() => {

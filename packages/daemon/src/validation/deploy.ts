@@ -62,7 +62,7 @@ export function isBlockedHealthCheckIP(ip: string): boolean {
     /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i,
   );
   if (v4Mapped) {
-    return isBlockedHealthCheckIP(v4Mapped[1]);
+    return isBlockedHealthCheckIP(v4Mapped[1]!);
   }
 
   // Allow loopback
