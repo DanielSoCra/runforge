@@ -237,8 +237,8 @@ describe('createPhaseHandlers', () => {
     // Reset octokit mocks
     mockOctokit.issues.addLabels.mockClear();
     mockOctokit.issues.createComment.mockClear();
-    // Default: git diff returns empty diff
-    mockGit.mockResolvedValue({ ok: true, value: '' });
+    // Default: git diff returns a non-empty diff so reviewer gates are created
+    mockGit.mockResolvedValue({ ok: true, value: 'diff --git a/file.ts b/file.ts\n' });
     // Default: not risk-sensitive
     mockIsRiskSensitive.mockReturnValue(false);
     // Default: spec loader returns empty (no specs)

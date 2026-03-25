@@ -296,8 +296,9 @@ describe('SessionRuntime', () => {
     expect(check.clear).toBe(true);
   });
 
-  it('returns containmentBreach error when post-session audit detects prohibited path (#222)', async () => {
-    // Simulate adapter returning output that references a blocked path
+  it('does not flag path references in output after path scanning removal (#222)', async () => {
+    // Path scanning was removed — preventive hooks handle write blocking.
+    // Output that merely mentions blocked paths should pass audit.
     mockSpawn.mockResolvedValueOnce({
       ok: true,
       value: { output: 'I read the file .specify/scenarios/secret.md and found test data', cost: 0.03 },
@@ -309,13 +310,7 @@ describe('SessionRuntime', () => {
       50,
     );
 
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBeInstanceOf(SessionError);
-      expect((result.error as SessionError).containmentBreach).toBe(true);
-      expect(result.error.message).toContain('Containment breach detected');
-      expect(result.error.message).toContain('.specify/scenarios');
-    }
+    expect(result.ok).toBe(true);
   });
 
   it('does not flag containment breach when session output is clean (#222)', async () => {
@@ -422,7 +417,8 @@ describe('SessionRuntime', () => {
     expect(result.prompt).toContain('PROMPT');
   });
 
-  it('containment breach error carries the session cost (#222)', async () => {
+  it('path references in output no longer trigger containment breach (#222)', async () => {
+    // Path scanning removed — preventive hooks handle this
     mockSpawn.mockResolvedValueOnce({
       ok: true,
       value: { output: 'Accessed state/runs/42.json for debugging', cost: 0.07 },
@@ -434,13 +430,7 @@ describe('SessionRuntime', () => {
       52,
     );
 
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBeInstanceOf(SessionError);
-      expect((result.error as SessionError).cost).toBe(0.07);
-      expect((result.error as SessionError).containmentBreach).toBe(true);
-      expect((result.error as SessionError).rateLimited).toBe(false);
-    }
+    expect(result.ok).toBe(true);
   });
 });
 
