@@ -483,6 +483,9 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
               });
           }
         }
+
+        // Parked-run resume scan — after all normal work detection (mirrors legacy poller)
+        await resumeParkedRuns().catch((e) => console.error('[daemon] resumeParkedRuns error:', e));
       },
     );
 
@@ -673,13 +676,16 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
 
       console.log(`[daemon] resumeParkedRuns: resuming #${run.issueNumber} (${hasApproved ? 'l2-approved' : 'l2-rejected'})`);
 
-      // Remove 'awaiting-l2-review' label (best-effort)
-      try {
-        await runOctokit.issues.removeLabel({
-          owner: runOwner, repo: runRepoName, issue_number: run.issueNumber,
-          name: 'awaiting-l2-review',
-        });
-      } catch { /* label may not exist — ignore */ }
+      // Remove gate labels (best-effort) — both awaiting and rejected must be cleared
+      // to prevent the l2-gate handler from immediately seeing l2-rejected on resume
+      for (const label of ['awaiting-l2-review', 'l2-rejected']) {
+        try {
+          await runOctokit.issues.removeLabel({
+            owner: runOwner, repo: runRepoName, issue_number: run.issueNumber,
+            name: label,
+          });
+        } catch { /* label may not exist — ignore */ }
+      }
 
       // Reset run state to re-enter l2-gate phase
       run.phase = 'l2-gate';
@@ -919,6 +925,11 @@ async function processWorkRequest(
           body: `**Auto-blocked:** this issue went stuck ${count} times. Needs human investigation.`,
         });
         await releaseClaim(capOctokit, owner, repoName, request.issueNumber);
+        // Finalize the in-progress DB row so it doesn't become orphaned
+        void runWriter?.upsertRun(run.id, {
+          outcome: 'stuck',
+          completed_at: new Date().toISOString(),
+        });
         return 'blocked';
       }
     }
