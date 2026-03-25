@@ -9,6 +9,31 @@ import { mkdtemp } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
+// Full handler maps for each variant — used in tests that provide partial handlers
+// but need all phases covered for the pre-flight validation check.
+const featureSimpleAllSuccess: PhaseHandlerMap = {
+  detect: async () => 'success' as PhaseEvent,
+  classify: async () => 'success:simple' as PhaseEvent,
+  implement: async () => 'success' as PhaseEvent,
+  review: async () => 'success' as PhaseEvent,
+  holdout: async () => 'success' as PhaseEvent,
+  integrate: async () => 'success' as PhaseEvent,
+  deploy: async () => 'success' as PhaseEvent,
+  test: async () => 'success' as PhaseEvent,
+  report: async () => 'success' as PhaseEvent,
+};
+
+const bugAllSuccess: PhaseHandlerMap = {
+  detect: async () => 'success' as PhaseEvent,
+  diagnose: async () => 'success' as PhaseEvent,
+  implement: async () => 'success' as PhaseEvent,
+  review: async () => 'success' as PhaseEvent,
+  integrate: async () => 'success' as PhaseEvent,
+  deploy: async () => 'success' as PhaseEvent,
+  test: async () => 'success' as PhaseEvent,
+  report: async () => 'success' as PhaseEvent,
+};
+
 const makeRun = (variant: 'feature' | 'feature-simple' | 'bug' = 'feature-simple'): RunState => ({
   id: 'test-run-id',
   issueNumber: 1,
@@ -57,8 +82,7 @@ describe('runPipeline', () => {
   it('transitions to stuck after max retries on implement failure', async () => {
     let attempts = 0;
     const handlers: PhaseHandlerMap = {
-      detect: async () => 'success' as PhaseEvent,
-      classify: async () => 'success:simple' as PhaseEvent,
+      ...featureSimpleAllSuccess,
       implement: async () => { attempts++; return 'failure' as PhaseEvent; },
     };
     const run = makeRun('feature-simple');
@@ -70,9 +94,7 @@ describe('runPipeline', () => {
 
   it('pauses when budget exceeded', async () => {
     costTracker.recordCost(1, 51); // exceed daily budget
-    const handlers: PhaseHandlerMap = {
-      detect: async () => 'success' as PhaseEvent,
-    };
+    const handlers: PhaseHandlerMap = { ...featureSimpleAllSuccess };
     const run = makeRun();
     run.phase = 'implement';
     const table = getPipeline('feature-simple');
@@ -82,9 +104,7 @@ describe('runPipeline', () => {
 
   it('transitions to stuck when per-run budget exceeded (#92)', async () => {
     costTracker.recordCost(1, 11); // exceed per-run budget of 10
-    const handlers: PhaseHandlerMap = {
-      detect: async () => 'success' as PhaseEvent,
-    };
+    const handlers: PhaseHandlerMap = { ...featureSimpleAllSuccess };
     const run = makeRun();
     run.phase = 'implement';
     const table = getPipeline('feature-simple');
@@ -95,8 +115,7 @@ describe('runPipeline', () => {
 
   it('pauses on budget-exceeded event from handler', async () => {
     const handlers: PhaseHandlerMap = {
-      detect: async () => 'success' as PhaseEvent,
-      classify: async () => 'success:simple' as PhaseEvent,
+      ...featureSimpleAllSuccess,
       implement: async () => 'budget-exceeded' as PhaseEvent,
     };
     const run = makeRun('feature-simple');
@@ -107,8 +126,7 @@ describe('runPipeline', () => {
 
   it('transitions to stuck on per-run-budget-exceeded event from handler (#92)', async () => {
     const handlers: PhaseHandlerMap = {
-      detect: async () => 'success' as PhaseEvent,
-      classify: async () => 'success:simple' as PhaseEvent,
+      ...featureSimpleAllSuccess,
       implement: async () => 'per-run-budget-exceeded' as PhaseEvent,
     };
     const run = makeRun('feature-simple');
@@ -140,8 +158,7 @@ describe('runPipeline', () => {
   it('handles exceptions in phase handlers as failures', async () => {
     let attempts = 0;
     const handlers: PhaseHandlerMap = {
-      detect: async () => 'success' as PhaseEvent,
-      classify: async () => 'success:simple' as PhaseEvent,
+      ...featureSimpleAllSuccess,
       implement: async () => { attempts++; throw new Error('boom'); },
     };
     const run = makeRun('feature-simple');
@@ -153,8 +170,7 @@ describe('runPipeline', () => {
 
   it('preserves error context from thrown exceptions in stuck result (#12)', async () => {
     const handlers: PhaseHandlerMap = {
-      detect: async () => 'success' as PhaseEvent,
-      classify: async () => 'success:simple' as PhaseEvent,
+      ...featureSimpleAllSuccess,
       implement: async () => { throw new Error('database connection refused'); },
     };
     const run = makeRun('feature-simple');
@@ -167,8 +183,7 @@ describe('runPipeline', () => {
 
   it('preserves error context from non-Error thrown values (#12)', async () => {
     const handlers: PhaseHandlerMap = {
-      detect: async () => 'success' as PhaseEvent,
-      classify: async () => 'success:simple' as PhaseEvent,
+      ...featureSimpleAllSuccess,
       implement: async () => { throw 'string error'; },
     };
     const run = makeRun('feature-simple');
@@ -182,8 +197,7 @@ describe('runPipeline', () => {
   it('transitions to stuck on circular error before exhausting retries (#88)', async () => {
     let attempts = 0;
     const handlers: PhaseHandlerMap = {
-      detect: async () => 'success' as PhaseEvent,
-      classify: async () => 'success:simple' as PhaseEvent,
+      ...featureSimpleAllSuccess,
       implement: async () => { attempts++; throw new Error('connection refused at db:5432'); },
     };
     const run = makeRun('feature-simple');
@@ -201,8 +215,7 @@ describe('runPipeline', () => {
   it('does not trigger circular detection for distinct errors (#88)', async () => {
     let attempts = 0;
     const handlers: PhaseHandlerMap = {
-      detect: async () => 'success' as PhaseEvent,
-      classify: async () => 'success:simple' as PhaseEvent,
+      ...featureSimpleAllSuccess,
       implement: async () => {
         attempts++;
         // Each attempt throws a different error — no circular pattern
@@ -221,8 +234,7 @@ describe('runPipeline', () => {
   it('records error hashes on run.errorHashes across failures (#88)', async () => {
     let attempts = 0;
     const handlers: PhaseHandlerMap = {
-      detect: async () => 'success' as PhaseEvent,
-      classify: async () => 'success:simple' as PhaseEvent,
+      ...featureSimpleAllSuccess,
       implement: async () => { attempts++; throw new Error('same error every time'); },
     };
     const run = makeRun('feature-simple');
@@ -239,8 +251,7 @@ describe('runPipeline', () => {
     let implementCalls = 0;
     let reviewCalls = 0;
     const handlers: PhaseHandlerMap = {
-      detect: async () => 'success' as PhaseEvent,
-      classify: async () => 'success:simple' as PhaseEvent,
+      ...featureSimpleAllSuccess,
       implement: async () => {
         implementCalls++;
         // Fail twice, then succeed, then after review failure, fail 3 more times
@@ -337,8 +348,7 @@ describe('runPipeline', () => {
 
   it('transitions to stuck on containment-breach event from handler (#208)', async () => {
     const handlers: PhaseHandlerMap = {
-      detect: async () => 'success' as PhaseEvent,
-      classify: async () => 'success:simple' as PhaseEvent,
+      ...featureSimpleAllSuccess,
       implement: async () => 'containment-breach' as PhaseEvent,
     };
     const run = makeRun('feature-simple');
@@ -348,11 +358,58 @@ describe('runPipeline', () => {
     expect(run.phase).toBe('stuck');
   });
 
+  describe('handler existence validation', () => {
+    it('returns stuck when transition table has phase with no handler', async () => {
+      // Build a minimal table that references 'missing_phase' but provide no handler for it
+      const table = {
+        detect: { success: { next: 'missing_phase' as any } },
+        missing_phase: { success: { next: 'report' as any } },
+        report: { success: { next: 'report' as any } },
+      };
+      const handlers: PhaseHandlerMap = {
+        detect: async () => 'success' as PhaseEvent,
+        report: async () => 'success' as PhaseEvent,
+        // missing_phase intentionally absent
+      };
+      const run = makeRun('feature-simple');
+      const result = await runPipeline(run, table as any, handlers, stateMgr, costTracker);
+      expect(result.outcome).toBe('stuck');
+      expect(result.error).toMatch(/Missing handlers.*missing_phase/);
+    });
+  });
+
+  describe('parked outcome', () => {
+    it('returns parked when handler sets pausedAtPhase', async () => {
+      const handlers: PhaseHandlerMap = {
+        ...featureSimpleAllSuccess,
+        detect: async (run) => {
+          run.pausedAtPhase = 'detect';
+          return 'success' as PhaseEvent;
+        },
+      };
+      const run = makeRun('feature-simple');
+      const table = getPipeline('feature-simple');
+      const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+      expect(result.outcome).toBe('parked');
+      expect(run.phase).toBe('paused');
+    });
+
+    it('budget-exceeded still returns paused (not parked)', async () => {
+      const handlers: PhaseHandlerMap = {
+        ...featureSimpleAllSuccess,
+        implement: async () => 'budget-exceeded' as PhaseEvent,
+      };
+      const run = makeRun('feature-simple');
+      const table = getPipeline('feature-simple');
+      const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+      expect(result.outcome).toBe('paused');
+    });
+  });
+
   it('containment-breach bypasses retry logic — no second attempt (#208)', async () => {
     let attempts = 0;
     const handlers: PhaseHandlerMap = {
-      detect: async () => 'success' as PhaseEvent,
-      classify: async () => 'success:simple' as PhaseEvent,
+      ...featureSimpleAllSuccess,
       implement: async () => { attempts++; return 'containment-breach' as PhaseEvent; },
     };
     const run = makeRun('feature-simple');
@@ -367,13 +424,7 @@ describe('runPipeline', () => {
     const runWriter = { upsertRun, writeCostEvent: vi.fn() } as any;
 
     const run = makeRun();
-    const handlers: PhaseHandlerMap = {
-      detect: async () => 'success' as PhaseEvent,
-      classify: async () => 'success:simple' as PhaseEvent,
-      implement: async () => 'success' as PhaseEvent,
-      review: async () => 'success' as PhaseEvent,
-      report: async () => 'success' as PhaseEvent,
-    };
+    const handlers: PhaseHandlerMap = { ...featureSimpleAllSuccess };
     await runPipeline(run, getPipeline('feature-simple'), handlers, stateMgr, costTracker, undefined, runWriter);
     expect(upsertRun).toHaveBeenCalled();
     const firstCall = upsertRun.mock.calls[0]!;

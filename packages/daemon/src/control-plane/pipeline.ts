@@ -50,6 +50,23 @@ export async function runPipeline(
   const retryCounts: Record<string, number> = {};
   let lastError: string | undefined;
 
+  // Pre-flight: validate all non-terminal phases have handlers
+  const missingHandlers: string[] = [];
+  for (const phase of Object.keys(table)) {
+    if (phase === 'stuck' || phase === 'paused') continue;
+    if (!handlers[phase as Phase]) {
+      missingHandlers.push(phase);
+    }
+  }
+  if (missingHandlers.length > 0) {
+    const msg = `Missing handlers for phases: ${missingHandlers.join(', ')} in variant`;
+    console.error(`[pipeline] ${msg}`);
+    run.phase = 'stuck';
+    await stateMgr.saveRunState(run);
+    void runWriter?.upsertRun(run.id, { current_phase: 'stuck', phases: buildPhaseRecords(run) });
+    return { outcome: 'stuck', run, error: msg };
+  }
+
   while (true) {
     // Check for terminal states
     if (isTerminal(run.phase)) {
@@ -122,6 +139,14 @@ export async function runPipeline(
     // single source of truth (updated by runtime.spawnSession for ALL session
     // types: diagnose, implement, review).
     run.cost = costTracker.getRunCost(run.issueNumber);
+
+    // Check if handler requested parking (e.g., l2-gate awaiting approval)
+    if (run.pausedAtPhase) {
+      run.phase = 'paused';
+      await stateMgr.saveRunState(run);
+      void runWriter?.upsertRun(run.id, { current_phase: run.phase, phases: buildPhaseRecords(run) });
+      return { outcome: 'parked', run };
+    }
 
     // Check for global overrides (budget-exceeded, rate-limited, containment-breach)
     const globalNext = applyGlobalTransition(event);
