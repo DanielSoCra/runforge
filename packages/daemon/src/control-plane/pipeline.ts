@@ -11,7 +11,7 @@ export type PhaseHandler = (run: RunState) => Promise<PhaseEvent>;
 export type PhaseHandlerMap = Partial<Record<Phase, PhaseHandler>>;
 
 export interface PipelineResult {
-  outcome: 'complete' | 'stuck' | 'paused' | 'error';
+  outcome: 'complete' | 'stuck' | 'paused' | 'error' | 'parked';
   run: RunState;
   error?: string;
 }
