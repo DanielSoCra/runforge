@@ -47,7 +47,7 @@ export const specDrivenPhases: readonly SpecPhaseDefinition[] = Object.freeze([
  * Key differences from feature pipeline:
  * - Adds l2-design, l2-gate, l3-generate, l3-compliance phases
  * - l2-gate supports 'feedback' event (backward to l2-design)
- * - l2-gate supports 'unchanged' event (remain parked — self-transition)
+ * - l2-gate parks the run via pausedAtPhase when awaiting human review
  * - l3-compliance failure loops back to l3-generate
  */
 export const specDrivenTransitions: TransitionTable = {

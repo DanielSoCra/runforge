@@ -209,12 +209,14 @@ export function extractCodePaths(traceContent: string, specIds: Set<string>): st
  * children and collecting specs whose parent field points into the current set.
  * Uses a fixpoint loop: keeps adding until no new refs are found.
  * Falls back to returning baseRefs if traceability.yml is missing.
+ *
+ * @param repoRoot - Repo root directory (the directory containing .specify/)
  */
 export async function resolveCurrentSpecRefs(
-  specifyRoot: string,
+  repoRoot: string,
   baseRefs: string[],
 ): Promise<string[]> {
-  const traceabilityPath = join(specifyRoot, '.specify', 'traceability.yml');
+  const traceabilityPath = join(repoRoot, '.specify', 'traceability.yml');
   let traceContent: string;
   try {
     traceContent = await readFile(traceabilityPath, 'utf-8');

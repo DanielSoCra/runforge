@@ -648,14 +648,17 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         continue;
       }
 
+      // Resolve token and Octokit once for all operations on this run
+      const resumeRepoId = repoManager?.getRepoId(runOwner, runRepoName) ?? '';
+      const resumeToken = repoManager && resumeRepoId
+        ? await repoManager.resolveTokenForRepo(resumeRepoId)
+        : process.env.GITHUB_TOKEN;
+      const runOctokit = new Octokit({ auth: resumeToken });
+
       // Fetch current labels from GitHub
       let issueLabels: string[];
       try {
-        const resumeToken = repoManager
-          ? await repoManager.resolveTokenForRepo(repoManager.getRepoId(runOwner, runRepoName) ?? '')
-          : process.env.GITHUB_TOKEN;
-        const scanOctokit = new Octokit({ auth: resumeToken });
-        const { data: issue } = await scanOctokit.issues.get({
+        const { data: issue } = await runOctokit.issues.get({
           owner: runOwner, repo: runRepoName, issue_number: run.issueNumber,
         });
         issueLabels = (issue.labels ?? []).map((l) => (typeof l === 'string' ? l : (l.name ?? '')));
@@ -672,11 +675,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
 
       // Remove 'awaiting-l2-review' label (best-effort)
       try {
-        const resumeToken = repoManager
-          ? await repoManager.resolveTokenForRepo(repoManager.getRepoId(runOwner, runRepoName) ?? '')
-          : process.env.GITHUB_TOKEN;
-        const scanOctokit = new Octokit({ auth: resumeToken });
-        await scanOctokit.issues.removeLabel({
+        await runOctokit.issues.removeLabel({
           owner: runOwner, repo: runRepoName, issue_number: run.issueNumber,
           name: 'awaiting-l2-review',
         });
@@ -690,13 +689,9 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       // Re-enter pipeline
       activeIssues.add(run.issueNumber);
       activeRuns++;
-      const resumeRepoId = repoManager?.getRepoId(runOwner, runRepoName) ?? '';
       if (repoManager && resumeRepoId) repoManager.notifyRunStart(resumeRepoId);
 
-      const resumeToken = repoManager && resumeRepoId
-        ? await repoManager.resolveTokenForRepo(resumeRepoId)
-        : process.env.GITHUB_TOKEN;
-      const notifyOctokit = new Octokit({ auth: resumeToken });
+      const notifyOctokit = runOctokit;
       const agencyConfig = await readAgencyConfig(null, '');
       const resumedRequest: WorkRequest = {
         issueNumber: run.issueNumber,
@@ -718,6 +713,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
             completed_at: new Date().toISOString(),
             total_cost: run.cost,
           });
+          if (result.outcome === 'stuck') {
+            const stuckDetector = legacyDetector ?? createWorkDetector(runOctokit, runOwner, runRepoName);
+            await stuckDetector.markStuck(run.issueNumber, result.error ?? 'Unknown error');
+          }
           handleRunOutcome(result.outcome, run.issueNumber, runOwner, runRepoName);
         })
         .catch((e) => console.error(`Parked run failed for #${run.issueNumber}:`, e))
