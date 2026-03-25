@@ -630,6 +630,105 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   const heartbeatPath = join(process.env.HOME ?? '/tmp', 'logs', 'claude-daemon.heartbeat');
   const stopHeartbeat = startHeartbeat(heartbeatPath, config.pollIntervalMs);
 
+  // 6d. resumeParkedRuns — check parked runs for l2-approved/l2-rejected label, re-enter pipeline
+  async function resumeParkedRuns(): Promise<void> {
+    if (paused || shuttingDown) return;
+    const parkedRuns = await stateMgr.findParkedRuns();
+    // Limit to 1 resume per cycle to avoid thundering-herd
+    for (const run of parkedRuns.slice(0, 1)) {
+      if (activeIssues.has(run.issueNumber)) continue; // already running
+      const runOwner = run.repoOwner ?? config.repo?.owner;
+      const runRepoName = run.repoName ?? config.repo?.name;
+      if (!runOwner || !runRepoName) {
+        console.warn(`[daemon] resumeParkedRuns: skipping run #${run.issueNumber} — missing repo info`);
+        continue;
+      }
+      if (run.pausedAtPhase !== 'l2-gate') {
+        // Only l2-gate parking is handled here; other parks are not yet defined
+        continue;
+      }
+
+      // Fetch current labels from GitHub
+      let issueLabels: string[];
+      try {
+        const resumeToken = repoManager
+          ? await repoManager.resolveTokenForRepo(repoManager.getRepoId(runOwner, runRepoName) ?? '')
+          : process.env.GITHUB_TOKEN;
+        const scanOctokit = new Octokit({ auth: resumeToken });
+        const { data: issue } = await scanOctokit.issues.get({
+          owner: runOwner, repo: runRepoName, issue_number: run.issueNumber,
+        });
+        issueLabels = (issue.labels ?? []).map((l) => (typeof l === 'string' ? l : (l.name ?? '')));
+      } catch (e) {
+        console.warn(`[daemon] resumeParkedRuns: failed to fetch labels for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`);
+        continue;
+      }
+
+      const hasApproved = issueLabels.includes('l2-approved');
+      const hasRejected = issueLabels.includes('l2-rejected');
+      if (!hasApproved && !hasRejected) continue; // still waiting
+
+      console.log(`[daemon] resumeParkedRuns: resuming #${run.issueNumber} (${hasApproved ? 'l2-approved' : 'l2-rejected'})`);
+
+      // Remove 'awaiting-l2-review' label (best-effort)
+      try {
+        const resumeToken = repoManager
+          ? await repoManager.resolveTokenForRepo(repoManager.getRepoId(runOwner, runRepoName) ?? '')
+          : process.env.GITHUB_TOKEN;
+        const scanOctokit = new Octokit({ auth: resumeToken });
+        await scanOctokit.issues.removeLabel({
+          owner: runOwner, repo: runRepoName, issue_number: run.issueNumber,
+          name: 'awaiting-l2-review',
+        });
+      } catch { /* label may not exist — ignore */ }
+
+      // Reset run state to re-enter l2-gate phase
+      run.phase = 'l2-gate';
+      run.pausedAtPhase = undefined;
+      await stateMgr.saveRunState(run);
+
+      // Re-enter pipeline
+      activeIssues.add(run.issueNumber);
+      activeRuns++;
+      const resumeRepoId = repoManager?.getRepoId(runOwner, runRepoName) ?? '';
+      if (repoManager && resumeRepoId) repoManager.notifyRunStart(resumeRepoId);
+
+      const resumeToken = repoManager && resumeRepoId
+        ? await repoManager.resolveTokenForRepo(resumeRepoId)
+        : process.env.GITHUB_TOKEN;
+      const notifyOctokit = new Octokit({ auth: resumeToken });
+      const agencyConfig = await readAgencyConfig(null, '');
+      const resumedRequest: WorkRequest = {
+        issueNumber: run.issueNumber,
+        title: run.title,
+        body: run.body ?? '',
+        labels: run.labels ?? [],
+        specRefs: run.specRefs ?? [],
+      };
+      const handlers = run.variant === 'website'
+        ? createWebsitePhaseHandlers(agencyConfig, null, notifyOctokit, runOwner, runRepoName, run.issueNumber, null)
+        : createPhaseHandlers(config, runOwner, runRepoName, runtime, coordinator, notifyOctokit, resumedRequest, stateDir, runWriter ?? undefined, run.id, repoRoot, configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins, knowledgeStore);
+      const table = getPipeline(run.variant);
+
+      runPipeline(run, table, handlers, stateMgr, costTracker, undefined, runWriter ?? undefined)
+        .then(async (result) => {
+          console.log(`[daemon] Parked run #${run.issueNumber} finished: ${result.outcome}`);
+          void runWriter?.upsertRun(run.id, {
+            outcome: toDbOutcome(result.outcome),
+            completed_at: new Date().toISOString(),
+            total_cost: run.cost,
+          });
+          handleRunOutcome(result.outcome, run.issueNumber, runOwner, runRepoName);
+        })
+        .catch((e) => console.error(`Parked run failed for #${run.issueNumber}:`, e))
+        .finally(() => {
+          activeRuns--;
+          activeIssues.delete(run.issueNumber);
+          if (repoManager && resumeRepoId) repoManager.notifyRunEnd(resumeRepoId);
+        });
+    }
+  }
+
   // 7. Legacy polling loop (only used when repoManager is null AND coordinator is off)
   let legacyPoller: ReturnType<typeof setInterval> | null = null;
   if (legacyDetector && !config.coordination.useCoordinator) {
@@ -694,6 +793,9 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
             .finally(() => { activeRuns--; activeIssues.delete(fpRequest.issueNumber); });
         }
       }
+
+      // Parked-run resume scan — after all normal work detection
+      await resumeParkedRuns().catch((e) => console.error('[daemon] resumeParkedRuns error:', e));
     }, config.pollIntervalMs);
   }
 
