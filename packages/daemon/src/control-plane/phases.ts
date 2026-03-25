@@ -350,6 +350,19 @@ export function createPhaseHandlers(
         console.warn(`[review] Failed to load spec content:`, e);
       }
 
+      // Skip reviewer gates if there's no diff (e.g., spec-only tasks with no code changes)
+      if (!diff || diff.trim().length === 0) {
+        console.log(`[review] No code changes to review — skipping reviewer gates`);
+        const gate1 = createGate1(config.validation.gate1Commands);
+        const result = await runReview([gate1], cwd, { maxFixCycles: config.validation.maxFixCycles });
+        if (!result.passed) {
+          console.error(`[review] Deterministic gate failed:`, JSON.stringify(result.gateResults));
+          return 'failure';
+        }
+        console.log(`[review] Passed (deterministic only, no diff)`);
+        return 'success';
+      }
+
       // Create all four gates
       // Inject knowledge context (STACK-AC-VALIDATION: knowledge injection before reviewer spawn)
       let knowledgeContext: string | undefined;

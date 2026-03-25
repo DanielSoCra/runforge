@@ -163,7 +163,7 @@ describe('phases integration (real pure-function wiring)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     releaseDetectLock();
-    mockGit.mockResolvedValue({ ok: true, value: '' });
+    mockGit.mockResolvedValue({ ok: true, value: 'diff --git a/file.ts b/file.ts\n' });
   });
 
   afterEach(() => {
