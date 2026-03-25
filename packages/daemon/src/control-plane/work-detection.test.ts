@@ -326,6 +326,21 @@ describe('WorkDetector', () => {
       }
     });
 
+    it('excludes issues with stuck label', async () => {
+      const octokit = mockOctokit();
+      octokit.issues.listForRepo = vi.fn().mockResolvedValue({
+        data: [
+          { number: 52, title: 'Stuck bug', body: 'fix', labels: [{ name: 'review-finding' }, { name: 'P0' }, { name: 'stuck' }] },
+        ],
+      });
+      const detector = createWorkDetector(octokit, 'owner', 'repo');
+      const result = await detector.detectBugFixWork();
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toBeNull();
+      }
+    });
+
     it('handles API errors gracefully', async () => {
       const octokit = mockOctokit();
       octokit.issues.listForRepo = vi.fn().mockRejectedValue(new Error('API error'));
@@ -557,6 +572,52 @@ describe('WorkDetector', () => {
       const octokit = mockOctokitForTiers({
         'feature-pipeline,ready-to-implement': [
           { number: 105, title: 'PR', body: 'spec', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }], pull_request: { url: 'https://...' } },
+        ],
+      });
+      const detector = createWorkDetector(octokit, 'owner', 'repo');
+      const result = await detector.detectFeaturePipelineWork();
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toBeNull();
+      }
+    });
+
+    it('excludes stuck issues from all tiers', async () => {
+      const octokit = mockOctokitForTiers({
+        'feature-pipeline,ready-to-implement': [
+          { number: 110, title: 'Stuck impl', body: 'spec', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }, { name: 'stuck' }] },
+        ],
+        'feature-pipeline,l2-approved': [
+          { number: 210, title: 'Stuck l3', body: 'spec', labels: [{ name: 'feature-pipeline' }, { name: 'l2-approved' }, { name: 'stuck' }] },
+        ],
+        'feature-pipeline,l2-in-progress': [
+          { number: 310, title: 'Stuck l2', body: 'spec', labels: [{ name: 'feature-pipeline' }, { name: 'l2-in-progress' }, { name: 'stuck' }] },
+        ],
+        'feature-pipeline,l1-approved': [
+          { number: 410, title: 'Stuck l1', body: 'spec', labels: [{ name: 'feature-pipeline' }, { name: 'l1-approved' }, { name: 'stuck' }] },
+        ],
+      });
+      const detector = createWorkDetector(octokit, 'owner', 'repo');
+      const result = await detector.detectFeaturePipelineWork();
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toBeNull();
+      }
+    });
+
+    it('excludes awaiting-l2-review issues from all tiers', async () => {
+      const octokit = mockOctokitForTiers({
+        'feature-pipeline,ready-to-implement': [
+          { number: 111, title: 'Awaiting review impl', body: 'spec', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }, { name: 'awaiting-l2-review' }] },
+        ],
+        'feature-pipeline,l2-approved': [
+          { number: 211, title: 'Awaiting review l3', body: 'spec', labels: [{ name: 'feature-pipeline' }, { name: 'l2-approved' }, { name: 'awaiting-l2-review' }] },
+        ],
+        'feature-pipeline,l2-in-progress': [
+          { number: 311, title: 'Awaiting review l2', body: 'spec', labels: [{ name: 'feature-pipeline' }, { name: 'l2-in-progress' }, { name: 'awaiting-l2-review' }] },
+        ],
+        'feature-pipeline,l1-approved': [
+          { number: 411, title: 'Awaiting review l1', body: 'spec', labels: [{ name: 'feature-pipeline' }, { name: 'l1-approved' }, { name: 'awaiting-l2-review' }] },
         ],
       });
       const detector = createWorkDetector(octokit, 'owner', 'repo');

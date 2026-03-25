@@ -9,6 +9,7 @@ export type DbSessionType = 'planning' | 'implementation' | 'validation' | 'diag
 export function toDbOutcome(outcome: PipelineResult['outcome']): DbOutcome {
   if (outcome === 'complete') return 'complete';
   if (outcome === 'stuck')    return 'stuck';
+  if (outcome === 'parked')   return 'in-progress';
   return 'in-progress'; // 'paused' and 'error' are non-terminal from DB perspective
 }
 

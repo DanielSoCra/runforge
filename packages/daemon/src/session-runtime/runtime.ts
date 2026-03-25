@@ -160,30 +160,30 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
   },
   'l2-designer': {
     name: 'l2-designer',
-    description: 'Generates L2 architecture spec from L1 functional spec using spec-brainstorm-l2 skill',
-    systemPrompt: '', // loaded from prompts/l2-designer.md
-    allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
+    description: 'Generates L2 architecture specs from L1 functional specs',
+    systemPrompt: 'You are an L2 architecture spec designer. Use the spec-brainstorm-l2 and l2-spec-guardian skills. Generate or update the ARCH-* spec file in .specify/architecture/. Commit the result.',
+    allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
     maxTurns: 30,
-    timeoutMs: 600_000,
-    budgetCap: 5,
+    timeoutMs: 300_000,
+    budgetCap: 2,
   },
   'l3-generator': {
     name: 'l3-generator',
-    description: 'Generates L3 stack-specific spec from L2 architecture spec using spec-generate-l3 skill',
-    systemPrompt: '', // loaded from prompts/l3-generator.md
-    allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
+    description: 'Generates L3 stack-specific specs from approved L2 architecture specs',
+    systemPrompt: 'You are an L3 spec generator. Use the spec-generate-l3 and l3-spec-guardian skills. Generate the STACK-* spec file in .specify/stack/. Run spec-review-compliance in inline mode as self-check. Commit the result.',
+    allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
     maxTurns: 30,
-    timeoutMs: 600_000,
-    budgetCap: 5,
+    timeoutMs: 300_000,
+    budgetCap: 2,
   },
   'compliance-reviewer': {
     name: 'compliance-reviewer',
-    description: 'Reviews L3 spec against L1/L2 for compliance using spec-review-compliance skill',
-    systemPrompt: '', // loaded from prompts/compliance-reviewer.md
-    allowedTools: ['Read', 'Glob', 'Grep', 'Bash'],
+    description: 'Reviews L3 specs for compliance with L1 and L2 specs',
+    systemPrompt: 'You are a spec compliance reviewer. Use the spec-review-compliance skill to verify the L3 spec is consistent with L1 and L2. Report pass/fail with specific gaps found.',
+    allowedTools: ['Read', 'Glob', 'Grep'],
     maxTurns: 15,
-    timeoutMs: 300_000,
-    budgetCap: 3,
+    timeoutMs: 180_000,
+    budgetCap: 1,
   },
 };
 

@@ -204,6 +204,125 @@ export function extractCodePaths(traceContent: string, specIds: Set<string>): st
   return paths;
 }
 
+/**
+ * Resolve the full spec chain starting from baseRefs by walking downward through
+ * children and collecting specs whose parent field points into the current set.
+ * Uses a fixpoint loop: keeps adding until no new refs are found.
+ * Falls back to returning baseRefs if traceability.yml is missing.
+ *
+ * @param repoRoot - Repo root directory (the directory containing .specify/)
+ */
+export async function resolveCurrentSpecRefs(
+  repoRoot: string,
+  baseRefs: string[],
+): Promise<string[]> {
+  const traceabilityPath = join(repoRoot, '.specify', 'traceability.yml');
+  let traceContent: string;
+  try {
+    traceContent = await readFile(traceabilityPath, 'utf-8');
+  } catch {
+    return baseRefs;
+  }
+
+  // Parse traceability.yml into a map of spec metadata
+  const specChildren = new Map<string, string[]>(); // specId -> children[]
+  const specParent = new Map<string, string>(); // specId -> parent
+
+  let currentSpec = '';
+  let inChildren = false;
+
+  for (const line of traceContent.split('\n')) {
+    // Top-level spec ID
+    const specMatch = line.match(/^([A-Z][A-Z0-9_-]+):\s*$/);
+    if (specMatch) {
+      currentSpec = specMatch[1]!;
+      inChildren = false;
+      if (!specChildren.has(currentSpec)) {
+        specChildren.set(currentSpec, []);
+      }
+      continue;
+    }
+
+    // parent: SPEC-ID
+    const parentMatch = line.match(/^\s+parent:\s*([A-Z][A-Z0-9_-]+)\s*$/);
+    if (parentMatch && currentSpec) {
+      specParent.set(currentSpec, parentMatch[1]!);
+      inChildren = false;
+      continue;
+    }
+
+    // Inline children: [CHILD1, CHILD2]
+    const inlineChildrenMatch = line.match(/^\s+children:\s*\[(.+)\]\s*$/);
+    if (inlineChildrenMatch && currentSpec) {
+      const ids = inlineChildrenMatch[1]!
+        .split(',')
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+      specChildren.set(currentSpec, ids);
+      inChildren = false;
+      continue;
+    }
+
+    // Empty inline children: []
+    if (/^\s+children:\s*\[\]\s*$/.test(line)) {
+      specChildren.set(currentSpec, []);
+      inChildren = false;
+      continue;
+    }
+
+    // Multi-line children block
+    if (/^\s+children:\s*$/.test(line)) {
+      inChildren = true;
+      continue;
+    }
+
+    if (inChildren && /^\s+-\s+/.test(line)) {
+      const childId = line.replace(/^\s+-\s+/, '').trim();
+      if (childId) {
+        const existing = specChildren.get(currentSpec) ?? [];
+        existing.push(childId);
+        specChildren.set(currentSpec, existing);
+      }
+      continue;
+    }
+
+    // Any other key ends the children block
+    if (/^\s+\w+:/.test(line)) {
+      inChildren = false;
+    }
+  }
+
+  // Fixpoint expansion: start from baseRefs, keep adding children and specs
+  // whose parent is already in the set
+  const resolved = new Set<string>(baseRefs);
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    // Walk children of all specs currently in set
+    for (const specId of resolved) {
+      const children = specChildren.get(specId) ?? [];
+      for (const child of children) {
+        if (!resolved.has(child)) {
+          resolved.add(child);
+          changed = true;
+        }
+      }
+    }
+
+    // Walk all known specs: if their parent is in our set, add them
+    for (const [specId, parent] of specParent) {
+      if (resolved.has(parent) && !resolved.has(specId)) {
+        resolved.add(specId);
+        changed = true;
+      }
+    }
+  }
+
+  return Array.from(resolved);
+}
+
 function extractSpecId(content: string): string | null {
   // Extract frontmatter block between --- delimiters, then match id within it
   const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
