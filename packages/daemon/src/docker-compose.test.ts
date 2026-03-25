@@ -11,8 +11,8 @@ describe('docker-compose.yml daemon env vars', () => {
     expect(raw).toContain('SUPABASE_URL');
   });
 
-  it('should forward SUPABASE_SERVICE_ROLE_KEY to the daemon', () => {
-    expect(raw).toContain('SUPABASE_SERVICE_ROLE_KEY');
+  it('should use an env_file for secrets (SERVICE_ROLE_KEY etc come from env_file)', () => {
+    expect(raw).toContain('env_file');
   });
 });
 
