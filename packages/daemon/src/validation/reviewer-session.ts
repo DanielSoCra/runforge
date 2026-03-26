@@ -82,13 +82,25 @@ export function createReviewerGate(
         }
 
         // Parse structured output — with --json-schema, the CLI stores the result
-        // in structured_output (not result/output). Fall back to the full object
-        // for backwards compatibility.
+        // in structured_output. Fall back to extracting JSON from the result text
+        // (model may follow prompt template and put JSON in a markdown code block
+        // instead of using structured output).
         const rawData = result.value.structuredData;
-        const structuredPayload =
-          rawData !== null && typeof rawData === 'object' && 'structured_output' in (rawData as object)
-            ? (rawData as Record<string, unknown>).structured_output
-            : rawData;
+        let structuredPayload: unknown;
+        if (rawData !== null && typeof rawData === 'object' && 'structured_output' in (rawData as object)) {
+          structuredPayload = (rawData as Record<string, unknown>).structured_output;
+        } else {
+          // Try to extract JSON from result text field (model followed prompt code block format)
+          const resultText = typeof (rawData as Record<string, unknown>)?.result === 'string'
+            ? (rawData as Record<string, unknown>).result as string
+            : result.value.output;
+          const jsonMatch = resultText.match(/```json\s*([\s\S]*?)```/) ?? resultText.match(/(\{[\s\S]*\})/);
+          if (jsonMatch?.[1]) {
+            try { structuredPayload = JSON.parse(jsonMatch[1]); } catch { structuredPayload = rawData; }
+          } else {
+            structuredPayload = rawData;
+          }
+        }
         const parsed = ReviewFindingsSchema.safeParse(structuredPayload);
         if (!parsed.success) {
           const subtype = (rawData as Record<string, unknown>)?.subtype;
