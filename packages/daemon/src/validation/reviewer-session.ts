@@ -86,15 +86,21 @@ export function createReviewerGate(
         // (model may follow prompt template and put JSON in a markdown code block
         // instead of using structured output).
         const rawData = result.value.structuredData;
+        const so = rawData !== null && typeof rawData === 'object'
+          ? (rawData as Record<string, unknown>).structured_output
+          : undefined;
         let structuredPayload: unknown;
-        if (rawData !== null && typeof rawData === 'object' && 'structured_output' in (rawData as object)) {
-          structuredPayload = (rawData as Record<string, unknown>).structured_output;
+        if (so !== null && so !== undefined) {
+          // Preferred path: --json-schema produced structured_output
+          structuredPayload = so;
         } else {
-          // Try to extract JSON from result text field (model followed prompt code block format)
+          // Fallback: model followed prompt code block format and put JSON in result text.
+          // structured_output is null when the model produces markdown code block output
+          // instead of using the CLI's structured output mechanism.
           const resultText = typeof (rawData as Record<string, unknown>)?.result === 'string'
             ? (rawData as Record<string, unknown>).result as string
             : result.value.output;
-          const jsonMatch = resultText.match(/```json\s*([\s\S]*?)```/) ?? resultText.match(/(\{[\s\S]*\})/);
+          const jsonMatch = resultText.match(/```json\s*([\s\S]*?)```/s) ?? resultText.match(/(\{[\s\S]*\})/s);
           if (jsonMatch?.[1]) {
             try { structuredPayload = JSON.parse(jsonMatch[1]); } catch { structuredPayload = rawData; }
           } else {
