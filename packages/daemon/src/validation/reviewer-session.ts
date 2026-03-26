@@ -81,8 +81,15 @@ export function createReviewerGate(
           };
         }
 
-        // Parse structured output
-        const parsed = ReviewFindingsSchema.safeParse(result.value.structuredData);
+        // Parse structured output — with --json-schema, the CLI stores the result
+        // in structured_output (not result/output). Fall back to the full object
+        // for backwards compatibility.
+        const rawData = result.value.structuredData;
+        const structuredPayload =
+          rawData !== null && typeof rawData === 'object' && 'structured_output' in (rawData as object)
+            ? (rawData as Record<string, unknown>).structured_output
+            : rawData;
+        const parsed = ReviewFindingsSchema.safeParse(structuredPayload);
         if (!parsed.success) {
           if (attempt === 0) continue; // retry once
           return {
