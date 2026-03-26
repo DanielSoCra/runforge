@@ -501,8 +501,18 @@ export function createPhaseHandlers(
         console.warn(`[implement] Failed to restore branch to ${config.branches.staging}: ${restoreResult.error.message}`);
       }
       if (!workspaceDirExists(workspaceDir)) {
-        console.log(`[implement] Workspace removed by batch — using repo root for review`);
-        workspaceCwd = mainRepoRoot;
+        // Batch removes the worktree but the branch still has commits.
+        // Recreate the worktree so review runs in the correct directory.
+        console.log(`[implement] Workspace removed by batch — recreating worktree for review`);
+        const recreate = await git(['worktree', 'add', workspaceDir, featureBranch], mainRepoRoot);
+        if (recreate.ok) {
+          workspaceCwd = workspaceDir;
+          run.workspacePath = workspaceDir;
+          console.log(`[implement] Worktree recreated at ${workspaceDir}`);
+        } else {
+          console.warn(`[implement] Failed to recreate worktree: ${recreate.error.message} — falling back to repo root`);
+          workspaceCwd = mainRepoRoot;
+        }
       }
 
       return 'success';
