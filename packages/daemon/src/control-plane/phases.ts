@@ -470,6 +470,16 @@ export function createPhaseHandlers(
       // Cost is synced from costTracker in pipeline.ts after every phase —
       // no manual run.cost += here (avoids double-counting).
       console.log(`[implement] Done, cost: $${result.value.totalCost.toFixed(2)}`);
+
+      // Batch processor removes the workspace worktree in its finally block.
+      // If workspaceDir no longer exists, fall back to mainRepoRoot for the review phase.
+      // coordinator.implement() merges to featureBranch, so mainRepoRoot is on the right content.
+      const { existsSync: workspaceDirExists } = await import('node:fs');
+      if (!workspaceDirExists(workspaceDir)) {
+        console.log(`[implement] Workspace removed by batch — using repo root for review`);
+        workspaceCwd = mainRepoRoot;
+      }
+
       return 'success';
     },
 
