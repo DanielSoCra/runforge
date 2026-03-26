@@ -108,6 +108,7 @@ export interface RunState {
   pausedAtPhase?: Phase;
   l2GateNotified?: boolean;
   l2Feedback?: string;
+  workspacePath?: string; // Persisted worktree path — survives daemon restarts
 }
 
 // --- Daemon State ---

@@ -75,11 +75,28 @@ export function createPhaseHandlers(
   // This prevents `git checkout` from swapping the daemon's source code out from under it.
   const mainRepoRoot = repoRoot ?? process.cwd();
   const workspaceDir = join(mainRepoRoot, 'workspaces', `issue-${workRequest.issueNumber}`);
-  // After detect, all phases use workspaceCwd instead of repoRoot
+  // After detect, all phases use workspaceCwd instead of repoRoot.
+  // Restored from run.workspacePath on resume (survives daemon restarts).
   let workspaceCwd: string = mainRepoRoot;
+  let workspaceRestored = false;
+
+  /** Restore workspaceCwd from persisted run state if not already set. */
+  const ensureWorkspace = async (run: RunState) => {
+    if (workspaceRestored || workspaceCwd !== mainRepoRoot) return;
+    if (run.workspacePath) {
+      const { existsSync } = await import('node:fs');
+      if (existsSync(run.workspacePath)) {
+        workspaceCwd = run.workspacePath;
+        console.log(`[phases] Restored workspace from run state: ${workspaceCwd}`);
+      } else {
+        console.warn(`[phases] Persisted workspace ${run.workspacePath} gone — using repo root`);
+      }
+    }
+    workspaceRestored = true;
+  };
 
   return {
-    detect: async (_run: RunState): Promise<PhaseEvent> => {
+    detect: async (run: RunState): Promise<PhaseEvent> => {
       if (!acquireRepoGitLock()) {
         console.error(`[detect] Lock held by another run — aborting`);
         return 'failure';
@@ -111,6 +128,7 @@ export function createPhaseHandlers(
           }
         }
         workspaceCwd = workspaceDir;
+        run.workspacePath = workspaceDir; // Persist for daemon restart recovery
         return 'success';
       } finally {
         releaseRepoGitLock();
@@ -121,7 +139,7 @@ export function createPhaseHandlers(
 
     'l2-design': async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[l2-design] Generating L2 architecture spec for #${workRequest.issueNumber}`);
-      const cwd = workspaceCwd;
+      await ensureWorkspace(run); const cwd = workspaceCwd;
       const specifyRoot = join(cwd, '.specify');
       let specContent = '';
       try {
@@ -231,7 +249,7 @@ export function createPhaseHandlers(
 
     'l3-generate': async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[l3-generate] Generating L3 stack spec for #${workRequest.issueNumber}`);
-      const cwd = workspaceCwd;
+      await ensureWorkspace(run); const cwd = workspaceCwd;
       const specifyRoot = join(cwd, '.specify');
       // Refresh spec refs before generation to pick up L2 specs
       try {
@@ -276,7 +294,7 @@ export function createPhaseHandlers(
 
     'l3-compliance': async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[l3-compliance] Reviewing L3 compliance for #${workRequest.issueNumber}`);
-      const cwd = workspaceCwd;
+      await ensureWorkspace(run); const cwd = workspaceCwd;
       const specifyRoot = join(cwd, '.specify');
       let specContent = '';
       try {
@@ -330,7 +348,7 @@ export function createPhaseHandlers(
       const threshold = config.diagnosis.confidenceThreshold;
 
       // Load actual spec content from .specify/ (not just spec IDs) (#143)
-      const cwd = workspaceCwd;
+      await ensureWorkspace(run); const cwd = workspaceCwd;
       const specifyRoot = join(cwd, '.specify');
       let specContent = '';
       try {
@@ -491,7 +509,7 @@ export function createPhaseHandlers(
     },
 
     review: async (run: RunState): Promise<PhaseEvent> => {
-      const cwd = workspaceCwd;
+      await ensureWorkspace(run); const cwd = workspaceCwd;
       console.log(`[review] Running review gates in ${cwd}`);
 
       // Use classifier-determined complexity (set in classify phase, line 83)
@@ -602,12 +620,12 @@ export function createPhaseHandlers(
       return 'success';
     },
 
-    holdout: async (_run: RunState): Promise<PhaseEvent> => {
+    holdout: async (run: RunState): Promise<PhaseEvent> => {
       if (!config.validation.holdoutCommand) {
         console.log(`[holdout] No holdout command configured — skipping`);
         return 'success';
       }
-      const cwd = workspaceCwd;
+      await ensureWorkspace(run); const cwd = workspaceCwd;
       console.log(`[holdout] Running holdout tests for #${workRequest.issueNumber}`);
       const result = await runHoldout(config.validation.holdoutCommand, featureBranch, cwd);
       if (!result.ok) {
@@ -638,12 +656,12 @@ export function createPhaseHandlers(
       return 'success';
     },
 
-    deploy: async (_run: RunState): Promise<PhaseEvent> => {
+    deploy: async (run: RunState): Promise<PhaseEvent> => {
       if (!config.validation.deployCommand || !config.validation.healthCheckUrl) {
         console.log(`[deploy] No deploy command or health check URL configured — skipping`);
         return 'success';
       }
-      const cwd = workspaceCwd;
+      await ensureWorkspace(run); const cwd = workspaceCwd;
       console.log(`[deploy] Running deploy for #${workRequest.issueNumber}`);
       const result = await runDeploy({
         deployCommand: config.validation.deployCommand,
@@ -670,7 +688,7 @@ export function createPhaseHandlers(
         console.log(`[test] No post-deploy test commands configured — skipping`);
         return 'success';
       }
-      const cwd = workspaceCwd;
+      await ensureWorkspace(run); const cwd = workspaceCwd;
       console.log(`[test] Running post-deploy tests for #${workRequest.issueNumber}`);
       const result = await runPostDeployTests({
         testCommands: config.validation.testCommands,
