@@ -3,7 +3,7 @@ id: ARCH-AC-PRODUCT-OWNER
 type: architecture
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 2
 references: FUNC-AC-PRODUCT-OWNER
 ---
@@ -85,6 +85,9 @@ The PO agent is a session-based component — it has no persistent process. The 
 - Modifies specs directly (L0 boundary).
 - Schedules its own execution (Coordination Service owns scheduling).
 - Auto-approves its own proposals (L0 boundary, enforced by Coordination Service).
+
+**Operator bypass — `auto-fix-approved` label (L1 scenario: Operator overrides triage via auto-fix-approved):**
+The operator may manually label a finding `auto-fix-approved` to bypass the TL/PO triage lifecycle entirely. Work Detection (defined in ARCH-AC-COORDINATION) treats `auto-fix-approved` findings as eligible for bug-fix work regardless of whether TL triage or PO approval has occurred. This preserves the operator's authority to fast-track urgent fixes. The PO agent is not involved in this path — it is a Work Detection boundary exception. The PO's finding approval cap and daily quota do not apply to `auto-fix-approved` findings.
 
 **Coordination Service responsibilities (defined in ARCH-AC-COORDINATION, referenced here for clarity):**
 - Spawns PO sessions on schedule and on protocol triggers.
