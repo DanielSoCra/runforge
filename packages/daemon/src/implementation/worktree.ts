@@ -1,3 +1,5 @@
+import { rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { git } from '../lib/git.js';
 import { ok, err, type Result } from '../lib/result.js';
 import { join } from 'path';
@@ -12,8 +14,13 @@ export async function createWorktree(
   const worktreePath = join(repoRoot ?? process.cwd(), WORKTREE_DIR, unitId);
   const branchName = `unit/${unitId}`;
 
-  // Clean up stale branch/worktree from previous run if it exists
+  // Clean up stale branch/worktree from previous run if it exists.
+  // git worktree remove only works for registered worktrees — if the directory
+  // exists but isn't registered (e.g. leftover from a spec phase), also delete it.
   await git(['worktree', 'remove', worktreePath, '--force'], repoRoot).catch(() => {});
+  if (existsSync(worktreePath)) {
+    await rm(worktreePath, { recursive: true, force: true });
+  }
   await git(['branch', '-D', branchName], repoRoot).catch(() => {});
 
   const result = await git(
