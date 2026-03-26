@@ -164,7 +164,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: 'You are an L2 architecture spec designer. Use the spec-brainstorm-l2 and l2-spec-guardian skills. Generate or update the ARCH-* spec file in .specify/architecture/. Commit the result.',
     allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
     maxTurns: 30,
-    timeoutMs: 300_000,
+    timeoutMs: 10_800_000, // 3 hours — spec generation is complex multi-step work
     budgetCap: 2,
   },
   'l3-generator': {
@@ -173,7 +173,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: 'You are an L3 spec generator. Use the spec-generate-l3 and l3-spec-guardian skills. Generate the STACK-* spec file in .specify/stack/. Run spec-review-compliance in inline mode as self-check. Commit the result.',
     allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
     maxTurns: 30,
-    timeoutMs: 600_000,
+    timeoutMs: 10_800_000, // 3 hours
     budgetCap: 2,
   },
   'compliance-reviewer': {
@@ -182,7 +182,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: 'You are a spec compliance reviewer. Use the spec-review-compliance skill to verify the L3 spec is consistent with L1 and L2. Report pass/fail with specific gaps found.',
     allowedTools: ['Read', 'Glob', 'Grep'],
     maxTurns: 15,
-    timeoutMs: 180_000,
+    timeoutMs: 10_800_000, // 3 hours
     budgetCap: 1,
   },
 };
