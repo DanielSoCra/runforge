@@ -173,7 +173,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: 'You are an L3 spec generator. Use the spec-generate-l3 and l3-spec-guardian skills. Generate the STACK-* spec file in .specify/stack/. Run spec-review-compliance in inline mode as self-check. Commit the result.',
     allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
     maxTurns: 30,
-    timeoutMs: 300_000,
+    timeoutMs: 600_000,
     budgetCap: 2,
   },
   'compliance-reviewer': {

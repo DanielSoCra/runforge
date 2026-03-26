@@ -146,6 +146,10 @@ export function createPhaseHandlers(
         console.error(`[l2-design] Session failed: ${result.error.message}`);
         return 'failure';
       }
+      if (result.value.exitStatus === 'timed-out' || result.value.exitStatus === 'failed') {
+        console.error(`[l2-design] Session exited with status: ${result.value.exitStatus}`);
+        return 'failure';
+      }
       // Refresh spec refs after L2 design session generates new specs
       try {
         run.specRefs = await resolveCurrentSpecRefs(cwd, workRequest.specRefs);
@@ -256,6 +260,10 @@ export function createPhaseHandlers(
         console.error(`[l3-generate] Session failed: ${result.error.message}`);
         return 'failure';
       }
+      if (result.value.exitStatus === 'timed-out' || result.value.exitStatus === 'failed') {
+        console.error(`[l3-generate] Session exited with status: ${result.value.exitStatus}`);
+        return 'failure';
+      }
       // Refresh spec refs after L3 generation
       try {
         run.specRefs = await resolveCurrentSpecRefs(cwd, workRequest.specRefs);
@@ -288,6 +296,10 @@ export function createPhaseHandlers(
       }, workRequest.issueNumber, undefined, runWriter, runId);
       if (!result.ok) {
         console.error(`[l3-compliance] Session failed: ${result.error.message}`);
+        return 'failure';
+      }
+      if (result.value.exitStatus === 'timed-out' || result.value.exitStatus === 'failed') {
+        console.error(`[l3-compliance] Session exited with status: ${result.value.exitStatus}`);
         return 'failure';
       }
       const structuredData = result.value?.structuredData as { passed?: boolean } | undefined;
