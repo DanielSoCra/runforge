@@ -58,6 +58,10 @@ export async function loadPromptTemplate(
 // Agent definition registry — maps session types to their operational parameters.
 // System prompts are placeholders here; the real content lives in prompts/*.md
 // and is loaded by the template renderer at runtime.
+// All timeouts set to 3 hours initially — gather real duration data first,
+// then tune down per session type based on actual p95 durations.
+const THREE_HOURS = 10_800_000;
+
 const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
   coordinator: {
     name: 'coordinator',
@@ -65,7 +69,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: '', // loaded from prompts/coordinator.md
     allowedTools: ['Read', 'Glob', 'Grep'],
     maxTurns: 1,
-    timeoutMs: 120_000,
+    timeoutMs: THREE_HOURS,
     budgetCap: 1,
   },
   classifier: {
@@ -74,7 +78,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: '', // loaded from prompts/classifier.md
     allowedTools: ['Read', 'Glob', 'Grep'],
     maxTurns: 1,
-    timeoutMs: 60_000,
+    timeoutMs: THREE_HOURS,
     budgetCap: 0.5,
   },
   worker: {
@@ -83,7 +87,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: '', // loaded from prompts/worker.md
     allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
     maxTurns: 50,
-    timeoutMs: 600_000,
+    timeoutMs: THREE_HOURS,
     budgetCap: 5,
   },
   'reviewer-spec': {
@@ -92,7 +96,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: '', // loaded from prompts/reviewer-spec.md
     allowedTools: ['Read', 'Glob', 'Grep'],
     maxTurns: 10,
-    timeoutMs: 600_000,
+    timeoutMs: THREE_HOURS,
     budgetCap: 2,
   },
   'reviewer-quality': {
@@ -101,7 +105,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: '', // loaded from prompts/reviewer-quality.md
     allowedTools: ['Read', 'Glob', 'Grep'],
     maxTurns: 10,
-    timeoutMs: 600_000,
+    timeoutMs: THREE_HOURS,
     budgetCap: 2,
   },
   'reviewer-security': {
@@ -110,7 +114,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: '', // loaded from prompts/reviewer-security.md
     allowedTools: ['Read', 'Glob', 'Grep'],
     maxTurns: 10,
-    timeoutMs: 600_000,
+    timeoutMs: THREE_HOURS,
     budgetCap: 2,
   },
   'bug-worker': {
@@ -119,7 +123,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: '', // loaded from prompts/bug-worker.md
     allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
     maxTurns: 30,
-    timeoutMs: 600_000,
+    timeoutMs: THREE_HOURS,
     budgetCap: 5,
   },
   diagnostician: {
@@ -128,7 +132,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: '', // loaded from prompts/diagnostician.md
     allowedTools: ['Read', 'Glob', 'Grep'],
     maxTurns: 1,
-    timeoutMs: 120_000,
+    timeoutMs: THREE_HOURS,
     budgetCap: 1,
   },
   'codebase-reviewer': {
@@ -137,7 +141,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: '', // loaded from prompts/codebase-reviewer.md
     allowedTools: ['Read', 'Glob', 'Grep', 'Bash'],
     maxTurns: 30,
-    timeoutMs: 600_000,
+    timeoutMs: THREE_HOURS,
     budgetCap: 3,
   },
   'product-owner': {
@@ -146,7 +150,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: '', // loaded from prompts/product-owner.md
     allowedTools: ['Read', 'Glob', 'Grep'],
     maxTurns: 10,
-    timeoutMs: 300_000,
+    timeoutMs: THREE_HOURS,
     budgetCap: 3,
   },
   'tech-lead': {
@@ -155,7 +159,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: '', // loaded from prompts/tech-lead.md
     allowedTools: ['Read', 'Glob', 'Grep'],
     maxTurns: 10,
-    timeoutMs: 300_000,
+    timeoutMs: THREE_HOURS,
     budgetCap: 3,
   },
   'l2-designer': {
