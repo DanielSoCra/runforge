@@ -473,8 +473,12 @@ export function createPhaseHandlers(
 
       // Batch processor removes the workspace worktree in its finally block.
       // If workspaceDir no longer exists, fall back to mainRepoRoot for the review phase.
-      // coordinator.implement() merges to featureBranch, so mainRepoRoot is on the right content.
+      // coordinator.implement() checks out featureBranch in the main repo for merging — restore
+      // to staging branch so the review phase sees current dev code and passing test suite.
       const { existsSync: workspaceDirExists } = await import('node:fs');
+      await git(['checkout', config.branches.staging], mainRepoRoot).catch((e) => {
+        console.warn(`[implement] Failed to restore branch to ${config.branches.staging}:`, e);
+      });
       if (!workspaceDirExists(workspaceDir)) {
         console.log(`[implement] Workspace removed by batch — using repo root for review`);
         workspaceCwd = mainRepoRoot;

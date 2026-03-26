@@ -6,6 +6,7 @@
   "controlPort": 3847,
   "pollIntervalMs": 30000,
   "maxConcurrentRuns": 1,
+  "maxRunsPerIssue": 20,
   "dailyBudget": 5,
   "perRunBudget": 2,
   "adapter": "cli",
