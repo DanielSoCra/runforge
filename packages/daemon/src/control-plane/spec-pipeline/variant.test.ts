@@ -61,8 +61,8 @@ describe('specDrivenTransitions', () => {
     expect(transition(table, 'l2-gate', 'feedback')?.next).toBe('l2-design');
   });
 
-  it('l2-gate → unchanged → l2-gate (parked)', () => {
-    expect(transition(table, 'l2-gate', 'unchanged')?.next).toBe('l2-gate');
+  it('l2-gate has no unchanged transition (removed — parking handled by pausedAtPhase)', () => {
+    expect(transition(table, 'l2-gate', 'unchanged')).toBeUndefined();
   });
 
   it('l3-generate → success → l3-compliance', () => {

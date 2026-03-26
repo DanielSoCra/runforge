@@ -3,7 +3,7 @@ id: ARCH-AC-PRODUCT-OWNER
 type: architecture
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 2
 references: FUNC-AC-PRODUCT-OWNER
 ---
@@ -14,188 +14,169 @@ references: FUNC-AC-PRODUCT-OWNER
 
 The Product Owner Agent analyzes system signals and generates proposals for what to build next. It runs as a scheduled agent session spawned by the Coordination Service, reading signal sources to identify spec pipeline gaps, stale work, and backlog priorities, then producing structured proposals that require operator approval before becoming work requests.
 
-This spec defines the PO agent's internal architecture: signal aggregation, proposal generation, protocol participation, and session design. It complements ARCH-AC-COORDINATION, which owns the Proposal lifecycle, agent pool, PO scheduling, and terminal interface. It complements ARCH-AC-KNOWLEDGE, which owns the knowledge store that the PO reads from (proposal history, business observations) and writes to (retrospective lessons).
+In v2, the PO also operates the **Finding Approval Gate**: it evaluates findings already approved by the Tech Lead (`tl-approved`) and decides whether to recommend them to the operator (`po-approved`) or reject them (`po-rejected`). Ambiguous findings enter a `NeedsDiscussionEntry` queue surfaced during interactive sessions. The PO is also available in **Interactive Session** mode: the operator opens a conversation with the PO, which loads its current state (proposals, needs-discussion items, recent decisions) and executes decisions on the spot, writing to shared persistent state that the daemon's next autonomous cycle reads.
 
-The PO and Tech Lead interact through six structured protocols (defined in FUNC-AC-PRODUCT-OWNER). At the architecture level, protocols are orchestrator-mediated: the Coordination Service spawns sequential agent sessions, passing each session's structured output as input to the next. Protocol state is persisted in the database for crash recovery.
+This spec defines the PO agent's internal architecture: signal aggregation, proposal generation, finding approval, interactive session state, and protocol participation. It complements ARCH-AC-COORDINATION (Proposal lifecycle, agent pool, PO scheduling, terminal interface) and ARCH-AC-KNOWLEDGE (knowledge store the PO reads from and writes to).
 
 ## Data Model
 
-**SignalSnapshot** represents the aggregated input context for a PO analysis cycle. It contains: a unique identifier, the cycle timestamp, a spec pipeline summary (which specs have complete layer chains and which have gaps), an aggregate delivery summary (pass/fail rates and completion counts per repository — no detailed failure analysis), a backlog summary (open issues with labels, ages, and staleness flags), an active proposal summary (current proposals with statuses), a proposal history summary (recently decided proposals with outcomes and operator reasons), and an operator idea inbox (pending idea submissions). The snapshot is assembled by the Coordination Service before spawning the PO session and is not persisted — it is a transient input document.
+**SignalSnapshot** represents the aggregated input context for a PO analysis cycle. It contains: a unique identifier, the cycle timestamp, a spec pipeline summary (which specs have complete layer chains and which have gaps), an aggregate delivery summary (pass/fail rates and completion counts per repository — no detailed failure analysis), a backlog summary (open issues with labels, ages, and staleness flags), an active proposal summary (current proposals with statuses), a proposal history summary (recently decided proposals with outcomes and operator reasons), an operator idea inbox (pending idea submissions), a `pending_approvals` section (findings with `tl-approved` label that have not yet received a PO verdict — each entry contains: issue number, issue title, severity label, Tech Lead triage reason, and a `previously_rejected_by_po` flag), and a `needs_discussion` section (NeedsDiscussionEntry records awaiting operator input, ordered by creation time). The snapshot is assembled by the Coordination Service before spawning the PO session and is not persisted — it is a transient input document.
 
-**ProtocolExecution** represents a single run of an interaction protocol between the PO and Tech Lead. It contains: a unique identifier, a protocol type (enrichment, batch_planning, backlog_grooming, escalation, status_sync, retrospective), an initiator role (po or tech_lead), a status (initiated, round_in_progress, awaiting_response, completed, failed, escalated_to_operator), a trigger reason (scheduled, event_driven, chained — with the chaining source protocol identifier when applicable), an array of ProtocolRound entries, the final output document (structured per protocol type, nullable until completed), an operator escalation reason (nullable, set when the protocol could not converge), and timestamps for creation, last update, and completion.
+**FindingApprovalDecision** represents the PO's verdict on a single `tl-approved` finding. It contains: a unique identifier, `finding_issue_number` (the GitHub issue number of the finding), `decision` (one of: `approve`, `reject`, `defer`, `needs_discussion`), `reason` (text explanation), `cycle_date` (ISO date string, used for daily cap accounting), `prior_rejection_count` (number of previous PO rejections for this finding — allows the operator to see escalation history), and `timestamp` (creation timestamp). Records are immutable once written. A finding with decision `defer` is re-evaluated on the next PO cycle without label change. A finding with decision `needs_discussion` moves to the NeedsDiscussionEntry queue.
 
-**ProtocolRound** represents one agent's contribution within a protocol execution. It contains: a sequence number, the contributing role (po or tech_lead), the session identifier of the agent session that produced it, a structured input document (what the agent received), a structured output document (what the agent produced), a status (pending, in_progress, completed, failed, skipped), and timestamps for start and completion. A round with status "skipped" indicates a degraded path where one agent could not contribute.
+**POApprovalDailyCap** tracks the number of PO finding approvals on a given calendar day. It contains: `date` (ISO date string, primary key), `approval_count` (count of decisions with `approve` made on this date), and `cap` (snapshot of the configured cap value at the time the first decision was written for this date — prevents mid-day config changes from retroactively affecting the cap). The Coordination Service reads this record before processing each approval from the PO session output, stopping when the cap is reached and deferring remaining approvals to the next cycle.
 
-**ProposalEnrichment** extends the Proposal model (defined in ARCH-AC-COORDINATION) with Tech Lead assessment data. It contains: a reference to the Proposal, a reference to the ProtocolExecution that produced the enrichment, an effort estimate (small, medium, large, or unassessed), a dependency analysis (array of spec or issue references that must complete first), a technical risk summary, a list of prerequisite work items, and an assessed flag (false when the Tech Lead could not assess — the "unassessed" degraded path from L1).
+**NeedsDiscussionEntry** represents a finding or decision item that the PO cannot resolve autonomously and needs operator input on. It contains: a unique identifier, an `item_type` (one of: `finding_approval`, `proposal_decision`), `finding_issue_number` (nullable, set for `finding_approval` items), `proposal_id` (nullable, set for `proposal_decision` items), `context` (structured description of why the PO is uncertain and what input would help — includes the Tech Lead's triage reason and any prior rejection history), `status` (one of: `pending`, `discussed`, `overridden`), `operator_decision` (nullable — set when the operator acts on this item during an interactive session), `created_at`, and `resolved_at` (nullable). Items remain in the queue until the operator resolves them in an interactive session or the underlying finding/proposal is resolved by other means.
 
-**ProtocolSchedule** represents the configured cadence for protocol triggers. It contains: the protocol type, a trigger mode (periodic or event_driven), a periodic interval (nullable — used for periodic triggers), an event source (nullable — used for event-driven triggers, e.g., "batch_completed", "idea_submitted", "stuck_item_detected"), and a debounce window (nullable — minimum time between event-driven triggers). Default schedules: Status Sync every 30 minutes, Backlog Grooming every 4 hours, Retrospective on batch completion, Escalation on event, Proposal Enrichment on new proposal, Batch Planning chained from Retrospective or Backlog Grooming.
+**POInteractiveState** represents the shared persistent state read and written by both daemon PO sessions and interactive PO sessions. It contains: `pending_proposals` (proposals awaiting operator decision, with summaries), `needs_discussion_queue` (current NeedsDiscussionEntry records with status `pending`), `recent_autonomous_decisions` (a rolling window of autonomous decisions made since the last interactive session — each entry contains the decision type, item reference, outcome, and timestamp; cleared after each interactive session review), `triage_queue_summary` (current `tl-approved` findings count and oldest age, for interactive context), and `last_daemon_cycle_at` (timestamp of the last autonomous PO cycle). This record is stored at a known path in file-based state storage, updated by the Coordination Service after each daemon cycle and after each interactive session.
+
+**ProtocolExecution** (unchanged from v1) — see v1 for full definition.
+
+**ProtocolRound** (unchanged from v1) — see v1 for full definition.
+
+**ProposalEnrichment** (unchanged from v1) — see v1 for full definition.
+
+**ProtocolSchedule** (unchanged from v1) — see v1 for full definition.
 
 ## API Contract
 
 The PO Agent does not expose its own service API. It operates as a session spawned by the Coordination Service and produces structured output that the Coordination Service processes. The interfaces below describe the contract between the Coordination Service and the PO session.
 
-**PO session input:** The Coordination Service assembles a session context containing: the SignalSnapshot, the protocol execution context (if the session is a protocol round rather than a standalone analysis cycle), relevant knowledge records from the Knowledge Service (business observations and proposal history, filtered by the PO's consumer set), and operating instructions (the PO prompt template).
+**PO daemon session input:** The Coordination Service assembles a session context containing: the SignalSnapshot (including `pending_approvals` and `needs_discussion` sections), the protocol execution context (if the session is a protocol round rather than a standalone analysis cycle), relevant knowledge records from the Knowledge Service (business observations and proposal history), and operating instructions (the PO prompt template).
 
-**PO session output — analysis cycle:** The session produces an array of raw proposals (each with: title, rationale, proposal type, related spec or issue references, estimated scope). These are submitted to the Coordination Service, which creates Proposal records and triggers Proposal Enrichment protocols with the Tech Lead.
+**PO daemon session output — analysis cycle:** The session produces: an array of raw proposals (each with: title, rationale, proposal type, related spec or issue references, estimated scope), an array of FindingApprovalDecisions (one per evaluated finding — all findings in `pending_approvals` must receive a verdict), and any new NeedsDiscussionEntry items (for findings the PO cannot decide). The Coordination Service processes each section independently.
 
-**PO session output — protocol round:** The session produces a structured document specific to the protocol type:
-- Enrichment (PO-initiated): raw proposal with business rationale, spec references, estimated value.
-- Enrichment (PO review of Tech Lead input): priority assessment, scope adjustments, forward/reject decision with reason.
-- Batch Planning: top N backlog items ordered by business priority, with rationale for ordering.
-- Backlog Grooming: re-prioritized backlog with movement rationale (items moved up, down, or removed).
-- Status Sync: priority changes, new operator ideas, proposal outcomes.
-- Retrospective: delivery expectations versus actuals, business-level lessons learned.
-- Escalation (PO-initiated): priority shift description, affected batch items, urgency justification.
-- Escalation (PO response): decision on Tech Lead's options, rationale grounded in business priority.
+**PO daemon session output — protocol round:** (Unchanged from v1.) The session produces a structured document specific to the protocol type.
 
-**Protocol trigger notifications:** The Coordination Service determines when protocols should execute based on ProtocolSchedule entries. It does not delegate scheduling to the PO — the PO is a participant, not a scheduler.
+**PO interactive session input:** The Coordination Service assembles an interactive context containing: the current POInteractiveState (pending proposals, needs-discussion queue, recent autonomous decisions, triage queue summary), relevant knowledge records, and the interactive PO prompt template (which instructs the PO to surface all pending items proactively and execute decisions via available tools). The interactive session has expanded tool access including the issue tracker mutation tool for applying labels and posting comments.
+
+**PO interactive session output:** The PO executes decisions on the spot within the session (applies labels via issue tracker tool, updates proposal statuses, resolves NeedsDiscussionEntry items). After the session, the Coordination Service reads the updated state from POInteractiveState and flushes any pending decisions that were not already executed during the session (for any items where the PO queued a decision but did not execute it inline).
+
+**Protocol trigger notifications:** (Unchanged from v1.)
 
 ## System Boundaries
 
-The PO agent is a session-based component — it has no persistent process. The Coordination Service spawns PO sessions on schedule and on protocol triggers via Session Runtime. The following describes how the PO connects to each system and what it owns, reads, and writes.
+The PO agent is a session-based component — it has no persistent process. The Coordination Service spawns PO sessions on schedule, on protocol triggers, and on operator request (interactive). The following describes how the PO connects to each system and what it owns, reads, and writes.
 
-**Coordination Service → PO Agent:** The Coordination Service assembles a SignalSnapshot and spawns a PO session via Session Runtime. It passes the snapshot, protocol context (if applicable), and the PO prompt template as session input. When the session completes, the Coordination Service processes its structured output (proposals, protocol round documents). The Coordination Service is the PO's sole lifecycle manager.
+**Coordination Service → PO Agent (daemon):** The Coordination Service assembles a SignalSnapshot (now including `pending_approvals` and `needs_discussion` sections) and spawns a PO session via Session Runtime. It processes the session output: creates Proposals, records FindingApprovalDecisions, applies GitHub label transitions (adding `po-approved` or `po-rejected`), creates NeedsDiscussionEntry records, and updates POInteractiveState.
 
-**Knowledge Service → PO Agent (read-only):** The Coordination Service queries the Knowledge Service for business_observation records relevant to the PO's current cycle and includes them in the session context. The PO does not call the Knowledge Service directly — it receives pre-fetched knowledge as part of its input.
+**Coordination Service → PO Agent (interactive):** The operator requests an interactive session via the terminal interface or dashboard. The Coordination Service assembles a POInteractiveState-based context and spawns an interactive PO session with expanded tool access. After the session, the Coordination Service reconciles any remaining pending decisions from POInteractiveState.
 
-**PO Agent → Tech Lead Agent (mediated):** PO and Tech Lead never communicate directly. The Coordination Service mediates all interaction through ProtocolExecution: it spawns a PO session, collects its output, then spawns a Tech Lead session with that output as input (and vice versa). Each agent sees only its round's input document.
+**Knowledge Service → PO Agent (read-only):** The Coordination Service queries the Knowledge Service for business_observation records relevant to the PO's current cycle and includes them in the session context. The PO does not call the Knowledge Service directly.
 
-**Operator → PO Agent (indirect):** Operators interact with the PO through the Coordination Service's terminal interface and the Dashboard. Idea submissions, proposal approvals/rejections, and priority changes flow through the Coordination Service, which incorporates them into the PO's next SignalSnapshot.
+**PO Agent → Tech Lead Agent (mediated):** (Unchanged from v1.) PO and Tech Lead never communicate directly. All protocol exchanges are mediated by the Coordination Service.
 
-**Session Runtime:** Provides the execution environment for PO sessions. Enforces per-session budget and time limits. Reports session completion, failure, or timeout to the Coordination Service.
+**Operator → PO Agent (indirect, daemon):** Operators interact with the PO through the Coordination Service's terminal interface and the Dashboard. Idea submissions, proposal approvals/rejections, and priority changes flow through the Coordination Service into the PO's next SignalSnapshot.
 
-**PO Agent OWNS:** Signal analysis logic (within session), proposal generation logic (within session), business priority assessment (within protocol rounds), protocol round outputs.
+**Operator → PO Agent (direct, interactive):** The operator opens an interactive session. The PO loads its current state and executes decisions on the spot. Decisions are written to POInteractiveState and executed immediately (labels applied via issue tracker tool within the session).
 
-**PO Agent READS (via SignalSnapshot assembled by Coordination Service):**
+**PO Agent OWNS:** Signal analysis logic (within session), proposal generation logic (within session), finding approval decisions (within session, enforced within daily cap), business priority assessment (within protocol rounds), POInteractiveState updates (flushed by Coordination Service after each session).
+
+**PO Agent READS (via SignalSnapshot/POInteractiveState assembled by Coordination Service):**
 - Specification directory — for pipeline gap analysis.
-- Aggregate delivery outcomes — from run history (pass/fail rates, completion counts per repository). The PO never reads detailed failure reasons, error categories, or phase breakdowns (Tech Lead territory, per L1 constraint).
-- Proposal history — from the Knowledge Service (business_observation records) and from the Proposal store (decided proposals with outcomes).
-- Issue backlog — from the work request source (open issues with labels, ages).
+- Aggregate delivery outcomes — from run history (pass/fail rates, completion counts per repository). The PO never reads detailed failure reasons or phase breakdowns (Tech Lead territory).
+- Proposal history — from the Knowledge Service and from the Proposal store.
+- Issue backlog — open issues with labels, ages.
 - Operator idea inbox — from the IdeaSubmission store.
+- Pending approvals — `tl-approved` findings awaiting PO verdict (new in v2).
+- Needs-discussion queue — NeedsDiscussionEntry records pending operator input (new in v2).
+- POInteractiveState — shared persistent state for interactive session initialization (new in v2).
 
 **PO Agent WRITES (via structured session output processed by Coordination Service):**
 - Raw proposals → Coordination Service creates Proposal records.
 - Protocol round outputs → Coordination Service stores as ProtocolRound entries.
-- Business-level retrospective lessons → Coordination Service submits to Knowledge Service as business_observation records with origin type "retrospective-po" and lifecycle status "candidate."
+- Business-level retrospective lessons → Coordination Service submits to Knowledge Service as business_observation records with lifecycle status "candidate."
+- FindingApprovalDecisions → Coordination Service records and applies label transitions (new in v2).
+- NeedsDiscussionEntry items → Coordination Service creates records in the queue (new in v2).
+- POInteractiveState updates (daemon: partial update via session output; interactive: in-session mutations via tools) (new in v2).
 
 **PO Agent NEVER:**
 - Reads detailed failure analysis (Tech Lead territory).
-- Performs code-level analysis or reads source files (operates at L0-L2 spec layers only).
-- Creates work requests directly (operator approval required, enforced by Coordination Service).
+- Performs code-level analysis or reads source files.
+- Creates work requests directly (operator approval required).
 - Modifies specs directly (L0 boundary).
-- Schedules its own execution (Coordination Service owns scheduling).
-- Auto-approves its own proposals (L0 boundary, enforced by Coordination Service).
+- Schedules its own execution.
+- Auto-approves its own proposals.
+- Approves findings beyond the daily cap (Coordination Service enforces the cap).
 
-**Coordination Service responsibilities (defined in ARCH-AC-COORDINATION, referenced here for clarity):**
-- Spawns PO sessions on schedule and on protocol triggers.
-- Assembles SignalSnapshot before each PO session.
-- Processes PO session output: creates Proposals, initiates Protocol Enrichment.
-- Manages ProtocolExecution lifecycle: creates entries, spawns sequential rounds, detects convergence failure, escalates to operator.
-- Enforces all guardrails: operator approval, proposal expiry, no self-approval.
+**Coordination Service responsibilities:**
+- Spawns PO daemon sessions on schedule and on protocol triggers.
+- Spawns PO interactive sessions on operator request.
+- Assembles SignalSnapshot (including `pending_approvals` and `needs_discussion`) before each daemon session.
+- Assembles POInteractiveState context before each interactive session.
+- Processes PO session output: creates Proposals, records FindingApprovalDecisions, applies GitHub label transitions, manages NeedsDiscussionEntry queue, updates POInteractiveState.
+- Enforces finding approval daily cap (POApprovalDailyCap).
+- Enforces operator approval for all proposals and findings (L0 boundary).
+- Manages ProtocolExecution lifecycle.
 
-**Operational constraints:** The PO analysis cycle runs on a configurable schedule (default: every 30 minutes). Event-driven triggers (operator idea submission, batch completion) are debounced with a configurable minimum interval (default: 5 minutes). Proposals remaining in `proposed` status beyond a configurable window (default: 7 days) are transitioned to `expired` by the Coordination Service as part of its PO-cycle tick — the PO agent does not manage expiry. The PO operates exclusively at spec layers 0 through 2 (vision, functional, architecture) and never performs code-level analysis. Each PO session operates within per-session budget and time limits configured in the Coordination Service. The system supports exactly one PO agent instance (pool allocation: min 1, max 1, per ARCH-AC-COORDINATION).
+**Operational constraints:** The PO analysis cycle runs on a configurable schedule (default: every 30 minutes). Event-driven triggers are debounced (default: 5 minutes). Proposals past expiry (default: 7 days) are transitioned to `expired` by the Coordination Service. Finding approval daily cap: configurable, default 5 (independent of Tech Lead triage cap, per L1). The PO operates at spec layers 0 through 2 only. Interactive sessions share the same agent identity (same prompt, same boundaries) but have expanded tool access. The system supports exactly one PO agent instance.
 
 ## Event Flows
 
-**PO analysis cycle (standalone — not part of a protocol):**
+**Finding Approval Gate (daemon cycle):**
 
-1. The Coordination Service's PO schedule tick fires (default: every 30 minutes) or an IdeaSubmission arrives (debounced: at most once per interval).
-2. The Coordination Service assembles a SignalSnapshot: reads the spec directory for pipeline state, queries run history for aggregate delivery outcomes, queries the Proposal store for active and decided proposals, queries the issue backlog for open items, reads the IdeaSubmission inbox for pending ideas, and queries the Knowledge Service for relevant business observations.
-3. The Coordination Service spawns a PO session via Session Runtime with the SignalSnapshot and PO prompt template as context.
-4. The PO session analyzes signals, identifies gaps and opportunities, and produces an array of raw proposals as structured output.
-5. The Coordination Service processes the output: for each raw proposal, it creates a Proposal record (status: proposed) in the database. For proposals that refine an operator idea, it links the Proposal to the originating IdeaSubmission and marks the IdeaSubmission as processed.
-6. For each new Proposal, the Coordination Service initiates a Proposal Enrichment protocol (see below).
-7. The Coordination Service sweeps Proposals past their expiry timestamp as part of its PO-cycle tick, transitioning them from `proposed` to `expired`. This runs in the Coordination Service, not in the PO session — expiry is a lifecycle operation, not an analysis task.
+1. As part of the PO analysis cycle (step 2 of the PO analysis cycle flow), the Coordination Service queries GitHub for issues with `tl-approved` label that do not yet have `po-approved` or `po-rejected`. It includes these as the `pending_approvals` section of the SignalSnapshot.
+2. The PO session evaluates each pending approval. For each finding, the PO produces a FindingApprovalDecision: `approve`, `reject`, `defer`, or `needs_discussion`.
+3. The Coordination Service processes FindingApprovalDecisions:
+   - For each `approve` decision: check POApprovalDailyCap for the current date. If `approval_count < cap`, post an audit comment on the GitHub issue explaining the PO's recommendation, apply `po-approved` label, increment `approval_count`. If `approval_count >= cap`, convert the decision to `defer` and log that it was cap-deferred.
+   - For each `reject` decision: post a comment explaining the reason, apply `po-rejected` label, remove `tl-approved` label.
+   - For each `defer` decision: no label change. The finding remains in `pending_approvals` for the next cycle.
+   - For each `needs_discussion` decision: create a NeedsDiscussionEntry record. No label change. The finding is excluded from `pending_approvals` on the next daemon cycle until the operator resolves the entry.
+4. The Coordination Service updates POInteractiveState with the current `needs_discussion_queue` and `recent_autonomous_decisions`.
 
-**Proposal Enrichment protocol (PO-initiated):**
+**Operator Confirmation of PO-Approved Finding:**
 
-1. The Coordination Service creates a ProtocolExecution (type: enrichment, initiator: po, status: initiated).
-2. Round 1 — PO: The Coordination Service spawns a PO protocol session with the raw Proposal as input. The PO produces business rationale, spec references, and estimated value. The round output is stored as a ProtocolRound. (Note: if the Proposal was generated in the same PO analysis cycle, the Coordination Service may skip this round and use the raw proposal output directly as Round 1 output, avoiding a redundant session spawn.)
-3. Round 2 — Tech Lead: The Coordination Service spawns a Tech Lead protocol session with the PO's Round 1 output. The Tech Lead adds effort estimate, dependency analysis, technical risks, and prerequisite work. The round output is stored as a ProtocolRound. If the Tech Lead cannot assess (insufficient data), it produces an output with assessed=false and the enrichment proceeds with the "unassessed" flag.
-4. Round 3 — PO review: The Coordination Service spawns a PO protocol session with both Round 1 and Round 2 outputs. The PO reviews the Tech Lead's input, may adjust priority or scope, and produces the final enriched proposal.
-5. The Coordination Service creates a ProposalEnrichment record linking the Proposal to the assessment data. The Proposal is now visible to the operator with both business case and technical assessment (or the "unassessed" flag).
-6. ProtocolExecution status transitions to completed.
+1. The Coordination Service surfaces `po-approved` findings to the operator via the briefing page and as items in the POInteractiveState.
+2. The operator confirms a finding (via dashboard, briefing action, or interactive session command). The Coordination Service receives the confirmation.
+3. The Coordination Service removes `po-approved`, adds `auto-fix-approved` (making the finding eligible for work detection), and records the operator decision.
+4. If the operator rejects a `po-approved` finding: the Coordination Service removes `po-approved`, adds `po-rejected` with operator comment, and records the rejection.
 
-**Proposal Enrichment protocol (Tech Lead-initiated):**
+**Tech Lead re-triage after PO rejection:**
 
-1. The Tech Lead generates a raw technical proposal during its analysis cycle.
-2. The Coordination Service creates a ProtocolExecution (type: enrichment, initiator: tech_lead, status: initiated).
-3. Round 1 — Tech Lead: The raw technical proposal with evidence, affected areas, and risk assessment. Stored as a ProtocolRound.
-4. Round 2 — PO: The Coordination Service spawns a PO protocol session. The PO evaluates business priority: worth doing now versus other backlog items. The PO either forwards the proposal to the operator with priority context, or rejects it with reason. Stored as a ProtocolRound.
-5. If rejected: ProtocolExecution status transitions to completed. The rejection reason is recorded. The Tech Lead may re-propose with stronger evidence on a future cycle.
-6. If forwarded: the Coordination Service creates a Proposal record visible to the operator. ProtocolExecution status transitions to completed.
+1. A finding with `po-rejected` label may be re-evaluated by the Tech Lead on a subsequent triage cycle (with new evidence or changed circumstances).
+2. The Tech Lead adds a comment referencing the prior rejection and new justification, then removes `po-rejected` and re-applies `tl-approved`.
+3. On the next PO daemon cycle, the finding re-enters `pending_approvals` with `previously_rejected_by_po: true` in its SignalSnapshot entry, allowing the PO to consider the escalation history.
 
-**Batch Planning protocol:**
+**Interactive Session (operator-initiated):**
 
-1. Triggered when: a Retrospective completes (chained), a Backlog Grooming completes (chained), or operator requests re-planning.
-2. The Coordination Service creates a ProtocolExecution (type: batch_planning, status: initiated).
-3. Round 1 — PO: The Coordination Service spawns a PO session with the current backlog. The PO produces the top N items ordered by business priority with rationale.
-4. Round 2 — Tech Lead: The Coordination Service spawns a Tech Lead session with the PO's prioritized list plus current system health data and the prospective risk query results from the Knowledge Service. The Tech Lead flags hard constraints (dependencies, parallelism limits, capacity), proposes an ordering and parallelism map.
-5. The Coordination Service evaluates convergence: if the Tech Lead's constraints are compatible with the PO's priorities (no items vetoed, ordering adjustments are minor), the protocol produces a final batch definition. If incompatible (Tech Lead vetoes a PO priority item, or capacity forces removal of items the PO considers essential), the protocol cannot converge in one round.
-6. On convergence failure: ProtocolExecution status transitions to escalated_to_operator. Both the PO's priorities and the Tech Lead's constraints are presented to the operator for resolution.
-7. On empty batch: if both the PO and Tech Lead agree that no items are viable (all items are blocked, capacity is insufficient, or dependencies cannot be satisfied), the protocol produces an empty batch definition with a reason summary. The Coordination Service creates an Escalation to the operator explaining why no work can proceed. ProtocolExecution status transitions to completed. No Batch is created.
-8. On convergence: the Coordination Service creates a Batch (as defined in ARCH-AC-COORDINATION) from the protocol output. ProtocolExecution status transitions to completed.
+1. The operator requests an interactive PO session via the terminal interface (`claude -p "Start interactive PO session"`) or dashboard action.
+2. The Coordination Service assembles the POInteractiveState context (pending proposals, needs-discussion queue, recent autonomous decisions, triage queue summary) and spawns an interactive PO session via Session Runtime with expanded tool access.
+3. The PO session loads its state and proactively surfaces items requiring operator input, in priority order: (a) needs-discussion findings with context, (b) pending proposals awaiting operator decision, (c) recent autonomous decisions for review.
+4. The operator makes decisions during the conversation. The PO executes each decision on the spot using its available tools:
+   - Finding approvals: applies labels via issue tracker tool, posts audit comment.
+   - Finding rejections: applies `po-rejected`, removes `tl-approved`, posts comment.
+   - Proposal approvals: applies `auto-fix-approved` or equivalent, records operator approval.
+   - Proposal rejections: archives with reason.
+   - Decision overrides: reverts any recent autonomous decision the operator disagrees with.
+5. Each executed decision is written to the POInteractiveState `recent_autonomous_decisions` log and the relevant NeedsDiscussionEntry is updated to `discussed` status with the operator's decision recorded.
+6. After the session, the Coordination Service reads the updated POInteractiveState, flushes any queued decisions not yet applied (in case the session ended before the PO could execute all of them), and clears the `recent_autonomous_decisions` rolling window (resetting it for the next interactive session).
 
-**Backlog Grooming protocol:**
+**PO analysis cycle (standalone — not part of a protocol):** (Unchanged from v1, with addition of Finding Approval Gate in step 2–3.)
 
-1. Triggered on the grooming schedule (default: every 4 hours) or when a significant backlog change occurs (new specs approved, large batch of issues created).
-2. The Coordination Service creates a ProtocolExecution (type: backlog_grooming, status: initiated).
-3. Round 1 — PO: Current prioritized backlog plus new signals (ideas, stale items, completed specs).
-4. Round 2 — Tech Lead: Updated technical landscape (new findings, resolved debt, changed dependencies). If the Tech Lead has no new technical input, this round is skipped (status: skipped) and the grooming is recorded as PO-only.
-5. Output: re-prioritized backlog.
-6. ProtocolExecution status transitions to completed.
+1. The Coordination Service's PO schedule tick fires (default: every 30 minutes) or an IdeaSubmission arrives (debounced).
+2. The Coordination Service assembles a SignalSnapshot: reads spec directory, queries run history, queries Proposal store, queries issue backlog, reads IdeaSubmission inbox, queries Knowledge Service, and (new in v2) queries `tl-approved` findings for `pending_approvals` section.
+3. The Coordination Service spawns a PO daemon session.
+4. The PO session analyzes signals, generates proposals, and (new in v2) produces FindingApprovalDecisions.
+5. The Coordination Service processes: creates Proposals, initiates Proposal Enrichment, and (new in v2) processes FindingApprovalDecisions with cap enforcement and applies label transitions.
+6. The Coordination Service updates POInteractiveState.
+7. The Coordination Service sweeps expired Proposals.
 
-**Status Sync protocol:**
-
-1. Triggered on the status sync schedule (default: every 30 minutes, aligned with PO analysis cycle).
-2. The Coordination Service creates a ProtocolExecution (type: status_sync, status: initiated).
-3. Round 1 — Tech Lead: Active work status, stuck items, completed items, resource utilization.
-4. Round 2 — PO: Priority changes, new operator ideas, proposal outcomes.
-5. Output: shared state update. The Coordination Service evaluates whether the output triggers a chained protocol (batch complete → Retrospective, stuck item → Escalation).
-6. ProtocolExecution status transitions to completed.
-
-**Retrospective protocol:**
-
-1. Triggered when a Status Sync detects batch completion (chained).
-2. The Coordination Service creates a ProtocolExecution (type: retrospective, status: initiated).
-3. Round 1 — PO: Delivery expectations versus actuals.
-4. Round 2 — Tech Lead: Failure analysis, recurring patterns, resource utilization, knowledge record trends.
-5. Output: lessons learned and process adjustments. The Coordination Service processes lessons: Tech Lead technical lessons are submitted to the Knowledge Service as technical_pitfall records (origin: retrospective-tech-lead). PO business lessons are submitted as business_observation records (origin: retrospective-po). Both enter with lifecycle status "candidate" per ARCH-AC-KNOWLEDGE.
-6. Actionable items become proposals (PO generates) or technical debt items (Tech Lead generates), triggering Proposal Enrichment protocols.
-7. The Coordination Service chains to Backlog Grooming, then Batch Planning.
-8. ProtocolExecution status transitions to completed.
-
-**Escalation protocol:**
-
-1. Triggered by events: Tech Lead detects a technical blocker, PO detects a priority shift (operator submits urgent idea), or Status Sync detects a stuck item.
-2. The Coordination Service creates a ProtocolExecution (type: escalation, status: initiated, with trigger reason).
-3. For Tech Lead escalation: Round 1 — Tech Lead presents the blocker with options. Round 2 — PO evaluates against business priority and decides.
-4. For PO escalation: Round 1 — PO presents the priority shift. Round 2 — Tech Lead evaluates capacity impact. Joint decision: re-plan or queue for next cycle.
-5. If domains clash and agents cannot resolve: ProtocolExecution status transitions to escalated_to_operator. Both positions go to the operator.
-6. If resolved: the Coordination Service may trigger re-Batch Planning if the decision requires it.
-7. Time-critical escalations (budget exceeded, system health critical) bypass the protocol and go directly to the operator via the Coordination Service's existing alerting.
-
-**Protocol composition (chaining):**
-
-The Coordination Service manages protocol chains. When a ProtocolExecution completes, the Coordination Service checks if the protocol type and output trigger a chained protocol:
-- Status Sync detects batch complete → chain to Retrospective.
-- Retrospective completes → chain to Backlog Grooming → chain to Batch Planning.
-- Status Sync detects stuck item → chain to Escalation.
-- Escalation resolves with re-plan decision → chain to Batch Planning.
-- Operator idea arrives → PO refines → chain to Proposal Enrichment.
-
-Chained protocols reference their parent ProtocolExecution in the trigger reason (trigger: chained, source: parent protocol identifier). This provides an audit trail of protocol chains.
+**Protocol flows:** (Unchanged from v1.) See v1 for Proposal Enrichment, Batch Planning, Backlog Grooming, Status Sync, Retrospective, Escalation, and Protocol Composition event flows.
 
 ## Error Handling
 
-**PO session failure (crash or timeout):** The Coordination Service detects the session failure. If the session was a standalone analysis cycle, the cycle is skipped — the next scheduled tick will produce a fresh analysis. If the session was a protocol round, the ProtocolRound status is set to failed. The Coordination Service evaluates whether to retry the round (if retries remain) or mark the ProtocolExecution as failed and escalate to the operator.
+**PO daemon session failure:** (Unchanged from v1.) The cycle is skipped; the next scheduled tick produces a fresh analysis. If a protocol round, the ProtocolRound is failed and the Coordination Service evaluates retry or escalation.
 
-**Tech Lead unavailable during protocol:** If the Tech Lead session fails or times out during a protocol round, the round is marked as skipped. The protocol proceeds on the degraded path defined in L1: Proposal Enrichment produces an "unassessed" enrichment, Backlog Grooming proceeds PO-only, Batch Planning escalates to the operator (cannot form a batch without technical assessment).
+**Interactive session failure:** If the interactive PO session crashes or times out before completing, the Coordination Service reads the POInteractiveState for any decisions written before the crash and flushes them. Any remaining NeedsDiscussionEntry items stay pending for the next interactive session.
 
-**Protocol convergence failure:** When Batch Planning cannot converge in one round (PO priorities and Tech Lead constraints are incompatible), both positions are packaged and presented to the operator for resolution. The ProtocolExecution status transitions to escalated_to_operator. The operator's decision is recorded and the Coordination Service creates a Batch from the operator's chosen option.
+**Finding approval cap exceeded:** The Coordination Service converts excess approvals to `defer` (not `reject`) — the finding re-enters `pending_approvals` the next cycle. No label change. The Coordination Service logs that the cap was reached. This is not an error condition.
 
-**Protocol chain interruption:** If a protocol in a chain fails, the chain stops. The Coordination Service logs the interruption and surfaces it on the briefing page. The next scheduled trigger for the interrupted protocol type will restart the chain from that point.
+**Tech Lead unavailable during protocol:** (Unchanged from v1.) Proposal Enrichment produces "unassessed" enrichment; Backlog Grooming proceeds PO-only; Batch Planning escalates.
 
-**Stale SignalSnapshot:** If signal sources are temporarily unavailable (database unreachable, issue tracker API down), the Coordination Service assembles a partial snapshot with available data and flags the missing sources. The PO session receives the partial snapshot and can still produce proposals based on available signals, noting which signal sources were unavailable.
+**Protocol convergence failure:** (Unchanged from v1.) Both positions go to the operator.
 
-**Duplicate proposal detection:** The Coordination Service checks new proposals against existing active proposals (by related spec/issue references and proposal type). If a duplicate is detected, the new proposal is discarded and logged. This prevents the PO from re-proposing work that is already pending operator decision.
+**Stale SignalSnapshot:** (Unchanged from v1.) Partial snapshot with missing sources flagged.
+
+**Duplicate proposal detection:** (Unchanged from v1.) New proposal discarded and logged.
+
+**NeedsDiscussionEntry staleness:** If a NeedsDiscussionEntry has been pending for longer than a configurable threshold (default: 3 days), the Coordination Service includes a staleness flag in the interactive session context and in briefing summaries, prompting the operator to address it.

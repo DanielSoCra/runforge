@@ -11,12 +11,13 @@ const {
   mockServer, mockServerStart, mockRunPipeline, mockNotify,
   mockRunWriter, mockConfigReader, mockLoadConfig, mockSelectVariant, phaseHandlerCalls, mockCreateReviewScheduler,
   mockCreatePOAgent, mockCreateTechLeadScheduler, mockCreateCoordinator,
-  knowledgeStoreCtorArgs,
+  knowledgeStoreCtorArgs, mockOctokit,
 } = vi.hoisted(() => ({
   mockStateMgr: {
     initialize: vi.fn().mockResolvedValue(undefined),
     saveRunState: vi.fn().mockResolvedValue(undefined),
     findIncompleteRuns: vi.fn().mockResolvedValue([]),
+    findParkedRuns: vi.fn().mockResolvedValue([]),
   },
   mockCostTracker: {
     getDailyCost: vi.fn().mockReturnValue(0),
@@ -66,12 +67,18 @@ const {
     start: vi.fn().mockReturnValue(vi.fn()),
   }),
   knowledgeStoreCtorArgs: [] as unknown[],
+  mockOctokit: {
+    issues: {
+      get: vi.fn().mockResolvedValue({ data: { labels: [] } }),
+      removeLabel: vi.fn().mockResolvedValue(undefined),
+    },
+  },
 }));
 
 // --- Module mocks (use classes for constructors to work with `new`) ---
 
 vi.mock('./state.js', () => {
-  return { StateManager: class { initialize = mockStateMgr.initialize; saveRunState = mockStateMgr.saveRunState; findIncompleteRuns = mockStateMgr.findIncompleteRuns; } };
+  return { StateManager: class { initialize = mockStateMgr.initialize; saveRunState = mockStateMgr.saveRunState; findIncompleteRuns = mockStateMgr.findIncompleteRuns; findParkedRuns = mockStateMgr.findParkedRuns; } };
 });
 vi.mock('../session-runtime/cost.js', () => {
   return { CostTracker: class { getDailyCost = mockCostTracker.getDailyCost; maybeResetDaily = mockCostTracker.maybeResetDaily; } };
@@ -138,7 +145,7 @@ vi.mock('../supabase/run-writer.js', () => {
   };
 });
 vi.mock('@octokit/rest', () => {
-  return { Octokit: class {} };
+  return { Octokit: class { issues = mockOctokit.issues; } };
 });
 vi.mock('../config.js', () => ({
   loadConfig: (...args: unknown[]) => mockLoadConfig(...args),
@@ -228,6 +235,9 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
   },
   maxConsecutiveStuck: 3,
   gracePeriodMs: 100,
+  maxRunsPerIssue: 3,
+  retryBackoffBaseMs: 60_000,
+  retryBackoffMaxMs: 1_800_000,
   activePlugins: [],
   repo: { owner: 'test-owner', name: 'test-repo' },
   ...overrides,
@@ -278,6 +288,9 @@ describe('daemon', () => {
     mockStateMgr.initialize.mockResolvedValue(undefined);
     mockStateMgr.saveRunState.mockResolvedValue(undefined);
     mockStateMgr.findIncompleteRuns.mockResolvedValue([]);
+    mockStateMgr.findParkedRuns.mockResolvedValue([]);
+    mockOctokit.issues.get.mockResolvedValue({ data: { labels: [] } });
+    mockOctokit.issues.removeLabel.mockResolvedValue(undefined);
     mockRemoteControl.stop.mockResolvedValue(undefined);
     mockCostTracker.getDailyCost.mockReturnValue(0);
     mockRunWriter.upsertRun.mockResolvedValue(undefined);
@@ -309,7 +322,8 @@ describe('daemon', () => {
     for (const mock of [
       mockDetector.detectReadyWork, mockDetector.detectBugFixWork, mockDetector.detectFeaturePipelineWork, mockDetector.claimWork, mockDetector.claimBugFixWork, mockDetector.claimFeaturePipelineWork, mockDetector.markStuck,
       mockRunPipeline, mockNotify, mockServerStart, mockLoadConfig,
-      mockStateMgr.initialize, mockStateMgr.saveRunState, mockStateMgr.findIncompleteRuns,
+      mockStateMgr.initialize, mockStateMgr.saveRunState, mockStateMgr.findIncompleteRuns, mockStateMgr.findParkedRuns,
+      mockOctokit.issues.get, mockOctokit.issues.removeLabel,
       mockServer.close, mockRemoteControl.start, mockRemoteControl.stop,
       mockCostTracker.getDailyCost, mockCostTracker.maybeResetDaily,
       mockRunWriter.upsertRun,
@@ -1707,6 +1721,320 @@ describe('daemon', () => {
       expect(knowledgeStoreCtorArgs).toHaveLength(3);
       expect(knowledgeStoreCtorArgs[0]).toMatch(/knowledge\.jsonl$/);
       expect(knowledgeStoreCtorArgs[2]).toMatch(/gotchas\.jsonl$/);
+    });
+  });
+
+  describe('parked outcome handling', () => {
+    it('does not increment consecutiveStuckCount on parked outcome', async () => {
+      mockRunPipeline.mockResolvedValue({ outcome: 'parked' });
+
+      const request = makeWorkRequest({ issueNumber: 10 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(0);
+    });
+
+    it('does not auto-pause daemon on parked outcome', async () => {
+      const config = makeConfig({ maxConsecutiveStuck: 1 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      mockRunPipeline.mockResolvedValue({ outcome: 'parked' });
+
+      const request = makeWorkRequest({ issueNumber: 10 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(false);
+    });
+
+    it('logs a message on parked outcome', async () => {
+      mockRunPipeline.mockResolvedValue({ outcome: 'parked' });
+
+      const request = makeWorkRequest({ issueNumber: 15 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('parked'),
+      );
+    });
+
+    it('resets consecutiveStuckCount after parked follows stuck (parked is not stuck)', async () => {
+      const config = makeConfig({ maxConsecutiveStuck: 5 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      // First run: stuck
+      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail' });
+      const request1 = makeWorkRequest({ issueNumber: 1 });
+      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request1]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const { createControlServer } = await import('./server.js');
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
+
+      // Second run: parked — should NOT change consecutiveStuckCount
+      mockRunPipeline.mockResolvedValueOnce({ outcome: 'parked' });
+      const request2 = makeWorkRequest({ issueNumber: 2 });
+      mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request2]));
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Parked is a no-op — stuck count stays at 1
+      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(false);
+    });
+  });
+
+  describe('retry backoff', () => {
+    it('skips issue in backoff window after it went stuck', async () => {
+      const config = makeConfig({ retryBackoffBaseMs: 60_000, retryBackoffMaxMs: 1_800_000 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      // First run: stuck
+      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail' });
+      const request = makeWorkRequest({ issueNumber: 42 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      // First poll — run goes stuck
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(42);
+
+      mockDetector.claimWork.mockClear();
+      mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+      // Second poll immediately — should be in backoff window (60s base), skip
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockDetector.claimWork).not.toHaveBeenCalledWith(42);
+    });
+
+    it('allows retry after backoff window expires', async () => {
+      const config = makeConfig({ retryBackoffBaseMs: 1_000, retryBackoffMaxMs: 5_000 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      // First run: stuck
+      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail' });
+      const request = makeWorkRequest({ issueNumber: 42 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      // First poll — run goes stuck
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(42);
+
+      mockDetector.claimWork.mockClear();
+      mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+      // Advance past backoff window (1s base, count=1 → backoff=1s)
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      // Next poll — backoff expired, should retry
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(42);
+    });
+  });
+
+  describe('parked-run resume scan', () => {
+    const makeParkedRun = (overrides?: Record<string, unknown>) => ({
+      id: 'run-parked-1',
+      issueNumber: 100,
+      title: 'Parked feature',
+      phase: 'paused',
+      pausedAtPhase: 'l2-gate',
+      variant: 'feature',
+      phaseCompletions: { detect: true, classify: true, 'l1-design': true, 'l2-design': true },
+      checkpoints: [],
+      cost: 5,
+      perRunBudget: 10,
+      fixAttempts: [],
+      errorHashes: {},
+      repoOwner: 'test-owner',
+      repoName: 'test-repo',
+      body: 'Feature body',
+      labels: ['feature-pipeline', 'l2-in-progress'],
+      specRefs: ['FUNC-100'],
+      l2GateNotified: true,
+      startedAt: '2026-03-21T00:00:00Z',
+      updatedAt: '2026-03-21T06:00:00Z',
+      ...overrides,
+    });
+
+    it('resumes a parked run when l2-approved label is present', async () => {
+      const parkedRun = makeParkedRun();
+      mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'l2-approved' }, { name: 'awaiting-l2-review' }] },
+      });
+      mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      // Trigger one poll cycle
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Should have fetched issue labels
+      expect(mockOctokit.issues.get).toHaveBeenCalledWith(
+        expect.objectContaining({ owner: 'test-owner', repo: 'test-repo', issue_number: 100 }),
+      );
+      // Should have removed awaiting-l2-review label (best-effort)
+      expect(mockOctokit.issues.removeLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'awaiting-l2-review', issue_number: 100 }),
+      );
+      // Should have reset state and re-entered pipeline
+      expect(mockStateMgr.saveRunState).toHaveBeenCalledWith(
+        expect.objectContaining({ issueNumber: 100, phase: 'l2-gate', pausedAtPhase: undefined }),
+      );
+      expect(mockRunPipeline).toHaveBeenCalled();
+    });
+
+    it('resumes a parked run when l2-rejected label is present', async () => {
+      const parkedRun = makeParkedRun();
+      mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'l2-rejected' }] },
+      });
+      mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockStateMgr.saveRunState).toHaveBeenCalledWith(
+        expect.objectContaining({ issueNumber: 100, phase: 'l2-gate', pausedAtPhase: undefined }),
+      );
+      expect(mockRunPipeline).toHaveBeenCalled();
+    });
+
+    it('leaves a parked run parked when no approval/rejection label is present', async () => {
+      const parkedRun = makeParkedRun();
+      mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'awaiting-l2-review' }] },
+      });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Pipeline should NOT have been called — run stays parked
+      expect(mockRunPipeline).not.toHaveBeenCalled();
+      // saveRunState should not have been called with phase reset
+      const saveCallsWithReset = mockStateMgr.saveRunState.mock.calls.filter(
+        (call) => (call[0] as Record<string, unknown>)['issueNumber'] === 100 && (call[0] as Record<string, unknown>)['phase'] === 'l2-gate',
+      );
+      expect(saveCallsWithReset).toHaveLength(0);
+    });
+
+    it('does not attempt to resume a parked run that is already active', async () => {
+      const parkedRun = makeParkedRun();
+      mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'l2-approved' }] },
+      });
+      // Make a blocking run for issue 100 so it is in activeIssues
+      mockRunPipeline.mockImplementation(() => new Promise(() => {})); // never resolves
+      const blockingRequest = makeWorkRequest({ issueNumber: 100 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([blockingRequest]));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      // First poll: claims issue 100 via ready work (it's now active)
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(100);
+      // Even with l2-approved, should not double-start since issue is already active
+      // runPipeline was called once by processWorkRequest — not a second time by resumeParkedRuns
+      expect(mockRunPipeline).toHaveBeenCalledTimes(1);
+    });
+
+    it('skips parked runs that are not at l2-gate', async () => {
+      const parkedRun = makeParkedRun({ pausedAtPhase: 'detect' }); // unknown park phase
+      mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'l2-approved' }] },
+      });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Should not fetch labels or re-enter pipeline
+      expect(mockOctokit.issues.get).not.toHaveBeenCalled();
+      expect(mockRunPipeline).not.toHaveBeenCalled();
+    });
+
+    it('handles GitHub API errors gracefully and continues poll cycle', async () => {
+      const parkedRun = makeParkedRun();
+      mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+      mockOctokit.issues.get.mockRejectedValue(new Error('GitHub API error'));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Should not crash — pipeline not called
+      expect(mockRunPipeline).not.toHaveBeenCalled();
+    });
+
+    it('parked runs are excluded from crash resumption', async () => {
+      // A parked run: phase=paused with pausedAtPhase set
+      const parkedRun = makeParkedRun();
+      // findIncompleteRuns should NOT return parked runs (they're excluded by the new filter)
+      mockStateMgr.findIncompleteRuns.mockResolvedValue([]);
+      mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+      // No labels → stays parked
+      mockOctokit.issues.get.mockResolvedValue({ data: { labels: [] } });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(0);
+
+      // findIncompleteRuns returned empty, so no crash resumption pipeline call
+      expect(mockRunPipeline).not.toHaveBeenCalled();
     });
   });
 });

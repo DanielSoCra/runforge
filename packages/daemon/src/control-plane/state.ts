@@ -43,7 +43,25 @@ export class StateManager {
       for (const file of files) {
         if (!file.endsWith('.json')) continue;
         const result = await readJsonSafe<RunState>(join(runsDir, file));
-        if (result.ok && !isRunComplete(result.value)) {
+        if (result.ok && !isRunComplete(result.value) && !isRunParked(result.value)) {
+          runs.push(result.value);
+        }
+      }
+      return runs;
+    } catch {
+      return [];
+    }
+  }
+
+  async findParkedRuns(): Promise<RunState[]> {
+    const runsDir = join(this.stateDir, 'runs');
+    try {
+      const files = await readdir(runsDir);
+      const runs: RunState[] = [];
+      for (const file of files) {
+        if (!file.endsWith('.json')) continue;
+        const result = await readJsonSafe<RunState>(join(runsDir, file));
+        if (result.ok && isRunParked(result.value)) {
           runs.push(result.value);
         }
       }
@@ -92,4 +110,8 @@ function isRunComplete(run: RunState): boolean {
     return isComplete(run.phase, 'success');
   }
   return false;
+}
+
+function isRunParked(run: RunState): boolean {
+  return run.phase === 'paused' && run.pausedAtPhase !== undefined;
 }

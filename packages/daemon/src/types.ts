@@ -105,6 +105,9 @@ export interface RunState {
   classificationComplexity?: 'simple' | 'standard' | 'complex';
   handoffNotes?: Record<string, string>;
   workerClaimId?: string;
+  pausedAtPhase?: Phase;
+  l2GateNotified?: boolean;
+  l2Feedback?: string;
 }
 
 // --- Daemon State ---

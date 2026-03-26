@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { loadSpecContent, loadImplementationContent, extractCodePaths } from './spec-loader.js';
+import {
+  loadSpecContent,
+  loadImplementationContent,
+  extractCodePaths,
+  resolveCurrentSpecRefs,
+} from './spec-loader.js';
 
 describe('loadSpecContent', () => {
   let specifyRoot: string;
@@ -235,5 +240,97 @@ describe('loadImplementationContent', () => {
     const content = await loadImplementationContent(['STACK-AC-DIAGNOSIS'], repoRoot);
     expect(content).not.toBe('');
     expect(content).toContain('diagnose');
+  });
+});
+
+describe('resolveCurrentSpecRefs', () => {
+  let specifyRoot: string;
+
+  beforeEach(async () => {
+    specifyRoot = await mkdtemp(join(tmpdir(), 'spec-chain-test-'));
+    await mkdir(join(specifyRoot, '.specify'));
+  });
+
+  afterEach(async () => {
+    await rm(specifyRoot, { recursive: true, force: true });
+  });
+
+  it('walks children downward to resolve full spec chain', async () => {
+    const traceability = [
+      'FUNC-AC-FOO:',
+      '  children: [ARCH-AC-FOO]',
+      '  status: approved',
+      '',
+      'ARCH-AC-FOO:',
+      '  parent: FUNC-AC-FOO',
+      '  children: [STACK-AC-FOO]',
+      '  status: approved',
+      '',
+      'STACK-AC-FOO:',
+      '  parent: ARCH-AC-FOO',
+      '  code_paths:',
+      '    - src/foo.ts',
+      '  status: approved',
+    ].join('\n');
+
+    await writeFile(join(specifyRoot, '.specify', 'traceability.yml'), traceability);
+
+    const result = await resolveCurrentSpecRefs(specifyRoot, ['FUNC-AC-FOO']);
+    expect(result).toContain('FUNC-AC-FOO');
+    expect(result).toContain('ARCH-AC-FOO');
+    expect(result).toContain('STACK-AC-FOO');
+  });
+
+  it('also picks up specs whose parent field points into the base set', async () => {
+    // ARCH-AC-BAR declares parent: FUNC-AC-BAR but FUNC-AC-BAR has no children list
+    const traceability = [
+      'FUNC-AC-BAR:',
+      '  status: approved',
+      '',
+      'ARCH-AC-BAR:',
+      '  parent: FUNC-AC-BAR',
+      '  status: approved',
+    ].join('\n');
+
+    await writeFile(join(specifyRoot, '.specify', 'traceability.yml'), traceability);
+
+    const result = await resolveCurrentSpecRefs(specifyRoot, ['FUNC-AC-BAR']);
+    expect(result).toContain('FUNC-AC-BAR');
+    expect(result).toContain('ARCH-AC-BAR');
+  });
+
+  it('returns original refs when traceability.yml does not exist', async () => {
+    const result = await resolveCurrentSpecRefs(specifyRoot, ['FUNC-AC-MISSING']);
+    expect(result).toEqual(['FUNC-AC-MISSING']);
+  });
+
+  it('returns original refs unchanged when base refs have no children or parents pointing to them', async () => {
+    const traceability = [
+      'FUNC-AC-ISOLATED:',
+      '  status: approved',
+    ].join('\n');
+
+    await writeFile(join(specifyRoot, '.specify', 'traceability.yml'), traceability);
+
+    const result = await resolveCurrentSpecRefs(specifyRoot, ['FUNC-AC-ISOLATED']);
+    expect(result).toEqual(['FUNC-AC-ISOLATED']);
+  });
+
+  it('deduplicates refs that appear via both children and parent traversal', async () => {
+    const traceability = [
+      'FUNC-AC-DUP:',
+      '  children: [ARCH-AC-DUP]',
+      '  status: approved',
+      '',
+      'ARCH-AC-DUP:',
+      '  parent: FUNC-AC-DUP',
+      '  status: approved',
+    ].join('\n');
+
+    await writeFile(join(specifyRoot, '.specify', 'traceability.yml'), traceability);
+
+    const result = await resolveCurrentSpecRefs(specifyRoot, ['FUNC-AC-DUP']);
+    const archCount = result.filter(r => r === 'ARCH-AC-DUP').length;
+    expect(archCount).toBe(1);
   });
 });

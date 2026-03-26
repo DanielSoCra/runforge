@@ -20,7 +20,7 @@ import { git } from '../lib/git.js';
 import { join } from 'node:path';
 import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
-import { loadSpecContent, loadImplementationContent } from '../infra/spec-loader.js';
+import { loadSpecContent, loadImplementationContent, resolveCurrentSpecRefs } from '../infra/spec-loader.js';
 import { classify as runClassify } from './classifier.js';
 import { SessionError } from '../session-runtime/session-error.js';
 import { runHoldout } from '../validation/holdout.js';
@@ -71,6 +71,12 @@ export function createPhaseHandlers(
   const repo = repoName;
   const detector = createWorkDetector(octokit, owner, repo);
   const featureBranch = `feature/${workRequest.issueNumber}`;
+  // Workspace isolation: sessions run in a worktree, not the daemon's own directory.
+  // This prevents `git checkout` from swapping the daemon's source code out from under it.
+  const mainRepoRoot = repoRoot ?? process.cwd();
+  const workspaceDir = join(mainRepoRoot, 'workspaces', `issue-${workRequest.issueNumber}`);
+  // After detect, all phases use workspaceCwd instead of repoRoot
+  let workspaceCwd: string = mainRepoRoot;
 
   return {
     detect: async (_run: RunState): Promise<PhaseEvent> => {
@@ -79,18 +85,32 @@ export function createPhaseHandlers(
         return 'failure';
       }
       try {
-        console.log(`[detect] Creating branch ${featureBranch} from ${config.branches.staging}`);
-        const stagingCheckout = await git(['checkout', config.branches.staging], repoRoot);
-        if (!stagingCheckout.ok) {
-          console.error(`[detect] Checkout staging failed:`, stagingCheckout.error.message);
-          return 'failure';
+        console.log(`[detect] Creating worktree ${workspaceDir} for ${featureBranch} from ${config.branches.staging}`);
+        // Try to create worktree with new branch
+        const wtResult = await git(
+          ['worktree', 'add', workspaceDir, '-b', featureBranch, config.branches.staging],
+          mainRepoRoot,
+        );
+        if (!wtResult.ok) {
+          // Branch may already exist — try adding worktree for existing branch
+          console.log(`[detect] Branch exists, trying existing branch worktree`);
+          const wtExisting = await git(
+            ['worktree', 'add', workspaceDir, featureBranch],
+            mainRepoRoot,
+          );
+          if (!wtExisting.ok) {
+            // Worktree directory may already exist from a previous run
+            const { existsSync } = await import('node:fs');
+            if (existsSync(workspaceDir)) {
+              console.log(`[detect] Worktree already exists at ${workspaceDir}, pulling latest`);
+              await git(['pull', '--ff-only'], workspaceDir);
+            } else {
+              console.error(`[detect] Worktree creation failed:`, wtExisting.error.message);
+              return 'failure';
+            }
+          }
         }
-        const branchResult = await git(['checkout', '-b', featureBranch, config.branches.staging], repoRoot);
-        if (!branchResult.ok) {
-          console.log(`[detect] Branch exists, checking out`);
-          const co = await git(['checkout', featureBranch], repoRoot);
-          if (!co.ok) { console.error(`[detect] Checkout failed:`, co.error.message); return 'failure'; }
-        }
+        workspaceCwd = workspaceDir;
         return 'success';
       } finally {
         releaseRepoGitLock();
@@ -101,62 +121,197 @@ export function createPhaseHandlers(
 
     'l2-design': async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[l2-design] Generating L2 architecture spec for #${workRequest.issueNumber}`);
+      const cwd = workspaceCwd;
+      const specifyRoot = join(cwd, '.specify');
+      let specContent = '';
+      try {
+        specContent = await loadSpecContent(workRequest.specRefs, specifyRoot);
+      } catch (e) {
+        console.warn(`[l2-design] Failed to load spec content:`, e);
+      }
       const result = await runtime.spawnSession('l2-designer', {
         variables: {
           issueNumber: String(workRequest.issueNumber),
           issueTitle: workRequest.title,
           issueBody: workRequest.body,
+          specContent,
           owner,
           repo: repoName,
+          feedback: run.l2Feedback ?? '',
         },
+        workspacePath: cwd,
       }, workRequest.issueNumber, undefined, runWriter, runId);
+      run.l2Feedback = undefined;
       if (!result.ok) {
         console.error(`[l2-design] Session failed: ${result.error.message}`);
         return 'failure';
       }
+      if (result.value.exitStatus === 'timed-out' || result.value.exitStatus === 'failed') {
+        console.error(`[l2-design] Session exited with status: ${result.value.exitStatus}`);
+        return 'failure';
+      }
+      // Refresh spec refs after L2 design session generates new specs
+      try {
+        run.specRefs = await resolveCurrentSpecRefs(cwd, workRequest.specRefs);
+      } catch (e) {
+        console.warn(`[l2-design] Failed to refresh spec refs:`, e);
+      }
       return 'success';
     },
 
-    'l2-gate': async (_run: RunState): Promise<PhaseEvent> => {
-      // Gate: check if L2 spec PR was created and approved.
-      // For now, auto-approve — the operator loop handles L2 review.
-      console.log(`[l2-gate] Auto-approving L2 gate for #${workRequest.issueNumber}`);
+    'l2-gate': async (run: RunState): Promise<PhaseEvent> => {
+      console.log(`[l2-gate] Checking L2 gate labels for #${workRequest.issueNumber}`);
+      // Fetch current issue labels
+      let labels: string[];
+      try {
+        const response = await octokit.issues.get({
+          owner, repo, issue_number: workRequest.issueNumber,
+        });
+        labels = (response.data.labels as Array<{ name?: string } | string>).map(
+          (l) => (typeof l === 'string' ? l : l.name ?? ''),
+        );
+      } catch (e) {
+        console.error(`[l2-gate] Failed to fetch issue labels:`, e);
+        return 'failure';
+      }
+
+      if (labels.includes('l2-approved')) {
+        console.log(`[l2-gate] L2 approved for #${workRequest.issueNumber}`);
+        return 'success';
+      }
+      if (labels.includes('l2-rejected')) {
+        console.log(`[l2-gate] L2 rejected for #${workRequest.issueNumber} — looping back to l2-design`);
+        // Fetch the most recent rejection comment to pass as feedback to the designer
+        try {
+          const comments = await octokit.issues.listComments({
+            owner, repo, issue_number: workRequest.issueNumber, per_page: 20,
+          });
+          const rejectionComment = [...comments.data].reverse().find(
+            (c) => c.body?.includes('REJECTED') || c.body?.includes('l2-rejected'),
+          );
+          if (rejectionComment?.body) {
+            run.l2Feedback = rejectionComment.body;
+            console.log(`[l2-gate] Captured rejection feedback for #${workRequest.issueNumber}`);
+          }
+        } catch (e) {
+          console.warn(`[l2-gate] Failed to fetch rejection comment:`, e);
+        }
+        // Remove l2-rejected label so next gate check doesn't re-trigger immediately
+        try {
+          await octokit.issues.removeLabel({
+            owner, repo, issue_number: workRequest.issueNumber, name: 'l2-rejected',
+          });
+        } catch (e) {
+          console.warn(`[l2-gate] Failed to remove l2-rejected label:`, e);
+        }
+        run.l2GateNotified = false;
+        return 'feedback';
+      }
+      // Neither approved nor rejected — park the run
+      console.log(`[l2-gate] No L2 decision yet for #${workRequest.issueNumber} — parking`);
+      run.pausedAtPhase = 'l2-gate';
+      // First park: add label and post comment
+      if (!run.l2GateNotified) {
+        try {
+          await octokit.issues.addLabels({
+            owner, repo, issue_number: workRequest.issueNumber,
+            labels: ['awaiting-l2-review'],
+          });
+          await octokit.issues.createComment({
+            owner, repo, issue_number: workRequest.issueNumber,
+            body: `## Awaiting L2 Review\n\nThe L2 architecture spec is ready for review. Add the \`l2-approved\` label to continue, or \`l2-rejected\` to send back for revision.`,
+          });
+        } catch (e) {
+          console.error(`[l2-gate] Failed to notify:`, e);
+        }
+        run.l2GateNotified = true;
+      }
       return 'success';
     },
 
     'l3-generate': async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[l3-generate] Generating L3 stack spec for #${workRequest.issueNumber}`);
+      const cwd = workspaceCwd;
+      const specifyRoot = join(cwd, '.specify');
+      // Refresh spec refs before generation to pick up L2 specs
+      try {
+        run.specRefs = await resolveCurrentSpecRefs(cwd, workRequest.specRefs);
+      } catch (e) {
+        console.warn(`[l3-generate] Failed to refresh spec refs before generation:`, e);
+      }
+      let specContent = '';
+      try {
+        specContent = await loadSpecContent(run.specRefs ?? workRequest.specRefs, specifyRoot);
+      } catch (e) {
+        console.warn(`[l3-generate] Failed to load spec content:`, e);
+      }
       const result = await runtime.spawnSession('l3-generator', {
         variables: {
           issueNumber: String(workRequest.issueNumber),
           issueTitle: workRequest.title,
           issueBody: workRequest.body,
+          specContent,
           owner,
           repo: repoName,
         },
+        workspacePath: cwd,
       }, workRequest.issueNumber, undefined, runWriter, runId);
       if (!result.ok) {
         console.error(`[l3-generate] Session failed: ${result.error.message}`);
         return 'failure';
+      }
+      if (result.value.exitStatus === 'timed-out' || result.value.exitStatus === 'failed') {
+        console.error(`[l3-generate] Session exited with status: ${result.value.exitStatus}`);
+        return 'failure';
+      }
+      // Refresh spec refs after L3 generation
+      try {
+        run.specRefs = await resolveCurrentSpecRefs(cwd, workRequest.specRefs);
+      } catch (e) {
+        console.warn(`[l3-generate] Failed to refresh spec refs after generation:`, e);
       }
       return 'success';
     },
 
     'l3-compliance': async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[l3-compliance] Reviewing L3 compliance for #${workRequest.issueNumber}`);
+      const cwd = workspaceCwd;
+      const specifyRoot = join(cwd, '.specify');
+      let specContent = '';
+      try {
+        specContent = await loadSpecContent(run.specRefs ?? workRequest.specRefs, specifyRoot);
+      } catch (e) {
+        console.warn(`[l3-compliance] Failed to load spec content:`, e);
+      }
       const result = await runtime.spawnSession('compliance-reviewer', {
         variables: {
           issueNumber: String(workRequest.issueNumber),
           issueTitle: workRequest.title,
           issueBody: workRequest.body,
+          specContent,
           owner,
           repo: repoName,
         },
+        workspacePath: cwd,
       }, workRequest.issueNumber, undefined, runWriter, runId);
       if (!result.ok) {
         console.error(`[l3-compliance] Session failed: ${result.error.message}`);
         return 'failure';
       }
+      if (result.value.exitStatus === 'timed-out' || result.value.exitStatus === 'failed') {
+        console.error(`[l3-compliance] Session exited with status: ${result.value.exitStatus}`);
+        return 'failure';
+      }
+      const structuredData = result.value?.structuredData as { passed?: boolean } | undefined;
+      if (structuredData && structuredData.passed === false) {
+        console.log(`[l3-compliance] Compliance check failed — gaps found`);
+        return 'failure';
+      }
+      return 'success';
+    },
+
+    decompose: async (_run: RunState): Promise<PhaseEvent> => {
+      console.log(`[decompose] Decompose phase for #${workRequest.issueNumber} — pass-through`);
       return 'success';
     },
 
@@ -164,7 +319,7 @@ export function createPhaseHandlers(
 
     classify: async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[classify] Classifying work request #${workRequest.issueNumber}`);
-      const result = await runClassify(runtime, workRequest, runWriter, runId, repoRoot, activePlugins);
+      const result = await runClassify(runtime, workRequest, runWriter, runId, workspaceCwd, activePlugins);
       run.classificationComplexity = result.complexity;
       return result.event;
     },
@@ -174,7 +329,7 @@ export function createPhaseHandlers(
       const threshold = config.diagnosis.confidenceThreshold;
 
       // Load actual spec content from .specify/ (not just spec IDs) (#143)
-      const cwd = repoRoot ?? process.cwd();
+      const cwd = workspaceCwd;
       const specifyRoot = join(cwd, '.specify');
       let specContent = '';
       try {
@@ -199,7 +354,7 @@ export function createPhaseHandlers(
         specContent,
         runWriter,
         runId,
-        repoRoot,
+        workspaceCwd,
         activePlugins,
       );
 
@@ -318,7 +473,7 @@ export function createPhaseHandlers(
     },
 
     review: async (run: RunState): Promise<PhaseEvent> => {
-      const cwd = repoRoot ?? process.cwd();
+      const cwd = workspaceCwd;
       console.log(`[review] Running review gates in ${cwd}`);
 
       // Use classifier-determined complexity (set in classify phase, line 83)
@@ -335,10 +490,16 @@ export function createPhaseHandlers(
       // Build diff for reviewer context.
       // Use explicit branch ref (not HEAD) so the diff is correct even when
       // a concurrent detect phase has checked out a different branch (#178).
+      // Truncate to 50 KB to avoid excessive prompt size that causes reviewer timeouts.
+      const DIFF_MAX_BYTES = 50_000;
       let diff: string | undefined;
       try {
-        const diffResult = await git(['diff', config.branches.staging + '..' + featureBranch], repoRoot);
-        if (diffResult.ok) diff = diffResult.value;
+        const diffResult = await git(['diff', config.branches.staging + '..' + featureBranch], workspaceCwd);
+        if (diffResult.ok) {
+          diff = diffResult.value.length > DIFF_MAX_BYTES
+            ? diffResult.value.slice(0, DIFF_MAX_BYTES) + '\n\n[diff truncated — showing first 50 KB of ' + diffResult.value.length + ' bytes]'
+            : diffResult.value;
+        }
       } catch { /* diff is optional context */ }
 
       // Load actual spec content from .specify/ for reviewer (#122)
@@ -368,7 +529,7 @@ export function createPhaseHandlers(
       let knowledgeContext: string | undefined;
       if (knowledgeStore) {
         try {
-          const nameOnlyResult = await git(['diff', '--name-only', config.branches.staging + '..' + featureBranch], repoRoot);
+          const nameOnlyResult = await git(['diff', '--name-only', config.branches.staging + '..' + featureBranch], workspaceCwd);
           const artifactPaths = nameOnlyResult.ok
             ? nameOnlyResult.value.split('\n').filter(Boolean)
             : [];
@@ -411,7 +572,17 @@ export function createPhaseHandlers(
           console.error(`[review] Escalated (${result.escalationReason ?? 'unknown'}):`, JSON.stringify(result.gateResults));
           return 'escalated';
         }
-        console.error(`[review] Failed:`, JSON.stringify(result.gateResults));
+        // Track review failures across implement→review loop iterations.
+        // Without a fixHandler, runReview returns immediately — escalation must be
+        // handled here using accumulated fixAttempts from prior cycles.
+        const reviewFailures = run.fixAttempts.filter(a => a.phase === 'review').length;
+        const errorHash = result.gateResults.find(g => !g.passed)?.findings[0]?.description?.slice(0, 64) ?? 'unknown';
+        run.fixAttempts.push({ phase: 'review', attempt: reviewFailures + 1, errorHash });
+        if (reviewFailures + 1 >= config.validation.maxFixCycles) {
+          console.error(`[review] Max fix cycles (${config.validation.maxFixCycles}) reached, escalating:`, JSON.stringify(result.gateResults));
+          return 'escalated';
+        }
+        console.error(`[review] Failed (attempt ${reviewFailures + 1}/${config.validation.maxFixCycles}):`, JSON.stringify(result.gateResults));
         return 'failure';
       }
       console.log(`[review] Passed (${result.fixCycles} fix cycles)`);
@@ -423,7 +594,7 @@ export function createPhaseHandlers(
         console.log(`[holdout] No holdout command configured — skipping`);
         return 'success';
       }
-      const cwd = repoRoot ?? process.cwd();
+      const cwd = workspaceCwd;
       console.log(`[holdout] Running holdout tests for #${workRequest.issueNumber}`);
       const result = await runHoldout(config.validation.holdoutCommand, featureBranch, cwd);
       if (!result.ok) {
@@ -441,7 +612,7 @@ export function createPhaseHandlers(
 
     integrate: async (_run: RunState): Promise<PhaseEvent> => {
       console.log(`[integrate] Merging ${featureBranch} into ${config.branches.staging}`);
-      const result = await integrateToStaging(featureBranch, config.branches.staging, repoRoot);
+      const result = await integrateToStaging(featureBranch, config.branches.staging, workspaceCwd);
       if (!result.ok) {
         console.error(`[integrate] Error:`, result.error.message);
         return 'failure';
@@ -459,7 +630,7 @@ export function createPhaseHandlers(
         console.log(`[deploy] No deploy command or health check URL configured — skipping`);
         return 'success';
       }
-      const cwd = repoRoot ?? process.cwd();
+      const cwd = workspaceCwd;
       console.log(`[deploy] Running deploy for #${workRequest.issueNumber}`);
       const result = await runDeploy({
         deployCommand: config.validation.deployCommand,
@@ -486,7 +657,7 @@ export function createPhaseHandlers(
         console.log(`[test] No post-deploy test commands configured — skipping`);
         return 'success';
       }
-      const cwd = repoRoot ?? process.cwd();
+      const cwd = workspaceCwd;
       console.log(`[test] Running post-deploy tests for #${workRequest.issueNumber}`);
       const result = await runPostDeployTests({
         testCommands: config.validation.testCommands,

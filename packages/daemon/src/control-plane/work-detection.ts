@@ -54,7 +54,7 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
           .filter((issue) => !('pull_request' in issue && issue.pull_request))
           .filter((issue) => {
             const names = getLabelNames(issue.labels);
-            return !names.includes('in-progress') && !names.includes('blocked');
+            return !names.includes('in-progress') && !names.includes('blocked') && !names.includes('stuck') && !names.includes('awaiting-l2-review');
           });
 
         // Severity-gated priority: P0 > P1 > P2 (with auto-fix-approved only), never P3
@@ -79,10 +79,10 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
       try {
         // 4-tier priority scan matching pipeline.sh find_work()
         const tiers: Array<{ labels: string; exclude: string[]; workType: FeaturePipelineWorkType }> = [
-          { labels: 'feature-pipeline,ready-to-implement', exclude: ['implementing', 'blocked'], workType: 'implementation' },
-          { labels: 'feature-pipeline,l2-approved', exclude: ['l3-in-progress', 'blocked'], workType: 'l3-generate' },
-          { labels: 'feature-pipeline,l2-in-progress', exclude: ['blocked'], workType: 'l2-brainstorm' },
-          { labels: 'feature-pipeline,l1-approved', exclude: ['l2-in-progress', 'blocked'], workType: 'l2-brainstorm' },
+          { labels: 'feature-pipeline,ready-to-implement', exclude: ['implementing', 'blocked', 'stuck', 'awaiting-l2-review'], workType: 'implementation' },
+          { labels: 'feature-pipeline,l2-approved', exclude: ['l3-in-progress', 'blocked', 'stuck', 'awaiting-l2-review'], workType: 'l3-generate' },
+          { labels: 'feature-pipeline,l2-in-progress', exclude: ['blocked', 'stuck', 'awaiting-l2-review'], workType: 'l2-brainstorm' },
+          { labels: 'feature-pipeline,l1-approved', exclude: ['l2-in-progress', 'blocked', 'stuck', 'awaiting-l2-review'], workType: 'l2-brainstorm' },
         ];
 
         for (const tier of tiers) {

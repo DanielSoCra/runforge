@@ -38,7 +38,7 @@ export function createGate1(commands: string[]): Gate {
           });
           return { gate: 'deterministic', passed: false, findings };
         }
-        const result = await runCommand('sh', ['-c', cmd], { cwd, timeoutMs: 120_000 });
+        const result = await runCommand('/bin/sh', ['-c', cmd], { cwd, timeoutMs: 120_000 });
         if (!result.ok) {
           findings.push({
             severity: 'critical',
