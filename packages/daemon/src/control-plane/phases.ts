@@ -508,7 +508,14 @@ export function createPhaseHandlers(
         if (recreate.ok) {
           workspaceCwd = workspaceDir;
           run.workspacePath = workspaceDir;
-          console.log(`[implement] Worktree recreated at ${workspaceDir}`);
+          // Install dependencies so review gate commands (pnpm test, tsc) work
+          const { execSync } = await import('node:child_process');
+          try {
+            execSync('pnpm install --frozen-lockfile', { cwd: workspaceDir, timeout: 120_000, stdio: 'pipe' });
+            console.log(`[implement] Worktree recreated at ${workspaceDir} (deps installed)`);
+          } catch (e) {
+            console.warn(`[implement] Worktree recreated but pnpm install failed — review gate may fail`);
+          }
         } else {
           console.warn(`[implement] Failed to recreate worktree: ${recreate.error.message} — falling back to repo root`);
           workspaceCwd = mainRepoRoot;
