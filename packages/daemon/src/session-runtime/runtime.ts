@@ -62,12 +62,16 @@ export async function loadPromptTemplate(
 // then tune down per session type based on actual p95 durations.
 const THREE_HOURS = 10_800_000;
 
+// Model routing: use the cheapest model that can handle each session type.
+// haiku = trivial/1-turn, sonnet = read+analyze, opus = complex multi-step reasoning.
+// undefined = user's default model (backward compat for API key users).
 const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
   coordinator: {
     name: 'coordinator',
     description: 'Decomposes work requests into parallel task graphs',
     systemPrompt: '', // loaded from prompts/coordinator.md
     allowedTools: ['Read', 'Glob', 'Grep'],
+    modelOverride: 'claude-haiku-4-5-20251001',
     maxTurns: 1,
     timeoutMs: THREE_HOURS,
     budgetCap: 1,
@@ -77,6 +81,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Classifies work request complexity (simple/standard/complex)',
     systemPrompt: '', // loaded from prompts/classifier.md
     allowedTools: ['Read', 'Glob', 'Grep'],
+    modelOverride: 'claude-haiku-4-5-20251001',
     maxTurns: 1,
     timeoutMs: THREE_HOURS,
     budgetCap: 0.5,
@@ -86,6 +91,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Implements a unit of work using TDD',
     systemPrompt: '', // loaded from prompts/worker.md
     allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
+    modelOverride: 'claude-sonnet-4-6',
     maxTurns: 50,
     timeoutMs: THREE_HOURS,
     budgetCap: 5,
@@ -95,6 +101,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Verifies implementation against spec acceptance criteria',
     systemPrompt: '', // loaded from prompts/reviewer-spec.md
     allowedTools: ['Read', 'Glob', 'Grep'],
+    modelOverride: 'claude-sonnet-4-6',
     maxTurns: 30,
     timeoutMs: THREE_HOURS,
     budgetCap: 2,
@@ -104,6 +111,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Evaluates code quality, patterns, and test quality',
     systemPrompt: '', // loaded from prompts/reviewer-quality.md
     allowedTools: ['Read', 'Glob', 'Grep'],
+    modelOverride: 'claude-sonnet-4-6',
     maxTurns: 30,
     timeoutMs: THREE_HOURS,
     budgetCap: 2,
@@ -113,6 +121,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Evaluates security: injection, auth, validation, concurrency',
     systemPrompt: '', // loaded from prompts/reviewer-security.md
     allowedTools: ['Read', 'Glob', 'Grep'],
+    modelOverride: 'claude-sonnet-4-6',
     maxTurns: 30,
     timeoutMs: THREE_HOURS,
     budgetCap: 2,
@@ -122,6 +131,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Fixes Type A bugs with regression-test-first protocol',
     systemPrompt: '', // loaded from prompts/bug-worker.md
     allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
+    modelOverride: 'claude-sonnet-4-6',
     maxTurns: 30,
     timeoutMs: THREE_HOURS,
     budgetCap: 5,
@@ -131,6 +141,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Classifies bugs as Type A/B/C with confidence score',
     systemPrompt: '', // loaded from prompts/diagnostician.md
     allowedTools: ['Read', 'Glob', 'Grep'],
+    modelOverride: 'claude-haiku-4-5-20251001',
     maxTurns: 1,
     timeoutMs: THREE_HOURS,
     budgetCap: 1,
@@ -140,6 +151,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Periodic codebase review — discovery, verification, filtered issue creation',
     systemPrompt: '', // loaded from prompts/codebase-reviewer.md
     allowedTools: ['Read', 'Glob', 'Grep', 'Bash'],
+    modelOverride: 'claude-sonnet-4-6',
     maxTurns: 30,
     timeoutMs: THREE_HOURS,
     budgetCap: 3,
@@ -149,6 +161,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Analyzes signals and generates business-level proposals',
     systemPrompt: '', // loaded from prompts/product-owner.md
     allowedTools: ['Read', 'Glob', 'Grep'],
+    modelOverride: 'claude-sonnet-4-6',
     maxTurns: 10,
     timeoutMs: THREE_HOURS,
     budgetCap: 3,
@@ -158,6 +171,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Analyzes technical signals and generates improvement proposals',
     systemPrompt: '', // loaded from prompts/tech-lead.md
     allowedTools: ['Read', 'Glob', 'Grep'],
+    modelOverride: 'claude-sonnet-4-6',
     maxTurns: 10,
     timeoutMs: THREE_HOURS,
     budgetCap: 3,
@@ -167,8 +181,9 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Generates L2 architecture specs from L1 functional specs',
     systemPrompt: 'You are an L2 architecture spec designer. Use the spec-brainstorm-l2 and l2-spec-guardian skills. Generate or update the ARCH-* spec file in .specify/architecture/. Commit the result.',
     allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
+    modelOverride: 'claude-sonnet-4-6',
     maxTurns: 30,
-    timeoutMs: 10_800_000, // 3 hours — spec generation is complex multi-step work
+    timeoutMs: THREE_HOURS,
     budgetCap: 2,
   },
   'l3-generator': {
@@ -176,8 +191,9 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Generates L3 stack-specific specs from approved L2 architecture specs',
     systemPrompt: 'You are an L3 spec generator. Use the spec-generate-l3 and l3-spec-guardian skills. Generate the STACK-* spec file in .specify/stack/. Run spec-review-compliance in inline mode as self-check. Commit the result.',
     allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
+    modelOverride: 'claude-sonnet-4-6',
     maxTurns: 30,
-    timeoutMs: 10_800_000, // 3 hours
+    timeoutMs: THREE_HOURS,
     budgetCap: 2,
   },
   'compliance-reviewer': {
@@ -185,8 +201,9 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Reviews L3 specs for compliance with L1 and L2 specs',
     systemPrompt: 'You are a spec compliance reviewer. Use the spec-review-compliance skill to verify the L3 spec is consistent with L1 and L2. Report pass/fail with specific gaps found.',
     allowedTools: ['Read', 'Glob', 'Grep'],
+    modelOverride: 'claude-sonnet-4-6',
     maxTurns: 15,
-    timeoutMs: 10_800_000, // 3 hours
+    timeoutMs: THREE_HOURS,
     budgetCap: 1,
   },
 };

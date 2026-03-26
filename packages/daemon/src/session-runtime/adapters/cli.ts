@@ -19,6 +19,9 @@ export class CliAdapter implements ProviderAdapter {
       '--output-format', 'json',
       '--max-turns', String(def.maxTurns),
     ];
+    if (def.modelOverride) {
+      args.push('--model', def.modelOverride);
+    }
     if (def.allowedTools.length > 0) {
       args.push('--allowedTools', def.allowedTools.join(','));
     }
