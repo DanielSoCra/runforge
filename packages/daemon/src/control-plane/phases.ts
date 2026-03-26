@@ -476,9 +476,12 @@ export function createPhaseHandlers(
       // coordinator.implement() checks out featureBranch in the main repo for merging — restore
       // to staging branch so the review phase sees current dev code and passing test suite.
       const { existsSync: workspaceDirExists } = await import('node:fs');
-      await git(['checkout', config.branches.staging], mainRepoRoot).catch((e) => {
-        console.warn(`[implement] Failed to restore branch to ${config.branches.staging}:`, e);
-      });
+      const restoreResult = await git(['checkout', config.branches.staging], mainRepoRoot);
+      if (restoreResult.ok) {
+        console.log(`[implement] Restored main repo to ${config.branches.staging}`);
+      } else {
+        console.warn(`[implement] Failed to restore branch to ${config.branches.staging}: ${restoreResult.error.message}`);
+      }
       if (!workspaceDirExists(workspaceDir)) {
         console.log(`[implement] Workspace removed by batch — using repo root for review`);
         workspaceCwd = mainRepoRoot;
