@@ -138,6 +138,7 @@ export function createPhaseHandlers(
           owner,
           repo: repoName,
         },
+        workspacePath: cwd,
       }, workRequest.issueNumber, undefined, runWriter, runId);
       if (!result.ok) {
         console.error(`[l2-design] Session failed: ${result.error.message}`);
@@ -223,6 +224,7 @@ export function createPhaseHandlers(
           owner,
           repo: repoName,
         },
+        workspacePath: cwd,
       }, workRequest.issueNumber, undefined, runWriter, runId);
       if (!result.ok) {
         console.error(`[l3-generate] Session failed: ${result.error.message}`);
@@ -256,6 +258,7 @@ export function createPhaseHandlers(
           owner,
           repo: repoName,
         },
+        workspacePath: cwd,
       }, workRequest.issueNumber, undefined, runWriter, runId);
       if (!result.ok) {
         console.error(`[l3-compliance] Session failed: ${result.error.message}`);
