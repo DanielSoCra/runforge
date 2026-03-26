@@ -11,6 +11,8 @@ const handlers = {
   getStatus: () => ({ activeRuns: 0, paused: false }),
   pause: vi.fn(),
   resume: vi.fn(),
+  drain: vi.fn(),
+  cancelDrain: vi.fn(),
   retry: (n: number) => n === 42 ? ok(undefined) : err(new Error('not found')),
 };
 

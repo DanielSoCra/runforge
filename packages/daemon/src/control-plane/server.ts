@@ -7,6 +7,8 @@ export interface ControlHandlers {
   getStatus: () => unknown;
   pause: () => void;
   resume: () => void;
+  drain: () => void;
+  cancelDrain: () => void;
   retry: (issueNumber: number) => Result<void>;
   reloadRepos?: () => Promise<{ active: number }>;
   restartRemoteControl?: () => void | Promise<void>;
@@ -53,6 +55,12 @@ export function createControlServer(
     } else if (method === 'POST' && url.pathname === '/resume') {
       handlers.resume();
       json(res, 200, { paused: false });
+    } else if (method === 'POST' && url.pathname === '/drain') {
+      handlers.drain();
+      json(res, 200, { draining: true });
+    } else if (method === 'POST' && url.pathname === '/drain/cancel') {
+      handlers.cancelDrain();
+      json(res, 200, { draining: false });
     } else if (method === 'POST' && url.pathname === '/repos/reload') {
       if (handlers.reloadRepos) {
         handlers.reloadRepos().then((result) => {

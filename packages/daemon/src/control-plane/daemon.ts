@@ -335,6 +335,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
 
   // 4. State tracking
   let paused = false;
+  let draining = false;
   let activeRuns = 0;
   let shuttingDown = false;
   let consecutiveStuckCount = 0;
@@ -393,6 +394,12 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       }
       consecutiveStuckCount = 0;
     }
+
+    // Drain mode: exit once all active runs finish
+    if (draining && activeRuns === 0) {
+      console.log('[daemon] Drain complete — all runs finished, shutting down');
+      void shutdown();
+    }
   };
 
   // 5. Build RepoManager or legacy single-repo detector
@@ -406,7 +413,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       supabase as any,
       config.pollIntervalMs,
       async (repoId, owner, name, detector) => {
-        if (paused || shuttingDown) return;
+        if (paused || draining || shuttingDown) return;
         if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
         costTracker.maybeResetDaily();
         const claimedIssues = new Set<number>();
@@ -417,7 +424,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         }
         for (const request of workResult.value) {
           if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) break;
-          if (paused || shuttingDown) break;
+          if (paused || draining || shuttingDown) break;
           if (activeIssues.has(request.issueNumber)) continue; // Already running
           if (isBackedOff(issueKey(owner, name, request.issueNumber), config)) {
             console.log(`[daemon] Issue #${request.issueNumber} is in backoff — skipping`);
@@ -440,7 +447,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         }
 
         // Bug-fix detection — lower priority than ready work (#284)
-        if (paused || shuttingDown) return;
+        if (paused || draining || shuttingDown) return;
         if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
         const bugResult = await detector.detectBugFixWork();
         if (bugResult.ok && bugResult.value && !claimedIssues.has(bugResult.value.issueNumber) && !activeIssues.has(bugResult.value.issueNumber)) {
@@ -463,7 +470,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         }
 
         // Feature-pipeline detection — lowest priority (#282)
-        if (paused || shuttingDown) return;
+        if (paused || draining || shuttingDown) return;
         if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
         const fpResult = await detector.detectFeaturePipelineWork();
         if (fpResult.ok && fpResult.value && !claimedIssues.has(fpResult.value.issueNumber) && !activeIssues.has(fpResult.value.issueNumber)) {
@@ -530,13 +537,21 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         dailyRunCount,
         dailyCost: costTracker.getDailyCost(),
         paused,
+        draining,
         consecutiveStuckCount,
         uptime: process.uptime(),
         ...safeState,
       };
     },
     pause: () => { paused = true; },
-    resume: () => { paused = false; },
+    resume: () => { paused = false; draining = false; },
+    drain: () => { enterDrainMode(); },
+    cancelDrain: () => {
+      if (draining && !shuttingDown) {
+        draining = false;
+        console.log('[daemon] Drain cancelled — resuming normal operation');
+      }
+    },
     retry: (_issueNumber) => err(new Error('retry not yet implemented')),
     reloadRepos: repoManager
       ? async () => repoManager!.reload()
@@ -635,7 +650,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
 
   // 6d. resumeParkedRuns — check parked runs for l2-approved/l2-rejected label, re-enter pipeline
   async function resumeParkedRuns(): Promise<void> {
-    if (paused || shuttingDown) return;
+    if (paused || draining || shuttingDown) return;
     const parkedRuns = await stateMgr.findParkedRuns();
     // Limit to 1 resume per cycle to avoid thundering-herd
     for (const run of parkedRuns.slice(0, 1)) {
@@ -739,7 +754,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   if (legacyDetector && !config.coordination.useCoordinator) {
     const detector = legacyDetector;
     legacyPoller = setInterval(async () => {
-      if (paused || shuttingDown) return;
+      if (paused || draining || shuttingDown) return;
       if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
       costTracker.maybeResetDaily();
       const claimedIssues = new Set<number>();
@@ -747,7 +762,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       if (!workResult.ok) return;
       for (const request of workResult.value) {
         if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) break;
-        if (paused || shuttingDown) break;
+        if (paused || draining || shuttingDown) break;
         if (activeIssues.has(request.issueNumber)) continue;
         if (isBackedOff(issueKey(config.repo!.owner, config.repo!.name, request.issueNumber), config)) {
           console.log(`[daemon] Issue #${request.issueNumber} is in backoff — skipping`);
@@ -765,7 +780,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       }
 
       // Bug-fix detection — lower priority than ready work (#284)
-      if (paused || shuttingDown) return;
+      if (paused || draining || shuttingDown) return;
       if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
       const bugResult = await detector.detectBugFixWork();
       if (bugResult.ok && bugResult.value && !claimedIssues.has(bugResult.value.issueNumber) && !activeIssues.has(bugResult.value.issueNumber)) {
@@ -783,7 +798,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       }
 
       // Feature-pipeline detection — lowest priority (#282)
-      if (paused || shuttingDown) return;
+      if (paused || draining || shuttingDown) return;
       if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
       const fpResult = await detector.detectFeaturePipelineWork();
       if (fpResult.ok && fpResult.value && !claimedIssues.has(fpResult.value.issueNumber) && !activeIssues.has(fpResult.value.issueNumber)) {
@@ -804,7 +819,25 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     }, config.pollIntervalMs);
   }
 
-  // 8. Graceful shutdown
+  // 8. Drain mode + graceful shutdown
+  const enterDrainMode = async () => {
+    if (draining) return;
+    draining = true;
+    console.log(`[daemon] Entering drain mode — ${activeRuns} active run(s), waiting for completion`);
+    // Stop schedulers so no new background work starts
+    if (legacyPoller) clearInterval(legacyPoller);
+    stopReviewScheduler();
+    stopPOAgent?.();
+    stopTechLeadScheduler?.();
+    repoManager?.stop();
+    // If no active runs, shut down immediately
+    if (activeRuns === 0) {
+      console.log('[daemon] No active runs — shutting down immediately');
+      await shutdown();
+    }
+    // Otherwise, handleRunOutcome will call shutdown() when activeRuns hits 0
+  };
+
   const shutdown = async () => {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -817,18 +850,16 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     stopTechLeadScheduler?.();
     repoManager?.stop();
     configReader?.stop();
-    const deadline = Date.now() + config.gracePeriodMs;
-    while (activeRuns > 0 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 1000));
-    }
     await remoteControl.stop();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     console.log('[daemon] Instance lock released');
     console.log('Daemon stopped.');
   };
 
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+  // SIGTERM/SIGINT enter drain mode — wait for active runs to finish, then exit.
+  // Use kill -9 (SIGKILL) for immediate force-kill.
+  process.on('SIGTERM', enterDrainMode);
+  process.on('SIGINT', enterDrainMode);
 
   return ok(undefined);
 }

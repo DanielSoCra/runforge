@@ -1534,9 +1534,10 @@ describe('daemon', () => {
       const { startDaemon } = await loadDaemon();
       await startDaemon('config.json');
 
+      // SIGTERM enters drain mode (stops schedulers) then calls shutdown (stops again — idempotent)
       await signalHandlers['SIGTERM']!();
 
-      expect(mockStopPO).toHaveBeenCalledTimes(1);
+      expect(mockStopPO).toHaveBeenCalled();
     });
 
     it('passes submitIdea handler to control server', async () => {

@@ -15,6 +15,8 @@ const handlers = {
   getStatus: () => ({ activeRuns: 0, dailyCost: 1.5, paused: false }),
   pause: () => {},
   resume: () => {},
+  drain: () => {},
+  cancelDrain: () => {},
   retry: (n: number) => n === 42 ? ok(undefined) : err(new Error('not found')),
 };
 
@@ -286,6 +288,8 @@ describe('ControlServer', () => {
       }),
       pause: () => {},
       resume: () => {},
+      drain: () => {},
+      cancelDrain: () => {},
       retry: () => ok(undefined),
     });
     const result2 = await start2();
