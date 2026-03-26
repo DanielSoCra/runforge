@@ -91,11 +91,15 @@ export function createReviewerGate(
             : rawData;
         const parsed = ReviewFindingsSchema.safeParse(structuredPayload);
         if (!parsed.success) {
+          const subtype = (rawData as Record<string, unknown>)?.subtype;
+          const parseErr = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
+          console.warn(`[reviewer] structured output parse failed (attempt ${attempt + 1}, subtype=${subtype}): ${parseErr}`);
+          console.warn(`[reviewer] structured_output value: ${JSON.stringify(structuredPayload)?.slice(0, 500)}`);
           if (attempt === 0) continue; // retry once
           return {
             gate: type,
             passed: false,
-            findings: [{ severity: 'critical', location: 'output', description: 'Reviewer produced invalid structured output' }],
+            findings: [{ severity: 'critical', location: 'output', description: `Reviewer produced invalid structured output (subtype=${subtype}): ${parseErr}` }],
           };
         }
 
