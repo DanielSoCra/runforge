@@ -25,6 +25,28 @@ export type ReviewFindings = z.infer<typeof ReviewFindingsSchema>;
 
 const jsonSchema = JSON.stringify(z.toJSONSchema(ReviewFindingsSchema));
 
+const SEVERITY_MAP: Record<string, string> = {
+  high: 'critical', severe: 'critical', blocker: 'critical',
+  medium: 'important', moderate: 'important', significant: 'important',
+  low: 'minor', info: 'minor', informational: 'minor', trivial: 'minor',
+};
+
+function normalizeSeverities(data: unknown): unknown {
+  if (data === null || typeof data !== 'object') return data;
+  const obj = data as Record<string, unknown>;
+  if (!Array.isArray(obj.findings)) return data;
+  return {
+    ...obj,
+    findings: obj.findings.map((f: unknown) => {
+      if (f === null || typeof f !== 'object') return f;
+      const finding = f as Record<string, unknown>;
+      const sev = typeof finding.severity === 'string' ? finding.severity.toLowerCase() : '';
+      const normalized = SEVERITY_MAP[sev];
+      return normalized ? { ...finding, severity: normalized } : finding;
+    }),
+  };
+}
+
 export function createReviewerGate(
   type: GateType,
   sessionType: 'reviewer-spec' | 'reviewer-quality' | 'reviewer-security',
@@ -107,7 +129,10 @@ export function createReviewerGate(
             structuredPayload = rawData;
           }
         }
-        const parsed = ReviewFindingsSchema.safeParse(structuredPayload);
+        // Normalize severity values: model sometimes uses non-standard terms
+        // (e.g. "moderate" instead of "important", "high" instead of "critical").
+        const normalizedPayload = normalizeSeverities(structuredPayload);
+        const parsed = ReviewFindingsSchema.safeParse(normalizedPayload);
         if (!parsed.success) {
           const subtype = (rawData as Record<string, unknown>)?.subtype;
           const parseErr = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
