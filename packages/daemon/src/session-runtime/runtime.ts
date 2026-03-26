@@ -95,7 +95,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Verifies implementation against spec acceptance criteria',
     systemPrompt: '', // loaded from prompts/reviewer-spec.md
     allowedTools: ['Read', 'Glob', 'Grep'],
-    maxTurns: 10,
+    maxTurns: 30,
     timeoutMs: THREE_HOURS,
     budgetCap: 2,
   },
@@ -104,7 +104,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Evaluates code quality, patterns, and test quality',
     systemPrompt: '', // loaded from prompts/reviewer-quality.md
     allowedTools: ['Read', 'Glob', 'Grep'],
-    maxTurns: 10,
+    maxTurns: 30,
     timeoutMs: THREE_HOURS,
     budgetCap: 2,
   },
@@ -113,7 +113,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     description: 'Evaluates security: injection, auth, validation, concurrency',
     systemPrompt: '', // loaded from prompts/reviewer-security.md
     allowedTools: ['Read', 'Glob', 'Grep'],
-    maxTurns: 10,
+    maxTurns: 30,
     timeoutMs: THREE_HOURS,
     budgetCap: 2,
   },
