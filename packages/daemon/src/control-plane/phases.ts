@@ -253,6 +253,7 @@ export function createPhaseHandlers(
           specContent,
           owner,
           repo: repoName,
+          feedback: '',
         },
         workspacePath: cwd,
       }, workRequest.issueNumber, undefined, runWriter, runId);
