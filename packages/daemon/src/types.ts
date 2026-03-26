@@ -107,6 +107,7 @@ export interface RunState {
   workerClaimId?: string;
   pausedAtPhase?: Phase;
   l2GateNotified?: boolean;
+  l2Feedback?: string;
 }
 
 // --- Daemon State ---

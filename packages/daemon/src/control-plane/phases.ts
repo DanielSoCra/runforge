@@ -137,9 +137,11 @@ export function createPhaseHandlers(
           specContent,
           owner,
           repo: repoName,
+          feedback: run.l2Feedback ?? '',
         },
         workspacePath: cwd,
       }, workRequest.issueNumber, undefined, runWriter, runId);
+      run.l2Feedback = undefined;
       if (!result.ok) {
         console.error(`[l2-design] Session failed: ${result.error.message}`);
         return 'failure';
@@ -175,6 +177,30 @@ export function createPhaseHandlers(
       }
       if (labels.includes('l2-rejected')) {
         console.log(`[l2-gate] L2 rejected for #${workRequest.issueNumber} — looping back to l2-design`);
+        // Fetch the most recent rejection comment to pass as feedback to the designer
+        try {
+          const comments = await octokit.issues.listComments({
+            owner, repo, issue_number: workRequest.issueNumber, per_page: 20,
+          });
+          const rejectionComment = [...comments.data].reverse().find(
+            (c) => c.body?.includes('REJECTED') || c.body?.includes('l2-rejected'),
+          );
+          if (rejectionComment?.body) {
+            run.l2Feedback = rejectionComment.body;
+            console.log(`[l2-gate] Captured rejection feedback for #${workRequest.issueNumber}`);
+          }
+        } catch (e) {
+          console.warn(`[l2-gate] Failed to fetch rejection comment:`, e);
+        }
+        // Remove l2-rejected label so next gate check doesn't re-trigger immediately
+        try {
+          await octokit.issues.removeLabel({
+            owner, repo, issue_number: workRequest.issueNumber, name: 'l2-rejected',
+          });
+        } catch (e) {
+          console.warn(`[l2-gate] Failed to remove l2-rejected label:`, e);
+        }
+        run.l2GateNotified = false;
         return 'feedback';
       }
       // Neither approved nor rejected — park the run
