@@ -490,10 +490,16 @@ export function createPhaseHandlers(
       // Build diff for reviewer context.
       // Use explicit branch ref (not HEAD) so the diff is correct even when
       // a concurrent detect phase has checked out a different branch (#178).
+      // Truncate to 50 KB to avoid excessive prompt size that causes reviewer timeouts.
+      const DIFF_MAX_BYTES = 50_000;
       let diff: string | undefined;
       try {
         const diffResult = await git(['diff', config.branches.staging + '..' + featureBranch], workspaceCwd);
-        if (diffResult.ok) diff = diffResult.value;
+        if (diffResult.ok) {
+          diff = diffResult.value.length > DIFF_MAX_BYTES
+            ? diffResult.value.slice(0, DIFF_MAX_BYTES) + '\n\n[diff truncated — showing first 50 KB of ' + diffResult.value.length + ' bytes]'
+            : diffResult.value;
+        }
       } catch { /* diff is optional context */ }
 
       // Load actual spec content from .specify/ for reviewer (#122)
@@ -566,7 +572,17 @@ export function createPhaseHandlers(
           console.error(`[review] Escalated (${result.escalationReason ?? 'unknown'}):`, JSON.stringify(result.gateResults));
           return 'escalated';
         }
-        console.error(`[review] Failed:`, JSON.stringify(result.gateResults));
+        // Track review failures across implement→review loop iterations.
+        // Without a fixHandler, runReview returns immediately — escalation must be
+        // handled here using accumulated fixAttempts from prior cycles.
+        const reviewFailures = run.fixAttempts.filter(a => a.phase === 'review').length;
+        const errorHash = result.gateResults.find(g => !g.passed)?.findings[0]?.description?.slice(0, 64) ?? 'unknown';
+        run.fixAttempts.push({ phase: 'review', attempt: reviewFailures + 1, errorHash });
+        if (reviewFailures + 1 >= config.validation.maxFixCycles) {
+          console.error(`[review] Max fix cycles (${config.validation.maxFixCycles}) reached, escalating:`, JSON.stringify(result.gateResults));
+          return 'escalated';
+        }
+        console.error(`[review] Failed (attempt ${reviewFailures + 1}/${config.validation.maxFixCycles}):`, JSON.stringify(result.gateResults));
         return 'failure';
       }
       console.log(`[review] Passed (${result.fixCycles} fix cycles)`);

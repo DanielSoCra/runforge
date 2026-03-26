@@ -92,7 +92,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: '', // loaded from prompts/reviewer-spec.md
     allowedTools: ['Read', 'Glob', 'Grep'],
     maxTurns: 10,
-    timeoutMs: 180_000,
+    timeoutMs: 600_000,
     budgetCap: 2,
   },
   'reviewer-quality': {
@@ -101,7 +101,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: '', // loaded from prompts/reviewer-quality.md
     allowedTools: ['Read', 'Glob', 'Grep'],
     maxTurns: 10,
-    timeoutMs: 180_000,
+    timeoutMs: 600_000,
     budgetCap: 2,
   },
   'reviewer-security': {
@@ -110,7 +110,7 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
     systemPrompt: '', // loaded from prompts/reviewer-security.md
     allowedTools: ['Read', 'Glob', 'Grep'],
     maxTurns: 10,
-    timeoutMs: 180_000,
+    timeoutMs: 600_000,
     budgetCap: 2,
   },
   'bug-worker': {
