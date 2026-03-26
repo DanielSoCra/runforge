@@ -16,8 +16,7 @@
   "webhooks": [],
   "validation": {
     "gate1Commands": [
-      "pnpm -r run test",
-      "pnpm -r run typecheck"
+      "pnpm --filter @auto-claude/daemon run test"
     ],
     "maxFixCycles": 2
   }

@@ -61,8 +61,8 @@ export function isBlockedHealthCheckIP(ip: string): boolean {
   const v4Mapped = bare.match(
     /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i,
   );
-  if (v4Mapped) {
-    return isBlockedHealthCheckIP(v4Mapped[1]!);
+  if (v4Mapped?.[1]) {
+    return isBlockedHealthCheckIP(v4Mapped[1]);
   }
 
   // Allow loopback

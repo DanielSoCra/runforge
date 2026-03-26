@@ -8,6 +8,7 @@ import { extractKnowledgeMarkers } from '../knowledge/extractor.js';
 import { SessionError } from '../session-runtime/session-error.js';
 import { createWorktree, getWorktreeDiffSize } from './worktree.js';
 import { git } from '../lib/git.js';
+import { runCommand } from '../lib/process.js';
 
 export interface UnitResult {
   unitId: string;
@@ -109,6 +110,16 @@ async function executeUnit(
     };
   }
   console.log(`[batch] Worktree created at ${worktreeResult.value}`);
+
+  // Install dependencies in the worktree so test commands can find local packages.
+  // Use --no-frozen-lockfile because worker commits may add new dependencies.
+  const installResult = await runCommand('pnpm', ['install', '--no-frozen-lockfile'], {
+    cwd: worktreeResult.value,
+    timeoutMs: 120_000,
+  });
+  if (!installResult.ok) {
+    console.warn(`[batch] pnpm install failed for ${unit.id}: ${installResult.error.message}`);
+  }
 
   try {
     // 2. Spawn worker session (bug-worker for bug pipeline, worker otherwise)
