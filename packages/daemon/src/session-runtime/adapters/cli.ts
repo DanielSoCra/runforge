@@ -1,8 +1,8 @@
 // src/session-runtime/adapters/cli.ts
 import { spawn } from 'child_process';
-import { writeFileSync, mkdirSync, mkdtempSync, unlinkSync, existsSync, readFileSync, rmSync } from 'fs';
+import { writeFileSync, mkdirSync, mkdtempSync, unlinkSync, existsSync, readFileSync, rmSync, symlinkSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
+import { tmpdir, homedir } from 'os';
 import { ok, err, type Result } from '../../lib/result.js';
 import type { AgentDefinition, SessionContext, SessionResult, ExitStatus, PitfallMarker } from '../../types.js';
 import type { ContainmentPolicy } from '../containment-hooks.js';
@@ -11,6 +11,50 @@ import type { McpConfig } from '../plugin-injection.js';
 import { generateContainmentScript } from '../generate-containment-script.js';
 import { generateTimeoutHookScript } from '../timeout-hook-script.js';
 import { SessionError } from '../session-error.js';
+
+/**
+ * Creates (or verifies) a minimal HOME directory for daemon-spawned sessions.
+ *
+ * The real user HOME has plugin MCP servers enabled (playwright, supabase, etc.)
+ * in ~/.claude/settings.json. When Claude CLI starts with that HOME it spawns
+ * those MCP servers — some of which (e.g. `npm exec @playwright/mcp@latest`)
+ * hang indefinitely on package resolution, causing every session to time out.
+ *
+ * This function creates ~/.claude-daemon-sessions/ with:
+ *   .claude/settings.json  — skipDangerousModePermissionPrompt only, no plugins
+ *   .claude/.env (symlink)  — points to real HOME auth for subscription auth
+ *
+ * The symlink gives Claude CLI access to subscription credentials while the
+ * minimal settings.json prevents any plugin MCP servers from loading.
+ */
+function ensureMinimalDaemonHome(): string {
+  const realHome = process.env.HOME ?? homedir();
+  const minHome = join(realHome, '.claude-daemon-sessions');
+  const minClaudeDir = join(minHome, '.claude');
+  mkdirSync(minClaudeDir, { recursive: true });
+
+  // Write minimal settings — no plugins
+  const settingsPath = join(minClaudeDir, 'settings.json');
+  if (!existsSync(settingsPath)) {
+    writeFileSync(settingsPath, JSON.stringify({ skipDangerousModePermissionPrompt: true }, null, 2));
+  }
+
+  // Symlink auth file for subscription auth (best-effort — API key auth works without it)
+  const authFile = join(realHome, '.claude', '.env');
+  const authLink = join(minClaudeDir, '.env');
+  if (existsSync(authFile) && !existsSync(authLink)) {
+    try { symlinkSync(authFile, authLink); } catch { /* ignore if already exists */ }
+  }
+
+  return minHome;
+}
+
+// Lazily initialized once per process — same value every time.
+let _minimalDaemonHome: string | undefined;
+function getMinimalDaemonHome(): string {
+  if (!_minimalDaemonHome) _minimalDaemonHome = ensureMinimalDaemonHome();
+  return _minimalDaemonHome;
+}
 
 export class CliAdapter implements ProviderAdapter {
   buildArgs(def: AgentDefinition, prompt: string, jsonSchema?: string): string[] {
@@ -31,14 +75,15 @@ export class CliAdapter implements ProviderAdapter {
   buildEnv(extra?: Record<string, string>): Record<string, string> {
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? '/usr/bin:/bin',
-      HOME: process.env.HOME ?? '/tmp',
+      // Use a minimal HOME with no plugins to prevent MCP server hangs.
+      // The minimal HOME has ~/.claude/.env symlinked for subscription auth.
+      HOME: getMinimalDaemonHome(),
       TERM: 'dumb',
       LANG: process.env.LANG ?? 'en_US.UTF-8',
     };
-    // Claude CLI auth: API key mode OR subscription mode (needs ~/.claude/ access)
-    // Pass through auth-related vars. HOME gives access to ~/.claude/ for subscription auth.
+    // Pass through auth and runtime vars.
     const passthrough = [
-      'ANTHROPIC_API_KEY',  // API key auth
+      'ANTHROPIC_API_KEY',  // API key auth (overrides subscription auth if set)
       'TMPDIR',             // temp directory
       'USER',               // needed by some CLI tools
       'SHELL',              // needed by Bash tool
