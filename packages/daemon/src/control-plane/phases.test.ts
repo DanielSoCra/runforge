@@ -260,57 +260,61 @@ describe('createPhaseHandlers', () => {
   });
 
   describe('detect', () => {
-    it('creates a new feature branch from staging', async () => {
-      mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // checkout staging
-      mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // checkout -b feature/42
+    it('creates a new feature branch from staging via worktree', async () => {
+      mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // worktree add -b feature/42 staging
       const { handlers } = createHandlers();
       const result = await handlers.detect!(makeRun());
       expect(result).toBe('success');
-      expect(mockGit).toHaveBeenCalledWith(['checkout', 'staging'], undefined);
-      expect(mockGit).toHaveBeenCalledWith(['checkout', '-b', 'feature/42', 'staging'], undefined);
+      expect(mockGit).toHaveBeenCalledWith(
+        ['worktree', 'add', expect.stringContaining('workspaces/issue-42'), '-b', 'feature/42', 'staging'],
+        expect.any(String),
+      );
     });
 
-    it('checks out existing branch when creation fails', async () => {
-      mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // checkout staging
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('branch exists') }); // checkout -b fails
-      mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // checkout feature/42
+    it('falls back to existing branch worktree when new-branch creation fails', async () => {
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('branch exists') }); // worktree add -b fails
+      mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // worktree add existing branch
       const { handlers } = createHandlers();
       const result = await handlers.detect!(makeRun());
       expect(result).toBe('success');
-      expect(mockGit).toHaveBeenCalledWith(['checkout', 'feature/42'], undefined);
+      expect(mockGit).toHaveBeenCalledWith(
+        ['worktree', 'add', expect.stringContaining('workspaces/issue-42'), 'feature/42'],
+        expect.any(String),
+      );
     });
 
-    it('passes repoRoot to git calls instead of relying on process.cwd() (#77)', async () => {
-      mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // checkout staging
-      mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // checkout -b feature/42
+    it('passes repoRoot to git worktree calls instead of relying on process.cwd() (#77)', async () => {
+      mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // worktree add -b feature/42 staging
       const { handlers } = createHandlers({}, undefined, '/custom/repo/root');
       const result = await handlers.detect!(makeRun());
       expect(result).toBe('success');
-      expect(mockGit).toHaveBeenCalledWith(['checkout', 'staging'], '/custom/repo/root');
-      expect(mockGit).toHaveBeenCalledWith(['checkout', '-b', 'feature/42', 'staging'], '/custom/repo/root');
+      expect(mockGit).toHaveBeenCalledWith(
+        ['worktree', 'add', '/custom/repo/root/workspaces/issue-42', '-b', 'feature/42', 'staging'],
+        '/custom/repo/root',
+      );
     });
 
-    it('returns failure when fallback checkout also fails', async () => {
-      mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // checkout staging
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('branch exists') }); // checkout -b fails
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal') }); // checkout also fails
+    it('returns failure when both worktree add attempts fail and directory does not exist', async () => {
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('branch exists') }); // worktree add -b fails
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal') }); // worktree add also fails
       const { handlers } = createHandlers();
       const result = await handlers.detect!(makeRun());
       expect(result).toBe('failure');
     });
 
-    it('returns failure when staging checkout fails before branch creation (#255)', async () => {
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('error: pathspec \'staging\' did not match') }); // checkout staging fails
+    it('returns failure when initial worktree add fails and fallback also fails (#255)', async () => {
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('cannot create worktree') }); // worktree add -b fails
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal: not a git repo') }); // fallback fails
       const { handlers } = createHandlers();
       const result = await handlers.detect!(makeRun());
       expect(result).toBe('failure');
-      // Branch creation should never be attempted if staging checkout failed
-      expect(mockGit).toHaveBeenCalledTimes(1);
-      expect(mockGit).toHaveBeenCalledWith(['checkout', 'staging'], undefined);
+      // Both worktree attempts should have been made
+      expect(mockGit).toHaveBeenCalledTimes(2);
     });
 
-    it('releases detect lock when staging checkout fails (#255)', async () => {
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('checkout staging failed') });
+    it('releases detect lock when worktree add fails (#255)', async () => {
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('worktree add failed') });
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal') });
       const { handlers } = createHandlers();
       await handlers.detect!(makeRun());
       expect(isDetectLocked()).toBe(false);
@@ -326,8 +330,7 @@ describe('createPhaseHandlers', () => {
     });
 
     it('releases detect lock after successful detect', async () => {
-      mockGit.mockResolvedValueOnce({ ok: true, value: '' });
-      mockGit.mockResolvedValueOnce({ ok: true, value: '' });
+      mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // worktree add -b feature/42 staging
       const { handlers } = createHandlers();
       expect(isDetectLocked()).toBe(false);
       await handlers.detect!(makeRun());
@@ -335,9 +338,8 @@ describe('createPhaseHandlers', () => {
     });
 
     it('releases detect lock even when git fails', async () => {
-      mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // checkout staging
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('branch exists') });
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal') });
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('branch exists') }); // worktree add -b fails
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal') }); // fallback also fails
       const { handlers } = createHandlers();
       await handlers.detect!(makeRun());
       // Lock must be released even on failure
@@ -355,7 +357,7 @@ describe('createPhaseHandlers', () => {
       expect(run.classificationComplexity).toBe('standard');
       expect(mockClassify).toHaveBeenCalledWith(
         mockRuntime, expect.objectContaining({ issueNumber: 42 }),
-        undefined, undefined, undefined, undefined,
+        undefined, undefined, expect.any(String), undefined,
       );
     });
 
@@ -703,7 +705,7 @@ describe('createPhaseHandlers', () => {
       // to avoid corruption when a concurrent detect phase checks out staging
       expect(mockGit).toHaveBeenCalledWith(
         ['diff', 'staging..feature/42'],
-        undefined,
+        expect.any(String),
       );
     });
 
@@ -793,7 +795,7 @@ describe('createPhaseHandlers', () => {
       expect(run.diagnosisConfidence).toBe(0.9);
       // specContent is loaded via loadSpecContent (returns '' by default mock)
       expect(mockDiagnose).toHaveBeenCalledWith(
-        mockRuntime, 42, 'Fix something', '', '', undefined, undefined, undefined, undefined,
+        mockRuntime, 42, 'Fix something', '', '', undefined, undefined, expect.any(String), undefined,
       );
       expect(mockRouteDiagnosis).toHaveBeenCalledWith(typeADiagnosis, 0.7);
     });
@@ -829,7 +831,7 @@ describe('createPhaseHandlers', () => {
       expect(mockDiagnose).toHaveBeenCalledWith(
         mockRuntime, 42, 'Fix something', '',
         '# FUNC-AC-PIPELINE\n\nFull spec markdown content',
-        undefined, undefined, undefined, undefined,
+        undefined, undefined, expect.any(String), undefined,
       );
     });
 
@@ -1080,7 +1082,7 @@ describe('createPhaseHandlers', () => {
       const { handlers } = createHandlers();
       const result = await handlers.integrate!(makeRun());
       expect(result).toBe('success');
-      expect(mockIntegrateToStaging).toHaveBeenCalledWith('feature/42', 'staging', undefined);
+      expect(mockIntegrateToStaging).toHaveBeenCalledWith('feature/42', 'staging', expect.any(String));
     });
 
     it('returns failure on merge conflict', async () => {
