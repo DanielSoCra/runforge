@@ -598,10 +598,7 @@ STACK-AC-PIPELINE-DISPATCH:
 STACK-AC-TECH-LEAD-TRIAGE:
   parent: ARCH-AC-TECH-LEAD
   children: []
-  code_paths:
-    - packages/daemon/src/coordination/tech-lead/finding-triage.ts
-  test_paths:
-    - packages/daemon/src/coordination/tech-lead/finding-triage.test.ts
+  # code_paths and test_paths pending implementation in issue #393
   status: draft
 
 STACK-AC-TECH-LEAD:
@@ -617,8 +614,7 @@ STACK-AC-TECH-LEAD:
     - packages/daemon/src/coordination/tech-lead/metrics.ts
     - packages/daemon/src/coordination/tech-lead/session-output-parser.ts
     - packages/daemon/src/coordination/tech-lead/retrospective.ts
-    - packages/daemon/src/coordination/tech-lead/triage.ts
-    - packages/daemon/src/coordination/tech-lead/triage-store.ts
+    # triage.ts and triage-store.ts pending implementation in issue #393
     - packages/daemon/src/coordination/tech-lead-scheduler.ts
     - prompts/tech-lead.md
     - prompts/tech-lead-enrichment.md
@@ -649,6 +645,7 @@ STACK-AC-PRODUCT-OWNER:
     - packages/daemon/src/coordination/product-owner/session-output-parser.ts
     - packages/daemon/src/coordination/product-owner/protocol-round-formatter.ts
     - packages/daemon/src/coordination/product-owner/idea-processor.ts
+    # finding-approval.ts, interactive-session-context.ts, product-owner-interactive.md pending issue #394
     - prompts/product-owner.md
     - prompts/product-owner-enrichment.md
   test_paths:
