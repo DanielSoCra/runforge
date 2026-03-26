@@ -13,7 +13,7 @@ export const DiscoveredIssueSchema = z.object({
 export const ReviewFindingsSchema = z.object({
   findings: z.array(z.object({
     severity: z.enum(['critical', 'important', 'minor']),
-    location: z.string(),
+    location: z.string().optional().default('output'),
     description: z.string(),
   })),
   summary: z.string(),
