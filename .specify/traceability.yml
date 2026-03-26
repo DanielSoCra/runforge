@@ -185,7 +185,7 @@ ARCH-AC-PRODUCT-OWNER:
 
 ARCH-AC-TECH-LEAD:
   parent: FUNC-AC-TECH-LEAD
-  children: [STACK-AC-TECH-LEAD]
+  children: [STACK-AC-TECH-LEAD, STACK-AC-TECH-LEAD-TRIAGE]
   status: draft
 
 ARCH-AC-ENRICHED-COMMITS:
@@ -593,6 +593,15 @@ STACK-AC-PIPELINE-DISPATCH:
     - prompts/spec-implementer.md
   test_paths:
     - packages/daemon/src/pipeline-dispatch/**/*.test.ts
+  status: draft
+
+STACK-AC-TECH-LEAD-TRIAGE:
+  parent: ARCH-AC-TECH-LEAD
+  children: []
+  code_paths:
+    - packages/daemon/src/coordination/tech-lead/finding-triage.ts
+  test_paths:
+    - packages/daemon/src/coordination/tech-lead/finding-triage.test.ts
   status: draft
 
 STACK-AC-TECH-LEAD:
