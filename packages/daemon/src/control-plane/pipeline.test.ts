@@ -25,7 +25,6 @@ const featureSimpleAllSuccess: PhaseHandlerMap = {
 
 const bugAllSuccess: PhaseHandlerMap = {
   detect: async () => 'success' as PhaseEvent,
-  diagnose: async () => 'success' as PhaseEvent,
   implement: async () => 'success' as PhaseEvent,
   review: async () => 'success' as PhaseEvent,
   integrate: async () => 'success' as PhaseEvent,
@@ -312,16 +311,10 @@ describe('runPipeline', () => {
   });
 
   it('syncs run.cost from costTracker after every phase (#132)', async () => {
-    // Simulate sessions recording costs during diagnose + implement + review phases.
+    // Simulate sessions recording costs during implement + review phases.
     // Before this fix, only implement costs were accumulated in run.cost.
     const handlers: PhaseHandlerMap = {
       detect: async () => 'success' as PhaseEvent,
-      classify: async () => 'success:simple' as PhaseEvent,
-      diagnose: async () => {
-        // Simulates runtime.spawnSession recording diagnosis cost
-        costTracker.recordCost(1, 0.50);
-        return 'success' as PhaseEvent;
-      },
       implement: async () => {
         // Simulates runtime.spawnSession recording implementation cost
         costTracker.recordCost(1, 2.00);
@@ -332,7 +325,6 @@ describe('runPipeline', () => {
         costTracker.recordCost(1, 0.75);
         return 'success' as PhaseEvent;
       },
-      holdout: async () => 'success' as PhaseEvent,
       integrate: async () => 'success' as PhaseEvent,
       deploy: async () => 'success' as PhaseEvent,
       test: async () => 'success' as PhaseEvent,
@@ -343,7 +335,7 @@ describe('runPipeline', () => {
     const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
     expect(result.outcome).toBe('complete');
     // run.cost must include ALL phase costs, not just implement
-    expect(run.cost).toBe(3.25); // 0.50 + 2.00 + 0.75
+    expect(run.cost).toBe(2.75); // 2.00 + 0.75
   });
 
   it('transitions to stuck on containment-breach event from handler (#208)', async () => {

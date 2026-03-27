@@ -58,16 +58,16 @@ describe('FSM', () => {
   describe('bug pipeline', () => {
     const table = getPipeline('bug');
 
-    it('detect → success → diagnose (#48)', () => {
-      expect(transition(table, 'detect', 'success')?.next).toBe('diagnose');
+    it('detect → success → implement (no diagnose phase — #440)', () => {
+      expect(transition(table, 'detect', 'success')?.next).toBe('implement');
     });
 
-    it('diagnose → success → implement (#48)', () => {
-      expect(transition(table, 'diagnose', 'success')?.next).toBe('implement');
+    it('detect → failure → stuck', () => {
+      expect(transition(table, 'detect', 'failure')?.next).toBe('stuck');
     });
 
-    it('diagnose → failure → stuck (#48)', () => {
-      expect(transition(table, 'diagnose', 'failure')?.next).toBe('stuck');
+    it('diagnose phase does not exist in bug pipeline (#440)', () => {
+      expect(transition(table, 'diagnose', 'success')).toBeUndefined();
     });
 
     it('review → success → integrate (skip holdout)', () => {
