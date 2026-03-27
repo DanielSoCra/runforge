@@ -98,7 +98,7 @@ export async function getNeedsAttention(): Promise<AttentionItem[]> {
   const supabase = await createClient();
   await requireUser(supabase);
 
-  const [stuckResult, escalatedResult] = await Promise.all([
+  const [stuckResult, escalatedResult, failedResult] = await Promise.all([
     supabase
       .from('runs')
       .select('id, repo_owner, repo_name, issue_number, issue_title, outcome, started_at')
@@ -107,6 +107,10 @@ export async function getNeedsAttention(): Promise<AttentionItem[]> {
       .from('runs')
       .select('id, repo_owner, repo_name, issue_number, issue_title, outcome, started_at')
       .eq('outcome', 'escalated'),
+    supabase
+      .from('runs')
+      .select('id, repo_owner, repo_name, issue_number, issue_title, outcome, started_at')
+      .eq('outcome', 'failed'),
   ]);
 
   if (stuckResult.error) {
@@ -116,6 +120,10 @@ export async function getNeedsAttention(): Promise<AttentionItem[]> {
   if (escalatedResult.error) {
     console.error('[briefing] getNeedsAttention escalated query failed:', escalatedResult.error);
     throw new Error('Failed to fetch escalated runs');
+  }
+  if (failedResult.error) {
+    console.error('[briefing] getNeedsAttention failed query failed:', failedResult.error);
+    throw new Error('Failed to fetch failed runs');
   }
 
   // Deduplicate by issue — keep most urgent entry per issue, with latest timestamp
@@ -141,6 +149,7 @@ export async function getNeedsAttention(): Promise<AttentionItem[]> {
 
   for (const run of stuckResult.data ?? []) addRun(run, 'blocked');
   for (const run of escalatedResult.data ?? []) addRun(run, 'review');
+  for (const run of failedResult.data ?? []) addRun(run, 'failure');
 
   const items = [...byIssue.values()];
   items.sort((a, b) => URGENCY_ORDER[a.reason] - URGENCY_ORDER[b.reason]);

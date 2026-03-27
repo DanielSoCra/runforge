@@ -26,6 +26,7 @@ const outcomeVariant = {
   complete: 'default',
   stuck: 'destructive',
   escalated: 'destructive',
+  failed: 'destructive',
 } as const;
 
 export function RunTable({ runs, budgetByRepoId }: { runs: Run[]; budgetByRepoId?: Record<string, number | null> }) {

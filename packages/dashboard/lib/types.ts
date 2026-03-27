@@ -531,7 +531,7 @@ export type Database = {
       matrix_status: "ok" | "degraded" | "failed"
       notification_channel_type: "web-push" | "slack" | "macos" | "webhook"
       notification_event_kind: "attention-required" | "work-completed" | "error" | "digest"
-      run_outcome: "in-progress" | "complete" | "stuck" | "escalated"
+      run_outcome: "in-progress" | "complete" | "stuck" | "escalated" | "failed"
       session_type:
         | "planning"
         | "implementation"
@@ -673,7 +673,7 @@ export const Constants = {
       matrix_status: ["ok", "degraded", "failed"],
       notification_channel_type: ["web-push", "slack", "macos", "webhook"],
       notification_event_kind: ["attention-required", "work-completed", "error", "digest"],
-      run_outcome: ["in-progress", "complete", "stuck", "escalated"],
+      run_outcome: ["in-progress", "complete", "stuck", "escalated", "failed"],
       session_type: [
         "planning",
         "implementation",
