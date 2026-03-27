@@ -310,6 +310,18 @@ describe('ControlServer', () => {
     }
   });
 
+  it('POST /drain rejects missing X-Requested-By (CSRF protection) (#425)', async () => {
+    await startServer();
+    const res = await fetch(`http://127.0.0.1:${PORT}/drain`, { method: 'POST' });
+    expect(res.status).toBe(403);
+  });
+
+  it('POST /drain/cancel rejects missing X-Requested-By (CSRF protection) (#425)', async () => {
+    await startServer();
+    const res = await fetch(`http://127.0.0.1:${PORT}/drain/cancel`, { method: 'POST' });
+    expect(res.status).toBe(403);
+  });
+
   it('GET /status includes remote_control_state but not remote_control_url', async () => {
     const { server: s2, start: start2 } = createControlServer(PORT + 1, {
       getStatus: () => ({
