@@ -335,6 +335,7 @@ describe('daemon', () => {
       mockCreatePOAgent,
       mockCreateTechLeadScheduler,
       mockCreateCoordinator,
+      mockSpawnSession,
     ]) {
       mock.mockClear();
     }
