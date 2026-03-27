@@ -45,6 +45,23 @@ describe('CliAdapter', () => {
     expect(args).toContain('Read,Write,Bash');
   });
 
+  it('includes --model flag when modelOverride is set (#424)', () => {
+    const adapter = new CliAdapter();
+    const defWithModel: AgentDefinition = { ...mockDef, modelOverride: 'claude-opus-4-6' };
+    const args = adapter.buildArgs(defWithModel, 'prompt');
+    expect(args).toContain('--model');
+    expect(args).toContain('claude-opus-4-6');
+    // Verify --model appears immediately before the value
+    const idx = args.indexOf('--model');
+    expect(args[idx + 1]).toBe('claude-opus-4-6');
+  });
+
+  it('omits --model flag when modelOverride is absent (#424)', () => {
+    const adapter = new CliAdapter();
+    const args = adapter.buildArgs(mockDef, 'prompt');
+    expect(args).not.toContain('--model');
+  });
+
   it('includes --json-schema when schema is provided', () => {
     const adapter = new CliAdapter();
     const schema = JSON.stringify({ type: 'object', properties: { a: { type: 'string' } } });
