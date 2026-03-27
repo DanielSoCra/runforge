@@ -126,6 +126,29 @@ describe('runProactiveReview', () => {
     );
   });
 
+  it('rejects findings that omit title — regression for #430 (prompt example was missing title field)', async () => {
+    // The codebase-reviewer prompt example previously showed findings without a `title` field.
+    // When the model followed that example, ProactiveResultSchema.safeParse would fail and all
+    // findings would be silently discarded. This test verifies that title is required.
+    const structuredData = {
+      findings: [
+        { severity: 'important', location: 'src/foo.ts:10', description: 'Missing check', evidence: 'Line 10 shows...' },
+      ],
+    };
+    const runtime = makeRuntime(structuredData);
+    const result = await runProactiveReview(runtime, {
+      area: 'src/foo',
+      cwd: '/workspace',
+      recentCommits: '',
+      issueNumber: 430,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain('Invalid structured output');
+    }
+  });
+
   it('forwards runWriter and runId to spawnSession when provided', async () => {
     const runtime = makeRuntime({ findings: [] });
     const fakeRunWriter = { write: vi.fn() } as unknown as import('../supabase/run-writer.js').SupabaseRunWriter;

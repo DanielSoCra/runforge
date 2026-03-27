@@ -49,6 +49,7 @@ Produce a JSON result with at most **{{maxIssues}}** verified findings:
   "category": "correctness",
   "findings": [
     {
+      "title": "Missing null check on config.repo",
       "severity": "important",
       "location": "src/path/file.ts:42",
       "description": "Missing null check on config.repo — crashes in legacy mode when repo is undefined",
