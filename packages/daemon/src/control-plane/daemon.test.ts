@@ -11,7 +11,7 @@ const {
   mockServer, mockServerStart, mockRunPipeline, mockNotify,
   mockRunWriter, mockConfigReader, mockLoadConfig, mockSelectVariant, phaseHandlerCalls, mockCreateReviewScheduler,
   mockCreatePOAgent, mockCreateTechLeadScheduler, mockCreateCoordinator,
-  knowledgeStoreCtorArgs, mockOctokit,
+  knowledgeStoreCtorArgs, mockOctokit, mockSpawnSession,
 } = vi.hoisted(() => ({
   mockStateMgr: {
     initialize: vi.fn().mockResolvedValue(undefined),
@@ -73,6 +73,7 @@ const {
       removeLabel: vi.fn().mockResolvedValue(undefined),
     },
   },
+  mockSpawnSession: vi.fn(),
 }));
 
 // --- Module mocks (use classes for constructors to work with `new`) ---
@@ -84,7 +85,7 @@ vi.mock('../session-runtime/cost.js', () => {
   return { CostTracker: class { getDailyCost = mockCostTracker.getDailyCost; maybeResetDaily = mockCostTracker.maybeResetDaily; } };
 });
 vi.mock('../session-runtime/runtime.js', () => {
-  return { SessionRuntime: class {} };
+  return { SessionRuntime: class { spawnSession = mockSpawnSession; } };
 });
 vi.mock('../knowledge/gotcha-store.js', () => {
   return { GotchaStore: class {} };
@@ -334,6 +335,7 @@ describe('daemon', () => {
       mockCreatePOAgent,
       mockCreateTechLeadScheduler,
       mockCreateCoordinator,
+      mockSpawnSession,
     ]) {
       mock.mockClear();
     }
@@ -2036,6 +2038,36 @@ describe('daemon', () => {
 
       // findIncompleteRuns returned empty, so no crash resumption pipeline call
       expect(mockRunPipeline).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('spawnTechLeadSession returns output not structuredData (#436)', () => {
+    it('returns result.value.output (LLM text) so parseTechLeadOutput sees real proposals, not CLI wrapper', async () => {
+      const proposalsJson = JSON.stringify({ proposals: [], protocolTriggers: [] });
+      const cliWrapper = { result: proposalsJson, cost_usd: 0.01 };
+      mockSpawnSession.mockResolvedValue(ok({
+        output: proposalsJson,
+        structuredData: cliWrapper,
+        cost: 0.01,
+        pitfallMarkers: [],
+        exitStatus: 'success',
+      }));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      // deps is first arg to createTechLeadScheduler
+      const calls = mockCreateTechLeadScheduler.mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      const deps = calls[0]![0] as { spawnTechLeadSession: (digest: unknown) => Promise<string> };
+
+      const digest = { id: '00000000-0000-0000-0000-000000000000', trigger: 'scheduled', assembledAt: new Date().toISOString() };
+      const result = await deps.spawnTechLeadSession(digest);
+
+      // Must be the raw LLM output, not the stringified CLI wrapper
+      expect(result).toBe(proposalsJson);
+      expect(result).not.toContain('cost_usd');
     });
   });
 });

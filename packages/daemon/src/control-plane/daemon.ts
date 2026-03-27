@@ -213,9 +213,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         if (!result.ok) {
           throw new Error(`Tech Lead session failed: ${result.error.message}`);
         }
-        return typeof result.value.structuredData === 'string'
-          ? result.value.structuredData
-          : JSON.stringify(result.value.structuredData ?? { proposals: [], protocolTriggers: [] });
+        return result.value.output;
       },
       storeProposals: async (proposals) => {
         let stored = 0;
