@@ -201,6 +201,8 @@ const mockOctokit = {
     addLabels: vi.fn(async () => ({})),
     createComment: vi.fn(async () => ({})),
     get: vi.fn(async () => ({ data: { labels: [] } })),
+    listComments: vi.fn(async () => ({ data: [] })),
+    removeLabel: vi.fn(async () => ({})),
   },
 } as any;
 const mockRuntime = { spawnSession: vi.fn() } as any;
@@ -266,6 +268,8 @@ describe('createPhaseHandlers', () => {
     mockResolveCurrentSpecRefs.mockImplementation(async (_root, refs) => refs);
     // Reset issues.get mock
     mockOctokit.issues.get.mockClear();
+    mockOctokit.issues.listComments.mockClear();
+    mockOctokit.issues.removeLabel.mockClear();
     // Default: workspace directory exists (batch did not remove it)
     mockExistsSync.mockReturnValue(true);
     // Default: runCommand succeeds
@@ -1374,13 +1378,41 @@ describe('createPhaseHandlers', () => {
       expect(run.pausedAtPhase).toBeUndefined();
     });
 
-    it('returns feedback when l2-rejected label is present', async () => {
+    it('returns feedback, removes the label, and resets l2GateNotified when no rejection comment is found', async () => {
       mockOctokit.issues.get.mockResolvedValue({
         data: { labels: [{ name: 'l2-rejected' }] },
       });
+      mockOctokit.issues.listComments.mockResolvedValue({ data: [] });
       const { handlers } = createHandlers();
-      const result = await handlers['l2-gate']!(makeRun());
+      const run = makeRun({ l2GateNotified: true });
+      const result = await handlers['l2-gate']!(run);
       expect(result).toBe('feedback');
+      expect(run.l2Feedback).toBeUndefined();
+      expect(run.l2GateNotified).toBe(false);
+      expect(mockOctokit.issues.removeLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'l2-rejected' }),
+      );
+    });
+
+    it('populates run.l2Feedback from the most recent REJECTED comment and removes the label', async () => {
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'l2-rejected' }] },
+      });
+      mockOctokit.issues.listComments.mockResolvedValue({
+        data: [
+          { body: 'Some other comment' },
+          { body: 'REJECTED: architecture does not follow ARCH-AC-CONTROL-PLANE' },
+        ],
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers['l2-gate']!(run);
+      expect(result).toBe('feedback');
+      expect(run.l2Feedback).toBe('REJECTED: architecture does not follow ARCH-AC-CONTROL-PLANE');
+      expect(run.l2GateNotified).toBe(false);
+      expect(mockOctokit.issues.removeLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'l2-rejected' }),
+      );
     });
 
     it('parks run and notifies on first check without decision labels', async () => {
