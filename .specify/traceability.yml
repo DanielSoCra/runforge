@@ -528,6 +528,7 @@ STACK-AC-DASHBOARD-BRIEFING:
     - packages/briefing-summarizer/
     - packages/briefing-summarizer/src/cycle-runner.ts
     - supabase/migrations/009_briefing.sql
+    - supabase/migrations/011_add_failed_run_outcome.sql
   test_paths:
     - packages/dashboard/components/briefing/**/*.test.tsx
     - packages/dashboard/actions/briefing.test.ts
