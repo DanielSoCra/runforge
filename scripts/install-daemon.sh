@@ -42,6 +42,8 @@ set +a
 log "Installing daemon plist..."
 log "  npx: $NPX_PATH"
 log "  repo: $REPO_ROOT"
+PLIST_TMP=$(mktemp "${PLIST_DST}.XXXXXX")
+chmod 600 "$PLIST_TMP"
 sed \
   -e "s|__NPX_PATH__|${NPX_PATH}|g" \
   -e "s|__REPO_ROOT__|${REPO_ROOT}|g" \
@@ -53,7 +55,8 @@ sed \
   -e "s|__NEXT_PUBLIC_SUPABASE_URL__|${NEXT_PUBLIC_SUPABASE_URL}|g" \
   -e "s|__NEXT_PUBLIC_SUPABASE_ANON_KEY__|${NEXT_PUBLIC_SUPABASE_ANON_KEY}|g" \
   -e "s|__ENCRYPTION_KEY__|${ENCRYPTION_KEY}|g" \
-  "$PLIST_SRC" > "$PLIST_DST"
+  "$PLIST_SRC" > "$PLIST_TMP"
+mv "$PLIST_TMP" "$PLIST_DST"
 
 # 4. Load and start
 log "Loading daemon plist..."
