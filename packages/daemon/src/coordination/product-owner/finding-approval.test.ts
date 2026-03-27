@@ -121,6 +121,16 @@ describe('incrementCapCounter', () => {
     );
   });
 
+  it('resets count on new day when delta > 1', async () => {
+    const stored = makeCapState({ date: '2020-01-01', approvedCount: 4 });
+    const deps = makeDeps({ readJson: vi.fn().mockResolvedValue({ ok: true, value: stored }) });
+    await incrementCapCounter(deps, 3);
+    expect(deps.writeJson).toHaveBeenCalledWith(
+      deps.capStatePath,
+      { date: today(), approvedCount: 3 },
+    );
+  });
+
   it('does nothing when delta is 0', async () => {
     const deps = makeDeps();
     await incrementCapCounter(deps, 0);

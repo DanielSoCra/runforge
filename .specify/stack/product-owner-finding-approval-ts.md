@@ -114,14 +114,18 @@ return issues.data.filter(i => !i.labels.some(l => skipLabels.includes(labelName
 ```
 
 ```typescript
-// Cap state persistence — atomic write via writeJsonSafe
-async function incrementCapCounter(statePath: string): Promise<void> {
-  const state = await readCapState(statePath);
+// Cap state persistence — atomic write via writeJsonSafe.
+// delta allows batching multiple approvals into one read-modify-write to reduce
+// the concurrent write window (applyFindingDecisions counts all successful
+// approvals in a loop and calls incrementCapCounter once at the end).
+async function incrementCapCounter(deps: FindingApprovalDeps, delta = 1): Promise<void> {
+  if (delta <= 0) return;
+  const state = await readCapState(deps);
   const today = new Date().toISOString().slice(0, 10);
   const updated = state.date === today
-    ? { date: today, approvedCount: state.approvedCount + 1 }
-    : { date: today, approvedCount: 1 };
-  await writeJsonSafe(statePath, updated);
+    ? { date: today, approvedCount: state.approvedCount + delta }
+    : { date: today, approvedCount: delta };
+  await deps.writeJson(deps.capStatePath, updated);
 }
 ```
 
