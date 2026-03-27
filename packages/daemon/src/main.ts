@@ -88,7 +88,11 @@ async function callApi(port: number, method: string, path: string): Promise<void
     try {
       body = await res.json();
     } catch {
-      console.error(`Daemon returned non-JSON response (HTTP ${res.status})`);
+      const text = await res.text().catch(() => '');
+      const preview = text.slice(0, 200);
+      console.error(
+        `Daemon returned non-JSON response (HTTP ${res.status})${preview ? `: ${preview}` : ''}`,
+      );
       process.exitCode = 1;
       return;
     }
