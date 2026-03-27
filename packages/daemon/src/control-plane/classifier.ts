@@ -57,7 +57,31 @@ export async function classify(
     return { event: 'success:simple' };
   }
 
-  const parsed = ClassificationSchema.safeParse(result.value.structuredData);
+  // Extract structured output from CLI response wrapper.
+  // The CLI adapter sets structuredData to the full JSON response object
+  // ({result, cost_usd, structured_output}). The actual schema-validated
+  // payload lives in the nested structured_output field. (#411)
+  const rawData = result.value.structuredData;
+  const so = rawData !== null && typeof rawData === 'object'
+    ? (rawData as Record<string, unknown>).structured_output
+    : undefined;
+  let structuredPayload: unknown;
+  if (so !== null && so !== undefined) {
+    structuredPayload = so;
+  } else {
+    // Fallback: model used markdown code block instead of structured output
+    const resultText = typeof (rawData as Record<string, unknown>)?.result === 'string'
+      ? (rawData as Record<string, unknown>).result as string
+      : result.value.output;
+    const jsonMatch = resultText.match(/```json\s*([\s\S]*?)```/s) ?? resultText.match(/(\{[\s\S]*\})/s);
+    if (jsonMatch?.[1]) {
+      try { structuredPayload = JSON.parse(jsonMatch[1]); } catch { structuredPayload = rawData; }
+    } else {
+      structuredPayload = rawData;
+    }
+  }
+
+  const parsed = ClassificationSchema.safeParse(structuredPayload);
   if (!parsed.success) {
     // No retry here (unlike diagnostician): classification failure falls back to 'simple',
     // which is a safe conservative default. Diagnosis failure routes to human, so retry is

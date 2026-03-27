@@ -199,6 +199,55 @@ describe('classify (#145)', () => {
     );
   });
 
+  it('extracts structured_output from full CLI JSON response (#411 regression)', async () => {
+    // The CLI adapter sets structuredData to the full response: {result, cost_usd, structured_output}
+    const validClassification = {
+      complexity: 'standard' as const,
+      reasoning: 'Multi-file change',
+      estimatedUnits: 3,
+      estimatedArtifacts: 5,
+    };
+    mockRuntime.spawnSession.mockResolvedValue({
+      ok: true,
+      value: {
+        output: '',
+        structuredData: {
+          result: 'some text',
+          cost_usd: 0.05,
+          structured_output: validClassification,
+        },
+        cost: 0.05,
+        pitfallMarkers: [],
+        exitStatus: 'completed',
+      },
+    });
+
+    const result = await classify(mockRuntime, makeWorkRequest());
+    expect(result.event).toBe('success');
+    expect(result.complexity).toBe('standard');
+  });
+
+  it('falls back to parsing JSON from result text when structured_output is null', async () => {
+    mockRuntime.spawnSession.mockResolvedValue({
+      ok: true,
+      value: {
+        output: '',
+        structuredData: {
+          result: '```json\n{"complexity":"complex","reasoning":"Architectural","estimatedUnits":8,"estimatedArtifacts":15}\n```',
+          cost_usd: 0.05,
+          structured_output: null,
+        },
+        cost: 0.05,
+        pitfallMarkers: [],
+        exitStatus: 'completed',
+      },
+    });
+
+    const result = await classify(mockRuntime, makeWorkRequest());
+    expect(result.event).toBe('success');
+    expect(result.complexity).toBe('complex');
+  });
+
   it('passes runWriter and runId for cost tracking', async () => {
     mockRuntime.spawnSession.mockResolvedValue({
       ok: true,
