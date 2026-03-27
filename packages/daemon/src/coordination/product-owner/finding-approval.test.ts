@@ -109,6 +109,23 @@ describe('incrementCapCounter', () => {
       { date: today(), approvedCount: 1 },
     );
   });
+
+  it('accepts a delta to batch multiple approvals in one write', async () => {
+    const stored = makeCapState({ date: today(), approvedCount: 1 });
+    const deps = makeDeps({ readJson: vi.fn().mockResolvedValue({ ok: true, value: stored }) });
+    await incrementCapCounter(deps, 3);
+    expect(deps.writeJson).toHaveBeenCalledTimes(1);
+    expect(deps.writeJson).toHaveBeenCalledWith(
+      deps.capStatePath,
+      { date: today(), approvedCount: 4 },
+    );
+  });
+
+  it('does nothing when delta is 0', async () => {
+    const deps = makeDeps();
+    await incrementCapCounter(deps, 0);
+    expect(deps.writeJson).not.toHaveBeenCalled();
+  });
 });
 
 describe('fetchFindingsAwaitingApproval', () => {
@@ -156,6 +173,23 @@ describe('fetchFindingsAwaitingApproval', () => {
 describe('applyFindingDecisions', () => {
   const owner = 'owner';
   const repo = 'repo';
+
+  it('batches cap counter into one write for multiple approvals (regression: #432)', async () => {
+    const octokit = makeOctokit();
+    const stored = makeCapState({ date: today(), approvedCount: 0 });
+    const deps = makeDeps({ readJson: vi.fn().mockResolvedValue({ ok: true, value: stored }) });
+    const decisions: POFindingDecision[] = [
+      { issueNumber: 10, verdict: 'approve', reason: 'Yes' },
+      { issueNumber: 11, verdict: 'approve', reason: 'Also yes' },
+      { issueNumber: 12, verdict: 'approve', reason: 'And this too' },
+    ];
+    await applyFindingDecisions(octokit as any, owner, repo, decisions, deps);
+
+    // Must be exactly one file write regardless of how many approvals, to minimise
+    // the concurrent read-modify-write window between PO cycles.
+    expect(deps.writeJson).toHaveBeenCalledTimes(1);
+    expect(deps.writeJson).toHaveBeenCalledWith(deps.capStatePath, { date: today(), approvedCount: 3 });
+  });
 
   it('applies approve verdict: adds po-approved label, posts comment, increments cap', async () => {
     const octokit = makeOctokit();
@@ -269,7 +303,7 @@ describe('applyFindingDecisions', () => {
     expect(octokit.issues.addLabels).toHaveBeenCalledTimes(2);
   });
 
-  it('handles multiple decisions in sequence', async () => {
+  it('handles multiple decisions in sequence, batching cap writes into one', async () => {
     const octokit = makeOctokit();
     const deps = makeDeps();
     const decisions: POFindingDecision[] = [
@@ -281,7 +315,12 @@ describe('applyFindingDecisions', () => {
 
     expect(octokit.issues.addLabels).toHaveBeenCalledTimes(3);
     expect(octokit.issues.createComment).toHaveBeenCalledTimes(3);
-    expect(deps.writeJson).toHaveBeenCalledTimes(2);
+    // Two approvals → one batched write with delta=2, not two separate writes
+    expect(deps.writeJson).toHaveBeenCalledTimes(1);
+    expect(deps.writeJson).toHaveBeenCalledWith(
+      deps.capStatePath,
+      { date: today(), approvedCount: 2 },
+    );
   });
 });
 

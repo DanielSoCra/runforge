@@ -47,12 +47,13 @@ export async function readCapState(deps: FindingApprovalDeps): Promise<POFinding
   return { date: new Date().toISOString().slice(0, 10), approvedCount: 0 };
 }
 
-export async function incrementCapCounter(deps: FindingApprovalDeps): Promise<void> {
+export async function incrementCapCounter(deps: FindingApprovalDeps, delta = 1): Promise<void> {
+  if (delta <= 0) return;
   const state = await readCapState(deps);
   const today = new Date().toISOString().slice(0, 10);
   const updated: POFindingDailyCap = state.date === today
-    ? { date: today, approvedCount: state.approvedCount + 1 }
-    : { date: today, approvedCount: 1 };
+    ? { date: today, approvedCount: state.approvedCount + delta }
+    : { date: today, approvedCount: delta };
   await deps.writeJson(deps.capStatePath, updated);
 }
 
@@ -101,6 +102,8 @@ export async function applyFindingDecisions(
   decisions: POFindingDecision[],
   deps: FindingApprovalDeps,
 ): Promise<void> {
+  let successfulApprovals = 0;
+
   for (const decision of decisions) {
     const mapping = VERDICT_LABELS[decision.verdict];
     if (!mapping) continue;
@@ -134,10 +137,16 @@ export async function applyFindingDecisions(
       // sourceRef set to the issue URL. Use writeWithRetry for optimistic concurrency.
 
       if (decision.verdict === 'approve') {
-        await incrementCapCounter(deps);
+        successfulApprovals++;
       }
     } catch (err) {
       console.error(`[finding-approval] failed to apply decision for issue #${decision.issueNumber}:`, err);
     }
+  }
+
+  // Batch the cap counter update: one read-modify-write per invocation instead of
+  // one per approval, reducing the window for concurrent writes between PO cycles.
+  if (successfulApprovals > 0) {
+    await incrementCapCounter(deps, successfulApprovals);
   }
 }
