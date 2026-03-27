@@ -1416,6 +1416,15 @@ describe('createPhaseHandlers', () => {
       expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
       expect(mockOctokit.issues.createComment).not.toHaveBeenCalled();
     });
+
+    it('returns failure when octokit.issues.get throws', async () => {
+      mockOctokit.issues.get.mockRejectedValue(new Error('network error'));
+      const { handlers } = createHandlers();
+      const result = await handlers['l2-gate']!(makeRun());
+      expect(result).toBe('failure');
+      expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
+      expect(mockOctokit.issues.createComment).not.toHaveBeenCalled();
+    });
   });
 
   describe('l3-generate', () => {
