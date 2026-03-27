@@ -235,6 +235,40 @@ describe('applyFindingDecisions', () => {
     expect(octokit.issues.addLabels).toHaveBeenCalled();
   });
 
+  it('continues processing remaining decisions when addLabels throws for one decision', async () => {
+    const octokit = makeOctokit();
+    octokit.issues.addLabels
+      .mockRejectedValueOnce(new Error('rate limit exceeded'))
+      .mockResolvedValue({});
+    const deps = makeDeps();
+    const decisions: POFindingDecision[] = [
+      { issueNumber: 1, verdict: 'approve', reason: 'Yes' },
+      { issueNumber: 2, verdict: 'approve', reason: 'Also yes' },
+    ];
+    await expect(applyFindingDecisions(octokit as any, owner, repo, decisions, deps)).resolves.toBeUndefined();
+    // Second decision must still be processed despite first failing
+    expect(octokit.issues.addLabels).toHaveBeenCalledTimes(2);
+    expect(octokit.issues.createComment).toHaveBeenCalledTimes(1);
+    expect(octokit.issues.createComment).toHaveBeenCalledWith(
+      expect.objectContaining({ issue_number: 2 }),
+    );
+  });
+
+  it('continues processing remaining decisions when createComment throws for one decision', async () => {
+    const octokit = makeOctokit();
+    octokit.issues.createComment
+      .mockRejectedValueOnce(new Error('API error'))
+      .mockResolvedValue({});
+    const deps = makeDeps();
+    const decisions: POFindingDecision[] = [
+      { issueNumber: 1, verdict: 'reject', reason: 'No' },
+      { issueNumber: 2, verdict: 'reject', reason: 'Also no' },
+    ];
+    await expect(applyFindingDecisions(octokit as any, owner, repo, decisions, deps)).resolves.toBeUndefined();
+    expect(octokit.issues.createComment).toHaveBeenCalledTimes(2);
+    expect(octokit.issues.addLabels).toHaveBeenCalledTimes(2);
+  });
+
   it('handles multiple decisions in sequence', async () => {
     const octokit = makeOctokit();
     const deps = makeDeps();

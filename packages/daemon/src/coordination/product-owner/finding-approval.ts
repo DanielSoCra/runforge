@@ -105,35 +105,39 @@ export async function applyFindingDecisions(
     const mapping = VERDICT_LABELS[decision.verdict];
     if (!mapping) continue;
 
-    await octokit.issues.addLabels({
-      owner,
-      repo,
-      issue_number: decision.issueNumber,
-      labels: mapping.add,
-    });
-
-    for (const label of mapping.remove) {
-      await octokit.issues.removeLabel({
+    try {
+      await octokit.issues.addLabels({
         owner,
         repo,
         issue_number: decision.issueNumber,
-        name: label,
-      }).catch(() => { /* 404 when label not present — safe to ignore */ });
-    }
+        labels: mapping.add,
+      });
 
-    await octokit.issues.createComment({
-      owner,
-      repo,
-      issue_number: decision.issueNumber,
-      body: `**PO ${decision.verdict}:** ${decision.reason}`,
-    });
+      for (const label of mapping.remove) {
+        await octokit.issues.removeLabel({
+          owner,
+          repo,
+          issue_number: decision.issueNumber,
+          name: label,
+        }).catch(() => { /* 404 when label not present — safe to ignore */ });
+      }
 
-    // TODO(STACK-AC-PRODUCT-OWNER-INTERACTIVE): For needs_discussion verdicts,
-    // add NeedsDiscussionItem to SharedPOState with sourceType: 'finding' and
-    // sourceRef set to the issue URL. Use writeWithRetry for optimistic concurrency.
+      await octokit.issues.createComment({
+        owner,
+        repo,
+        issue_number: decision.issueNumber,
+        body: `**PO ${decision.verdict}:** ${decision.reason}`,
+      });
 
-    if (decision.verdict === 'approve') {
-      await incrementCapCounter(deps);
+      // TODO(STACK-AC-PRODUCT-OWNER-INTERACTIVE): For needs_discussion verdicts,
+      // add NeedsDiscussionItem to SharedPOState with sourceType: 'finding' and
+      // sourceRef set to the issue URL. Use writeWithRetry for optimistic concurrency.
+
+      if (decision.verdict === 'approve') {
+        await incrementCapCounter(deps);
+      }
+    } catch (err) {
+      console.error(`[finding-approval] failed to apply decision for issue #${decision.issueNumber}:`, err);
     }
   }
 }
