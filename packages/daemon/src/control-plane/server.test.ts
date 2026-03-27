@@ -278,6 +278,38 @@ describe('ControlServer', () => {
     }
   });
 
+  it('POST /drain calls drain handler and returns draining:true (#425)', async () => {
+    const drain = vi.fn();
+    const { server, start } = createControlServer(PORT + 10, { ...handlers, drain });
+    const result = await start();
+    expect(result.ok).toBe(true);
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT + 10}/drain`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toEqual({ draining: true });
+      expect(drain).toHaveBeenCalledOnce();
+    } finally {
+      server.close();
+    }
+  });
+
+  it('POST /drain/cancel calls cancelDrain handler and returns draining:false (#425)', async () => {
+    const cancelDrain = vi.fn();
+    const { server, start } = createControlServer(PORT + 11, { ...handlers, cancelDrain });
+    const result = await start();
+    expect(result.ok).toBe(true);
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT + 11}/drain/cancel`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toEqual({ draining: false });
+      expect(cancelDrain).toHaveBeenCalledOnce();
+    } finally {
+      server.close();
+    }
+  });
+
   it('GET /status includes remote_control_state but not remote_control_url', async () => {
     const { server: s2, start: start2 } = createControlServer(PORT + 1, {
       getStatus: () => ({
