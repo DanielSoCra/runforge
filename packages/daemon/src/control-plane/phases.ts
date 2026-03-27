@@ -213,7 +213,12 @@ export function createPhaseHandlers(
             (c) => c.body?.includes('REJECTED') || c.body?.includes('l2-rejected'),
           );
           if (rejectionComment?.body) {
-            run.l2Feedback = rejectionComment.body;
+            // Sanitize before storing: strip {{placeholder}} patterns (defense against
+            // template injection via renderTemplate) and cap length to limit prompt size.
+            const MAX_FEEDBACK_LENGTH = 4000;
+            run.l2Feedback = rejectionComment.body
+              .replace(/\{\{[\w-]+\}\}/g, '')
+              .slice(0, MAX_FEEDBACK_LENGTH);
             console.log(`[l2-gate] Captured rejection feedback for #${workRequest.issueNumber}`);
           }
         } catch (e) {
