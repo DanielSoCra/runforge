@@ -365,6 +365,28 @@ describe('createPhaseHandlers', () => {
       // Lock must be released even on failure
       expect(isDetectLocked()).toBe(false);
     });
+
+    it('returns failure when worktree exists but git pull --ff-only fails (#419)', async () => {
+      mockExistsSync.mockReturnValue(true); // workspace dir already exists
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('branch exists') }); // worktree add -b fails
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('worktree already exists') }); // worktree add existing fails
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal: not possible to fast-forward') }); // pull fails
+      const { handlers } = createHandlers();
+      const result = await handlers.detect!(makeRun());
+      expect(result).toBe('failure');
+      expect(mockGit).toHaveBeenCalledWith(['pull', '--ff-only'], expect.any(String));
+    });
+
+    it('returns success when worktree exists and git pull --ff-only succeeds (#419)', async () => {
+      mockExistsSync.mockReturnValue(true); // workspace dir already exists
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('branch exists') }); // worktree add -b fails
+      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('worktree already exists') }); // worktree add existing fails
+      mockGit.mockResolvedValueOnce({ ok: true, value: 'Already up to date.' }); // pull succeeds
+      const { handlers } = createHandlers();
+      const result = await handlers.detect!(makeRun());
+      expect(result).toBe('success');
+      expect(mockGit).toHaveBeenCalledWith(['pull', '--ff-only'], expect.any(String));
+    });
   });
 
   describe('classify', () => {

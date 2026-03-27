@@ -121,7 +121,11 @@ export function createPhaseHandlers(
             const { existsSync } = await import('node:fs');
             if (existsSync(workspaceDir)) {
               console.log(`[detect] Worktree already exists at ${workspaceDir}, pulling latest`);
-              await git(['pull', '--ff-only'], workspaceDir);
+              const pullResult = await git(['pull', '--ff-only'], workspaceDir);
+              if (!pullResult.ok) {
+                console.error(`[detect] git pull failed:`, pullResult.error.message);
+                return 'failure';
+              }
             } else {
               console.error(`[detect] Worktree creation failed:`, wtExisting.error.message);
               return 'failure';
