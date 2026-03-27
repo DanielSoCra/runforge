@@ -62,6 +62,15 @@ vi.mock('./classifier.js', () => ({
   classify: vi.fn(),
 }));
 
+vi.mock('../lib/process.js', () => ({
+  runCommand: vi.fn(),
+}));
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, existsSync: vi.fn(() => true) };
+});
+
 vi.mock('../validation/holdout.js', () => ({
   runHoldout: vi.fn(),
 }));
@@ -97,6 +106,8 @@ import { runHoldout } from '../validation/holdout.js';
 import { integrateToStaging } from './integration.js';
 import { runDeploy } from '../validation/deploy.js';
 import { runPostDeployTests } from '../validation/post-deploy-test.js';
+import { runCommand } from '../lib/process.js';
+import { existsSync } from 'node:fs';
 
 const mockGit = vi.mocked(git);
 const mockClassify = vi.mocked(runClassify);
@@ -119,6 +130,8 @@ const mockRunHoldout = vi.mocked(runHoldout);
 const mockIntegrateToStaging = vi.mocked(integrateToStaging);
 const mockRunDeploy = vi.mocked(runDeploy);
 const mockRunPostDeployTests = vi.mocked(runPostDeployTests);
+const mockRunCommand = vi.mocked(runCommand);
+const mockExistsSync = vi.mocked(existsSync);
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
@@ -253,6 +266,10 @@ describe('createPhaseHandlers', () => {
     mockResolveCurrentSpecRefs.mockImplementation(async (_root, refs) => refs);
     // Reset issues.get mock
     mockOctokit.issues.get.mockClear();
+    // Default: workspace directory exists (batch did not remove it)
+    mockExistsSync.mockReturnValue(true);
+    // Default: runCommand succeeds
+    mockRunCommand.mockResolvedValue({ ok: true, value: '' });
   });
 
   afterEach(() => {
@@ -295,6 +312,7 @@ describe('createPhaseHandlers', () => {
     });
 
     it('returns failure when both worktree add attempts fail and directory does not exist', async () => {
+      mockExistsSync.mockReturnValue(false); // workspace dir does not exist
       mockGit.mockResolvedValueOnce({ ok: false, error: new Error('branch exists') }); // worktree add -b fails
       mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal') }); // worktree add also fails
       const { handlers } = createHandlers();
@@ -303,6 +321,7 @@ describe('createPhaseHandlers', () => {
     });
 
     it('returns failure when initial worktree add fails and fallback also fails (#255)', async () => {
+      mockExistsSync.mockReturnValue(false); // workspace dir does not exist
       mockGit.mockResolvedValueOnce({ ok: false, error: new Error('cannot create worktree') }); // worktree add -b fails
       mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal: not a git repo') }); // fallback fails
       const { handlers } = createHandlers();
@@ -313,6 +332,7 @@ describe('createPhaseHandlers', () => {
     });
 
     it('releases detect lock when worktree add fails (#255)', async () => {
+      mockExistsSync.mockReturnValue(false); // workspace dir does not exist
       mockGit.mockResolvedValueOnce({ ok: false, error: new Error('worktree add failed') });
       mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal') });
       const { handlers } = createHandlers();
@@ -488,6 +508,33 @@ describe('createPhaseHandlers', () => {
       const result = await handlers.implement!(run);
       expect(result).toBe('success');
       expect(run.handoffNotes).toBeUndefined();
+    });
+
+    it('uses async runCommand instead of execSync for pnpm install in worktree recreation (#413)', async () => {
+      const { handlers, coordinator } = createHandlers();
+      coordinator.implement.mockResolvedValue({
+        ok: true,
+        value: { success: true, totalCost: 1.0 },
+      });
+      // Simulate batch removing the workspace directory
+      mockExistsSync.mockReturnValue(false);
+      // git checkout staging succeeds, git worktree add succeeds
+      mockGit
+        .mockResolvedValueOnce({ ok: true, value: '' }) // checkout staging
+        .mockResolvedValueOnce({ ok: true, value: '' }); // worktree add
+      // runCommand for pnpm install succeeds
+      mockRunCommand.mockResolvedValueOnce({ ok: true, value: '' });
+
+      const run = makeRun();
+      const result = await handlers.implement!(run);
+      expect(result).toBe('success');
+
+      // Verify runCommand was called (async) instead of execSync (blocking)
+      expect(mockRunCommand).toHaveBeenCalledWith(
+        'pnpm',
+        ['install', '--frozen-lockfile'],
+        expect.objectContaining({ cwd: expect.any(String), timeoutMs: 120_000 }),
+      );
     });
   });
 

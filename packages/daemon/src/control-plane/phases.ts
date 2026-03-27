@@ -17,6 +17,7 @@ import { appendResult } from './results.js';
 import type { Octokit } from '@octokit/rest';
 import { createWorkDetector } from './work-detection.js';
 import { git } from '../lib/git.js';
+import { runCommand } from '../lib/process.js';
 import { join } from 'node:path';
 import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
@@ -509,11 +510,13 @@ export function createPhaseHandlers(
           workspaceCwd = workspaceDir;
           run.workspacePath = workspaceDir;
           // Install dependencies so review gate commands (pnpm test, tsc) work
-          const { execSync } = await import('node:child_process');
-          try {
-            execSync('pnpm install --frozen-lockfile', { cwd: workspaceDir, timeout: 120_000, stdio: 'pipe' });
+          const installResult = await runCommand('pnpm', ['install', '--frozen-lockfile'], {
+            cwd: workspaceDir,
+            timeoutMs: 120_000,
+          });
+          if (installResult.ok) {
             console.log(`[implement] Worktree recreated at ${workspaceDir} (deps installed)`);
-          } catch (e) {
+          } else {
             console.warn(`[implement] Worktree recreated but pnpm install failed — review gate may fail`);
           }
         } else {
