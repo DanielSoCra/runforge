@@ -660,7 +660,10 @@ export function createPhaseHandlers(
 
     integrate: async (_run: RunState): Promise<PhaseEvent> => {
       console.log(`[integrate] Merging ${featureBranch} into ${config.branches.staging}`);
-      const result = await integrateToStaging(featureBranch, config.branches.staging, workspaceCwd);
+      // Integration must run in mainRepoRoot (where staging is already checked out),
+      // not workspaceCwd (worktree on featureBranch). Git prohibits checking out a branch
+      // that's already checked out in another worktree — see #412.
+      const result = await integrateToStaging(featureBranch, config.branches.staging, mainRepoRoot);
       if (!result.ok) {
         console.error(`[integrate] Error:`, result.error.message);
         return 'failure';

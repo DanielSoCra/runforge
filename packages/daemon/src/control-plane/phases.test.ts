@@ -1085,6 +1085,15 @@ describe('createPhaseHandlers', () => {
       expect(mockIntegrateToStaging).toHaveBeenCalledWith('feature/42', 'staging', expect.any(String));
     });
 
+    it('passes mainRepoRoot (not workspaceCwd) to integrateToStaging (regression #412)', async () => {
+      mockIntegrateToStaging.mockResolvedValue({ ok: true, value: { success: true, conflicted: false } } as any);
+      const testRepoRoot = '/tmp/test-repo-root-412';
+      const { handlers } = createHandlers({}, undefined, testRepoRoot);
+      await handlers.integrate!(makeRun());
+      // Must pass mainRepoRoot, not workspaceCwd (which would be workspaces/issue-42)
+      expect(mockIntegrateToStaging).toHaveBeenCalledWith('feature/42', 'staging', testRepoRoot);
+    });
+
     it('returns failure on merge conflict', async () => {
       mockIntegrateToStaging.mockResolvedValue({
         ok: true, value: { success: false, conflicted: true, error: 'Merge conflicts detected' },
