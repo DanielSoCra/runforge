@@ -1328,6 +1328,38 @@ describe('createPhaseHandlers', () => {
         42, undefined, undefined, undefined,
       );
     });
+
+    it('ensureWorkspace restores workspaceCwd when run.workspacePath exists (#426)', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: { output: 'done', structuredData: {}, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
+      });
+      mockExistsSync.mockReturnValue(true);
+      const { handlers } = createHandlers({}, undefined, '/repo/root');
+      const run = makeRun({ workspacePath: '/repo/root/workspaces/issue-42' });
+      await handlers['l2-design']!(run);
+      expect(mockRuntime.spawnSession).toHaveBeenCalledWith(
+        'l2-designer',
+        expect.objectContaining({ workspacePath: '/repo/root/workspaces/issue-42' }),
+        42, undefined, undefined, undefined,
+      );
+    });
+
+    it('ensureWorkspace falls back to repo root when persisted workspace is gone (#426)', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: { output: 'done', structuredData: {}, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
+      });
+      mockExistsSync.mockReturnValue(false);
+      const { handlers } = createHandlers({}, undefined, '/repo/root');
+      const run = makeRun({ workspacePath: '/repo/root/workspaces/issue-42' });
+      await handlers['l2-design']!(run);
+      expect(mockRuntime.spawnSession).toHaveBeenCalledWith(
+        'l2-designer',
+        expect.objectContaining({ workspacePath: '/repo/root' }),
+        42, undefined, undefined, undefined,
+      );
+    });
   });
 
   describe('l2-gate', () => {
