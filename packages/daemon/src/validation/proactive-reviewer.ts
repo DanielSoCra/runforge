@@ -19,6 +19,28 @@ const ProactiveResultSchema = z.object({
 
 const jsonSchema = JSON.stringify(z.toJSONSchema(ProactiveResultSchema));
 
+const SEVERITY_MAP: Record<string, string> = {
+  high: 'critical', severe: 'critical', blocker: 'critical',
+  medium: 'important', moderate: 'important', significant: 'important',
+  low: 'minor', info: 'minor', informational: 'minor', trivial: 'minor',
+};
+
+function normalizeSeverities(data: unknown): unknown {
+  if (data === null || typeof data !== 'object') return data;
+  const obj = data as Record<string, unknown>;
+  if (!Array.isArray(obj.findings)) return data;
+  return {
+    ...obj,
+    findings: obj.findings.map((f: unknown) => {
+      if (f === null || typeof f !== 'object') return f;
+      const finding = f as Record<string, unknown>;
+      const sev = typeof finding.severity === 'string' ? finding.severity.toLowerCase() : '';
+      const normalized = SEVERITY_MAP[sev];
+      return normalized ? { ...finding, severity: normalized } : finding;
+    }),
+  };
+}
+
 export interface ProactiveReviewInput {
   area: string;
   cwd: string;
@@ -70,7 +92,36 @@ export async function runProactiveReview(
     return { ok: false, error: result.error.message };
   }
 
-  const parsed = ProactiveResultSchema.safeParse(result.value.structuredData);
+  // Unwrap the CLI wrapper {result, cost_usd, structured_output} to get the payload.
+  // Peer callers (reviewer-session.ts:111-117) use the same pattern.
+  const rawData = result.value.structuredData;
+  const so =
+    rawData !== null && typeof rawData === 'object'
+      ? (rawData as Record<string, unknown>).structured_output
+      : undefined;
+  let structuredPayload: unknown;
+  if (so !== null && so !== undefined) {
+    structuredPayload = so;
+  } else {
+    // Fallback: model put JSON in result text as markdown code block
+    const resultText =
+      typeof (rawData as Record<string, unknown>)?.result === 'string'
+        ? ((rawData as Record<string, unknown>).result as string)
+        : result.value.output;
+    const jsonMatch =
+      resultText.match(/```json\s*([\s\S]*?)```/s) ?? resultText.match(/(\{[\s\S]*\})/s);
+    if (jsonMatch?.[1]) {
+      try {
+        structuredPayload = JSON.parse(jsonMatch[1]);
+      } catch {
+        structuredPayload = rawData;
+      }
+    } else {
+      structuredPayload = rawData;
+    }
+  }
+
+  const parsed = ProactiveResultSchema.safeParse(normalizeSeverities(structuredPayload));
   if (!parsed.success) {
     return { ok: false, error: `Invalid structured output: ${parsed.error.message}` };
   }

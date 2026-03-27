@@ -4,9 +4,14 @@ import { runProactiveReview } from './proactive-reviewer.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { SessionResult } from '../types.js';
 
+/** Wraps a payload in the CLI wrapper shape that SessionRuntime actually delivers. */
+function wrapCli(payload: unknown): unknown {
+  return { result: '', cost_usd: 0.01, structured_output: payload };
+}
+
 function makeRuntime(structuredData: unknown, ok = true): SessionRuntime {
   const result = ok
-    ? { ok: true as const, value: { output: '', structuredData, cost: 0.1, pitfallMarkers: [], exitStatus: 'completed' as const } }
+    ? { ok: true as const, value: { output: '', structuredData: wrapCli(structuredData), cost: 0.1, pitfallMarkers: [], exitStatus: 'completed' as const } }
     : { ok: false as const, error: new Error('session failed') };
   return {
     spawnSession: vi.fn().mockResolvedValue(result),
@@ -146,6 +151,76 @@ describe('runProactiveReview', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toContain('Invalid structured output');
+    }
+  });
+
+  it('unwraps CLI wrapper {structured_output} before parsing — regression for #434', async () => {
+    // BUG-30: structuredData is the full CLI wrapper {result, cost_usd, structured_output},
+    // not the {findings:[]} payload. The fix must unwrap .structured_output before safeParse.
+    // makeRuntime now wraps in the CLI shape, so this exercises the primary unwrap path.
+    const runtime = makeRuntime({
+      findings: [
+        { title: 'BUG-30 test', severity: 'minor', location: 'src/foo.ts:1', description: 'test', evidence: 'test' },
+      ],
+    });
+    const result = await runProactiveReview(runtime, {
+      area: 'src/foo',
+      cwd: '/workspace',
+      recentCommits: '',
+      issueNumber: 434,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]!.title).toBe('BUG-30 test');
+    }
+  });
+
+  it('falls back to markdown code block in result text when structured_output is null', async () => {
+    // Build a CLI wrapper where structured_output is null and the payload is in result text.
+    const fallbackWrapper = {
+      result: '```json\n{"findings":[{"title":"fallback","severity":"minor","location":"src/x.ts:1","description":"d","evidence":"e"}]}\n```',
+      cost_usd: 0.01,
+      structured_output: null,
+    };
+    const resultObj = { ok: true as const, value: { output: '', structuredData: fallbackWrapper, cost: 0.1, pitfallMarkers: [], exitStatus: 'completed' as const } };
+    const runtime = { spawnSession: vi.fn().mockResolvedValue(resultObj) } as unknown as import('../session-runtime/runtime.js').SessionRuntime;
+    const result = await runProactiveReview(runtime, {
+      area: 'src/x',
+      cwd: '/workspace',
+      recentCommits: '',
+      issueNumber: 434,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.findings[0]!.title).toBe('fallback');
+    }
+  });
+
+  it('normalizes non-standard severity strings before parsing', async () => {
+    // Model may output "high"/"moderate"/"low" instead of the enum values.
+    // Without normalization, safeParse fails and all findings are discarded.
+    const runtime = makeRuntime({
+      findings: [
+        { title: 'High sev', severity: 'high', location: 'src/a.ts:1', description: 'd', evidence: 'e' },
+        { title: 'Moderate sev', severity: 'moderate', location: 'src/b.ts:1', description: 'd', evidence: 'e' },
+        { title: 'Low sev', severity: 'low', location: 'src/c.ts:1', description: 'd', evidence: 'e' },
+      ],
+    });
+    const result = await runProactiveReview(runtime, {
+      area: 'src',
+      cwd: '/workspace',
+      recentCommits: '',
+      issueNumber: 434,
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.findings[0]!.severity).toBe('critical');
+      expect(result.findings[1]!.severity).toBe('important');
+      expect(result.findings[2]!.severity).toBe('minor');
     }
   });
 
