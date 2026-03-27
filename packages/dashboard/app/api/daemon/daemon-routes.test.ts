@@ -132,6 +132,19 @@ describe.each(inlineAuthRoutes)('POST /api/daemon/$name', ({ path, daemonPath })
     expect(body.error).toMatch(/DAEMON_URL/);
     vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
   });
+
+  it('returns 502 when daemon returns non-JSON body (#423)', async () => {
+    const createClient = await getCreateClient();
+    createClient.mockResolvedValueOnce(mockSupabaseAdmin());
+    fetchMock.mockResolvedValueOnce(
+      new Response('<html>Internal Server Error</html>', { status: 500 }),
+    );
+    const { POST } = await import(path);
+    const res = await POST();
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.error).toMatch(/non-JSON/);
+  });
 });
 
 // ---------- remote-control/restart (uses requireAdmin — returns 403 for both unauth and non-admin) ----------
@@ -190,6 +203,19 @@ describe('POST /api/daemon/remote-control/restart', () => {
     const body = await res.json();
     expect(body.error).toMatch(/DAEMON_URL/);
     vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
+  });
+
+  it('returns 502 when daemon returns non-JSON body (#423)', async () => {
+    const createClient = await getCreateClient();
+    createClient.mockResolvedValueOnce(mockSupabaseAdmin());
+    fetchMock.mockResolvedValueOnce(
+      new Response('<html>Internal Server Error</html>', { status: 500 }),
+    );
+    const { POST } = await import('./remote-control/restart/route.js');
+    const res = await POST();
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.error).toMatch(/non-JSON/);
   });
 });
 
@@ -279,5 +305,18 @@ describe('GET /api/daemon/status', () => {
     const body = await res.json();
     expect(body.error).toMatch(/DAEMON_URL/);
     vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
+  });
+
+  it('returns 502 when daemon returns non-JSON body (#423)', async () => {
+    const createClient = await getCreateClient();
+    createClient.mockResolvedValueOnce(mockSupabaseAdmin());
+    fetchMock.mockResolvedValueOnce(
+      new Response('<html>Internal Server Error</html>', { status: 500 }),
+    );
+    const { GET } = await import('./status/route.js');
+    const res = await GET();
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.error).toMatch(/non-JSON/);
   });
 });

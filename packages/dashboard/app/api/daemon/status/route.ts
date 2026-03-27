@@ -17,7 +17,16 @@ export async function GET() {
       signal: AbortSignal.timeout(3000),
       cache: 'no-store',
     });
-    return NextResponse.json(await res.json(), { status: res.status });
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch {
+      return NextResponse.json(
+        { error: `Daemon returned non-JSON response (HTTP ${res.status})` },
+        { status: 502 },
+      );
+    }
+    return NextResponse.json(json, { status: res.status });
   } catch (e) {
     if (e instanceof DaemonConfigError) {
       return NextResponse.json({ error: e.message }, { status: 500 });
