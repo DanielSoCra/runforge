@@ -65,7 +65,12 @@ export function createReviewerGate(
     async execute(cwd: string): Promise<GateResult> {
       const variables: Record<string, string> = { rubric, cwd };
       variables.diff = diff ?? '(diff unavailable — git diff failed or returned no output)';
-      variables.specs = specs || 'No spec content available for this review.';
+      // Only inject specs for reviewer-spec — reviewer-quality and reviewer-security
+      // templates declare only {{diff}}, {{rubric}}, and {{knownIssues}}; they have
+      // no {{specs}} placeholder so passing the variable is a silent no-op (#438).
+      if (sessionType === 'reviewer-spec') {
+        variables.specs = specs || 'No spec content available for this review.';
+      }
       variables.knownIssues = knowledgeContext || '';
 
       const sessionOpts = {

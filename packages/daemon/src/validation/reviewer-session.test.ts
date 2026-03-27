@@ -240,7 +240,7 @@ describe('createReviewerGate', () => {
     );
   });
 
-  it('sets diff fallback when not provided and always includes specs fallback (#272)', async () => {
+  it('sets diff fallback when not provided (#272)', async () => {
     const runtime = makeRuntime({
       ok: true,
       value: {
@@ -259,8 +259,8 @@ describe('createReviewerGate', () => {
     const passedVariables = (callArgs[1] as { variables: Record<string, string> }).variables;
     expect(passedVariables).toHaveProperty('diff');
     expect(passedVariables.diff).toContain('diff unavailable');
-    expect(passedVariables).toHaveProperty('specs');
-    expect(passedVariables.specs).toBe('No spec content available for this review.');
+    // reviewer-quality has no {{specs}} placeholder — specs variable must not be injected (#438)
+    expect(passedVariables).not.toHaveProperty('specs');
   });
 
   it('includes knownIssues variable when knowledgeContext is provided (#326)', async () => {
@@ -606,6 +606,57 @@ describe('extractDiscoveredIssues', () => {
       findings: [],
     });
     expect(result).toEqual([]);
+  });
+});
+
+describe('specs variable scoped to reviewer-spec only (#438)', () => {
+  function makeOkRuntime() {
+    return makeRuntime({
+      ok: true,
+      value: {
+        structuredData: { findings: [], summary: 'ok', approved: true },
+        output: '',
+        cost: 0.05,
+        pitfallMarkers: [],
+        exitStatus: 'completed',
+      },
+    });
+  }
+
+  it('reviewer-spec receives specs variable', async () => {
+    const runtime = makeOkRuntime();
+    const gate = createReviewerGate(
+      'spec-compliance', 'reviewer-spec', 'rubric', runtime, 42,
+      undefined, undefined, 'some diff', '# Spec content',
+    );
+    await gate.execute('/workspace');
+
+    const vars = ((runtime.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]![1] as { variables: Record<string, string> }).variables;
+    expect(vars).toHaveProperty('specs', '# Spec content');
+  });
+
+  it('reviewer-quality does not receive specs variable', async () => {
+    const runtime = makeOkRuntime();
+    const gate = createReviewerGate(
+      'quality', 'reviewer-quality', 'rubric', runtime, 42,
+      undefined, undefined, 'some diff', '# Spec content',
+    );
+    await gate.execute('/workspace');
+
+    const vars = ((runtime.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]![1] as { variables: Record<string, string> }).variables;
+    expect(vars).not.toHaveProperty('specs');
+  });
+
+  it('reviewer-security does not receive specs variable', async () => {
+    const runtime = makeOkRuntime();
+    const gate = createReviewerGate(
+      'security', 'reviewer-security', 'rubric', runtime, 42,
+      undefined, undefined, 'some diff', '# Spec content',
+    );
+    await gate.execute('/workspace');
+
+    const vars = ((runtime.spawnSession as ReturnType<typeof vi.fn>).mock.calls[0]![1] as { variables: Record<string, string> }).variables;
+    expect(vars).not.toHaveProperty('specs');
   });
 });
 
