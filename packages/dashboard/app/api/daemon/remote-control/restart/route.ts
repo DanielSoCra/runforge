@@ -11,7 +11,15 @@ export async function POST() {
 
   try {
     const res = await daemonFetch('/remote-control/restart', { method: 'POST' });
-    const json = await res.json();
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch {
+      return NextResponse.json(
+        { error: `Daemon returned non-JSON response (HTTP ${res.status})` },
+        { status: 502 },
+      );
+    }
     return NextResponse.json(json, { status: res.status });
   } catch (e) {
     if (e instanceof DaemonConfigError) {
