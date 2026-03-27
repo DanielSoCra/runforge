@@ -331,8 +331,8 @@ export function createPhaseHandlers(
         console.error(`[l3-compliance] Session exited with status: ${result.value.exitStatus}`);
         return 'failure';
       }
-      const structuredData = result.value?.structuredData as { passed?: boolean } | undefined;
-      if (structuredData && structuredData.passed === false) {
+      const structuredData = result.value?.structuredData as { compliant?: boolean } | undefined;
+      if (structuredData && structuredData.compliant === false) {
         console.log(`[l3-compliance] Compliance check failed — gaps found`);
         return 'failure';
       }

@@ -1537,10 +1537,10 @@ describe('createPhaseHandlers', () => {
   });
 
   describe('l3-compliance', () => {
-    it('spawns compliance-reviewer session and returns success when passed', async () => {
+    it('spawns compliance-reviewer session and returns success when compliant', async () => {
       mockRuntime.spawnSession.mockResolvedValue({
         ok: true,
-        value: { output: 'done', structuredData: { passed: true }, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
+        value: { output: 'done', structuredData: { compliant: true }, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
       });
       const { handlers } = createHandlers();
       const result = await handlers['l3-compliance']!(makeRun());
@@ -1557,7 +1557,7 @@ describe('createPhaseHandlers', () => {
     it('returns failure when compliance check finds gaps', async () => {
       mockRuntime.spawnSession.mockResolvedValue({
         ok: true,
-        value: { output: 'gaps found', structuredData: { passed: false }, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
+        value: { output: 'gaps found', structuredData: { compliant: false }, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
       });
       const { handlers } = createHandlers();
       const result = await handlers['l3-compliance']!(makeRun());
@@ -1574,13 +1574,26 @@ describe('createPhaseHandlers', () => {
       expect(result).toBe('failure');
     });
 
-    it('returns success when structuredData has no passed field', async () => {
+    it('returns success when structuredData has no compliant field', async () => {
       mockRuntime.spawnSession.mockResolvedValue({
         ok: true,
         value: { output: 'done', structuredData: {}, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
       });
       const { handlers } = createHandlers();
       const result = await handlers['l3-compliance']!(makeRun());
+      expect(result).toBe('success');
+    });
+
+    it('regression #435: does NOT return failure when structuredData.passed is false (wrong field)', async () => {
+      // compliance-reviewer outputs "compliant", not "passed" — "passed" field must be ignored
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: { output: 'gaps found', structuredData: { passed: false }, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
+      });
+      const { handlers } = createHandlers();
+      const result = await handlers['l3-compliance']!(makeRun());
+      // "passed: false" is an unknown field — phase should return success (not failure)
+      // because the compliance-reviewer schema uses "compliant", not "passed"
       expect(result).toBe('success');
     });
   });
