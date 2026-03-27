@@ -234,6 +234,12 @@ describe('getNeedsAttention', () => {
         eq: vi.fn().mockResolvedValue({ data: escalatedRuns, error: null }),
       }),
     });
+    // Third call: failed runs (none)
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }),
+    });
 
     const { getNeedsAttention } = await import('./briefing');
     const result = await getNeedsAttention();
@@ -249,7 +255,71 @@ describe('getNeedsAttention', () => {
     expect(result[1].actionLinks[0].url).toBe('https://github.com/acme/api/issues/20');
   });
 
+  it('populates failure bucket for runs with outcome=failed (SPEC-63 regression — #442)', async () => {
+    const failedRuns = [
+      {
+        id: 'r-failed',
+        repo_owner: 'acme',
+        repo_name: 'web',
+        issue_number: 30,
+        issue_title: 'Failed issue',
+        outcome: 'failed',
+        started_at: '2026-03-20T10:00:00Z',
+      },
+    ];
+
+    // stuck: none
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }),
+    });
+    // escalated: none
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }),
+    });
+    // failed: one run
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: failedRuns, error: null }),
+      }),
+    });
+
+    const { getNeedsAttention } = await import('./briefing');
+    const result = await getNeedsAttention();
+
+    expect(result).toHaveLength(1);
+    expect(result[0].reason).toBe('failure');
+    expect(result[0].issueNumber).toBe(30);
+    expect(result[0].actionLinks[0].url).toBe('https://github.com/acme/web/issues/30');
+  });
+
+  it('sorts all three tiers correctly: blocked > review > failure (SPEC-63 regression — #442)', async () => {
+    const stuckRuns = [{ id: 'r-s', repo_owner: 'acme', repo_name: 'web', issue_number: 10, issue_title: 'Stuck', outcome: 'stuck', started_at: '2026-03-20T10:00:00Z' }];
+    const escalatedRuns = [{ id: 'r-e', repo_owner: 'acme', repo_name: 'web', issue_number: 20, issue_title: 'Escalated', outcome: 'escalated', started_at: '2026-03-20T10:00:00Z' }];
+    const failedRuns = [{ id: 'r-f', repo_owner: 'acme', repo_name: 'web', issue_number: 30, issue_title: 'Failed', outcome: 'failed', started_at: '2026-03-20T10:00:00Z' }];
+
+    mockFrom.mockReturnValueOnce({ select: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ data: stuckRuns, error: null }) }) });
+    mockFrom.mockReturnValueOnce({ select: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ data: escalatedRuns, error: null }) }) });
+    mockFrom.mockReturnValueOnce({ select: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ data: failedRuns, error: null }) }) });
+
+    const { getNeedsAttention } = await import('./briefing');
+    const result = await getNeedsAttention();
+
+    expect(result).toHaveLength(3);
+    expect(result[0].reason).toBe('blocked');
+    expect(result[1].reason).toBe('review');
+    expect(result[2].reason).toBe('failure');
+  });
+
   it('returns empty array when nothing needs attention', async () => {
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }),
+    });
     mockFrom.mockReturnValueOnce({
       select: vi.fn().mockReturnValue({
         eq: vi.fn().mockResolvedValue({ data: [], error: null }),
@@ -289,6 +359,11 @@ describe('getNeedsAttention', () => {
         eq: vi.fn().mockResolvedValue({ data: [], error: null }),
       }),
     });
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }),
+    });
 
     const { getNeedsAttention } = await import('./briefing');
     const result = await getNeedsAttention();
@@ -307,6 +382,12 @@ describe('getNeedsAttention', () => {
       }),
     });
     // escalated query succeeds
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }),
+    });
+    // failed query succeeds
     mockFrom.mockReturnValueOnce({
       select: vi.fn().mockReturnValue({
         eq: vi.fn().mockResolvedValue({ data: [], error: null }),
@@ -333,9 +414,42 @@ describe('getNeedsAttention', () => {
         }),
       }),
     });
+    // failed query succeeds
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }),
+    });
 
     const { getNeedsAttention } = await import('./briefing');
     await expect(getNeedsAttention()).rejects.toThrow('Failed to fetch escalated runs');
+  });
+
+  it('throws when failed runs query fails', async () => {
+    // stuck query succeeds
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }),
+    });
+    // escalated query succeeds
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }),
+    });
+    // failed query returns error
+    mockFrom.mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({
+          data: null,
+          error: { code: '42P01', message: 'relation does not exist' },
+        }),
+      }),
+    });
+
+    const { getNeedsAttention } = await import('./briefing');
+    await expect(getNeedsAttention()).rejects.toThrow('Failed to fetch failed runs');
   });
 });
 
