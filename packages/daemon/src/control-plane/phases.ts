@@ -664,7 +664,81 @@ export function createPhaseHandlers(
       if (!result.value.passed) {
         const failedIds = result.value.failures.map((f) => f.id).join(', ');
         console.error(`[holdout] Failed scenarios: ${failedIds}`);
-        return 'failure';
+
+        // Delegate to Bug Diagnosis Service for Type A/B/C classification
+        // per ARCH-AC-CONTROL-PLANE spec (line 84): holdout failures must be classified
+        // before routing — Type A → fix cycle, Type B → needs-spec-update, Type C → needs-human
+        const threshold = config.diagnosis.confidenceThreshold;
+        const specifyRoot = join(cwd, '.specify');
+        let specContent = '';
+        try {
+          specContent = await loadSpecContent(workRequest.specRefs, specifyRoot);
+        } catch (e) {
+          console.warn(`[holdout] Failed to load spec content:`, e);
+        }
+        let implementationContent = '';
+        try {
+          implementationContent = await loadImplementationContent(workRequest.specRefs, cwd);
+        } catch (e) {
+          console.warn(`[holdout] Failed to load implementation content:`, e);
+        }
+
+        const bugReport = `Holdout test failures for issue #${workRequest.issueNumber}.\nFailed scenarios: ${failedIds}\n\nOriginal issue:\n${workRequest.body}`;
+        const diagResult = await diagnose(
+          runtime,
+          workRequest.issueNumber,
+          bugReport,
+          implementationContent,
+          specContent,
+          runWriter,
+          runId,
+          workspaceCwd,
+          activePlugins,
+        );
+
+        if (!diagResult.ok) {
+          console.error(`[holdout] Diagnosis failed:`, diagResult.error.message);
+          try {
+            await octokit.issues.addLabels({ owner, repo, issue_number: workRequest.issueNumber, labels: ['needs-human'] });
+            await octokit.issues.createComment({
+              owner, repo, issue_number: workRequest.issueNumber,
+              body: `## Holdout Diagnosis Failed\n\nHoldout scenarios failed (${failedIds}) but automatic diagnosis could not produce valid output.\nRouting to human for manual triage.`,
+            });
+          } catch (e) {
+            console.error(`[holdout] Failed to update issue:`, e);
+          }
+          return 'escalated';
+        }
+
+        const routing = routeDiagnosis(diagResult.value, threshold);
+        if (routing.route === 'bug-pipeline') {
+          // Type A: implementation defect — route back to fix cycle
+          console.log(`[holdout] Diagnosis Type A (confidence ${diagResult.value.confidence}) — routing to fix cycle`);
+          return 'failure';
+        }
+
+        // Type B or Type C / low confidence — post diagnosis and escalate to stuck
+        const label = routing.route === 'needs-spec-update' ? 'needs-spec-update' : 'needs-human';
+        const diagnosisComment = [
+          `## Holdout Failure Diagnosis`,
+          `**Type:** ${diagResult.value.type} | **Confidence:** ${diagResult.value.confidence}`,
+          `**Failed Scenarios:** ${failedIds}`,
+          `**Affected Specs:** ${diagResult.value.affectedSpecs.join(', ') || 'none'}`,
+          `**Suggested Action:** ${diagResult.value.suggestedAction}`,
+          `**Reasoning:** ${diagResult.value.reasoning}`,
+          '',
+          routing.route === 'needs-spec-update'
+            ? '_Routed to spec author — implementation is correct per spec, but spec is incomplete._'
+            : `_Routed to human — ${routing.reason}_`,
+        ].join('\n');
+        console.log(`[holdout] Diagnosis ${routing.route} — labeling ${label}`);
+        try {
+          await octokit.issues.addLabels({ owner, repo, issue_number: workRequest.issueNumber, labels: [label] });
+          await octokit.issues.createComment({ owner, repo, issue_number: workRequest.issueNumber, body: diagnosisComment });
+        } catch (e) {
+          console.error(`[holdout] Failed to update issue:`, e);
+        }
+        return 'escalated';
       }
       console.log(`[holdout] All scenarios passed`);
       return 'success';

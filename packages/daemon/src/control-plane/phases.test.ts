@@ -1133,20 +1133,71 @@ describe('createPhaseHandlers', () => {
       expect(mockRunHoldout).not.toHaveBeenCalled();
     });
 
-    it('returns failure when holdout scenarios fail', async () => {
-      mockRunHoldout.mockResolvedValue({
-        ok: true, value: { passed: false, skipped: false, failures: [{ id: 'scenario-1', passed: false }] },
-      } as any);
+    it('returns failure when holdout runner errors (no diagnosis needed)', async () => {
+      mockRunHoldout.mockResolvedValue({ ok: false, error: new Error('runner crashed') } as any);
       const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
       const result = await handlers.holdout!(makeRun());
       expect(result).toBe('failure');
     });
 
-    it('returns failure when holdout runner errors', async () => {
-      mockRunHoldout.mockResolvedValue({ ok: false, error: new Error('runner crashed') } as any);
-      const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
-      const result = await handlers.holdout!(makeRun());
-      expect(result).toBe('failure');
+    describe('holdout failure — delegates to Bug Diagnosis Service (#441)', () => {
+      const failingHoldout = { ok: true, value: { passed: false, skipped: false, failures: [{ id: 'scenario-1', passed: false }] } };
+
+      it('returns failure (fix cycle) when diagnosis is Type A — implementation defect', async () => {
+        mockRunHoldout.mockResolvedValue(failingHoldout as any);
+        mockDiagnose.mockResolvedValue({ ok: true, value: { type: 'A', confidence: 0.9, affectedSpecs: [], affectedArtifacts: [], suggestedAction: 'fix impl', reasoning: 'impl deviated' } } as any);
+        mockRouteDiagnosis.mockReturnValue({ route: 'bug-pipeline', diagnosis: {} as any });
+        const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
+        const result = await handlers.holdout!(makeRun());
+        expect(result).toBe('failure');
+        expect(mockDiagnose).toHaveBeenCalled();
+        expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
+      });
+
+      it('returns escalated and adds needs-spec-update label when diagnosis is Type B', async () => {
+        mockRunHoldout.mockResolvedValue(failingHoldout as any);
+        mockDiagnose.mockResolvedValue({ ok: true, value: { type: 'B', confidence: 0.85, affectedSpecs: ['FUNC-AC-PIPELINE'], affectedArtifacts: [], suggestedAction: 'update spec', reasoning: 'spec gap' } } as any);
+        mockRouteDiagnosis.mockReturnValue({ route: 'needs-spec-update', diagnosis: {} as any });
+        const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
+        const result = await handlers.holdout!(makeRun());
+        expect(result).toBe('escalated');
+        expect(mockOctokit.issues.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ['needs-spec-update'] }));
+        expect(mockOctokit.issues.createComment).toHaveBeenCalled();
+      });
+
+      it('returns escalated and adds needs-human label when diagnosis is Type C / low confidence', async () => {
+        mockRunHoldout.mockResolvedValue(failingHoldout as any);
+        mockDiagnose.mockResolvedValue({ ok: true, value: { type: 'C', confidence: 0.5, affectedSpecs: [], affectedArtifacts: [], suggestedAction: 'human review', reasoning: 'unclear' } } as any);
+        mockRouteDiagnosis.mockReturnValue({ route: 'needs-human', diagnosis: {} as any, reason: 'Type C: expectation mismatch' });
+        const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
+        const result = await handlers.holdout!(makeRun());
+        expect(result).toBe('escalated');
+        expect(mockOctokit.issues.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ['needs-human'] }));
+        expect(mockOctokit.issues.createComment).toHaveBeenCalled();
+      });
+
+      it('returns escalated and adds needs-human label when diagnosis itself fails', async () => {
+        mockRunHoldout.mockResolvedValue(failingHoldout as any);
+        mockDiagnose.mockResolvedValue({ ok: false, error: new Error('session failed') } as any);
+        const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
+        const result = await handlers.holdout!(makeRun());
+        expect(result).toBe('escalated');
+        expect(mockOctokit.issues.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ['needs-human'] }));
+        expect(mockDiagnose).toHaveBeenCalled();
+      });
+
+      it('passes failed scenario IDs in the bug report to the diagnosis service', async () => {
+        mockRunHoldout.mockResolvedValue({
+          ok: true, value: { passed: false, skipped: false, failures: [{ id: 'scen-A', passed: false }, { id: 'scen-B', passed: false }] },
+        } as any);
+        mockDiagnose.mockResolvedValue({ ok: true, value: { type: 'A', confidence: 0.95, affectedSpecs: [], affectedArtifacts: [], suggestedAction: '', reasoning: '' } } as any);
+        mockRouteDiagnosis.mockReturnValue({ route: 'bug-pipeline', diagnosis: {} as any });
+        const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
+        await handlers.holdout!(makeRun());
+        const bugReport = mockDiagnose.mock.calls[0][2] as string;
+        expect(bugReport).toContain('scen-A');
+        expect(bugReport).toContain('scen-B');
+      });
     });
   });
 

@@ -83,6 +83,28 @@ describe('FSM', () => {
     });
   });
 
+  describe('holdout diagnosis routing (#441)', () => {
+    it('feature: holdout → failure → implement (Type A fix cycle)', () => {
+      const table = getPipeline('feature');
+      expect(transition(table, 'holdout', 'failure')?.next).toBe('implement');
+    });
+
+    it('feature: holdout → escalated → stuck (Type B/C or diagnosis failure)', () => {
+      const table = getPipeline('feature');
+      expect(transition(table, 'holdout', 'escalated')?.next).toBe('stuck');
+    });
+
+    it('feature-simple: holdout → failure → implement (Type A fix cycle)', () => {
+      const table = getPipeline('feature-simple');
+      expect(transition(table, 'holdout', 'failure')?.next).toBe('implement');
+    });
+
+    it('feature-simple: holdout → escalated → stuck (Type B/C or diagnosis failure)', () => {
+      const table = getPipeline('feature-simple');
+      expect(transition(table, 'holdout', 'escalated')?.next).toBe('stuck');
+    });
+  });
+
   describe('review escalation (#383)', () => {
     it('feature: review → escalated → stuck', () => {
       const table = getPipeline('feature');
