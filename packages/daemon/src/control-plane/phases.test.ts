@@ -375,6 +375,7 @@ describe('createPhaseHandlers', () => {
       const result = await handlers.detect!(makeRun());
       expect(result).toBe('failure');
       expect(mockGit).toHaveBeenCalledWith(['pull', '--ff-only'], expect.any(String));
+      expect(isDetectLocked()).toBe(false);
     });
 
     it('returns success when worktree exists and git pull --ff-only succeeds (#419)', async () => {
