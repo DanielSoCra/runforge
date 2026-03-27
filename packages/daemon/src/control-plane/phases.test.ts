@@ -1069,9 +1069,9 @@ describe('createPhaseHandlers', () => {
       expect(result).toBe('success');
     });
 
-    it('returns success even when completeWork throws (#107)', async () => {
+    it('returns success even when completeWork returns err (#107)', async () => {
       mockCreateWorkDetector.mockReturnValue({
-        completeWork: vi.fn(async () => { throw new Error('network timeout'); }),
+        completeWork: vi.fn(async () => ({ ok: false, error: new Error('network timeout') })),
         detectReadyWork: vi.fn(),
         claimWork: vi.fn(),
         markStuck: vi.fn(),

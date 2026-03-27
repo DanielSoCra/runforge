@@ -150,8 +150,8 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
     async completeBugFixWork(issueNumber: number, commitSha: string): Promise<Result<void>> {
       try {
         await octokit.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: 'in-progress' }).catch(() => {});
-        await octokit.issues.createComment({ owner, repo, issue_number: issueNumber, body: `Fixed in commit ${commitSha}` });
         await octokit.issues.update({ owner, repo, issue_number: issueNumber, state: 'closed' });
+        await octokit.issues.createComment({ owner, repo, issue_number: issueNumber, body: `Fixed in commit ${commitSha}` }).catch(() => {});
         return ok(undefined);
       } catch (e) {
         return err(e instanceof Error ? e : new Error(String(e)));
@@ -172,8 +172,8 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
       try {
         await octokit.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: 'in-progress' }).catch(() => {});
         await octokit.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: ['complete'] });
-        await octokit.issues.createComment({ owner, repo, issue_number: issueNumber, body: comment });
         await octokit.issues.update({ owner, repo, issue_number: issueNumber, state: 'closed' });
+        await octokit.issues.createComment({ owner, repo, issue_number: issueNumber, body: comment }).catch(() => {});
         return ok(undefined);
       } catch (e) {
         return err(e instanceof Error ? e : new Error(String(e)));

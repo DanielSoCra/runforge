@@ -143,6 +143,20 @@ describe('WorkDetector', () => {
         expect.objectContaining({ state: 'closed' }),
       );
     });
+
+    it('closes issue even when createComment fails — regression for #433', async () => {
+      const octokit = mockOctokit();
+      octokit.issues.createComment = vi.fn().mockRejectedValue(new Error('GitHub API error'));
+      const detector = createWorkDetector(octokit, 'owner', 'repo');
+      const result = await detector.completeWork(42, 'Done!');
+      expect(result.ok).toBe(true);
+      expect(octokit.issues.addLabels).toHaveBeenCalledWith(
+        expect.objectContaining({ labels: ['complete'] }),
+      );
+      expect(octokit.issues.update).toHaveBeenCalledWith(
+        expect.objectContaining({ state: 'closed' }),
+      );
+    });
   });
 
   describe('markStuck', () => {

@@ -765,7 +765,10 @@ export function createPhaseHandlers(
 
       try {
         // Complete the work request (label + close)
-        await detector.completeWork(workRequest.issueNumber, reportBody);
+        const completeResult = await detector.completeWork(workRequest.issueNumber, reportBody);
+        if (!completeResult.ok) {
+          console.error(`[report] completeWork failed (non-fatal):`, completeResult.error);
+        }
       } catch (err) {
         console.error(`[report] completeWork failed (non-fatal):`, err);
       }
