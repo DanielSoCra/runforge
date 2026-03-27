@@ -73,6 +73,30 @@ export const IdeaSubmissionSchema = z.object({
 });
 export type IdeaSubmission = z.infer<typeof IdeaSubmissionSchema>;
 
+// --- PO Finding Approval ---
+
+export const POFindingDecisionSchema = z.object({
+  issueNumber: z.number().int().positive(),
+  verdict: z.enum(['approve', 'reject', 'needs_discussion']),
+  reason: z.string().min(1),
+  discussionContext: z.string().optional(),
+});
+export type POFindingDecision = z.infer<typeof POFindingDecisionSchema>;
+
+export const POFindingDailyCapSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  approvedCount: z.number().int().nonnegative(),
+});
+export type POFindingDailyCap = z.infer<typeof POFindingDailyCapSchema>;
+
+export const FindingAwaitingApprovalSchema = z.object({
+  issueNumber: z.number().int().positive(),
+  title: z.string(),
+  severityLabel: z.string().optional(),
+  tlApprovalReason: z.string(),
+});
+export type FindingAwaitingApproval = z.infer<typeof FindingAwaitingApprovalSchema>;
+
 // --- SignalSnapshot ---
 
 export const SignalSnapshotSchema = z.object({
@@ -83,6 +107,7 @@ export const SignalSnapshotSchema = z.object({
   activeProposals: z.array(ActiveProposalSummarySchema).default([]),
   proposalHistory: z.array(ProposalHistoryEntrySchema).default([]),
   ideaInbox: z.array(IdeaSubmissionSchema).default([]),
+  findingsAwaitingApproval: z.array(FindingAwaitingApprovalSchema).default([]),
   missingSources: z.array(z.string()).default([]),
 });
 export type SignalSnapshot = z.infer<typeof SignalSnapshotSchema>;
@@ -92,6 +117,7 @@ export type SignalSnapshot = z.infer<typeof SignalSnapshotSchema>;
 export const POAnalysisOutputSchema = z.object({
   proposals: z.array(RawProposalSchema).default([]),
   protocolTriggers: z.array(z.enum(['backlog_grooming', 'escalation'])).default([]),
+  findingDecisions: z.array(POFindingDecisionSchema).default([]),
 });
 export type POAnalysisOutput = z.infer<typeof POAnalysisOutputSchema>;
 

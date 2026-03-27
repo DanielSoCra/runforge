@@ -16,6 +16,7 @@ function makeDeps(overrides: Partial<SnapshotDeps> = {}): SnapshotDeps {
     getActiveProposals: async () => [],
     getProposalHistory: async () => [],
     getIdeaInbox: async () => [],
+    getFindingsAwaitingApproval: async () => [],
     ...overrides,
   };
 }
@@ -26,6 +27,7 @@ function makeConfig(overrides: Partial<SnapshotConfig> = {}): SnapshotConfig {
     maxProposalEntries: 20,
     maxIdeaEntries: 10,
     maxDefaultEntries: 50,
+    maxFindingsEntries: 5,
     ...overrides,
   };
 }

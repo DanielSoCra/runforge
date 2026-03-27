@@ -1,5 +1,5 @@
 // src/coordination/product-owner/signal-analyzer.ts — Assemble SignalSnapshot from external sources
-import type { SignalSnapshot, SpecGapEntry } from './schemas.js';
+import type { SignalSnapshot, SpecGapEntry, FindingAwaitingApproval } from './schemas.js';
 
 // --- Dependency injection types ---
 
@@ -10,6 +10,7 @@ export interface SnapshotDeps {
   getActiveProposals: () => Promise<SignalSnapshot['activeProposals']>;
   getProposalHistory: () => Promise<SignalSnapshot['proposalHistory']>;
   getIdeaInbox: () => Promise<SignalSnapshot['ideaInbox']>;
+  getFindingsAwaitingApproval: () => Promise<FindingAwaitingApproval[]>;
 }
 
 export interface SnapshotConfig {
@@ -17,6 +18,7 @@ export interface SnapshotConfig {
   maxProposalEntries: number;    // default: 20
   maxIdeaEntries: number;        // default: 10
   maxDefaultEntries: number;     // default: 50
+  maxFindingsEntries: number;    // default: 5 (matches poFindingDailyCap)
 }
 
 export async function assembleSignalSnapshot(
@@ -25,7 +27,7 @@ export async function assembleSignalSnapshot(
 ): Promise<SignalSnapshot> {
   const missingSources: string[] = [];
 
-  const [specPipeline, deliverySummary, backlog, activeProposals, proposalHistory, ideaInbox] =
+  const [specPipeline, deliverySummary, backlog, activeProposals, proposalHistory, ideaInbox, findingsAwaitingApproval] =
     await Promise.all([
       deps.getSpecPipeline().catch(() => {
         missingSources.push('spec_pipeline');
@@ -51,6 +53,10 @@ export async function assembleSignalSnapshot(
         missingSources.push('idea_inbox');
         return [] as SignalSnapshot['ideaInbox'];
       }),
+      deps.getFindingsAwaitingApproval().catch(() => {
+        missingSources.push('findings_awaiting_approval');
+        return [] as FindingAwaitingApproval[];
+      }),
     ]);
 
   const truncatedSections: string[] = [];
@@ -69,6 +75,7 @@ export async function assembleSignalSnapshot(
     activeProposals: capAndTrack(activeProposals, config.maxProposalEntries, 'active_proposals'),
     proposalHistory: capAndTrack(proposalHistory, config.maxProposalEntries, 'proposal_history'),
     ideaInbox: capAndTrack(ideaInbox, config.maxIdeaEntries, 'idea_inbox'),
+    findingsAwaitingApproval: capAndTrack(findingsAwaitingApproval, config.maxFindingsEntries, 'findings_awaiting_approval'),
     missingSources: [...missingSources, ...truncatedSections.map(s => `${s}_truncated`)],
   };
 }

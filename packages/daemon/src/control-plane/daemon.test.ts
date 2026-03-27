@@ -215,7 +215,7 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
   coordination: {
     useCoordinator: false, tickInterval: 5000,
     maxAgents: 10, reviewerInterval: 3600000, poInterval: 3600000,
-    poIdeaDebounce: 300000,
+    poIdeaDebounce: 300000, poFindingDailyCap: 5,
     plannerTimeout: 60000, maxAttemptsPerIssue: 3, diskSpaceThreshold: 2_000_000_000,
     gcInterval: 600000, conflictFileThreshold: 3, conflictLineThreshold: 100,
     mergeDependencyTimeout: 1800000, mergeValidationTimeout: 600000,
