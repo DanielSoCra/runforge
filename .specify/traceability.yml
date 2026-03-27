@@ -180,7 +180,7 @@ ARCH-AC-DASHBOARD:
 
 ARCH-AC-PRODUCT-OWNER:
   parent: FUNC-AC-PRODUCT-OWNER
-  children: [STACK-AC-PRODUCT-OWNER]
+  children: [STACK-AC-PRODUCT-OWNER, STACK-AC-PRODUCT-OWNER-INTERACTIVE]
   status: draft
 
 ARCH-AC-TECH-LEAD:
@@ -645,9 +645,22 @@ STACK-AC-PRODUCT-OWNER:
     - packages/daemon/src/coordination/product-owner/session-output-parser.ts
     - packages/daemon/src/coordination/product-owner/protocol-round-formatter.ts
     - packages/daemon/src/coordination/product-owner/idea-processor.ts
-    # finding-approval.ts, interactive-session-context.ts, product-owner-interactive.md pending issue #394
+    # finding-approval.ts pending issue #394
     - prompts/product-owner.md
     - prompts/product-owner-enrichment.md
   test_paths:
     - packages/daemon/src/coordination/product-owner/**/*.test.ts
+  status: draft
+
+STACK-AC-PRODUCT-OWNER-INTERACTIVE:
+  parent: ARCH-AC-PRODUCT-OWNER
+  children: []
+  code_paths:
+    - packages/daemon/src/coordination/product-owner/interactive-session-context.ts
+    - packages/daemon/src/coordination/product-owner/shared-po-state.ts
+    - packages/daemon/src/coordination/product-owner/interactive-schemas.ts
+    - prompts/product-owner-interactive.md
+  test_paths:
+    - packages/daemon/src/coordination/product-owner/interactive-session-context.test.ts
+    - packages/daemon/src/coordination/product-owner/shared-po-state.test.ts
   status: draft
