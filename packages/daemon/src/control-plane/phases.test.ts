@@ -1186,6 +1186,63 @@ describe('createPhaseHandlers', () => {
         expect(mockDiagnose).toHaveBeenCalled();
       });
 
+      it('propagates rate-limited signal when diagnosis session is rate-limited (#441)', async () => {
+        const { SessionError } = await import('../session-runtime/session-error.js');
+        mockRunHoldout.mockResolvedValue(failingHoldout as any);
+        mockDiagnose.mockResolvedValue({ ok: false, error: SessionError.rateLimited(0.5) } as any);
+        const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
+        const result = await handlers.holdout!(makeRun());
+        expect(result).toBe('rate-limited');
+        expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
+      });
+
+      it('propagates containment-breach signal when diagnosis session has containment breach (#441)', async () => {
+        const { SessionError } = await import('../session-runtime/session-error.js');
+        mockRunHoldout.mockResolvedValue(failingHoldout as any);
+        mockDiagnose.mockResolvedValue({ ok: false, error: SessionError.containmentBreached('escaped', 0.1) } as any);
+        const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
+        const result = await handlers.holdout!(makeRun());
+        expect(result).toBe('containment-breach');
+        expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
+      });
+
+      it('propagates budget-exceeded signal when diagnosis session exceeds budget (#441)', async () => {
+        const { SessionError } = await import('../session-runtime/session-error.js');
+        mockRunHoldout.mockResolvedValue(failingHoldout as any);
+        mockDiagnose.mockResolvedValue({ ok: false, error: SessionError.budgetExceeded('per-run-budget-exceeded') } as any);
+        const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
+        const result = await handlers.holdout!(makeRun());
+        expect(result).toBe('budget-exceeded');
+        expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
+      });
+
+      it('escalates after maxFixCycles Type A failures to prevent infinite holdout→implement loop (#441)', async () => {
+        mockRunHoldout.mockResolvedValue(failingHoldout as any);
+        mockDiagnose.mockResolvedValue({ ok: true, value: { type: 'A', confidence: 0.9, affectedSpecs: [], affectedArtifacts: [], suggestedAction: '', reasoning: '' } } as any);
+        mockRouteDiagnosis.mockReturnValue({ route: 'bug-pipeline', diagnosis: {} as any });
+        const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout', maxFixCycles: 3 } });
+        // Simulate 2 prior holdout failures already recorded
+        const run = makeRun({ fixAttempts: [
+          { phase: 'holdout', attempt: 1, errorHash: 'scenario-1' },
+          { phase: 'holdout', attempt: 2, errorHash: 'scenario-1' },
+        ] });
+        const result = await handlers.holdout!(run);
+        // Third attempt (3 >= maxFixCycles=3) → escalated
+        expect(result).toBe('escalated');
+      });
+
+      it('records diagnosis type and confidence on run state (#441)', async () => {
+        mockRunHoldout.mockResolvedValue(failingHoldout as any);
+        mockDiagnose.mockResolvedValue({ ok: true, value: { type: 'A', confidence: 0.88, affectedSpecs: [], affectedArtifacts: [], suggestedAction: '', reasoning: '' } } as any);
+        mockRouteDiagnosis.mockReturnValue({ route: 'bug-pipeline', diagnosis: {} as any });
+        const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
+        const run = makeRun();
+        await handlers.holdout!(run);
+        expect(run.diagnosisType).toBe('A');
+        expect(run.diagnosisConfidence).toBe(0.88);
+        expect(run.diagnosisDetail).toBeDefined();
+      });
+
       it('passes failed scenario IDs in the bug report to the diagnosis service', async () => {
         mockRunHoldout.mockResolvedValue({
           ok: true, value: { passed: false, skipped: false, failures: [{ id: 'scen-A', passed: false }, { id: 'scen-B', passed: false }] },

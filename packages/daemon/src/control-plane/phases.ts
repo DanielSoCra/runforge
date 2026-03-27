@@ -697,6 +697,22 @@ export function createPhaseHandlers(
         );
 
         if (!diagResult.ok) {
+          // Propagate safety signals before falling back to needs-human
+          // (mirrors the diagnose phase handler — ARCH-AC-OPERATIONAL-SAFETY)
+          if (diagResult.error instanceof SessionError) {
+            if (diagResult.error.rateLimited) {
+              console.warn(`[holdout] Diagnosis session rate-limited: ${diagResult.error.message} — signaling pipeline to pause`);
+              return 'rate-limited';
+            }
+            if (diagResult.error.containmentBreach) {
+              console.warn(`[holdout] Diagnosis session containment breach: ${diagResult.error.message} — signaling pipeline`);
+              return 'containment-breach';
+            }
+            if (diagResult.error.message.startsWith('Budget exceeded')) {
+              console.warn(`[holdout] Diagnosis session budget exceeded: ${diagResult.error.message} — signaling pipeline to pause`);
+              return 'budget-exceeded';
+            }
+          }
           console.error(`[holdout] Diagnosis failed:`, diagResult.error.message);
           try {
             await octokit.issues.addLabels({ owner, repo, issue_number: workRequest.issueNumber, labels: ['needs-human'] });
@@ -710,10 +726,22 @@ export function createPhaseHandlers(
           return 'escalated';
         }
 
+        // Record diagnosis on run state for results ledger
+        run.diagnosisType = diagResult.value.type;
+        run.diagnosisConfidence = diagResult.value.confidence;
+        run.diagnosisDetail = JSON.stringify(diagResult.value);
+
         const routing = routeDiagnosis(diagResult.value, threshold);
         if (routing.route === 'bug-pipeline') {
-          // Type A: implementation defect — route back to fix cycle
-          console.log(`[holdout] Diagnosis Type A (confidence ${diagResult.value.confidence}) — routing to fix cycle`);
+          // Type A: implementation defect — track fix attempt and route back to fix cycle.
+          // Guard against infinite holdout→implement loop (mirrors review phase maxFixCycles logic).
+          const holdoutFailures = run.fixAttempts.filter(a => a.phase === 'holdout').length;
+          run.fixAttempts.push({ phase: 'holdout', attempt: holdoutFailures + 1, errorHash: failedIds.slice(0, 64) });
+          if (holdoutFailures + 1 >= config.validation.maxFixCycles) {
+            console.error(`[holdout] Max fix cycles (${config.validation.maxFixCycles}) reached for Type A — escalating`);
+            return 'escalated';
+          }
+          console.log(`[holdout] Diagnosis Type A (confidence ${diagResult.value.confidence}) — routing to fix cycle (attempt ${holdoutFailures + 1}/${config.validation.maxFixCycles})`);
           return 'failure';
         }
 
@@ -724,6 +752,7 @@ export function createPhaseHandlers(
           `**Type:** ${diagResult.value.type} | **Confidence:** ${diagResult.value.confidence}`,
           `**Failed Scenarios:** ${failedIds}`,
           `**Affected Specs:** ${diagResult.value.affectedSpecs.join(', ') || 'none'}`,
+          `**Affected Artifacts:** ${diagResult.value.affectedArtifacts.join(', ') || 'none'}`,
           `**Suggested Action:** ${diagResult.value.suggestedAction}`,
           `**Reasoning:** ${diagResult.value.reasoning}`,
           '',
