@@ -332,6 +332,38 @@ describe('applyFindingDecisions', () => {
       { date: today(), approvedCount: 2 },
     );
   });
+
+  it('does not propagate when incrementCapCounter throws due to writeJson failure (regression: #452)', async () => {
+    const octokit = makeOctokit();
+    const deps = makeDeps({
+      writeJson: vi.fn().mockRejectedValue(new Error('disk write failed')),
+    });
+    const decisions: POFindingDecision[] = [
+      { issueNumber: 1, verdict: 'approve', reason: 'Looks good' },
+    ];
+    // Must resolve (not throw) even when cap counter write fails
+    await expect(applyFindingDecisions(octokit as any, owner, repo, decisions, deps)).resolves.toBeUndefined();
+    // GitHub labels/comments must still have been applied before the cap write
+    expect(octokit.issues.addLabels).toHaveBeenCalledWith({
+      owner, repo, issue_number: 1, labels: ['po-approved'],
+    });
+    expect(octokit.issues.createComment).toHaveBeenCalledWith({
+      owner, repo, issue_number: 1,
+      body: '**PO approve:** Looks good',
+    });
+  });
+
+  it('does not propagate when incrementCapCounter throws due to readJson failure (regression: #452)', async () => {
+    const octokit = makeOctokit();
+    const deps = makeDeps({
+      readJson: vi.fn().mockRejectedValue(new Error('disk read failed')),
+    });
+    const decisions: POFindingDecision[] = [
+      { issueNumber: 1, verdict: 'approve', reason: 'Looks good' },
+    ];
+    await expect(applyFindingDecisions(octokit as any, owner, repo, decisions, deps)).resolves.toBeUndefined();
+    expect(octokit.issues.addLabels).toHaveBeenCalled();
+  });
 });
 
 describe('VERDICT_LABELS', () => {

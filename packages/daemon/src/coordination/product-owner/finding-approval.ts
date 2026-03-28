@@ -147,6 +147,13 @@ export async function applyFindingDecisions(
   // Batch the cap counter update: one read-modify-write per invocation instead of
   // one per approval, reducing the window for concurrent writes between PO cycles.
   if (successfulApprovals > 0) {
-    await incrementCapCounter(deps, successfulApprovals);
+    try {
+      await incrementCapCounter(deps, successfulApprovals);
+    } catch (err) {
+      // Log but do not re-throw: GitHub labels/comments have already been applied.
+      // Re-throwing risks callers retrying and double-applying verdicts. The counter
+      // will under-count for this cycle; operators can reconcile via the audit log.
+      console.error('[finding-approval] cap counter update failed — counter may be out of sync with actual approvals:', err);
+    }
   }
 }
