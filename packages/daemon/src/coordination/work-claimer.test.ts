@@ -71,6 +71,32 @@ describe('work-claimer', () => {
       if (!result.ok) return;
       expect(result.value.batchItemId).toBe(batchItemId);
     });
+
+    it('concurrent claim() calls for the same issue — only one succeeds', async () => {
+      // Regression test for: two concurrent callers both reading empty state
+      // and both returning success (race condition in read-check-write sequence).
+      const [r1, r2] = await Promise.all([
+        claimer.claim(99, 'worker'),
+        claimer.claim(99, 'worker'),
+      ]);
+      const results = [r1, r2];
+      const successCount = results.filter((r) => r.ok).length;
+      const failureCount = results.filter((r) => !r.ok).length;
+      expect(successCount).toBe(1);
+      expect(failureCount).toBe(1);
+      // The one that succeeded should have attempt=1
+      const winner = results.find((r) => r.ok);
+      expect(winner?.ok && winner.value.attempt).toBe(1);
+    });
+
+    it('concurrent claim() calls for different issues — both succeed', async () => {
+      const [r1, r2] = await Promise.all([
+        claimer.claim(10, 'worker'),
+        claimer.claim(11, 'worker'),
+      ]);
+      expect(r1.ok).toBe(true);
+      expect(r2.ok).toBe(true);
+    });
   });
 
   describe('findActiveClaim', () => {
