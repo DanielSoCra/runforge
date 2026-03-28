@@ -73,7 +73,6 @@ export function createWorkClaimer(stateDir: string): WorkClaimer {
 
   return {
     async claim(issueNumber, agentType, batchItemId?) {
-      await ensureDir();
       return withMutex(async () => {
         const allClaims = await readAllClaims();
 
