@@ -85,6 +85,22 @@ describe('specDrivenTransitions', () => {
     expect(transition(table, 'review', 'success')?.next).toBe('holdout');
   });
 
+  it('holdout → success → integrate', () => {
+    expect(transition(table, 'holdout', 'success')?.next).toBe('integrate');
+  });
+
+  it('holdout → failure → stuck', () => {
+    expect(transition(table, 'holdout', 'failure')?.next).toBe('stuck');
+  });
+
+  // Regression for #448: holdout handler returns 'escalated' in multiple paths
+  // (Type B/C diagnosis, max-fix-cycles exceeded, diagnosis session failure).
+  // Without this transition, advancePhase() returned false and pipeline.ts silently
+  // forced run.phase = 'stuck' with an opaque "No transition for holdout:escalated" error.
+  it('holdout → escalated → stuck (regression #448)', () => {
+    expect(transition(table, 'holdout', 'escalated')?.next).toBe('stuck');
+  });
+
   it('report → failure → stuck', () => {
     expect(transition(table, 'report', 'failure')?.next).toBe('stuck');
   });
