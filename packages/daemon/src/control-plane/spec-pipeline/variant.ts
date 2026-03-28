@@ -36,7 +36,7 @@ export const specDrivenPhases: readonly SpecPhaseDefinition[] = Object.freeze([
   { name: 'l3-compliance',  type: 'session',    sessionType: 'compliance-reviewer',  retryable: true,  maxRetries: 3 },
   { name: 'implement',      type: 'delegated',  sessionType: null,                   retryable: true,  maxRetries: 3 },
   { name: 'review',         type: 'delegated',  sessionType: null,                   retryable: true,  maxRetries: 3 },
-  { name: 'holdout',        type: 'delegated',  sessionType: null,                   retryable: false, maxRetries: 0 },
+  { name: 'holdout',        type: 'delegated',  sessionType: null,                   retryable: false, maxRetries: 0 }, // retryable=false: no phase-level self-loop; fix-cycle retry is via FSM (holdout.failure → implement)
   { name: 'integrate',      type: 'delegated',  sessionType: null,                   retryable: false, maxRetries: 0 },
   { name: 'report',         type: 'session',    sessionType: null,                   retryable: false, maxRetries: 0 },
 ] as const);
@@ -62,7 +62,7 @@ export const specDrivenTransitions: TransitionTable = {
   'l3-compliance': { success: { next: 'implement' }, failure: { next: 'l3-generate' } },
   implement:       { success: { next: 'review' }, failure: { next: 'implement' } },
   review:          { success: { next: 'holdout' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
-  holdout:         { success: { next: 'integrate' }, failure: { next: 'stuck' }, escalated: { next: 'stuck' } },
+  holdout:         { success: { next: 'integrate' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
   integrate:       { success: { next: 'report' }, failure: { next: 'stuck' } },
   report:          { success: { next: 'report' }, failure: { next: 'stuck' } },
 };

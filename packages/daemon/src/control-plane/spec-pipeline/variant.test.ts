@@ -89,8 +89,10 @@ describe('specDrivenTransitions', () => {
     expect(transition(table, 'holdout', 'success')?.next).toBe('integrate');
   });
 
-  it('holdout → failure → stuck', () => {
-    expect(transition(table, 'holdout', 'failure')?.next).toBe('stuck');
+  // Regression for #449: holdout Type A failure (fix cycles remain) must route back to implement,
+  // not stuck. phases.ts:745 returns 'failure' expecting a retry via the implement phase.
+  it('holdout → failure → implement (Type A fix cycle retry, regression #449)', () => {
+    expect(transition(table, 'holdout', 'failure')?.next).toBe('implement');
   });
 
   // Regression for #448: holdout handler returns 'escalated' in multiple paths

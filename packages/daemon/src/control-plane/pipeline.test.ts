@@ -33,7 +33,20 @@ const bugAllSuccess: PhaseHandlerMap = {
   report: async () => 'success' as PhaseEvent,
 };
 
-const makeRun = (variant: 'feature' | 'feature-simple' | 'bug' = 'feature-simple'): RunState => ({
+const specDrivenAllSuccess: PhaseHandlerMap = {
+  detect: async () => 'success' as PhaseEvent,
+  'l2-design': async () => 'success' as PhaseEvent,
+  'l2-gate': async () => 'success' as PhaseEvent,
+  'l3-generate': async () => 'success' as PhaseEvent,
+  'l3-compliance': async () => 'success' as PhaseEvent,
+  implement: async () => 'success' as PhaseEvent,
+  review: async () => 'success' as PhaseEvent,
+  holdout: async () => 'success' as PhaseEvent,
+  integrate: async () => 'success' as PhaseEvent,
+  report: async () => 'success' as PhaseEvent,
+};
+
+const makeRun = (variant: 'feature' | 'feature-simple' | 'bug' | 'spec-driven' = 'feature-simple'): RunState => ({
   id: 'test-run-id',
   issueNumber: 1,
   title: 'Test',
@@ -409,6 +422,34 @@ describe('runPipeline', () => {
     const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
     expect(result.outcome).toBe('stuck');
     expect(attempts).toBe(1); // terminal — no retries
+  });
+
+  // Regression for #449: spec-driven holdout.failure must route to implement (not stuck).
+  // Without the fix, the FSM had no transition for holdout:failure and pipeline.ts would
+  // force run.phase = 'stuck'. This test drives the full path through runPipeline.
+  it('spec-driven: holdout failure routes to implement retry, then completes (regression #449)', async () => {
+    let holdoutCalls = 0;
+    let implementCallsAfterHoldout = 0;
+    let holdoutDone = false;
+    const handlers: PhaseHandlerMap = {
+      ...specDrivenAllSuccess,
+      holdout: async () => {
+        holdoutCalls++;
+        if (holdoutCalls === 1) return 'failure' as PhaseEvent; // Type A: retry via implement
+        return 'success' as PhaseEvent;
+      },
+      implement: async () => {
+        if (holdoutDone) implementCallsAfterHoldout++;
+        else holdoutDone = holdoutCalls > 0; // first holdout failure has fired
+        return 'success' as PhaseEvent;
+      },
+    };
+    const run = makeRun('spec-driven');
+    const table = getPipeline('spec-driven');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('complete');
+    expect(run.phase).not.toBe('stuck');
+    expect(holdoutCalls).toBe(2); // failed once, then passed on retry
   });
 
   it('calls runWriter.upsertRun on phase transitions', async () => {
