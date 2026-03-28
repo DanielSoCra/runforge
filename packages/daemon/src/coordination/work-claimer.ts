@@ -23,6 +23,24 @@ export interface WorkClaimer {
 export function createWorkClaimer(stateDir: string): WorkClaimer {
   const claimsDir = join(stateDir, 'coordination', 'claims');
 
+  /** Promise-based mutex — serializes all read-check-write sequences so
+   *  concurrent async callers (e.g. coordinator tick + legacy daemon poller)
+   *  cannot both read the same empty state and both succeed for the same issue. */
+  let mutex: Promise<void> = Promise.resolve();
+
+  async function withMutex<T>(fn: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const gate = new Promise<void>(r => { release = r; });
+    const prev = mutex;
+    mutex = gate;
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
   async function ensureDir(): Promise<void> {
     await mkdir(claimsDir, { recursive: true });
   }
@@ -56,40 +74,42 @@ export function createWorkClaimer(stateDir: string): WorkClaimer {
   return {
     async claim(issueNumber, agentType, batchItemId?) {
       await ensureDir();
-      const allClaims = await readAllClaims();
+      return withMutex(async () => {
+        const allClaims = await readAllClaims();
 
-      // Check for existing active claim on this issue
-      const activeClaim = allClaims.find(
-        (c) => c.issueNumber === issueNumber && isActiveClaimStatus(c.status),
-      );
-      if (activeClaim) {
-        return err(new Error(`Active claim already exists for issue #${issueNumber}`));
-      }
+        // Check for existing active claim on this issue
+        const activeClaim = allClaims.find(
+          (c) => c.issueNumber === issueNumber && isActiveClaimStatus(c.status),
+        );
+        if (activeClaim) {
+          return err(new Error(`Active claim already exists for issue #${issueNumber}`));
+        }
 
-      // Determine attempt number
-      const issueClaims = allClaims.filter((c) => c.issueNumber === issueNumber);
-      const attempt = issueClaims.length > 0 ? Math.max(...issueClaims.map((c) => c.attempt)) + 1 : 1;
+        // Determine attempt number
+        const issueClaims = allClaims.filter((c) => c.issueNumber === issueNumber);
+        const attempt = issueClaims.length > 0 ? Math.max(...issueClaims.map((c) => c.attempt)) + 1 : 1;
 
-      const now = new Date().toISOString();
-      const claim: WorkerClaim = {
-        id: randomUUID(),
-        issueNumber,
-        attempt,
-        batchItemId: batchItemId ?? null,
-        sessionId: null,
-        worktreePath: null,
-        prNumber: null,
-        agentType,
-        status: 'claimed',
-        failureReason: null,
-        createdAt: now,
-        updatedAt: now,
-      };
+        const now = new Date().toISOString();
+        const claim: WorkerClaim = {
+          id: randomUUID(),
+          issueNumber,
+          attempt,
+          batchItemId: batchItemId ?? null,
+          sessionId: null,
+          worktreePath: null,
+          prNumber: null,
+          agentType,
+          status: 'claimed',
+          failureReason: null,
+          createdAt: now,
+          updatedAt: now,
+        };
 
-      const filePath = join(claimsDir, claimFileName(issueNumber, attempt));
-      await writeJsonSafe(filePath, claim);
+        const filePath = join(claimsDir, claimFileName(issueNumber, attempt));
+        await writeJsonSafe(filePath, claim);
 
-      return ok(claim);
+        return ok(claim);
+      });
     },
 
     async findActiveClaim(issueNumber) {
@@ -98,23 +118,25 @@ export function createWorkClaimer(stateDir: string): WorkClaimer {
     },
 
     async updateStatus(claimId, status, failureReason?) {
-      const allClaims = await readAllClaims();
-      const claim = allClaims.find((c) => c.id === claimId);
-      if (!claim) {
-        return err(new Error(`Claim not found: ${claimId}`));
-      }
+      return withMutex(async () => {
+        const allClaims = await readAllClaims();
+        const claim = allClaims.find((c) => c.id === claimId);
+        if (!claim) {
+          return err(new Error(`Claim not found: ${claimId}`));
+        }
 
-      const updated: WorkerClaim = {
-        ...claim,
-        status,
-        failureReason: failureReason ?? claim.failureReason,
-        updatedAt: new Date().toISOString(),
-      };
+        const updated: WorkerClaim = {
+          ...claim,
+          status,
+          failureReason: failureReason ?? claim.failureReason,
+          updatedAt: new Date().toISOString(),
+        };
 
-      const filePath = join(claimsDir, claimFileName(claim.issueNumber, claim.attempt));
-      await writeJsonSafe(filePath, updated);
+        const filePath = join(claimsDir, claimFileName(claim.issueNumber, claim.attempt));
+        await writeJsonSafe(filePath, updated);
 
-      return ok(undefined);
+        return ok(undefined);
+      });
     },
 
     async listActive() {
