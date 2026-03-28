@@ -1,5 +1,5 @@
 // src/coordination/protocol-orchestrator.test.ts
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   createProtocolOrchestrator,
   type ProtocolOrchestrator,
@@ -37,6 +37,30 @@ function makeDeps(overrides: Partial<ProtocolOrchestratorDeps> = {}): ProtocolOr
     ...overrides,
   };
 }
+
+describe('withTimeout — timer leak regression (#453)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('does not leave a pending timer after the wrapped promise settles', async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps({
+      poBatchPlanning: vi.fn().mockResolvedValue({ prioritizedItems: [] }),
+      tlBatchPlanning: vi.fn().mockResolvedValue({ plan: 'ok' }),
+    });
+    // Long timeout so it won't fire on its own during normal resolution
+    const orchestrator = createProtocolOrchestrator(deps, makeConfig({ protocolTimeoutMs: 60_000 }));
+
+    // Let the promises resolve via microtasks only — do not advance timers yet
+    const resultPromise = orchestrator.batchPlanning();
+    await resultPromise;
+
+    // After the wrapped promise settled, all timer handles must be cleared.
+    // A non-zero count here means withTimeout leaked a setTimeout handle.
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
 
 describe('ProtocolOrchestrator', () => {
   describe('batchPlanning()', () => {
