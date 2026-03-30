@@ -36,4 +36,8 @@ COPY --from=builder /app/packages/dashboard/.next/standalone ./
 COPY --from=builder /app/packages/dashboard/.next/static ./packages/dashboard/.next/static
 COPY --from=builder /app/packages/dashboard/public ./packages/dashboard/public
 EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s \
+  CMD wget -q --spider http://localhost:3000/ || exit 1
+
 CMD ["node", "packages/dashboard/server.js"]

@@ -429,6 +429,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/lib/daemon-fetch.test.ts
     - packages/dashboard/app/(dashboard)/runs/[id]/page.test.tsx
     - packages/dashboard/lib/supabase/env.test.ts
+    - packages/dashboard/dockerfile.test.ts
   status: draft
 
 STACK-AC-HANDOFF-RUNTIME:
