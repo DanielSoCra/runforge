@@ -148,6 +148,61 @@ describe('POAgent', () => {
     expect(deps.spawnPOSession).not.toHaveBeenCalled();
   });
 
+  it('skips concurrent runCycle when one is already in progress', async () => {
+    let resolveSession!: () => void;
+    const sessionPromise = new Promise<void>((resolve) => {
+      resolveSession = resolve;
+    });
+    const deps = makeDeps({
+      spawnPOSession: vi.fn().mockReturnValue(sessionPromise),
+    });
+    const config = makeConfig({ intervalMs: 100, debounceMs: 50 });
+    const agent = createPOAgent(deps, config);
+    const stop = agent.start();
+
+    // First interval fires — starts runCycle (blocks on spawnPOSession)
+    await vi.advanceTimersByTimeAsync(110);
+    expect(deps.spawnPOSession).toHaveBeenCalledTimes(1);
+
+    // Second interval fires while first is still running
+    await vi.advanceTimersByTimeAsync(110);
+    // Still only one call — second was skipped
+    expect(deps.spawnPOSession).toHaveBeenCalledTimes(1);
+
+    // Let first cycle complete
+    resolveSession();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Third interval fires — now it can run again
+    await vi.advanceTimersByTimeAsync(110);
+    expect(deps.spawnPOSession).toHaveBeenCalledTimes(2);
+
+    stop();
+  });
+
+  it('resets running flag when runCycle throws', async () => {
+    let callCount = 0;
+    const deps = makeDeps({
+      spawnPOSession: vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) throw new Error('boom');
+      }),
+    });
+    const config = makeConfig({ intervalMs: 100 });
+    const agent = createPOAgent(deps, config);
+    const stop = agent.start();
+
+    // First cycle throws
+    await vi.advanceTimersByTimeAsync(110);
+    expect(deps.spawnPOSession).toHaveBeenCalledTimes(1);
+
+    // Second cycle should still run (running flag was reset via finally)
+    await vi.advanceTimersByTimeAsync(110);
+    expect(deps.spawnPOSession).toHaveBeenCalledTimes(2);
+
+    stop();
+  });
+
   it('does not sweep already-decided proposals', async () => {
     const approved = makeProposal({
       status: 'approved',
