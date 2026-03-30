@@ -329,6 +329,62 @@ describe('ImplementationCoordinator', () => {
     expect(workerCall[1].variables.pitfalls).toContain('V2 record: use parameterized queries');
   });
 
+  it('continues without knowledge injection when KnowledgeStore.matchRecords rejects (#454)', async () => {
+    const unitWithArtifacts = {
+      id: 'unit-ks-fail', title: 'Unit with artifacts', specIds: [], specContent: '',
+      expectedArtifacts: ['src/models/*.ts'], dependencies: [], batchNumber: 0,
+      verificationCommand: '', context: 'implement model',
+    };
+
+    const mockKnowledgeStore = {
+      matchRecords: vi.fn().mockRejectedValue(new Error('FS read error: ENOENT')),
+    } as any;
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const runtime = {
+      spawnSession: vi.fn()
+        .mockResolvedValueOnce(ok({
+          output: 'decomposed',
+          structuredData: { units: [unitWithArtifacts] },
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        } as SessionResult))
+        .mockResolvedValueOnce(ok(successResult)),
+      getCostTracker: vi.fn(),
+    } as any;
+
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0, undefined, mockKnowledgeStore);
+    const result = await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'standard',
+      specContent: 'spec',
+    });
+
+    // matchRecords was called and rejected
+    expect(mockKnowledgeStore.matchRecords).toHaveBeenCalledWith(['src/models/*.ts'], 'implementation');
+
+    // Coordinator logged the failure
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[coordinator] Failed to match knowledge records for unit-ks-fail'),
+      expect.any(Error),
+    );
+
+    // Worker still ran and succeeded despite knowledge store failure
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(2); // decompose + worker
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.success).toBe(true);
+      expect(result.value.unitResults).toHaveLength(1);
+    }
+
+    // Worker should have empty pitfalls (no knowledge injected)
+    const workerCall = runtime.spawnSession.mock.calls[1];
+    expect(workerCall[1].variables.pitfalls).toBe('');
+
+    warnSpy.mockRestore();
+  });
+
   it('does not include pitfalls variable when no gotchas match (#45)', async () => {
     const unitWithArtifacts = {
       id: 'unit-no-match', title: 'Unit', specIds: [], specContent: '',
