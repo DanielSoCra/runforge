@@ -117,7 +117,18 @@ export function createCoordinator(deps: CoordinatorDeps, config: CoordinatorConf
 
           if (!claimResult.ok) continue; // Already claimed or error — skip
 
-          await deps.spawnWorker(claimResult.value, decision);
+          try {
+            await deps.spawnWorker(claimResult.value, decision);
+          } catch (spawnErr) {
+            console.error(`[coordinator] spawnWorker failed for issue #${decision.issueNumber}, releasing claim ${claimResult.value.id}:`, spawnErr);
+            await deps.workClaimer.updateStatus(
+              claimResult.value.id,
+              'failed',
+              spawnErr instanceof Error ? spawnErr.message : String(spawnErr),
+            ).catch((updateErr) => {
+              console.error(`[coordinator] failed to release orphaned claim ${claimResult.value.id}:`, updateErr);
+            });
+          }
         }
         consecutiveTickErrors = 0;
       } finally {

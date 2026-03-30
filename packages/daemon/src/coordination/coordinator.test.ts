@@ -558,6 +558,69 @@ describe('Coordinator', () => {
     stop();
   });
 
+  it('transitions claim to failed when spawnWorker throws after successful claim (#461)', async () => {
+    const poClaim = makeClaim({ agentType: 'po', issueNumber: 0 });
+    const reviewerClaim = makeClaim({ agentType: 'reviewer', issueNumber: 0 });
+    const claim = makeClaim({ agentType: 'worker', issueNumber: 42, status: 'claimed' as ClaimStatus });
+    const updateStatus = vi.fn().mockResolvedValue({ ok: true, value: undefined });
+    const spawnWorker = vi.fn().mockImplementation((_claim: WorkerClaim, decision: SpawnDecision) => {
+      if (decision.issueNumber === 42) return Promise.reject(new Error('CLI not found'));
+      return Promise.resolve(undefined);
+    });
+    const deps = makeDeps({
+      getDispatchQueue: vi.fn().mockResolvedValue([{ issueNumber: 42 }]),
+      workClaimer: {
+        claim: vi.fn().mockResolvedValue({ ok: true, value: claim }),
+        findActiveClaim: vi.fn().mockResolvedValue(null),
+        updateStatus,
+        listActive: vi.fn().mockResolvedValue([poClaim, reviewerClaim]),
+        listAll: vi.fn().mockResolvedValue([poClaim, reviewerClaim]),
+      },
+      spawnWorker,
+    });
+    const config = makeConfig({ tickIntervalMs: 100 });
+    const coordinator = createCoordinator(deps, config);
+    const stop = coordinator.start();
+
+    await vi.advanceTimersByTimeAsync(150);
+
+    expect(updateStatus).toHaveBeenCalledWith(claim.id, 'failed', 'CLI not found');
+    stop();
+  });
+
+  it('handles updateStatus failure gracefully when releasing orphaned claim (#461)', async () => {
+    const poClaim = makeClaim({ agentType: 'po', issueNumber: 0 });
+    const reviewerClaim = makeClaim({ agentType: 'reviewer', issueNumber: 0 });
+    const claim = makeClaim({ agentType: 'worker', issueNumber: 42, status: 'claimed' as ClaimStatus });
+    const updateStatus = vi.fn().mockRejectedValue(new Error('disk full'));
+    const spawnWorker = vi.fn().mockImplementation((_claim: WorkerClaim, decision: SpawnDecision) => {
+      if (decision.issueNumber === 42) return Promise.reject(new Error('CLI not found'));
+      return Promise.resolve(undefined);
+    });
+    const deps = makeDeps({
+      getDispatchQueue: vi.fn().mockResolvedValue([{ issueNumber: 42 }]),
+      workClaimer: {
+        claim: vi.fn().mockResolvedValue({ ok: true, value: claim }),
+        findActiveClaim: vi.fn().mockResolvedValue(null),
+        updateStatus,
+        listActive: vi.fn().mockResolvedValue([poClaim, reviewerClaim]),
+        listAll: vi.fn().mockResolvedValue([poClaim, reviewerClaim]),
+      },
+      spawnWorker,
+    });
+    const config = makeConfig({ tickIntervalMs: 100 });
+    const coordinator = createCoordinator(deps, config);
+    const stop = coordinator.start();
+
+    // Should not throw or trigger error threshold — the catch swallows the updateStatus error
+    await vi.advanceTimersByTimeAsync(150);
+
+    expect(updateStatus).toHaveBeenCalledWith(claim.id, 'failed', 'CLI not found');
+    // Tick completed successfully (spawnWorker error was caught), so no consecutive error count
+    expect(deps.onTickErrorThresholdReached).not.toHaveBeenCalled();
+    stop();
+  });
+
   it('skips inference processing when no engine provided', async () => {
     const deps = makeDeps(); // no inferenceEngine
     const config = makeConfig({ tickIntervalMs: 100 });
