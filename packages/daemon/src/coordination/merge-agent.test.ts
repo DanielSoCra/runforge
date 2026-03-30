@@ -614,6 +614,63 @@ describe('merge-agent', () => {
     });
   });
 
+  describe('recoverStuckEntries phase cleanup on validation failure (#464)', () => {
+    it('validating phase + validation failure → updates mergePhase to reverted before marking failed', async () => {
+      const entry = makeEntry({ mergePhase: 'validating', mergeCommit: 'abc123' });
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.list.mockResolvedValue([entry]);
+
+      (deps.validate as ReturnType<typeof vi.fn>).mockResolvedValue(err(new Error('tests failed')));
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      await agent.recoverStuckEntries();
+
+      // Must update phase to 'reverted' BEFORE status to 'failed'
+      expect(queue.updatePhase).toHaveBeenCalledWith('entry-1', 'reverted');
+      expect(queue.updateStatus).toHaveBeenCalledWith('entry-1', 'failed', 'tests failed');
+
+      // Phase update must come before status update
+      const phaseCallOrder = queue.updatePhase.mock.invocationCallOrder[0];
+      const statusCallOrder = queue.updateStatus.mock.invocationCallOrder[0];
+      expect(phaseCallOrder).toBeLessThan(statusCallOrder);
+    });
+
+    it('merging phase with commit + validation failure → updates mergePhase to reverted (#464)', async () => {
+      const entry = makeEntry({ mergePhase: 'merging', mergeCommit: 'abc123' });
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.list.mockResolvedValue([entry]);
+
+      (deps.validate as ReturnType<typeof vi.fn>).mockResolvedValue(err(new Error('tests failed')));
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      await agent.recoverStuckEntries();
+
+      // Should advance to validating, then revert on failure
+      expect(queue.updatePhase).toHaveBeenCalledWith('entry-1', 'validating');
+      expect(queue.updatePhase).toHaveBeenCalledWith('entry-1', 'reverted');
+      expect(queue.updateStatus).toHaveBeenCalledWith('entry-1', 'failed', 'tests failed');
+    });
+
+    it('validating phase + validation failure does not block queue selection (#464)', async () => {
+      const failedEntry = makeEntry({ id: 'entry-1', mergePhase: 'validating', mergeCommit: 'abc123' });
+      const queuedEntry = makeEntry({ id: 'entry-2', mergePhase: 'queued', status: 'queued' });
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.list.mockResolvedValue([failedEntry, queuedEntry]);
+
+      (deps.validate as ReturnType<typeof vi.fn>).mockResolvedValue(err(new Error('tests failed')));
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      await agent.recoverStuckEntries();
+
+      // After recovery, entry-1 should have mergePhase 'reverted', not 'validating'
+      // This ensures selectNext() won't be blocked by the failed entry
+      expect(queue.updatePhase).toHaveBeenCalledWith('entry-1', 'reverted');
+    });
+  });
+
   describe('recoverStuckEntries Result checking', () => {
     it('updateStatus failure during validating recovery → skips entry', async () => {
       const entry1 = makeEntry({ id: 'entry-1', mergePhase: 'validating' });

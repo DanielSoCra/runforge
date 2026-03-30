@@ -172,6 +172,8 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
             if (!phaseResult.ok) continue;
             const validationResult = await runValidation(entry.issueNumber, config.validationTimeoutMs);
             if (!validationResult.ok) {
+              const revertedPhaseResult = await queue.updatePhase(entry.id, 'reverted');
+              if (!revertedPhaseResult.ok) continue;
               const statusResult = await queue.updateStatus(entry.id, 'failed', validationResult.error.message);
               if (!statusResult.ok) continue;
             } else {
@@ -192,6 +194,8 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
           // Re-run validation
           const validationResult = await runValidation(entry.issueNumber, config.validationTimeoutMs);
           if (!validationResult.ok) {
+            const phaseResult = await queue.updatePhase(entry.id, 'reverted');
+            if (!phaseResult.ok) continue;
             const statusResult = await queue.updateStatus(entry.id, 'failed', validationResult.error.message);
             if (!statusResult.ok) continue;
           } else {
