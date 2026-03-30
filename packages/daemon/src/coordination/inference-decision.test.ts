@@ -88,6 +88,19 @@ describe('InferenceEngine', () => {
       expect(result.degraded).toBe(true);
     });
 
+    it('clears timeout handle on successful inference to prevent timer leak', async () => {
+      // Regression test for BUG-38 (#456): setTimeout handle leaked on every
+      // successful inference call because clearTimeout was never called.
+      const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+      const deps = makeDeps();
+      const engine = createInferenceEngine(deps, makeConfig());
+
+      await engine.decide(makeContext());
+
+      expect(clearTimeoutSpy).toHaveBeenCalled();
+      clearTimeoutSpy.mockRestore();
+    });
+
     it('falls back to deterministic rule on inference timeout', async () => {
       const deps = makeDeps({
         infer: vi.fn().mockImplementation(

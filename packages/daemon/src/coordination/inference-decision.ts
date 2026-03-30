@@ -79,11 +79,12 @@ export function createInferenceEngine(
       };
     } else {
       try {
+        let handle: ReturnType<typeof setTimeout> | undefined;
         const raw = await Promise.race([
-          deps.infer(context),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('inference timeout')), config.inferenceTimeoutMs),
-          ),
+          deps.infer(context).finally(() => clearTimeout(handle)),
+          new Promise<never>((_, reject) => {
+            handle = setTimeout(() => reject(new Error('inference timeout')), config.inferenceTimeoutMs);
+          }),
         ]);
 
         tickBudgetRemaining -= config.estimateCostPerCall;
