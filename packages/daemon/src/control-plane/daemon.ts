@@ -116,11 +116,16 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           console.error('[review-scheduler] session failed:', result.error.message);
           return { findingsCount: 0, issuesCreated: 0 };
         }
-        // Parse structured data from session output if available
-        const data = result.value.structuredData as { findingsCount?: number; issuesCreated?: number } | null;
+        // Parse structured data from session output — codebase-reviewer.md outputs
+        // { findings: [...], candidatesFound, candidatesDropped, ... }
+        const data = result.value.structuredData as {
+          findings?: unknown[];
+          candidatesFound?: number;
+        } | null;
         return {
-          findingsCount: data?.findingsCount ?? 0,
-          issuesCreated: data?.issuesCreated ?? 0,
+          findingsCount: data?.findings?.length ?? 0,
+          // The reviewer is read-only; issue creation happens downstream
+          issuesCreated: 0,
         };
       },
       getSignalRatio: () => {

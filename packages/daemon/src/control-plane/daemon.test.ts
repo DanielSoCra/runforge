@@ -1613,6 +1613,58 @@ describe('daemon', () => {
     });
   });
 
+  describe('review scheduler structuredData mapping (#462)', () => {
+    it('maps codebase-reviewer findings[] to findingsCount (not findingsCount field)', async () => {
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      // Capture the deps passed to createReviewScheduler
+      const [deps] = mockCreateReviewScheduler.mock.calls[0]!;
+
+      // Mock spawnSession to return codebase-reviewer output format
+      mockSpawnSession.mockResolvedValueOnce(ok({
+        output: 'review output',
+        structuredData: {
+          category: 'correctness',
+          findings: [
+            { title: 'Bug A', severity: 'important', location: 'foo.ts:1', description: 'd', evidence: 'e' },
+            { title: 'Bug B', severity: 'critical', location: 'bar.ts:2', description: 'd', evidence: 'e' },
+          ],
+          scannedFiles: 15,
+          candidatesFound: 8,
+          candidatesDropped: 6,
+          summary: 'Found 2 verified issues',
+        },
+        cost: 0.05,
+        pitfallMarkers: [],
+        exitStatus: 'success',
+      }));
+
+      const result = await deps.spawnReviewSession('correctness', 5);
+      expect(result.findingsCount).toBe(2);
+      expect(result.issuesCreated).toBe(0);
+    });
+
+    it('returns findingsCount 0 when structuredData has no findings array', async () => {
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      const [deps] = mockCreateReviewScheduler.mock.calls[0]!;
+
+      mockSpawnSession.mockResolvedValueOnce(ok({
+        output: 'review output',
+        structuredData: null,
+        cost: 0.01,
+        pitfallMarkers: [],
+        exitStatus: 'success',
+      }));
+
+      const result = await deps.spawnReviewSession('security', 5);
+      expect(result.findingsCount).toBe(0);
+      expect(result.issuesCreated).toBe(0);
+    });
+  });
+
   describe('coordinator wiring (#345)', () => {
     it('does not instantiate coordinator when useCoordinator is false (default)', async () => {
       const { startDaemon } = await loadDaemon();
