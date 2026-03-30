@@ -147,6 +147,39 @@ describe('Coordinator', () => {
     stop();
   });
 
+  it('stop() calls the restarted merge agent stop handle after crash recovery (#457)', async () => {
+    let crashCallback: (() => void) | undefined;
+    const originalStop = vi.fn();
+    const restartedStop = vi.fn();
+    const deps = makeDeps({
+      mergeAgent: {
+        processEntry: vi.fn(),
+        recoverStuckEntries: vi.fn(),
+        start: vi.fn()
+          .mockReturnValueOnce(originalStop)
+          .mockReturnValueOnce(restartedStop),
+      },
+      onMergeAgentCrash: vi.fn().mockImplementation((cb) => {
+        crashCallback = cb;
+      }),
+    });
+    const config = makeConfig({ tickIntervalMs: 100 });
+    const coordinator = createCoordinator(deps, config);
+    const stop = coordinator.start();
+
+    // Simulate crash — triggers restart
+    crashCallback!();
+    expect(deps.mergeAgent.start).toHaveBeenCalledTimes(2);
+
+    // Crash handler should have stopped the old instance before restarting
+    expect(originalStop).toHaveBeenCalledTimes(1);
+
+    // Shutdown — should call the restarted stop handle, not the original again
+    stop();
+    expect(restartedStop).toHaveBeenCalledTimes(1);
+    expect(originalStop).toHaveBeenCalledTimes(1); // not called again on shutdown
+  });
+
   it('does not restart merge agent when shutting down', async () => {
     let crashCallback: (() => void) | undefined;
     const deps = makeDeps({

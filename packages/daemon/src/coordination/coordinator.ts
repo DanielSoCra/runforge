@@ -49,12 +49,13 @@ export function createCoordinator(deps: CoordinatorDeps, config: CoordinatorConf
     let consecutiveTickErrors = 0;
 
     // Start Merge Agent
-    const stopMergeAgent = deps.mergeAgent.start();
+    let stopMergeAgent = deps.mergeAgent.start();
 
     // Register crash handler — restart Merge Agent unless paused/shutting down
     deps.onMergeAgentCrash(() => {
       if (deps.isPaused() || deps.isShuttingDown()) return;
-      deps.mergeAgent.start();
+      stopMergeAgent(); // clean up crashed instance's timer chain
+      stopMergeAgent = deps.mergeAgent.start();
     });
 
     async function tick(): Promise<void> {
