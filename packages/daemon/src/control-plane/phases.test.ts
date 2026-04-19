@@ -1251,7 +1251,7 @@ describe('createPhaseHandlers', () => {
         mockRouteDiagnosis.mockReturnValue({ route: 'bug-pipeline', diagnosis: {} as any });
         const { handlers } = createHandlers({ validation: { ...makeConfig().validation, holdoutCommand: 'run-holdout' } });
         await handlers.holdout!(makeRun());
-        const bugReport = mockDiagnose.mock.calls[0][2] as string;
+        const bugReport = mockDiagnose.mock.calls[0]![2] as string;
         expect(bugReport).toContain('scen-A');
         expect(bugReport).toContain('scen-B');
       });

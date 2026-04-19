@@ -15,7 +15,7 @@ describe('pnpm version consistency', () => {
     expect(pinnedVersion).toBeTruthy();
 
     // CI workflow should NOT specify an explicit version (relies on packageManager field)
-    const ciWorkflow = readFile('.github/workflows/auto-claude.yml');
+    const ciWorkflow = readFile('.github/workflows/ci.yml');
     expect(ciWorkflow).not.toMatch(/version:\s*latest/);
 
     // If CI specifies a version, it must match
