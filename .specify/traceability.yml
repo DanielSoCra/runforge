@@ -534,6 +534,7 @@ STACK-AC-DASHBOARD-BRIEFING:
     - packages/briefing-summarizer/src/cycle-runner.ts
     - supabase/migrations/009_briefing.sql
     - supabase/migrations/011_add_failed_run_outcome.sql
+    - supabase/migrations/012_runs_updated_at.sql
   test_paths:
     - packages/dashboard/components/briefing/**/*.test.tsx
     - packages/dashboard/actions/briefing.test.ts
@@ -634,9 +635,11 @@ STACK-AC-COORDINATION-DAEMON-WIRING:
   children: []
   code_paths:
     - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/control-plane/po-snapshot.ts
     - packages/daemon/src/coordination/coordinator.ts
   test_paths:
     - packages/daemon/src/control-plane/daemon.test.ts
+    - packages/daemon/src/control-plane/daemon-po-wiring.test.ts
     - packages/daemon/src/coordination/coordinator.test.ts
   status: draft
 

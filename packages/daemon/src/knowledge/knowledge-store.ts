@@ -157,6 +157,7 @@ export class KnowledgeStore {
     expectedCurrentStatus?: KnowledgeRecord['lifecycleStatus'],
   ): Promise<void> {
     return this.withMutex(async () => {
+      await this.migrateIfNeeded();
       const all = await this.loadAllInternal();
       const record = all.find(r => r.id === id);
       if (record) {

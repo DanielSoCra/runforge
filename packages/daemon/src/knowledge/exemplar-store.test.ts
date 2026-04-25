@@ -140,4 +140,32 @@ describe('ExemplarStore', () => {
       expect(result!.commitSha).toBe('abc');
     });
   });
+
+  describe('concurrency', () => {
+    it('serializes concurrent store() calls (no lost writes) (#297)', async () => {
+      // Fire 20 concurrent stores with distinct deliverableType keys.
+      // Without a mutex, the read-modify-write cycle in store() races and
+      // some writes get clobbered when promises resolve out of order.
+      const writes = Array.from({ length: 20 }, (_, i) =>
+        store.store({
+          deliverableType: `type-${i}`,
+          branch: `feat/${i}`,
+          commitSha: `sha-${i}`,
+          filePaths: [`src/f${i}.ts`],
+          qualityScore: 8,
+          createdAt: new Date().toISOString(),
+        }),
+      );
+      const results = await Promise.all(writes);
+      expect(results.every((r) => r === true)).toBe(true);
+
+      const all = await store.list();
+      expect(Object.keys(all)).toHaveLength(20);
+      for (let i = 0; i < 20; i++) {
+        const exemplar = all[`type-${i}`];
+        expect(exemplar).toBeDefined();
+        expect(exemplar!.commitSha).toBe(`sha-${i}`);
+      }
+    });
+  });
 });

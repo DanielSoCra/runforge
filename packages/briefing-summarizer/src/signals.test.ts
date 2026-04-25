@@ -61,6 +61,25 @@ describe('collectSignals', () => {
     expect(result.gaps).toHaveLength(0);
   });
 
+  it('queries runs by updated_at so changed in-progress runs are included (#398)', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ state: 'running' }),
+    }) as unknown as typeof fetch;
+
+    const gte = vi.fn(() => Promise.resolve({ data: [], error: null }));
+    const select = vi.fn(() => ({ gte }));
+    const from = vi.fn(() => ({ select }));
+    const supabase = { from } as unknown as Parameters<typeof collectSignals>[0];
+    const since = '2026-03-22T00:00:00Z';
+
+    await collectSignals(supabase, 'http://localhost:3847', since);
+
+    expect(from).toHaveBeenCalledWith('runs');
+    expect(select).toHaveBeenCalledWith('*');
+    expect(gte).toHaveBeenCalledWith('updated_at', since);
+  });
+
   it('handles runs query failure with gap note', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
