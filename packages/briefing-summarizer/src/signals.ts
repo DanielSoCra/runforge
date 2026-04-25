@@ -92,7 +92,7 @@ async function collectRuns(
   const { data, error } = await supabase
     .from('runs')
     .select('*')
-    .gte('started_at', since);
+    .gte('updated_at', since);
 
   if (error) throw new Error(`Supabase runs query failed: ${error.message}`);
   return (data ?? []) as Record<string, unknown>[];

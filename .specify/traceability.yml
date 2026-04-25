@@ -70,7 +70,7 @@ FUNC-AC-QUALITY:
   status: draft
 
 FUNC-AC-SAFETY:
-  children: [ARCH-AC-SESSION-RUNTIME, ARCH-AC-OPERATIONAL-SAFETY]
+  children: [ARCH-AC-SESSION-RUNTIME, ARCH-AC-OPERATIONAL-SAFETY, ARCH-AC-CONTAINMENT]
   status: draft
 
 FUNC-AC-BUG-TRIAGE:
@@ -156,6 +156,10 @@ ARCH-AC-SESSION-RUNTIME:
 ARCH-AC-OPERATIONAL-SAFETY:
   parent: FUNC-AC-SAFETY
   children: [STACK-AC-OPERATIONAL-SAFETY]
+  status: draft
+
+ARCH-AC-CONTAINMENT:
+  parent: FUNC-AC-SAFETY
   status: draft
 
 ARCH-AC-DIAGNOSIS:
@@ -530,6 +534,7 @@ STACK-AC-DASHBOARD-BRIEFING:
     - packages/briefing-summarizer/src/cycle-runner.ts
     - supabase/migrations/009_briefing.sql
     - supabase/migrations/011_add_failed_run_outcome.sql
+    - supabase/migrations/012_runs_updated_at.sql
   test_paths:
     - packages/dashboard/components/briefing/**/*.test.tsx
     - packages/dashboard/actions/briefing.test.ts
@@ -630,9 +635,11 @@ STACK-AC-COORDINATION-DAEMON-WIRING:
   children: []
   code_paths:
     - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/control-plane/po-snapshot.ts
     - packages/daemon/src/coordination/coordinator.ts
   test_paths:
     - packages/daemon/src/control-plane/daemon.test.ts
+    - packages/daemon/src/control-plane/daemon-po-wiring.test.ts
     - packages/daemon/src/coordination/coordinator.test.ts
   status: draft
 

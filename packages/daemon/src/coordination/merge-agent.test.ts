@@ -376,6 +376,67 @@ describe('merge-agent', () => {
       );
     });
 
+    it('revert failure → calls merge --abort and rebase --abort before parking for human (#451)', async () => {
+      const entry = makeEntry();
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.getEntry.mockResolvedValue(entry);
+
+      const gitMock = deps.git as ReturnType<typeof vi.fn>;
+      gitMock
+        .mockResolvedValueOnce(ok('')) // checkout
+        .mockResolvedValueOnce(ok('')) // rebase
+        .mockResolvedValueOnce(ok('')) // checkout integration
+        .mockResolvedValueOnce(ok('')) // merge --no-ff
+        .mockResolvedValueOnce(ok('abc123')) // rev-parse HEAD
+        .mockResolvedValueOnce(err(new Error('revert failed: conflict'))) // revert fails
+        .mockResolvedValueOnce(ok('')) // merge --abort cleanup
+        .mockResolvedValueOnce(ok('')); // rebase --abort cleanup
+
+      (deps.validate as ReturnType<typeof vi.fn>).mockResolvedValue(
+        err(new Error('tests failed')),
+      );
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      const result = await agent.processEntry('entry-1');
+
+      expect(result.ok).toBe(false);
+
+      // Both abort calls must happen on the merge worktree
+      expect(gitMock).toHaveBeenCalledWith(['merge', '--abort'], '/tmp/merge-worktree');
+      expect(gitMock).toHaveBeenCalledWith(['rebase', '--abort'], '/tmp/merge-worktree');
+
+      // Find the order of git calls vs the needs_human status update.
+      // Aborts must precede the updateStatus('needs_human', ...) call.
+      const gitCallOrders = gitMock.mock.invocationCallOrder;
+      const gitCallArgs = gitMock.mock.calls;
+      const mergeAbortIdx = gitCallArgs.findIndex(
+        (call) => Array.isArray(call[0]) && call[0][0] === 'merge' && call[0][1] === '--abort',
+      );
+      const rebaseAbortIdx = gitCallArgs.findIndex(
+        (call) => Array.isArray(call[0]) && call[0][0] === 'rebase' && call[0][1] === '--abort',
+      );
+      expect(mergeAbortIdx).toBeGreaterThanOrEqual(0);
+      expect(rebaseAbortIdx).toBeGreaterThanOrEqual(0);
+
+      const needsHumanCall = (queue.updateStatus.mock.calls as any[]).findIndex(
+        (call) => call[0] === 'entry-1' && call[1] === 'needs_human',
+      );
+      expect(needsHumanCall).toBeGreaterThanOrEqual(0);
+      const needsHumanOrder = queue.updateStatus.mock.invocationCallOrder[needsHumanCall];
+
+      expect(gitCallOrders[mergeAbortIdx]).toBeLessThan(needsHumanOrder);
+      expect(gitCallOrders[rebaseAbortIdx]).toBeLessThan(needsHumanOrder);
+
+      // Final entry state assertions
+      expect(queue.updatePhase).toHaveBeenCalledWith('entry-1', 'reverted');
+      expect(queue.updateStatus).toHaveBeenCalledWith(
+        'entry-1',
+        'needs_human',
+        'validation failed and revert failed: revert failed: conflict',
+      );
+    });
+
     it('updateStatus("merged") failure on success path → returns err (#258)', async () => {
       const entry = makeEntry();
       const deps = makeDeps();

@@ -602,6 +602,39 @@ describe('KnowledgeStore', () => {
       expect(records).toHaveLength(1);
       expect(records[0]!.recordType).toBe('technical_pitfall');
     });
+
+    it('migrates v1 gotchas.jsonl when transitionStatus is the first method called (#324)', async () => {
+      const gotchaPath = join(dir, 'gotchas.jsonl');
+      const v1Entry = {
+        id: 'old-1',
+        artifactPatterns: ['src/**/*.ts'],
+        description: 'V1 gotcha',
+        sourceIssue: 10,
+        confidence: 1,
+        createdAt: '2026-01-01T00:00:00Z',
+        hitCount: 3,
+        promoted: false,
+        archived: false,
+        originType: 'autonomous',
+        priorityTier: 'normal',
+      };
+      await writeFile(gotchaPath, JSON.stringify(v1Entry) + '\n');
+
+      const migratingStore = new KnowledgeStore(storePath, DEFAULT_POLICIES, gotchaPath);
+
+      // Call transitionStatus FIRST — before storeRecord/matchRecords/loadAll.
+      // The v1 record's id should be visible to transitionStatus, which means
+      // migration must run before loadAllInternal does its read.
+      await migratingStore.transitionStatus('old-1', 'archived');
+
+      // After migration + transition, the record should exist and be archived.
+      const records = await migratingStore.loadAll();
+      expect(records).toHaveLength(1);
+      expect(records[0]!.id).toBe('old-1');
+      expect(records[0]!.recordType).toBe('technical_pitfall');
+      expect(records[0]!.lifecycleStatus).toBe('archived');
+      expect(records[0]!.sourceId).toBe('issue-10');
+    });
   });
 
   describe('compact', () => {

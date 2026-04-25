@@ -42,6 +42,7 @@ import { isTerminalStatus } from '../coordination/tech-lead/proposal-lifecycle.j
 import { readJsonSafe, writeJsonSafe } from '../lib/json-store.js';
 import { mkdir } from 'fs/promises';
 import type { Proposal, IdeaSubmission } from '../coordination/types.js';
+import { buildProductOwnerSessionVariables, PRODUCT_OWNER_SNAPSHOT_CONFIG } from './po-snapshot.js';
 
 let dailyRunCount = 0;
 let dailyRunCountResetDate = new Date().toISOString().split('T')[0];
@@ -147,25 +148,51 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   await mkdir(poStateDir, { recursive: true });
   const proposalsPath = join(poStateDir, 'proposals.json');
   const ideasPath = join(poStateDir, 'ideas.json');
+  const poSnapshotGithub = config.repo
+    ? {
+      owner: config.repo.owner,
+      repo: config.repo.name,
+      issues: new Octokit({ auth: process.env.GITHUB_TOKEN }).issues,
+    }
+    : undefined;
+  const poSnapshotConfig = {
+    ...PRODUCT_OWNER_SNAPSHOT_CONFIG,
+    maxFindingsEntries: config.coordination.poFindingDailyCap,
+  };
+  const loadPOProposals = async () => {
+    const result = await readJsonSafe<Proposal[]>(proposalsPath);
+    return result.ok ? result.value : [];
+  };
+  const savePOProposals = async (proposals: Proposal[]) => {
+    await writeJsonSafe(proposalsPath, proposals);
+  };
+  const loadPOIdeas = async () => {
+    const result = await readJsonSafe<IdeaSubmission[]>(ideasPath);
+    return result.ok ? result.value : [];
+  };
+  const savePOIdeas = async (ideas: IdeaSubmission[]) => {
+    await writeJsonSafe(ideasPath, ideas);
+  };
 
   const poAgent = createPOAgent(
     {
-      loadProposals: async () => {
-        const result = await readJsonSafe<Proposal[]>(proposalsPath);
-        return result.ok ? result.value : [];
-      },
-      saveProposals: async (proposals) => {
-        await writeJsonSafe(proposalsPath, proposals);
-      },
-      loadIdeas: async () => {
-        const result = await readJsonSafe<IdeaSubmission[]>(ideasPath);
-        return result.ok ? result.value : [];
-      },
-      saveIdeas: async (ideas) => {
-        await writeJsonSafe(ideasPath, ideas);
-      },
+      loadProposals: loadPOProposals,
+      saveProposals: savePOProposals,
+      loadIdeas: loadPOIdeas,
+      saveIdeas: savePOIdeas,
       spawnPOSession: async () => {
-        const result = await runtime.spawnSession('product-owner', { variables: {} }, 0);
+        const variables = await buildProductOwnerSessionVariables({
+          repoRoot,
+          stateDir,
+          loadProposals: loadPOProposals,
+          loadIdeas: loadPOIdeas,
+          github: poSnapshotGithub,
+        }, poSnapshotConfig);
+        const result = await runtime.spawnSession(
+          'product-owner',
+          { variables },
+          0,
+        );
         if (!result.ok) {
           console.error('[po-agent] session failed:', result.error.message);
         }
