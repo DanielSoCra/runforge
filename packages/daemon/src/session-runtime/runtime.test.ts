@@ -538,3 +538,71 @@ describe('SessionRuntime prompt assembly with templates', () => {
     expect(result.prompt).toContain('do something');
   });
 });
+
+describe('post-session output audit (advisory) — #489', () => {
+  it('does NOT terminate the session when output prose mentions blocked command names', async () => {
+    // Reproduces the failure mode that stuck #480: model output legitimately
+    // discusses git/bash/python3 in prose, which the regex flags as evidence.
+    // Pre-fix: returned err(SessionError, containmentBreached=true) → terminal.
+    // Post-fix: warning recorded on result.value.auditWarnings, session continues.
+    const proseWithBlockedNames = `
+Here is what I plan to do next:
+
+  $ git status
+  $ bash deploy.sh
+  python3 -V
+
+These are reference examples; I will not execute them.
+`;
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: proseWithBlockedNames, cost: 0.05 },
+    });
+
+    const costTracker = new CostTracker({ dailyBudget: 50, perRunBudget: 10 });
+    const runtime = new SessionRuntime(testConfig, costTracker);
+    const result = await runtime.spawnSession('product-owner', { variables: {} }, 1);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Warnings recorded — but session continues
+      expect(result.value.auditWarnings).toBeDefined();
+      expect(result.value.auditWarnings!.length).toBeGreaterThan(0);
+      expect(result.value.auditWarnings!.some(v => v.includes("'git'"))).toBe(true);
+    }
+  });
+
+  it('does NOT set auditWarnings when output is clean prose with no command patterns', async () => {
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: 'I added a helper function to format strings.', cost: 0.01 },
+    });
+    const costTracker = new CostTracker({ dailyBudget: 50, perRunBudget: 10 });
+    const runtime = new SessionRuntime(testConfig, costTracker);
+    const result = await runtime.spawnSession('product-owner', { variables: {} }, 1);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.auditWarnings).toBeUndefined();
+    }
+  });
+
+  it('preserves session error when adapter itself fails (audit only runs on success)', async () => {
+    // Confirms that real session errors (e.g., from preventive Bash-hook
+    // containment in adapters/cli.ts) still propagate as terminal — the
+    // post-session audit is non-terminal but does not mask actual failures.
+    mockSpawn.mockResolvedValueOnce({
+      ok: false,
+      error: new SessionError('hook denied: git push to forbidden remote', 0.01, false, true),
+    });
+    const costTracker = new CostTracker({ dailyBudget: 50, perRunBudget: 10 });
+    const runtime = new SessionRuntime(testConfig, costTracker);
+    const result = await runtime.spawnSession('product-owner', { variables: {} }, 1);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(SessionError);
+      expect((result.error as SessionError).containmentBreach).toBe(true);
+    }
+  });
+});

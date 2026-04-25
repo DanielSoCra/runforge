@@ -56,6 +56,11 @@ export interface SessionResult {
   exitStatus: ExitStatus;
   handoffNote?: string;
   pluginGates?: string[];  // Gate scripts from active plugins — additive with repo validation commands
+  // Non-terminal warnings from post-session output audit (audit.ts).
+  // Output text matching blocked command patterns is recorded here rather than
+  // terminating the session; preventive containment via Bash hooks still
+  // terminates as before. Issue #489 acceptance criteria 5–6.
+  auditWarnings?: string[];
 }
 
 export interface PitfallMarker {

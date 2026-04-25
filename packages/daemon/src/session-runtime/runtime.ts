@@ -285,18 +285,19 @@ export class SessionRuntime {
       this.rateLimiter.reportRateLimit();
     }
 
-    // 9. Post-session audit — containment layer 6 (detective)
-    // Scan output for references to prohibited paths (ARCH-AC-SESSION-RUNTIME step 9)
-    // Scans path references and blocked command evidence (SEC-35).
+    // 9. Post-session audit — containment layer 6 (detective, advisory).
+    // Output-text scanning has high false-positive risk: model prose mentioning
+    // command names (git, bash, python3) trips the regex even when no command
+    // was executed. Preventive containment via Bash hooks (containment-hooks.ts)
+    // is still terminal — that layer audits real tool invocations.
+    // Issue #489 acceptance criteria 5–6.
     if (result.ok) {
       const audit = auditSessionOutput(result.value.output, DEFAULT_POLICY);
       if (!audit.clean) {
-        return err(new SessionError(
-          `Containment breach detected in post-session audit: ${audit.violations.join('; ')}`,
-          result.value.cost,
-          false,
-          true,
-        ));
+        console.warn(
+          `[audit] Post-session output mentions blocked commands (advisory, not terminal): ${audit.violations.join('; ')}`,
+        );
+        result.value.auditWarnings = audit.violations;
       }
     }
 
