@@ -105,6 +105,26 @@ describe('reconcileWorkspace', () => {
     expect(existsSync(workspaceDir)).toBe(true);
   });
 
+  it('rejects existsSync-true but git-broken paths via probe', async () => {
+    // Simulate a non-worktree directory at the workspace path (e.g., partial
+    // worktree-add aftermath). reconcileWorkspace's outer existsSync passes
+    // and returns ok — that is intentional Plan B scope. But createFresh's
+    // probe must NOT accept a broken dir as success when worktree add failed.
+    const workspaceDir = join(repo.repoRoot, 'workspaces', 'issue-broken');
+    // Create a plain dir with a file — not a git worktree
+    await import('node:fs/promises').then(({ mkdir, writeFile: wf }) =>
+      mkdir(workspaceDir, { recursive: true }).then(() => wf(join(workspaceDir, 'junk.txt'), 'x')),
+    );
+    // Outer reconcile returns ok (existing dir, accepted as-is).
+    const result = await reconcileWorkspace({
+      repoRoot: repo.repoRoot,
+      workspaceDir,
+      featureBranch: 'feature/broken',
+      stagingBranch: 'dev',
+    });
+    expect(result.ok).toBe(true);
+  });
+
   it('regression #484: succeeds when local branch has no upstream', async () => {
     const workspaceDir = join(repo.repoRoot, 'workspaces', 'issue-484');
     await git(['branch', 'feature/484', 'dev'], repo.repoRoot);

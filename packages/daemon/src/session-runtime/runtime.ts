@@ -291,6 +291,12 @@ export class SessionRuntime {
     // was executed. Preventive containment via Bash hooks (containment-hooks.ts)
     // is still terminal — that layer audits real tool invocations.
     // Issue #489 acceptance criteria 5–6.
+    //
+    // NOTE: this downgrade assumes auditSessionOutput only produces blocked-
+    // command evidence violations (path-reference scanning was already removed
+    // — see audit.ts comments). If new violation classes are added that
+    // genuinely warrant terminal handling, split the result by violation
+    // class here rather than blanket-downgrading everything.
     if (result.ok) {
       const audit = auditSessionOutput(result.value.output, DEFAULT_POLICY);
       if (!audit.clean) {

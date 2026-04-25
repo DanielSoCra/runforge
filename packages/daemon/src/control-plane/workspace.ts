@@ -53,25 +53,46 @@ async function createFresh(
     repoRoot,
   );
   if (wtNew.ok) return ok({ path: workspaceDir });
-  if (existsSync(workspaceDir)) return ok({ path: workspaceDir });
+  if (await isUsableWorktree(workspaceDir)) return ok({ path: workspaceDir });
 
   const wtExisting = await git(
     ['worktree', 'add', workspaceDir, featureBranch],
     repoRoot,
   );
   if (wtExisting.ok) return ok({ path: workspaceDir });
-  if (existsSync(workspaceDir)) return ok({ path: workspaceDir });
+  if (await isUsableWorktree(workspaceDir)) return ok({ path: workspaceDir });
 
   // Orphan recovery: stale worktree registration may point at a deleted path.
+  // After prune, retry the full create sequence — the new-branch attempt may
+  // succeed if the orphan was the only thing blocking it.
   await git(['worktree', 'prune'], repoRoot);
-  const wtRetry = await git(
+
+  const wtRetryNew = await git(
+    ['worktree', 'add', workspaceDir, '-b', featureBranch, stagingBranch],
+    repoRoot,
+  );
+  if (wtRetryNew.ok) return ok({ path: workspaceDir });
+  if (await isUsableWorktree(workspaceDir)) return ok({ path: workspaceDir });
+
+  const wtRetryExisting = await git(
     ['worktree', 'add', workspaceDir, featureBranch],
     repoRoot,
   );
-  if (wtRetry.ok) return ok({ path: workspaceDir });
-  if (existsSync(workspaceDir)) return ok({ path: workspaceDir });
+  if (wtRetryExisting.ok) return ok({ path: workspaceDir });
+  if (await isUsableWorktree(workspaceDir)) return ok({ path: workspaceDir });
 
   return err(new Error(
-    `reconcileWorkspace: failed to create worktree at ${workspaceDir} for ${featureBranch}: ${wtRetry.error.message}`,
+    `reconcileWorkspace: failed to create worktree at ${workspaceDir} for ${featureBranch}: ${wtRetryExisting.error.message}`,
   ));
+}
+
+/**
+ * Probe that the directory exists AND is a usable git worktree. Guards against
+ * the case where `git worktree add` fails after partially creating the dir —
+ * `existsSync` alone would return true and mask a broken workspace.
+ */
+async function isUsableWorktree(workspaceDir: string): Promise<boolean> {
+  if (!existsSync(workspaceDir)) return false;
+  const probe = await git(['rev-parse', '--git-dir'], workspaceDir);
+  return probe.ok;
 }

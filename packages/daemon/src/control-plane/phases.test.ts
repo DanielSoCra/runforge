@@ -332,8 +332,8 @@ describe('createPhaseHandlers', () => {
       const { handlers } = createHandlers();
       const result = await handlers.detect!(makeRun());
       expect(result).toBe('failure');
-      // reconcileWorkspace tries: add -b, add (existing), prune, add (retry)
-      expect(mockGit).toHaveBeenCalledTimes(4);
+      // reconcileWorkspace tries: add -b, add (existing), prune, add -b retry, add (existing) retry
+      expect(mockGit).toHaveBeenCalledTimes(5);
     });
 
     it('releases detect lock when reconcile fails (#255)', async () => {
