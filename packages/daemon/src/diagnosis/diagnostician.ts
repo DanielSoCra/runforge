@@ -3,6 +3,7 @@ import type { BugDiagnosis, SessionResult } from '../types.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import { BugDiagnosisSchema, bugDiagnosisJsonSchema } from './schema.js';
 import { ok, err, type Result } from '../lib/result.js';
+import { extractStructuredOutput as unwrapStructuredOutput } from '../lib/structured-output.js';
 
 /**
  * Extract the structured output payload from a CLI session result.
@@ -13,21 +14,16 @@ import { ok, err, type Result } from '../lib/result.js';
  * is null (model used markdown code block instead of structured output).
  */
 function extractStructuredOutput(session: SessionResult): unknown {
-  const rawData = session.structuredData;
-  const so = rawData !== null && typeof rawData === 'object'
-    ? (rawData as Record<string, unknown>).structured_output
-    : undefined;
-  if (so !== null && so !== undefined) {
-    return so;
-  }
-  const resultText = typeof (rawData as Record<string, unknown>)?.result === 'string'
-    ? (rawData as Record<string, unknown>).result as string
-    : session.output;
+  const so = unwrapStructuredOutput(session.structuredData);
+  if (so !== session.structuredData) return so;
+  // Fallback: model used markdown code block instead of structured output
+  const rd = session.structuredData as Record<string, unknown> | null;
+  const resultText = typeof rd?.['result'] === 'string' ? (rd['result'] as string) : session.output;
   const jsonMatch = resultText.match(/```json\s*([\s\S]*?)```/s) ?? resultText.match(/(\{[\s\S]*\})/s);
   if (jsonMatch?.[1]) {
     try { return JSON.parse(jsonMatch[1]); } catch { /* fall through */ }
   }
-  return rawData;
+  return session.structuredData;
 }
 
 export async function diagnose(

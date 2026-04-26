@@ -230,8 +230,15 @@ ARCH-AC-KNOWLEDGE-SYNC:
 STACK-AC-CONVENTIONS:
   parent: L0-AC-VISION
   children: []
-  code_paths: [packages/daemon/src/types.ts, packages/daemon/src/main.ts, packages/daemon/src/config.ts, packages/daemon/src/lib/]
-  test_paths: [packages/daemon/src/**/*.test.ts]
+  code_paths:
+    - packages/daemon/src/types.ts
+    - packages/daemon/src/main.ts
+    - packages/daemon/src/config.ts
+    - packages/daemon/src/lib/
+    - packages/daemon/src/lib/structured-output.ts
+  test_paths:
+    - packages/daemon/src/**/*.test.ts
+    - packages/daemon/src/lib/structured-output.test.ts
   status: draft
 
 STACK-AC-CONTROL-PLANE:
