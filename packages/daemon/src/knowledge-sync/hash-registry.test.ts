@@ -1,6 +1,6 @@
 // src/knowledge-sync/hash-registry.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { rm, access } from 'fs/promises';
+import { rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { HashRegistry, computeContentHash } from './hash-registry.js';

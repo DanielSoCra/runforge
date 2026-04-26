@@ -8,13 +8,6 @@ import type { KnowledgeStore } from '../knowledge/knowledge-store.js';
 
 const tmpDir = () => join(tmpdir(), `sync-svc-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
-function makeVault(dir: string, manifest: string, docs: Record<string, string> = {}): {
-  vaultPath: string;
-  manifestPath: string;
-} {
-  return { vaultPath: dir, manifestPath: join(dir, '00-Meta', 'auto-claude-sync.md') };
-}
-
 async function createVault(dir: string, manifestContent: string, docs: Record<string, string> = {}) {
   await mkdir(dir, { recursive: true });
   await mkdir(join(dir, '00-Meta'), { recursive: true });
