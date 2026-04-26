@@ -19,6 +19,6 @@
     "gate1Commands": [
       "pnpm --filter @auto-claude/daemon run test"
     ],
-    "maxFixCycles": 2
+    "maxFixCycles": 4
   }
 }
