@@ -423,6 +423,9 @@ STACK-AC-KNOWLEDGE-SYNC:
     - packages/daemon/src/knowledge-sync/hash-registry.test.ts
     - packages/daemon/src/knowledge-sync/document-mapper.test.ts
     - packages/daemon/src/knowledge-sync/sync-service.test.ts
+    - packages/daemon/src/knowledge-sync/hash-registry.test.ts
+    - packages/daemon/src/knowledge-sync/document-mapper.test.ts
+    - packages/daemon/src/knowledge-sync/sync-service.test.ts
   status: draft
 
 STACK-AC-DASHBOARD:
