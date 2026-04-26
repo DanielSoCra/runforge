@@ -282,6 +282,7 @@ describe('createPhaseHandlers', () => {
 
   describe('detect', () => {
     it('creates a new feature branch from staging via worktree', async () => {
+      mockExistsSync.mockReturnValue(false); // workspace dir does not yet exist
       mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // worktree add -b feature/42 staging
       const { handlers } = createHandlers();
       const result = await handlers.detect!(makeRun());
@@ -293,6 +294,7 @@ describe('createPhaseHandlers', () => {
     });
 
     it('falls back to existing branch worktree when new-branch creation fails', async () => {
+      mockExistsSync.mockReturnValue(false); // workspace dir does not yet exist
       mockGit.mockResolvedValueOnce({ ok: false, error: new Error('branch exists') }); // worktree add -b fails
       mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // worktree add existing branch
       const { handlers } = createHandlers();
@@ -305,6 +307,7 @@ describe('createPhaseHandlers', () => {
     });
 
     it('passes repoRoot to git worktree calls instead of relying on process.cwd() (#77)', async () => {
+      mockExistsSync.mockReturnValue(false); // workspace dir does not yet exist
       mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // worktree add -b feature/42 staging
       const { handlers } = createHandlers({}, undefined, '/custom/repo/root');
       const result = await handlers.detect!(makeRun());
@@ -315,30 +318,27 @@ describe('createPhaseHandlers', () => {
       );
     });
 
-    it('returns failure when both worktree add attempts fail and directory does not exist', async () => {
-      mockExistsSync.mockReturnValue(false); // workspace dir does not exist
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('branch exists') }); // worktree add -b fails
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal') }); // worktree add also fails
+    it('returns failure when all worktree creation attempts fail and directory does not exist', async () => {
+      mockExistsSync.mockReturnValue(false); // workspace dir never appears
+      mockGit.mockResolvedValue({ ok: false, error: new Error('fatal: cannot create') }); // every git call fails
       const { handlers } = createHandlers();
       const result = await handlers.detect!(makeRun());
       expect(result).toBe('failure');
     });
 
-    it('returns failure when initial worktree add fails and fallback also fails (#255)', async () => {
-      mockExistsSync.mockReturnValue(false); // workspace dir does not exist
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('cannot create worktree') }); // worktree add -b fails
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal: not a git repo') }); // fallback fails
+    it('returns failure when reconcile cannot create worktree even after prune+retry (#255)', async () => {
+      mockExistsSync.mockReturnValue(false);
+      mockGit.mockResolvedValue({ ok: false, error: new Error('fatal: not a git repo') });
       const { handlers } = createHandlers();
       const result = await handlers.detect!(makeRun());
       expect(result).toBe('failure');
-      // Both worktree attempts should have been made
-      expect(mockGit).toHaveBeenCalledTimes(2);
+      // reconcileWorkspace tries: add -b, add (existing), prune, add -b retry, add (existing) retry
+      expect(mockGit).toHaveBeenCalledTimes(5);
     });
 
-    it('releases detect lock when worktree add fails (#255)', async () => {
-      mockExistsSync.mockReturnValue(false); // workspace dir does not exist
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('worktree add failed') });
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal') });
+    it('releases detect lock when reconcile fails (#255)', async () => {
+      mockExistsSync.mockReturnValue(false);
+      mockGit.mockResolvedValue({ ok: false, error: new Error('worktree add failed') });
       const { handlers } = createHandlers();
       await handlers.detect!(makeRun());
       expect(isDetectLocked()).toBe(false);
@@ -354,6 +354,7 @@ describe('createPhaseHandlers', () => {
     });
 
     it('releases detect lock after successful detect', async () => {
+      mockExistsSync.mockReturnValue(false);
       mockGit.mockResolvedValueOnce({ ok: true, value: '' }); // worktree add -b feature/42 staging
       const { handlers } = createHandlers();
       expect(isDetectLocked()).toBe(false);
@@ -362,35 +363,23 @@ describe('createPhaseHandlers', () => {
     });
 
     it('releases detect lock even when git fails', async () => {
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('branch exists') }); // worktree add -b fails
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal') }); // fallback also fails
+      mockExistsSync.mockReturnValue(false);
+      mockGit.mockResolvedValue({ ok: false, error: new Error('branch exists') });
       const { handlers } = createHandlers();
       await handlers.detect!(makeRun());
       // Lock must be released even on failure
       expect(isDetectLocked()).toBe(false);
     });
 
-    it('returns failure when worktree exists but git pull --ff-only fails (#419)', async () => {
-      mockExistsSync.mockReturnValue(true); // workspace dir already exists
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('branch exists') }); // worktree add -b fails
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('worktree already exists') }); // worktree add existing fails
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('fatal: not possible to fast-forward') }); // pull fails
-      const { handlers } = createHandlers();
-      const result = await handlers.detect!(makeRun());
-      expect(result).toBe('failure');
-      expect(mockGit).toHaveBeenCalledWith(['pull', '--ff-only'], expect.any(String));
-      expect(isDetectLocked()).toBe(false);
-    });
-
-    it('returns success when worktree exists and git pull --ff-only succeeds (#419)', async () => {
-      mockExistsSync.mockReturnValue(true); // workspace dir already exists
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('branch exists') }); // worktree add -b fails
-      mockGit.mockResolvedValueOnce({ ok: false, error: new Error('worktree already exists') }); // worktree add existing fails
-      mockGit.mockResolvedValueOnce({ ok: true, value: 'Already up to date.' }); // pull succeeds
+    it('regression #489: returns success when workspace already exists, no git pull issued', async () => {
+      // Pre-existing worktree on a branch with no upstream — the #484 sticking pattern.
+      // reconcileWorkspace must NOT attempt 'git pull --ff-only' (which the old detect did).
+      mockExistsSync.mockReturnValue(true);
       const { handlers } = createHandlers();
       const result = await handlers.detect!(makeRun());
       expect(result).toBe('success');
-      expect(mockGit).toHaveBeenCalledWith(['pull', '--ff-only'], expect.any(String));
+      expect(mockGit).not.toHaveBeenCalled(); // accepted as-is, no git operations
+      expect(isDetectLocked()).toBe(false);
     });
   });
 
