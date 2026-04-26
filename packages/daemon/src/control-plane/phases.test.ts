@@ -1649,6 +1649,35 @@ describe('createPhaseHandlers', () => {
       expect(spawnArgs[1].variables.feedback).toContain('missing X');
       expect(run.l3Feedback).toBeUndefined();
     });
+
+    it('retains run.l3Feedback when spawn returns ok=false (Codex 636ca05)', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: false,
+        error: new Error('CLI crashed'),
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      run.l3Feedback = 'Prior compliance findings: missing X';
+
+      const result = await handlers['l3-generate']!(run);
+      expect(result).toBe('failure');
+      // Feedback retained so the self-loop retry sees the same compliance findings
+      expect(run.l3Feedback).toBe('Prior compliance findings: missing X');
+    });
+
+    it('retains run.l3Feedback when session times out (Codex 636ca05)', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: { output: '', structuredData: null, cost: 0.5, pitfallMarkers: [], exitStatus: 'timed-out' },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      run.l3Feedback = 'Prior compliance findings: missing X';
+
+      const result = await handlers['l3-generate']!(run);
+      expect(result).toBe('failure');
+      expect(run.l3Feedback).toBe('Prior compliance findings: missing X');
+    });
   });
 
   describe('l3-compliance', () => {

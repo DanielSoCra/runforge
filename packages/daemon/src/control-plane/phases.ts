@@ -270,17 +270,21 @@ export function createPhaseHandlers(
         },
         workspacePath: cwd,
       }, workRequest.issueNumber, undefined, runWriter, runId);
-      // Clear after consume so a downstream success path doesn't re-deliver stale feedback.
-      // (l3-compliance success path also clears this; double-clear is safe.)
-      run.l3Feedback = undefined;
       if (!result.ok) {
         console.error(`[l3-generate] Session failed: ${result.error.message}`);
+        // Retain l3Feedback so the retry attempt sees the same compliance findings
+        // (Codex review 636ca05 — clearing before failure check loses feedback on
+        //  transient l3-generate self-loop retries).
         return 'failure';
       }
       if (result.value.exitStatus === 'timed-out' || result.value.exitStatus === 'failed') {
         console.error(`[l3-generate] Session exited with status: ${result.value.exitStatus}`);
         return 'failure';
       }
+      // Generator produced an accepted result — clear feedback so the next
+      // compliance failure starts a fresh round (l3-compliance success path
+      // also clears this; double-clear is safe).
+      run.l3Feedback = undefined;
       // Refresh spec refs after L3 generation
       try {
         run.specRefs = await resolveCurrentSpecRefs(cwd, workRequest.specRefs);
