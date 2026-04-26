@@ -67,6 +67,17 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   }
   console.log(`[daemon] Prompt contracts validated (${contractCheck.value.checked} prompts)`);
 
+  // 0c. Pre-warm the prompt template cache while HEAD is still on the daemon's
+  // startup branch (typically `dev`). Pipeline phases like coordinator.implement
+  // and integrateToStaging move HEAD in mainRepoRoot during normal operation,
+  // and prompts/*.md is read from that working copy. Without pre-warming, the
+  // first session that loads a prompt mid-pipeline can cache a stale version
+  // from the feature branch the daemon happens to be checked out to at that
+  // moment. Pre-warming freezes a known-good revision for the daemon's lifetime.
+  const { preloadPromptCache } = await import('../session-runtime/runtime.js');
+  const preloaded = await preloadPromptCache();
+  console.log(`[daemon] Prompt cache pre-warmed (${preloaded} prompts)`);
+
   // 1. Load config
   const configResult = await loadConfig(configPath);
   if (!configResult.ok) return configResult;

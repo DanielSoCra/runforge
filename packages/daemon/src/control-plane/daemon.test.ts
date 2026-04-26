@@ -86,7 +86,10 @@ vi.mock('../session-runtime/cost.js', () => {
   return { CostTracker: class { getDailyCost = mockCostTracker.getDailyCost; maybeResetDaily = mockCostTracker.maybeResetDaily; } };
 });
 vi.mock('../session-runtime/runtime.js', () => {
-  return { SessionRuntime: class { spawnSession = mockSpawnSession; } };
+  return {
+    SessionRuntime: class { spawnSession = mockSpawnSession; },
+    preloadPromptCache: async () => 0,
+  };
 });
 vi.mock('../knowledge/gotcha-store.js', () => {
   return { GotchaStore: class {} };

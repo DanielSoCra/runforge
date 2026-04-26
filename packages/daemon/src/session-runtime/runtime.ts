@@ -23,6 +23,54 @@ function promptsDir(): string {
 }
 
 /**
+ * Cache prompt templates in memory after first read.
+ *
+ * The daemon's main repo HEAD can move between branches during normal pipeline
+ * operation (`coordinator.implement` checks out the feature branch in the main
+ * repo before merging; `integrateToStaging` checks out staging). When HEAD is
+ * not on `dev`, prompts/worker.md and friends reflect whatever the *other*
+ * branch happened to have — typically a stale version that lacks recent
+ * orchestration fixes. Sessions spawned in that window get the wrong prompt.
+ *
+ * Caching once at first-load freezes the prompt to whatever the daemon process
+ * saw at startup, which is always a known-good revision (the daemon was started
+ * from a clean dev checkout). The cache lasts the lifetime of the daemon
+ * process; a daemon restart picks up any updated prompt files. In test mode,
+ * caching is bypassed so each test sees fresh file content.
+ */
+const promptCache = new Map<string, string>();
+const isTestEnv = (): boolean =>
+  process.env['NODE_ENV'] === 'test' || process.env['VITEST'] === 'true';
+
+/**
+ * Pre-warm the prompt cache by reading every registered prompt template now,
+ * while the daemon's main repo HEAD is still on its known-good startup branch.
+ * Without this, the *first* loadPromptTemplate call for each prompt could land
+ * mid-pipeline (after a phase moved HEAD to a feature branch) and cache the
+ * stale version. Returns the number of prompts loaded.
+ */
+export async function preloadPromptCache(): Promise<number> {
+  if (isTestEnv()) return 0;
+  let loaded = 0;
+  for (const name of Object.keys(PROMPT_CONTRACTS)) {
+    const filePath = join(promptsDir(), `${name}.md`);
+    try {
+      const content = await readFile(filePath, 'utf-8');
+      promptCache.set(filePath, content);
+      loaded += 1;
+    } catch {
+      // Missing file is tolerated (loadPromptTemplate falls back to def.systemPrompt).
+    }
+  }
+  return loaded;
+}
+
+/** Test-only: clear the cache between tests. */
+export function __clearPromptCacheForTests(): void {
+  promptCache.clear();
+}
+
+/**
  * Load a prompt template from prompts/{name}.md and substitute {{variable}} placeholders.
  * Returns null if the file does not exist (caller falls back to def.systemPrompt).
  */
@@ -36,7 +84,7 @@ export async function loadPromptTemplate(
   }
 
   const isRegistered = name in PROMPT_CONTRACTS;
-  const isTest = process.env['NODE_ENV'] === 'test' || process.env['VITEST'] === 'true';
+  const isTest = isTestEnv();
 
   // Apply prompt contract: defaults for omitted keys + reject extras/missing.
   // In test mode we throw (CI catches drift); in production we warn and fall
@@ -59,7 +107,14 @@ export async function loadPromptTemplate(
 
   const filePath = join(promptsDir(), `${name}.md`);
   try {
-    const template = await readFile(filePath, 'utf-8');
+    let template: string;
+    const cached = promptCache.get(filePath);
+    if (cached !== undefined && !isTest) {
+      template = cached;
+    } else {
+      template = await readFile(filePath, 'utf-8');
+      if (!isTest) promptCache.set(filePath, template);
+    }
     const missing = findUnsubstitutedVars(template, finalVars);
     if (missing.length > 0) {
       console.warn(
