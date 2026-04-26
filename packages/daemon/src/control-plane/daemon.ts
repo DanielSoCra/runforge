@@ -37,6 +37,7 @@ import { createMergeAgent } from '../coordination/merge-agent.js';
 import { createMergeQueue } from '../coordination/merge-queue.js';
 import { statfs } from 'fs/promises';
 import { startHeartbeat } from './heartbeat.js';
+import { createKnowledgeSyncService } from '../knowledge-sync/sync-service.js';
 import { TechProposalStore } from '../coordination/tech-lead/proposal-store.js';
 import { assembleSignalDigest } from '../coordination/tech-lead/signal-digest.js';
 import { isTerminalStatus } from '../coordination/tech-lead/proposal-lifecycle.js';
@@ -126,7 +127,19 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   // substantive feature implementation. Review gates remain the safety net for bad large diffs.
   const coordinator = new ImplementationCoordinator(runtime, repoRoot, 2000, 2000, gotchaStore, knowledgeStore);
 
-  // 3b. Start Remote Control
+  // 3b. Start Knowledge Sync schedule (opt-in; no-op when knowledgeSync.enabled is false)
+  let knowledgeSyncPoller: ReturnType<typeof setInterval> | null = null;
+  if (config.knowledgeSync?.enabled) {
+    const syncService = createKnowledgeSyncService(config.knowledgeSync, knowledgeStore, stateDir);
+    const intervalMs = config.knowledgeSync.syncIntervalMinutes * 60_000;
+    knowledgeSyncPoller = setInterval(() => {
+      syncService.triggerSync().catch(e => console.warn('[knowledge-sync] cycle error:', e));
+    }, intervalMs);
+    // Trigger an initial cycle on startup
+    syncService.triggerSync().catch(e => console.warn('[knowledge-sync] startup cycle error:', e));
+  }
+
+  // 3c. Start Remote Control
   const remoteControl = new RemoteControlManager();
   remoteControl.start();
 
@@ -882,6 +895,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     console.log(`[daemon] Entering drain mode — ${activeRuns} active run(s), waiting for completion`);
     // Stop schedulers so no new background work starts
     if (legacyPoller) clearInterval(legacyPoller);
+    if (knowledgeSyncPoller) clearInterval(knowledgeSyncPoller);
     stopReviewScheduler();
     stopPOAgent?.();
     stopTechLeadScheduler?.();
@@ -899,6 +913,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     shuttingDown = true;
     console.log('Shutting down...');
     if (legacyPoller) clearInterval(legacyPoller);
+    if (knowledgeSyncPoller) clearInterval(knowledgeSyncPoller);
     stopHeartbeat();
     if (stopCoordinator) stopCoordinator();
     stopReviewScheduler();
