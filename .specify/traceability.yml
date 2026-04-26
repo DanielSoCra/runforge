@@ -52,7 +52,7 @@ ARCH-SDD-SPEC-LIFECYCLE:
 # --- Auto-Claude L0 spec (vision — root of all Auto-Claude specs) ---
 
 L0-AC-VISION:
-  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, FUNC-AC-PLUGINS, FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, STACK-AC-CONVENTIONS]
+  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, FUNC-AC-PLUGINS, FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, FUNC-AC-AGENT-DISCIPLINE, STACK-AC-CONVENTIONS]
   status: draft
 
 # --- Auto-Claude L1 specs ---
@@ -107,6 +107,10 @@ FUNC-AC-PRODUCT-OWNER:
 
 FUNC-AC-TECH-LEAD:
   children: [ARCH-AC-TECH-LEAD]
+  status: draft
+
+FUNC-AC-AGENT-DISCIPLINE:
+  children: [ARCH-AC-AGENT-DISCIPLINE]
   status: draft
 
 # --- Auto-Claude Plugins L2 spec ---
@@ -222,6 +226,11 @@ ARCH-AC-KNOWLEDGE-SYNC:
   children: [STACK-AC-KNOWLEDGE-SYNC]
   status: draft
 
+ARCH-AC-AGENT-DISCIPLINE:
+  parent: FUNC-AC-AGENT-DISCIPLINE
+  children: [STACK-AC-AGENT-DISCIPLINE-PROMPTS, STACK-AC-AGENT-DISCIPLINE-REVIEW]
+  status: draft
+
 # --- Auto-Claude L3 specs (stack-specific) ---
 
 # STACK-AC-CONVENTIONS is a cross-cutting spec — it references L0 directly
@@ -271,6 +280,23 @@ STACK-AC-IMPLEMENTATION:
     - packages/daemon/src/implementation/**/*.test.ts
   status: draft
 
+STACK-AC-AGENT-DISCIPLINE-PROMPTS:
+  parent: ARCH-AC-AGENT-DISCIPLINE
+  children: []
+  code_paths:
+    - prompts/coordinator.md
+    - prompts/worker.md
+    - prompts/spec-implementer.md
+    - prompts/bug-worker.md
+    - packages/daemon/src/implementation/decompose.ts
+    - packages/daemon/src/implementation/context.ts
+    - packages/daemon/src/implementation/exit-status.ts
+  test_paths:
+    - packages/daemon/src/implementation/decompose.test.ts
+    - packages/daemon/src/implementation/context.test.ts
+    - packages/daemon/src/implementation/exit-status.test.ts
+  status: draft
+
 STACK-AC-VALIDATION:
   parent: ARCH-AC-VALIDATION
   children: []
@@ -304,6 +330,20 @@ STACK-AC-VALIDATION:
     - packages/daemon/src/validation/proactive-scheduler.test.ts
     - packages/daemon/src/validation/knowledge-injector.test.ts
     - packages/daemon/src/infra/spec-loader.test.ts
+  status: draft
+
+STACK-AC-AGENT-DISCIPLINE-REVIEW:
+  parent: ARCH-AC-AGENT-DISCIPLINE
+  children: []
+  code_paths:
+    - prompts/reviewer-quality.md
+    - packages/daemon/src/validation/review.ts
+    - packages/daemon/src/validation/reviewer-session.ts
+    - packages/daemon/src/validation/knowledge-injector.ts
+  test_paths:
+    - packages/daemon/src/validation/review.test.ts
+    - packages/daemon/src/validation/reviewer-session.test.ts
+    - packages/daemon/src/validation/knowledge-injector.test.ts
   status: draft
 
 STACK-AC-SESSION-RUNTIME:
