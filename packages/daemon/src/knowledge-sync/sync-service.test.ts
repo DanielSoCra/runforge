@@ -200,8 +200,8 @@ importSources:
     const history = await service.getSyncHistory(10);
     expect(history.length).toBe(2);
     // Newest first
-    expect(new Date(history[0].triggeredAt).getTime()).toBeGreaterThanOrEqual(
-      new Date(history[1].triggeredAt).getTime(),
+    expect(new Date(history[0]!.triggeredAt).getTime()).toBeGreaterThanOrEqual(
+      new Date(history[1]!.triggeredAt).getTime(),
     );
   });
 
