@@ -341,15 +341,43 @@ export function createPhaseHandlers(
         return recordFailureAndMaybeEscalate(`Compliance session ended with exit status: ${result.value.exitStatus}`);
       }
 
-      const payload = extractStructuredOutput(result.value?.structuredData) as
-        | {
-            compliant?: boolean;
-            findings?: Array<{ type?: string; severity?: string; location?: string; description?: string }>;
-            summary?: string;
-          }
-        | undefined;
+      // Extract compliance payload. Try wrapper unwrap first (preferred path
+      // when --json-schema produced structured_output). Then if `compliant` is
+      // missing, fall back to parsing JSON from result text (model didn't honor
+      // the schema and returned a markdown code block or bare JSON instead).
+      // Without the fallback, a noncompliant report can silently pass when
+      // structured_output is null (Codex deep review of fix/silent-prompt-vars).
+      type CompliancePayload = {
+        compliant?: boolean;
+        findings?: Array<{ type?: string; severity?: string; location?: string; description?: string }>;
+        summary?: string;
+      };
+      const rawData = result.value?.structuredData;
+      let payload = extractStructuredOutput(rawData) as CompliancePayload | undefined;
+      if (typeof payload?.compliant !== 'boolean') {
+        const rd = rawData as Record<string, unknown> | null;
+        const resultText = typeof rd?.['result'] === 'string'
+          ? (rd['result'] as string)
+          : result.value?.output ?? '';
+        const jsonMatch = resultText.match(/```json\s*([\s\S]*?)```/s) ?? resultText.match(/(\{[\s\S]*\})/s);
+        if (jsonMatch?.[1]) {
+          try { payload = JSON.parse(jsonMatch[1]) as CompliancePayload; } catch { /* fall through */ }
+        }
+      }
 
-      if (payload?.compliant === false) {
+      // Defensive: treat absent or non-boolean `compliant` as failure rather
+      // than silently passing. The compliance gate exists to block bad specs;
+      // a malformed reply must not earn a free pass.
+      if (typeof payload?.compliant !== 'boolean') {
+        const preview = (JSON.stringify(payload) ?? '<undefined>').slice(0, 500);
+        console.error(`[l3-compliance] Compliance reply missing or malformed 'compliant' field — treating as failure`);
+        return recordFailureAndMaybeEscalate(
+          `Compliance session returned malformed output (compliant field missing or non-boolean). ` +
+          `Raw payload preview: ${preview}`,
+        );
+      }
+
+      if (payload.compliant === false) {
         const findingLines = (payload.findings ?? []).map(
           (f) => `- [${f.severity ?? 'unknown'}] ${f.location ?? ''}: ${f.description ?? ''}`,
         ).join('\n');
