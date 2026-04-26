@@ -157,4 +157,8 @@ describe('renderTemplate rejectUnused option', () => {
     expect(() => renderTemplate('{{a}}', { b: '2' }, { strict: true, rejectUnused: true }))
       .toThrow();
   });
+  it('rejectUnused fires even when strict is satisfied (Codex review d5f7a78)', () => {
+    expect(() => renderTemplate('{{a}}', { a: '1', b: '2' }, { strict: true, rejectUnused: true }))
+      .toThrow(/unused variables.*b/);
+  });
 });
