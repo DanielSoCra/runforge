@@ -363,8 +363,10 @@ STACK-AC-KNOWLEDGE:
     - packages/daemon/src/knowledge/exemplar-store.ts
     - packages/daemon/src/knowledge/pattern-extractor.ts
     - packages/daemon/src/knowledge/proposal-store.ts
+    - packages/daemon/src/knowledge/prompt-contracts.ts
   test_paths:
     - packages/daemon/src/knowledge/**/*.test.ts
+    - packages/daemon/src/knowledge/prompt-contracts.test.ts
   status: draft
 
 STACK-AC-KNOWLEDGE-SYNC:
