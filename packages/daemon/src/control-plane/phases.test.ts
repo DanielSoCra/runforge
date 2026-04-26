@@ -1644,9 +1644,9 @@ describe('createPhaseHandlers', () => {
       await handlers['l3-generate']!(run);
 
       const spawnArgs = mockRuntime.spawnSession.mock.calls.find(
-        (c) => c[0] === 'l3-generator',
+        (c: unknown[]) => c[0] === 'l3-generator',
       )!;
-      expect(spawnArgs[1].variables.feedback).toContain('missing X');
+      expect((spawnArgs[1] as { variables: { feedback: string } }).variables.feedback).toContain('missing X');
       expect(run.l3Feedback).toBeUndefined();
     });
 
