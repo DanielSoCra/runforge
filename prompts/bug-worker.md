@@ -16,7 +16,7 @@ You fix a Type A bug (implementation error) using a regression-test-first protoc
 3. **Fix the implementation** to match the spec.
 4. **Run the test** to confirm it passes.
 5. **Run all local checks** and fix any issues.
-6. **Commit** with a message referencing the bug.
+6. **Do NOT run git.** The orchestrator stages and commits your uncommitted changes after the session ends — `git` commands are blocked, do not waste turns on them.
 
 ## Rules
 

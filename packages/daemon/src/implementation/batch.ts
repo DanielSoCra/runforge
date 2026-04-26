@@ -215,6 +215,29 @@ async function executeUnit(
       }
     }
 
+    // 3c. Stage and commit any uncommitted worker changes. Worker sessions cannot
+    // run `git` themselves (containment hooks block it), so without this step the
+    // worktree's edits stay uncommitted, the unit branch has no commits relative
+    // to feature, the diff comes back empty, and the pipeline merges nothing —
+    // a silent no-op that looks like success. We commit on behalf of the worker
+    // here using the daemon's direct git wrapper, which bypasses the session's
+    // containment policy.
+    const statusResult = await git(['status', '--porcelain'], worktreeResult.value);
+    if (statusResult.ok && statusResult.value.trim().length > 0) {
+      const addResult = await git(['add', '-A'], worktreeResult.value);
+      if (addResult.ok) {
+        const commitMsg = `worker(${unit.id}): ${result.exitStatus} session output\n\nAuto-staged on behalf of the worker session — git is blocked inside worker\ncontexts. Files captured here are whatever the session wrote to the worktree\nbefore exit.`;
+        const commitResult = await git(['commit', '-m', commitMsg], worktreeResult.value);
+        if (!commitResult.ok) {
+          console.warn(`[batch] auto-commit failed for ${unit.id}: ${commitResult.error.message}`);
+        } else {
+          console.log(`[batch] auto-committed worker changes for ${unit.id}`);
+        }
+      } else {
+        console.warn(`[batch] git add failed for ${unit.id}: ${addResult.error.message}`);
+      }
+    }
+
     // 4. Check diff size
     const diffSize = await getWorktreeDiffSize(unit.id, featureBranch, repoRoot);
     if (!diffSize.ok) {
