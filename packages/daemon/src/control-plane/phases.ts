@@ -296,6 +296,31 @@ export function createPhaseHandlers(
 
     'l3-compliance': async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[l3-compliance] Reviewing L3 compliance for #${workRequest.issueNumber}`);
+
+      // Operator override: same pattern as l2-gate. If the L3 spec was already
+      // approved by a human (l3-approved label present), don't second-guess via
+      // the autonomous compliance reviewer. Without this bypass, the daemon
+      // re-runs l3-generate + l3-compliance every time the pipeline restarts,
+      // and the reviewer often catches real cross-layer concerns the regenerator
+      // can't fix because they require L1/L2 changes (read-only to the worker).
+      try {
+        const labelResp = await octokit.issues.get({
+          owner, repo, issue_number: workRequest.issueNumber,
+        });
+        const labelNames = (labelResp.data.labels as Array<{ name?: string } | string>).map(
+          (l) => (typeof l === 'string' ? l : l.name ?? ''),
+        );
+        if (labelNames.includes('l3-approved')) {
+          console.log(`[l3-compliance] L3 already operator-approved for #${workRequest.issueNumber} — bypassing reviewer`);
+          run.l3ComplianceAttempts = undefined;
+          run.l3Feedback = undefined;
+          return 'success';
+        }
+      } catch (e) {
+        console.warn(`[l3-compliance] Failed to fetch labels for bypass check:`, e);
+        // Fall through to running the reviewer.
+      }
+
       await ensureWorkspace(run); const cwd = workspaceCwd;
       const specifyRoot = join(cwd, '.specify');
       let specContent = '';
