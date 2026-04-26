@@ -110,7 +110,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   const gotchaStore = new GotchaStore(gotchasPath);
   const knowledgeStore = new KnowledgeStore(join(stateDir, 'knowledge.jsonl'), DEFAULT_POLICIES, gotchasPath);
   const repoRoot = process.cwd();
-  const coordinator = new ImplementationCoordinator(runtime, repoRoot, 300, 2000, gotchaStore, knowledgeStore);
+  // maxDiffLines: 2000 — real features (multi-file specs, e.g., knowledge-sync, multi-provider)
+  // routinely produce 500–1500 line diffs. The historical 300 ceiling silently failed any
+  // substantive feature implementation. Review gates remain the safety net for bad large diffs.
+  const coordinator = new ImplementationCoordinator(runtime, repoRoot, 2000, 2000, gotchaStore, knowledgeStore);
 
   // 3b. Start Remote Control
   const remoteControl = new RemoteControlManager();

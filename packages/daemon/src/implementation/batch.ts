@@ -253,6 +253,7 @@ async function executeUnit(
       };
     }
     if (diffSize.value > maxDiffLines) {
+      console.warn(`[batch] ${unit.id} diff ${diffSize.value} > limit ${maxDiffLines}; failing this unit`);
       return {
         unitId: unit.id,
         exitStatus: 'failed',
@@ -263,6 +264,7 @@ async function executeUnit(
         error: `Diff size ${diffSize.value} exceeds limit of ${maxDiffLines}`,
       };
     }
+    console.log(`[batch] ${unit.id} diff size ${diffSize.value} (limit ${maxDiffLines})`);
 
     return {
       unitId: unit.id,
