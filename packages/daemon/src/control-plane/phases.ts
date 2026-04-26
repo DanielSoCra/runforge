@@ -28,6 +28,7 @@ import { runHoldout } from '../validation/holdout.js';
 import { integrateToStaging } from './integration.js';
 import { runDeploy } from '../validation/deploy.js';
 import { runPostDeployTests } from '../validation/post-deploy-test.js';
+import { reconcileWorkspace } from './workspace.js';
 
 // Serializes git operations on the shared repoRoot across concurrent pipeline runs.
 // Currently protects detect (which modifies checkout state via git checkout).
@@ -103,37 +104,19 @@ export function createPhaseHandlers(
         return 'failure';
       }
       try {
-        console.log(`[detect] Creating worktree ${workspaceDir} for ${featureBranch} from ${config.branches.staging}`);
-        // Try to create worktree with new branch
-        const wtResult = await git(
-          ['worktree', 'add', workspaceDir, '-b', featureBranch, config.branches.staging],
-          mainRepoRoot,
-        );
-        if (!wtResult.ok) {
-          // Branch may already exist — try adding worktree for existing branch
-          console.log(`[detect] Branch exists, trying existing branch worktree`);
-          const wtExisting = await git(
-            ['worktree', 'add', workspaceDir, featureBranch],
-            mainRepoRoot,
-          );
-          if (!wtExisting.ok) {
-            // Worktree directory may already exist from a previous run
-            const { existsSync } = await import('node:fs');
-            if (existsSync(workspaceDir)) {
-              console.log(`[detect] Worktree already exists at ${workspaceDir}, pulling latest`);
-              const pullResult = await git(['pull', '--ff-only'], workspaceDir);
-              if (!pullResult.ok) {
-                console.error(`[detect] git pull failed:`, pullResult.error.message);
-                return 'failure';
-              }
-            } else {
-              console.error(`[detect] Worktree creation failed:`, wtExisting.error.message);
-              return 'failure';
-            }
-          }
+        console.log(`[detect] Reconciling workspace ${workspaceDir} for ${featureBranch} from ${config.branches.staging}`);
+        const reconciled = await reconcileWorkspace({
+          repoRoot: mainRepoRoot,
+          workspaceDir,
+          featureBranch,
+          stagingBranch: config.branches.staging,
+        });
+        if (!reconciled.ok) {
+          console.error(`[detect] Workspace reconcile failed:`, reconciled.error.message);
+          return 'failure';
         }
-        workspaceCwd = workspaceDir;
-        run.workspacePath = workspaceDir; // Persist for daemon restart recovery
+        workspaceCwd = reconciled.value.path;
+        run.workspacePath = reconciled.value.path; // Persist for daemon restart recovery
         return 'success';
       } finally {
         releaseRepoGitLock();

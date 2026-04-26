@@ -637,10 +637,12 @@ STACK-AC-COORDINATION-DAEMON-WIRING:
     - packages/daemon/src/control-plane/daemon.ts
     - packages/daemon/src/control-plane/po-snapshot.ts
     - packages/daemon/src/coordination/coordinator.ts
+    - packages/daemon/src/control-plane/workspace.ts
   test_paths:
     - packages/daemon/src/control-plane/daemon.test.ts
     - packages/daemon/src/control-plane/daemon-po-wiring.test.ts
     - packages/daemon/src/coordination/coordinator.test.ts
+    - packages/daemon/src/control-plane/workspace.test.ts
   status: draft
 
 STACK-AC-PRODUCT-OWNER:
