@@ -1,5 +1,5 @@
 // src/knowledge-sync/manifest.test.ts
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { writeFile, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';

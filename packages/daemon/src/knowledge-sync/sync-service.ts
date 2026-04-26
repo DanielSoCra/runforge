@@ -41,7 +41,7 @@ export function createKnowledgeSyncService(
         deduplicated: 0,
         parseFailures: 0,
         storeErrors: 0,
-        errors: reason ? [reason] : [],
+        errors: reason !== undefined ? [reason] : [],
       },
       status: 'success',
     };
