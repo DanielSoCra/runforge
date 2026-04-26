@@ -486,6 +486,44 @@ describe('loadPromptTemplate', () => {
     const result = await loadPromptTemplate('worker', { task: 'build feature' });
     expect(result).toBe('Task: build feature\nPitfalls: {{pitfalls}}');
   });
+
+  it('applies defaults for omitted keys when prompt is registered', async () => {
+    // Write a minimal l2-designer template that references {{feedback}} so the
+    // default-applied substitution is observable.
+    await writeFile(
+      join(tmpDir, 'l2-designer.md'),
+      'Issue {{issueNumber}}: {{issueTitle}}\nBody: {{issueBody}}\n' +
+      'Spec: {{specContent}}\nRepo: {{owner}}/{{repo}}\nFeedback: {{feedback}}',
+    );
+    const out = await loadPromptTemplate('l2-designer', {
+      issueNumber: '1', issueTitle: 't', issueBody: 'b',
+      specContent: 's', owner: 'o', repo: 'r',
+    });
+    expect(out).not.toBeNull();
+    // {{feedback}} should have been substituted with the default (empty string)
+    expect(out).not.toMatch(/\{\{feedback\}\}/);
+  });
+
+  it('throws when caller passes an unknown variable to a registered prompt (test mode)', async () => {
+    await expect(loadPromptTemplate('l2-designer', {
+      issueNumber: '1', issueTitle: 't', issueBody: 'b',
+      specContent: 's', owner: 'o', repo: 'r', feedback: '',
+      surprise: 'x',
+    } as Record<string, string>)).rejects.toThrow(/unknown variable.*surprise/);
+  });
+
+  it('throws when caller omits a required variable for a registered prompt (test mode)', async () => {
+    await expect(loadPromptTemplate('compliance-reviewer', {
+      issueNumber: '1', repo: 'r',
+    } as Record<string, string>)).rejects.toThrow(/missing required variable/);
+  });
+
+  it('leaves unregistered prompts unchanged (legacy behavior)', async () => {
+    // worker is not in PROMPT_CONTRACTS — caller can pass anything
+    await writeFile(join(tmpDir, 'worker.md'), 'Task: {{task}}\nSpecs: {{specs}}');
+    const out = await loadPromptTemplate('worker', { task: 'x', specs: 'y' });
+    expect(out).not.toBeNull();
+  });
 });
 
 describe('SessionRuntime prompt assembly with templates', () => {
