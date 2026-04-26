@@ -524,7 +524,11 @@ describe('CliAdapter.spawn() (#102)', () => {
     }
   });
 
-  it('returns failed result on non-zero exit code', async () => {
+  it('downgrades unmarked output on non-zero exit to completed-with-concerns', async () => {
+    // When the CLI exits non-zero but produced parseable output without a
+    // status marker (default "completed"), we soften to completed-with-concerns
+    // instead of 'failed' so the implement phase doesn't loop indefinitely on
+    // post-completion non-fatal CLI errors. Review gates still run.
     const mockProc = createMockProcess();
     vi.mocked(spawnMock).mockReturnValue(mockProc as never);
 
@@ -540,7 +544,7 @@ describe('CliAdapter.spawn() (#102)', () => {
     const result = await promise;
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.exitStatus).toBe('failed');
+      expect(result.value.exitStatus).toBe('completed-with-concerns');
       expect(result.value.cost).toBe(0.01);
     }
   });
@@ -831,7 +835,11 @@ describe('CliAdapter.spawn() (#102)', () => {
     }
   });
 
-  it('does not parse exit status from output on non-zero exit code (#329)', async () => {
+  it('preserves explicit DONE_WITH_CONCERNS marker when CLI exits non-zero (#329 update)', async () => {
+    // #329 originally distrusted worker self-report on non-zero exit. The newer
+    // policy trusts the marker but downgrades unmarked-completed output (see
+    // adjacent test). DONE_WITH_CONCERNS already signals concerns, so it stays.
+    // Review gates still catch real defects in either path.
     const mockProc = createMockProcess();
     vi.mocked(spawnMock).mockReturnValue(mockProc as never);
 
@@ -839,7 +847,7 @@ describe('CliAdapter.spawn() (#102)', () => {
     const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
 
     mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
-      result: 'Crashed\n**DONE_WITH_CONCERNS** — this should not matter',
+      result: 'Crashed\n**DONE_WITH_CONCERNS** — captured non-fatal error',
       cost_usd: 0.01,
     })));
     mockProc.emit('close', 1);
@@ -847,7 +855,7 @@ describe('CliAdapter.spawn() (#102)', () => {
     const result = await promise;
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.exitStatus).toBe('failed');
+      expect(result.value.exitStatus).toBe('completed-with-concerns');
     }
   });
 

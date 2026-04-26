@@ -291,9 +291,25 @@ export class CliAdapter implements ProviderAdapter {
           return;
         }
 
+        const reportedStatus = this.parseExitStatusFromOutput(parsed.value.output);
+        // When the CLI exits non-zero but produced parseable output that the worker
+        // marked as "completed", downgrade to 'completed-with-concerns' rather than
+        // hard-failing the unit. The review gates still run; we don't loop at
+        // implement burning budget on retries that won't improve. Other reported
+        // statuses (failed/blocked/needs-context) are preserved as-is.
         const exitStatus: ExitStatus = code === 0
-          ? this.parseExitStatusFromOutput(parsed.value.output)
-          : 'failed';
+          ? reportedStatus
+          : reportedStatus === 'completed'
+            ? 'completed-with-concerns'
+            : reportedStatus;
+
+        if (code !== 0) {
+          const stderrTail = stderr.trim().slice(-1200) || '(empty stderr)';
+          const outputTail = parsed.value.output.trim().slice(-1200) || '(empty output)';
+          console.warn(
+            `[cli-adapter] claude exited ${code}; reported=${reportedStatus}; returning=${exitStatus}; stderr_tail=${JSON.stringify(stderrTail)}; output_tail=${JSON.stringify(outputTail)}`,
+          );
+        }
 
         resolve(ok({
           output: parsed.value.output,
