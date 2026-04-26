@@ -153,6 +153,38 @@ describe('SessionRuntime', () => {
     expect(assembled.indexOf('PLUGIN INJECTION')).toBeLessThan(assembled.indexOf('SYSTEM PROMPT'));
   });
 
+  it('serializes object jsonSchema to string before adapter.spawn (Codex 057caeb)', async () => {
+    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '', cost: 0.01 } });
+    const schema = { type: 'object', properties: { nested: { type: 'array', items: { type: 'string' } } }, required: ['nested'] };
+    await runtime.spawnSession(
+      'worker',
+      { variables: { task: 'do it' }, workspacePath: '/tmp/ws' },
+      99,
+      { jsonSchema: schema },
+    );
+    expect(mockSpawn).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      expect.objectContaining({ jsonSchema: JSON.stringify(schema) }),
+    );
+  });
+
+  it('passes through string jsonSchema unchanged to adapter.spawn', async () => {
+    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '', cost: 0.01 } });
+    const schemaString = '{"type":"object"}';
+    await runtime.spawnSession(
+      'worker',
+      { variables: { task: 'do it' }, workspacePath: '/tmp/ws' },
+      99,
+      { jsonSchema: schemaString },
+    );
+    expect(mockSpawn).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      expect.objectContaining({ jsonSchema: schemaString }),
+    );
+  });
+
   it('passes containmentPolicy to adapter.spawn', async () => {
     mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '', cost: 0.01 } });
     await runtime.spawnSession(
