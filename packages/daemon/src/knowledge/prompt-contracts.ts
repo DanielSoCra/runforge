@@ -22,6 +22,14 @@ export const PROMPT_CONTRACTS: Readonly<Record<string, PromptContract>> = {
   'compliance-reviewer': {
     variables: ['issueNumber', 'issueTitle', 'issueBody', 'specContent', 'owner', 'repo'],
   },
+  'worker': {
+    variables: ['task', 'specs', 'verification', 'pitfalls'],
+    defaults: { pitfalls: '' },
+  },
+  'bug-worker': {
+    variables: ['bugReport', 'diagnosis', 'specs', 'pitfalls'],
+    defaults: { pitfalls: '' },
+  },
 };
 
 const PLACEHOLDER_RE = /\{\{([\w-]+)\}\}/g;

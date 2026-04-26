@@ -72,11 +72,20 @@ export function getUnitsByBatch(graph: TaskGraph): Unit[][] {
     .map(([, units]) => units);
 }
 
+/** Default verification command for simple-complexity worker units.
+ *  This is passed into the worker prompt as `{{verification}}` — the worker
+ *  agent runs it as part of its TDD protocol. The daemon does not execute it
+ *  directly. Defaults to the standard repo-root checks every package supports.
+ */
+export const DEFAULT_VERIFICATION_COMMAND = 'pnpm -r typecheck && pnpm -r test';
+
 export function createSingleUnitGraph(
   issueNumber: number,
   featureBranch: string,
   title: string,
   context: string,
+  specContent: string = '',
+  verificationCommand: string = DEFAULT_VERIFICATION_COMMAND,
 ): TaskGraph {
   return {
     issueNumber,
@@ -85,11 +94,11 @@ export function createSingleUnitGraph(
       id: `issue-${issueNumber}`,
       title,
       specIds: [],
-      specContent: '',
+      specContent,
       expectedArtifacts: [],
       dependencies: [],
       batchNumber: 0,
-      verificationCommand: '',
+      verificationCommand,
       context,
     }],
   };

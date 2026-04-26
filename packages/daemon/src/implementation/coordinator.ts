@@ -53,6 +53,8 @@ export class ImplementationCoordinator {
         featureBranch,
         request.title,
         `Title: ${request.title}\n\n${request.body}`,
+        options?.specContent ?? '',
+        // verification command: leave to createSingleUnitGraph's default
       );
     } else {
       const decomposeResult = await decompose(

@@ -36,6 +36,11 @@ const testConfig = {
   perRunBudget: 10,
 } as Config;
 
+// Full variable set for the registered worker prompt contract
+// (task, specs, verification, pitfalls — pitfalls has default ''; the others
+// must be present or assertContract throws in test mode).
+const WORKER_VARS = { task: 'do it', specs: '', verification: '', pitfalls: '' };
+
 describe('SessionRuntime', () => {
   let runtime: SessionRuntime;
   let costTracker: CostTracker;
@@ -96,7 +101,7 @@ describe('SessionRuntime', () => {
 
   it('rejects when daily budget exceeded with SessionError', async () => {
     costTracker.recordCost(1, 51);
-    const result = await runtime.spawnSession('worker', { variables: {} }, 2);
+    const result = await runtime.spawnSession('worker', { variables: WORKER_VARS }, 2);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.message).toContain('Budget exceeded');
@@ -107,7 +112,7 @@ describe('SessionRuntime', () => {
 
   it('rejects when per-run budget exceeded with SessionError', async () => {
     costTracker.recordCost(1, 11);
-    const result = await runtime.spawnSession('worker', { variables: {} }, 1);
+    const result = await runtime.spawnSession('worker', { variables: WORKER_VARS }, 1);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.message).toContain('Budget exceeded');
@@ -158,7 +163,7 @@ describe('SessionRuntime', () => {
     const schema = { type: 'object', properties: { nested: { type: 'array', items: { type: 'string' } } }, required: ['nested'] };
     await runtime.spawnSession(
       'worker',
-      { variables: { task: 'do it' }, workspacePath: '/tmp/ws' },
+      { variables: WORKER_VARS, workspacePath: '/tmp/ws' },
       99,
       { jsonSchema: schema },
     );
@@ -174,7 +179,7 @@ describe('SessionRuntime', () => {
     const schemaString = '{"type":"object"}';
     await runtime.spawnSession(
       'worker',
-      { variables: { task: 'do it' }, workspacePath: '/tmp/ws' },
+      { variables: WORKER_VARS, workspacePath: '/tmp/ws' },
       99,
       { jsonSchema: schemaString },
     );
@@ -189,7 +194,7 @@ describe('SessionRuntime', () => {
     mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '', cost: 0.01 } });
     await runtime.spawnSession(
       'worker',
-      { variables: { task: 'do it' }, workspacePath: '/tmp/ws' },
+      { variables: WORKER_VARS, workspacePath: '/tmp/ws' },
       99,
     );
     expect(mockSpawn).toHaveBeenCalledWith(
@@ -211,7 +216,7 @@ describe('SessionRuntime', () => {
 
     const result = await runtime.spawnSession(
       'worker',
-      { variables: { task: 'do it' }, workspacePath: '/tmp', activePlugins: [] },
+      { variables: WORKER_VARS, workspacePath: '/tmp', activePlugins: [] },
       42,
       undefined,
       runWriter,
@@ -229,7 +234,7 @@ describe('SessionRuntime', () => {
 
     await runtime.spawnSession(
       'worker',
-      { variables: { task: 'do it' }, workspacePath: '/tmp' },
+      { variables: WORKER_VARS, workspacePath: '/tmp' },
       77,
     );
 
@@ -244,7 +249,7 @@ describe('SessionRuntime', () => {
 
     await runtime.spawnSession(
       'worker',
-      { variables: { task: 'do it' }, workspacePath: '/tmp' },
+      { variables: WORKER_VARS, workspacePath: '/tmp' },
       88,
       undefined,
       runWriter,
@@ -260,7 +265,7 @@ describe('SessionRuntime', () => {
 
     await runtime.spawnSession(
       'worker',
-      { variables: { task: 'do it' }, workspacePath: '/tmp' },
+      { variables: WORKER_VARS, workspacePath: '/tmp' },
       99,
     );
 
@@ -273,7 +278,7 @@ describe('SessionRuntime', () => {
 
     await runtime.spawnSession(
       'worker',
-      { variables: { task: 'do it' }, workspacePath: '/tmp' },
+      { variables: WORKER_VARS, workspacePath: '/tmp' },
       100,
     );
 
@@ -286,7 +291,7 @@ describe('SessionRuntime', () => {
     rateLimiter.reportRateLimit(); // activate cooldown
     const rl = new SessionRuntime(testConfig, costTracker, rateLimiter);
 
-    const result = await rl.spawnSession('worker', { variables: {} }, 1);
+    const result = await rl.spawnSession('worker', { variables: WORKER_VARS }, 1);
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.message).toContain('Rate limited');
@@ -305,7 +310,7 @@ describe('SessionRuntime', () => {
       error: new SessionError('Rate limited by upstream provider', 0.1, true),
     });
 
-    await rl.spawnSession('worker', { variables: { task: 'do it' } }, 42);
+    await rl.spawnSession('worker', { variables: WORKER_VARS }, 42);
 
     // Rate limiter should now be in cooldown
     const check = rateLimiter.checkRateLimit();
@@ -322,7 +327,7 @@ describe('SessionRuntime', () => {
       error: new SessionError('Some other error', 0.1, false),
     });
 
-    await rl.spawnSession('worker', { variables: { task: 'do it' } }, 42);
+    await rl.spawnSession('worker', { variables: WORKER_VARS }, 42);
 
     const check = rateLimiter.checkRateLimit();
     expect(check.clear).toBe(true);
@@ -338,7 +343,7 @@ describe('SessionRuntime', () => {
 
     const result = await runtime.spawnSession(
       'worker',
-      { variables: { task: 'do it' }, workspacePath: '/tmp/ws' },
+      { variables: WORKER_VARS, workspacePath: '/tmp/ws' },
       50,
     );
 
@@ -353,7 +358,7 @@ describe('SessionRuntime', () => {
 
     const result = await runtime.spawnSession(
       'worker',
-      { variables: { task: 'do it' }, workspacePath: '/tmp/ws' },
+      { variables: WORKER_VARS, workspacePath: '/tmp/ws' },
       51,
     );
 
@@ -378,7 +383,7 @@ describe('SessionRuntime', () => {
     mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: 'done', cost: 0.01 } });
     await runtime.spawnSession(
       'worker',
-      { variables: { task: 'do it' }, workspacePath: '/tmp/ws', activePlugins: [{ id: 'figma-plugin', activatedAt: '2024-01-01T00:00:00Z' }] },
+      { variables: WORKER_VARS, workspacePath: '/tmp/ws', activePlugins: [{ id: 'figma-plugin', activatedAt: '2024-01-01T00:00:00Z' }] },
       200,
     );
 
@@ -406,7 +411,7 @@ describe('SessionRuntime', () => {
     mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: 'done', cost: 0.01 } });
     const result = await runtime.spawnSession(
       'worker',
-      { variables: { task: 'do it' }, workspacePath: '/tmp/ws', activePlugins: [{ id: 'lint-plugin', activatedAt: '2024-01-01T00:00:00Z' }] },
+      { variables: WORKER_VARS, workspacePath: '/tmp/ws', activePlugins: [{ id: 'lint-plugin', activatedAt: '2024-01-01T00:00:00Z' }] },
       201,
     );
 
@@ -458,7 +463,7 @@ describe('SessionRuntime', () => {
 
     const result = await runtime.spawnSession(
       'worker',
-      { variables: { task: 'do it' }, workspacePath: '/tmp/ws' },
+      { variables: WORKER_VARS, workspacePath: '/tmp/ws' },
       52,
     );
 
@@ -485,8 +490,9 @@ describe('loadPromptTemplate', () => {
   });
 
   it('loads template from prompts/{name}.md and substitutes {{variables}}', async () => {
-    await writeFile(join(tmpDir, 'worker.md'), '# Worker\n\nTask: {{task}}\nSpecs: {{specs}}');
-    const result = await loadPromptTemplate('worker', { task: 'build feature', specs: 'FUNC-1' });
+    // Using an unregistered synthetic prompt name so the contract registry doesn't apply
+    await writeFile(join(tmpDir, 'test-loader.md'), '# Worker\n\nTask: {{task}}\nSpecs: {{specs}}');
+    const result = await loadPromptTemplate('test-loader', { task: 'build feature', specs: 'FUNC-1' });
     expect(result).toBe('# Worker\n\nTask: build feature\nSpecs: FUNC-1');
   });
 
@@ -502,8 +508,8 @@ describe('loadPromptTemplate', () => {
   });
 
   it('replaces all occurrences of the same placeholder', async () => {
-    await writeFile(join(tmpDir, 'worker.md'), 'Run {{cmd}} then {{cmd}} again');
-    const result = await loadPromptTemplate('worker', { cmd: 'vitest' });
+    await writeFile(join(tmpDir, 'test-repeat.md'), 'Run {{cmd}} then {{cmd}} again');
+    const result = await loadPromptTemplate('test-repeat', { cmd: 'vitest' });
     expect(result).toBe('Run vitest then vitest again');
   });
 
@@ -514,8 +520,8 @@ describe('loadPromptTemplate', () => {
   });
 
   it('leaves unknown placeholders intact (delegates to knowledge/renderTemplate)', async () => {
-    await writeFile(join(tmpDir, 'worker.md'), 'Task: {{task}}\nPitfalls: {{pitfalls}}');
-    const result = await loadPromptTemplate('worker', { task: 'build feature' });
+    await writeFile(join(tmpDir, 'test-placeholder.md'), 'Task: {{task}}\nPitfalls: {{pitfalls}}');
+    const result = await loadPromptTemplate('test-placeholder', { task: 'build feature' });
     expect(result).toBe('Task: build feature\nPitfalls: {{pitfalls}}');
   });
 
@@ -551,9 +557,9 @@ describe('loadPromptTemplate', () => {
   });
 
   it('leaves unregistered prompts unchanged (legacy behavior)', async () => {
-    // worker is not in PROMPT_CONTRACTS — caller can pass anything
-    await writeFile(join(tmpDir, 'worker.md'), 'Task: {{task}}\nSpecs: {{specs}}');
-    const out = await loadPromptTemplate('worker', { task: 'x', specs: 'y' });
+    // test-unregistered is not in PROMPT_CONTRACTS — caller can pass anything
+    await writeFile(join(tmpDir, 'test-unregistered.md'), 'Task: {{task}}\nSpecs: {{specs}}');
+    const out = await loadPromptTemplate('test-unregistered', { task: 'x', specs: 'y' });
     expect(out).not.toBeNull();
   });
 });
@@ -577,7 +583,7 @@ describe('SessionRuntime prompt assembly with templates', () => {
   });
 
   it('assemblePrompt loads template instead of using empty systemPrompt', async () => {
-    await writeFile(join(tmpDir, 'worker.md'), '# Worker\n\nYou implement {{task}} per {{specs}}.');
+    await writeFile(join(tmpDir, 'worker.md'), '# Worker\n\nYou implement {{task}} per {{specs}}.\nVerify: {{verification}}\n{{pitfalls}}');
     const costTracker = new CostTracker({ dailyBudget: 50, perRunBudget: 10 });
     const runtime = new SessionRuntime(
       { adapter: 'cli', dailyBudget: 50, perRunBudget: 10 } as Config,
@@ -585,7 +591,7 @@ describe('SessionRuntime prompt assembly with templates', () => {
     );
     const result = await (runtime as any).assemblePrompt(
       { name: 'worker', systemPrompt: '' },
-      { variables: { task: 'add auth', specs: 'FUNC-AC-SAFETY' } },
+      { variables: { task: 'add auth', specs: 'FUNC-AC-SAFETY', verification: 'pnpm test', pitfalls: '' } },
     );
     expect(result.prompt).toContain('# Worker');
     expect(result.prompt).toContain('You implement add auth per FUNC-AC-SAFETY.');

@@ -526,11 +526,25 @@ export function createPhaseHandlers(
       const handoffNotes = run.handoffNotes
         ? new Map(Object.entries(run.handoffNotes))
         : undefined;
+      // Load spec content so simple-complexity workers receive non-empty {{specs}}
+      // (Codex review of fix/worker-context — without this, the new specContent
+      // pass-through in createSingleUnitGraph is unreachable from the real
+      // production path; the worker keeps getting empty specs).
+      await ensureWorkspace(run); const cwd = workspaceCwd;
+      const specifyRoot = join(cwd, '.specify');
+      let specContent = '';
+      try {
+        specContent = await loadSpecContent(run.specRefs ?? workRequest.specRefs, specifyRoot);
+      } catch (e) {
+        console.warn(`[implement] Failed to load spec content:`, e);
+      }
       const result = await coordinator.implement(workRequest, featureBranch, runWriter, runId, {
         handoffNotes,
         variant: run.variant,
         diagnosisDetail: run.diagnosisDetail,
         activePlugins,
+        complexity: run.classificationComplexity,
+        specContent,
       });
       if (!result.ok) { console.error(`[implement] Error:`, result.error.message); return 'failure'; }
       if (!result.value.success) {
