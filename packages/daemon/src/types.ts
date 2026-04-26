@@ -113,6 +113,10 @@ export interface RunState {
   pausedAtPhase?: Phase;
   l2GateNotified?: boolean;
   l2Feedback?: string;
+  /** Compliance findings from the most recent l3-compliance failure, fed back into l3-generate. */
+  l3Feedback?: string;
+  /** Counter for l3-compliance failure attempts (every failure path); capped to prevent infinite cross-phase loop. */
+  l3ComplianceAttempts?: number;
   workspacePath?: string; // Persisted worktree path — survives daemon restarts
 }
 

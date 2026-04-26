@@ -21,3 +21,27 @@ export type BugDiagnosisOutput = z.infer<typeof BugDiagnosisSchema>;
 export const bugDiagnosisJsonSchema = JSON.stringify(
   z.toJSONSchema(BugDiagnosisSchema, { target: 'draft-07' }),
 );
+
+export const complianceReportJsonSchema = {
+  type: 'object',
+  properties: {
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['contradiction', 'traceability', 'code-gap'] },
+          severity: { type: 'string', enum: ['critical', 'warning'] },
+          location: { type: 'string' },
+          description: { type: 'string' },
+        },
+        required: ['type', 'severity', 'location', 'description'],
+        additionalProperties: false,
+      },
+    },
+    summary: { type: 'string' },
+    compliant: { type: 'boolean' },
+  },
+  required: ['findings', 'summary', 'compliant'],
+  additionalProperties: false,
+} as const;
