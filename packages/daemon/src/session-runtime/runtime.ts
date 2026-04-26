@@ -255,7 +255,7 @@ export class SessionRuntime {
     type: SessionType,
     context: SessionContext,
     issueNumber: number,
-    options?: { jsonSchema?: string; agentDef?: AgentDefinition },
+    options?: { jsonSchema?: string | object; agentDef?: AgentDefinition },
     runWriter?: SupabaseRunWriter,
     runId?: string,
   ): Promise<Result<SessionResult>> {
@@ -288,10 +288,16 @@ export class SessionRuntime {
     // 5. Assemble prompt and extract plugin artifacts (ARCH-AC-PLUGINS Flow 4 step 3)
     const assembled = await this.assemblePrompt(def, context);
 
-    // 6. Delegate to adapter — with containment policy and plugin MCP configs
+    // 6. Delegate to adapter — with containment policy and plugin MCP configs.
+    // jsonSchema may be passed as object (callers like l3-compliance use the
+    // exported schema constant directly) or a pre-stringified string. Adapter
+    // expects string for the CLI --json-schema arg, so serialize here.
+    const jsonSchema = typeof options?.jsonSchema === 'object' && options.jsonSchema !== null
+      ? JSON.stringify(options.jsonSchema)
+      : options?.jsonSchema;
     const result = await this.adapter.spawn(def, assembled.prompt, {
       cwd: context.workspacePath,
-      jsonSchema: options?.jsonSchema,
+      jsonSchema,
       containmentPolicy: DEFAULT_POLICY,
       mcpConfigs: assembled.mcpConfigs,
     });

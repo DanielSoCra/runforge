@@ -1647,7 +1647,9 @@ describe('createPhaseHandlers', () => {
         expect.objectContaining({
           variables: expect.objectContaining({ issueNumber: '42' }),
         }),
-        42, undefined, undefined, undefined,
+        42,
+        expect.objectContaining({ jsonSchema: expect.any(Object) }),
+        undefined, undefined,
       );
     });
 
@@ -1692,6 +1694,129 @@ describe('createPhaseHandlers', () => {
       // "passed: false" is an unknown field — phase should return success (not failure)
       // because the compliance-reviewer schema uses "compliant", not "passed"
       expect(result).toBe('success');
+    });
+
+    it('passes complianceReportJsonSchema to compliance-reviewer spawn', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: 'done',
+          structuredData: {
+            result: 'r', cost_usd: 0,
+            structured_output: { compliant: true, findings: [], summary: 'ok' },
+          },
+          cost: 0.5,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        },
+      });
+      const { handlers } = createHandlers();
+      await handlers['l3-compliance']!(makeRun());
+      const spawnArgs = mockRuntime.spawnSession.mock.calls.find(
+        (c: any[]) => c[0] === 'compliance-reviewer',
+      )!;
+      expect(spawnArgs[3]).toMatchObject({ jsonSchema: expect.any(Object) });
+    });
+
+    it('extracts compliant=false from wrapped structured_output and captures findings as l3Feedback', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: 'done',
+          structuredData: {
+            result: 'r', cost_usd: 0,
+            structured_output: {
+              compliant: false,
+              findings: [
+                { type: 'contradiction', severity: 'critical',
+                  location: 'spec.md', description: 'missing field' },
+              ],
+              summary: 'broken',
+            },
+          },
+          cost: 0.5,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers['l3-compliance']!(run);
+      expect(result).toBe('failure');
+      expect(run.l3Feedback).toContain('missing field');
+      expect(run.l3ComplianceAttempts).toBe(1);
+    });
+
+    it('also increments counter on session crash (no structuredData)', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: false,
+        error: new Error('session crashed'),
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers['l3-compliance']!(run);
+      expect(result).toBe('failure');
+      expect(run.l3ComplianceAttempts).toBe(1);
+    });
+
+    it('also increments counter on session timeout', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: '',
+          structuredData: { result: '', cost_usd: 0, structured_output: null },
+          cost: 0,
+          pitfallMarkers: [],
+          exitStatus: 'timed-out',
+        },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers['l3-compliance']!(run);
+      expect(result).toBe('failure');
+      expect(run.l3ComplianceAttempts).toBe(1);
+    });
+
+    it('routes to escalated after MAX_L3_COMPLIANCE_ATTEMPTS failures', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: 'done',
+          structuredData: {
+            result: 'r', cost_usd: 0,
+            structured_output: { compliant: false, findings: [], summary: 's' },
+          },
+          cost: 0.5,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun({ l3ComplianceAttempts: 2 }); // about to hit the cap of 3
+      const result = await handlers['l3-compliance']!(run);
+      expect(result).toBe('escalated');
+      expect(run.l3ComplianceAttempts).toBe(3);
+    });
+
+    it('returns success and clears compliance counter when compliant', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: 'done',
+          structuredData: {
+            result: 'r', cost_usd: 0,
+            structured_output: { compliant: true, findings: [], summary: 'ok' },
+          },
+          cost: 0.5,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun({ l3ComplianceAttempts: 2 });
+      const result = await handlers['l3-compliance']!(run);
+      expect(result).toBe('success');
+      expect(run.l3ComplianceAttempts).toBeUndefined();
     });
   });
 
