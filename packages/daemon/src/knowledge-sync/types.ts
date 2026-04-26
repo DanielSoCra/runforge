@@ -13,10 +13,12 @@ export const ImportSourceSchema = z.object({
 export type ImportSource = z.infer<typeof ImportSourceSchema>;
 
 export const VaultAccessManifestSchema = z.object({
-  importSources: z.array(ImportSourceSchema).refine(
-    sources => new Set(sources.map(s => s.name)).size === sources.length,
-    { message: 'Duplicate import source names are not allowed' },
-  ),
+  importSources: z
+    .array(ImportSourceSchema)
+    .refine(
+      (sources) => new Set(sources.map((s) => s.name)).size === sources.length,
+      { message: 'Duplicate import source names are not allowed' },
+    ),
 });
 export type VaultAccessManifest = z.infer<typeof VaultAccessManifestSchema>;
 

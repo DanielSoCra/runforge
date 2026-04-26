@@ -6,9 +6,17 @@ import { tmpdir } from 'os';
 import { createKnowledgeSyncService } from './sync-service.js';
 import type { KnowledgeStore } from '../knowledge/knowledge-store.js';
 
-const tmpDir = () => join(tmpdir(), `sync-svc-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+const tmpDir = () =>
+  join(
+    tmpdir(),
+    `sync-svc-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
 
-async function createVault(dir: string, manifestContent: string, docs: Record<string, string> = {}) {
+async function createVault(
+  dir: string,
+  manifestContent: string,
+  docs: Record<string, string> = {},
+) {
   await mkdir(dir, { recursive: true });
   await mkdir(join(dir, '00-Meta'), { recursive: true });
   await writeFile(join(dir, '00-Meta', 'auto-claude-sync.md'), manifestContent);
@@ -114,7 +122,9 @@ describe('KnowledgeSyncService', () => {
     await createVault(vaultDir, validManifest('mistakes'), {});
 
     const mockStoreSlowly = {
-      storeRecord: vi.fn().mockImplementation(() => new Promise(r => setTimeout(r, 100))),
+      storeRecord: vi
+        .fn()
+        .mockImplementation(() => new Promise((r) => setTimeout(r, 100))),
     } as unknown as KnowledgeStore;
 
     const service = createKnowledgeSyncService(
@@ -129,7 +139,9 @@ describe('KnowledgeSyncService', () => {
 
     // One should complete normally; the other is the concurrent no-op
     const results = [run1, run2];
-    const noOp = results.find(r => r.importResult.errors.some(e => e.includes('already in progress')));
+    const noOp = results.find((r) =>
+      r.importResult.errors.some((e) => e.includes('already in progress')),
+    );
     expect(noOp).toBeDefined();
   });
 
@@ -160,14 +172,17 @@ describe('KnowledgeSyncService', () => {
   });
 
   it('rejects path traversal in relativePath', async () => {
-    await createVault(vaultDir, `---
+    await createVault(
+      vaultDir,
+      `---
 importSources:
   - name: escape
     relativePath: ../../etc
     recordType: technical_pitfall
     recursion: top-level-only
 ---
-`);
+`,
+    );
 
     const service = createKnowledgeSyncService(
       { enabled: true, vaultPath: vaultDir, syncIntervalMinutes: 60 },

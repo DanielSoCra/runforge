@@ -1,7 +1,10 @@
 // src/knowledge-sync/manifest.ts
 import { readFile } from 'fs/promises';
 import matter from 'gray-matter';
-import { VaultAccessManifestSchema, type VaultAccessManifest } from './types.js';
+import {
+  VaultAccessManifestSchema,
+  type VaultAccessManifest,
+} from './types.js';
 
 const MANIFEST_RELATIVE_PATH = '00-Meta/auto-claude-sync.md';
 
@@ -9,7 +12,9 @@ export function getManifestPath(vaultRoot: string): string {
   return `${vaultRoot}/${MANIFEST_RELATIVE_PATH}`;
 }
 
-export async function readVaultManifest(manifestPath: string): Promise<VaultAccessManifest | null> {
+export async function readVaultManifest(
+  manifestPath: string,
+): Promise<VaultAccessManifest | null> {
   let raw: string;
   try {
     raw = await readFile(manifestPath, 'utf-8');

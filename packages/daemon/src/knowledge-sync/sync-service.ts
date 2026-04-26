@@ -7,8 +7,16 @@ import { appendJsonl, readJsonl } from '../lib/json-store.js';
 import type { KnowledgeStore } from '../knowledge/knowledge-store.js';
 import { getManifestPath, readVaultManifest } from './manifest.js';
 import { HashRegistry, computeContentHash } from './hash-registry.js';
-import { applyFrontmatterDefaults, mapDocumentToRecord } from './document-mapper.js';
-import { SyncRunSchema, type SyncRun, type SyncImportResult, type VaultDocument } from './types.js';
+import {
+  applyFrontmatterDefaults,
+  mapDocumentToRecord,
+} from './document-mapper.js';
+import {
+  SyncRunSchema,
+  type SyncRun,
+  type SyncImportResult,
+  type VaultDocument,
+} from './types.js';
 import type { ImportSource } from './types.js';
 
 export interface SyncConfig {
@@ -53,17 +61,27 @@ export function createKnowledgeSyncService(
     return 'success';
   }
 
-  async function enumerateSource(vaultRoot: string, source: ImportSource): Promise<string[]> {
+  async function enumerateSource(
+    vaultRoot: string,
+    source: ImportSource,
+  ): Promise<string[]> {
     const absPath = resolve(vaultRoot, source.relativePath);
-    if (!absPath.startsWith(resolve(vaultRoot) + '/') && absPath !== resolve(vaultRoot)) {
-      throw new Error(`Path traversal detected in relativePath: ${source.relativePath}`);
+    if (
+      !absPath.startsWith(resolve(vaultRoot) + '/') &&
+      absPath !== resolve(vaultRoot)
+    ) {
+      throw new Error(
+        `Path traversal detected in relativePath: ${source.relativePath}`,
+      );
     }
 
     try {
-      const entries = await readdir(absPath, { recursive: source.recursion === 'recursive' });
+      const entries = await readdir(absPath, {
+        recursive: source.recursion === 'recursive',
+      });
       return (entries as string[])
-        .filter(e => e.endsWith('.md'))
-        .map(e => join(absPath, e));
+        .filter((e) => e.endsWith('.md'))
+        .map((e) => join(absPath, e));
     } catch (e: unknown) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === 'ENOENT') return [];
@@ -95,8 +113,13 @@ export function createKnowledgeSyncService(
 
     const { confidence, artifactPatterns } = applyFrontmatterDefaults(
       {
-        confidence: typeof frontmatter.confidence === 'number' ? frontmatter.confidence : undefined,
-        artifact_patterns: Array.isArray(frontmatter.artifact_patterns) ? frontmatter.artifact_patterns : undefined,
+        confidence:
+          typeof frontmatter.confidence === 'number'
+            ? frontmatter.confidence
+            : undefined,
+        artifact_patterns: Array.isArray(frontmatter.artifact_patterns)
+          ? frontmatter.artifact_patterns
+          : undefined,
       },
       {
         confidence: source.confidence,
@@ -121,7 +144,12 @@ export function createKnowledgeSyncService(
       return;
     }
 
-    const mapped = mapDocumentToRecord(doc, source.recordType, source.name, vaultRoot);
+    const mapped = mapDocumentToRecord(
+      doc,
+      source.recordType,
+      source.name,
+      vaultRoot,
+    );
 
     try {
       await store.storeRecord(
@@ -141,7 +169,9 @@ export function createKnowledgeSyncService(
       result.created++;
     } catch (e: unknown) {
       result.storeErrors++;
-      result.errors.push(`Store error for ${vaultDocumentRef}: ${e instanceof Error ? e.message : String(e)}`);
+      result.errors.push(
+        `Store error for ${vaultDocumentRef}: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
 
@@ -201,7 +231,12 @@ export function createKnowledgeSyncService(
     }
 
     const status = deriveStatus(result);
-    const run: SyncRun = { id: randomUUID(), triggeredAt, importResult: result, status };
+    const run: SyncRun = {
+      id: randomUUID(),
+      triggeredAt,
+      importResult: result,
+      status,
+    };
     await appendJsonl(runsPath, run);
     return run;
   }
@@ -225,7 +260,7 @@ export function createKnowledgeSyncService(
 
     async getSyncHistory(limit = 10): Promise<SyncRun[]> {
       const raw = await readJsonl<Record<string, unknown>>(runsPath);
-      const runs = raw.flatMap(line => {
+      const runs = raw.flatMap((line) => {
         const result = SyncRunSchema.safeParse(line);
         return result.success ? [result.data] : [];
       });
