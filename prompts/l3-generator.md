@@ -30,7 +30,7 @@ body: {{issueBody}}
 
 <spec-context>
 The following spec content is provided for convenience. You must still read
-the full spec chain from `.specify/` (L0 → L1 → existing L2 specs). This
+the full chain from `.specify/` for the L2 spec being implemented (L2 → L1 → L0) plus existing L3 specs for patterns. This
 block is not a substitute for reading the source files.
 
 {{specContent}}
