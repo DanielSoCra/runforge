@@ -40,15 +40,21 @@ export async function loadPromptTemplate(
 
   // Apply prompt contract: defaults for omitted keys + reject extras/missing.
   // In test mode we throw (CI catches drift); in production we warn and fall
-  // back to caller's original variables so a contract bug never takes the
+  // back to defaults-applied variables so a contract bug never takes the
   // daemon down at runtime — startup validation is the hard gate.
+  // Defaults are applied even on the fallback path so that, e.g., a registered
+  // prompt with `feedback` default still substitutes `{{feedback}}` with `''`
+  // rather than leaving it as a literal placeholder in the rendered output
+  // (Codex review a2737b6).
+  const defaults = PROMPT_CONTRACTS[name]?.defaults ?? {};
+  const variablesWithDefaults: Record<string, string> = { ...defaults, ...variables };
   let finalVars: Record<string, string>;
   try {
     finalVars = assertContract(name, variables);
   } catch (e) {
     if (isTest) throw e;
     console.warn(`[prompt-template] contract violation for ${name}: ${(e as Error).message}`);
-    finalVars = variables;
+    finalVars = variablesWithDefaults;
   }
 
   const filePath = join(promptsDir(), `${name}.md`);
