@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { loadTemplate, renderTemplate, findUnsubstitutedVars } from './templates.js';
+import { loadTemplate, renderTemplate, findUnsubstitutedVars, findUnusedVariables } from './templates.js';
 
 let dir: string;
 
@@ -124,5 +124,41 @@ describe('findUnsubstitutedVars', () => {
     const template = 'Analyze signals:\n{{signal_snapshot}}\n\nPrioritize {{focus_area}}.';
     const missing = findUnsubstitutedVars(template, {});
     expect(missing).toEqual(['signal_snapshot', 'focus_area']);
+  });
+});
+
+describe('findUnusedVariables', () => {
+  it('returns variables not referenced in template', () => {
+    const tpl = 'Hello {{name}}';
+    expect(findUnusedVariables(tpl, { name: 'x', surprise: 'y' })).toEqual(['surprise']);
+  });
+  it('returns empty when all variables are used', () => {
+    expect(findUnusedVariables('{{a}} {{b}}', { a: '1', b: '2' })).toEqual([]);
+  });
+  it('treats no-placeholder template as all-unused', () => {
+    expect(findUnusedVariables('static text', { a: '1' })).toEqual(['a']);
+  });
+});
+
+describe('renderTemplate rejectUnused option', () => {
+  it('throws when caller passes a variable not in template', () => {
+    expect(() => renderTemplate('Hello {{name}}', { name: 'x', extra: 'y' }, { rejectUnused: true }))
+      .toThrow(/unused variables.*extra/);
+  });
+  it('does not throw when all variables are used', () => {
+    expect(() => renderTemplate('Hello {{name}}', { name: 'x' }, { rejectUnused: true }))
+      .not.toThrow();
+  });
+  it('does not throw on missing placeholder unless strict is also set', () => {
+    expect(() => renderTemplate('{{a}} {{b}}', { a: '1' }, { rejectUnused: true }))
+      .not.toThrow();
+  });
+  it('strict and rejectUnused are independent', () => {
+    expect(() => renderTemplate('{{a}}', { b: '2' }, { strict: true, rejectUnused: true }))
+      .toThrow();
+  });
+  it('rejectUnused fires even when strict is satisfied (Codex review d5f7a78)', () => {
+    expect(() => renderTemplate('{{a}}', { a: '1', b: '2' }, { strict: true, rejectUnused: true }))
+      .toThrow(/unused variables.*b/);
   });
 });

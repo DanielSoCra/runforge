@@ -58,7 +58,7 @@ L0-AC-VISION:
 # --- Auto-Claude L1 specs ---
 
 FUNC-AC-PIPELINE:
-  children: [ARCH-AC-CONTROL-PLANE, ARCH-AC-SPEC-PIPELINE, ARCH-AC-PIPELINE-DISPATCH]
+  children: [ARCH-AC-CONTROL-PLANE, ARCH-AC-SPEC-PIPELINE, ARCH-AC-PIPELINE-DISPATCH, ARCH-AC-PHASE-LABELS, ARCH-AC-BATCH-CLASSIFIER, ARCH-AC-DAG-EXECUTOR]
   status: draft
 
 FUNC-AC-IMPLEMENTATION:
@@ -66,7 +66,7 @@ FUNC-AC-IMPLEMENTATION:
   status: draft
 
 FUNC-AC-QUALITY:
-  children: [ARCH-AC-VALIDATION]
+  children: [ARCH-AC-VALIDATION, ARCH-AC-ADVERSARIAL-REVIEWER]
   status: draft
 
 FUNC-AC-SAFETY:
@@ -78,7 +78,7 @@ FUNC-AC-BUG-TRIAGE:
   status: draft
 
 FUNC-AC-LEARNING:
-  children: [ARCH-AC-KNOWLEDGE, ARCH-AC-ENRICHED-COMMITS]
+  children: [ARCH-AC-KNOWLEDGE, ARCH-AC-ENRICHED-COMMITS, ARCH-AC-KNOWLEDGE-SYNC]
   status: draft
 
 FUNC-AC-DASHBOARD:
@@ -123,9 +123,24 @@ ARCH-AC-COORDINATION:
   children: [STACK-AC-COORDINATION, STACK-AC-MERGE-AGENT, STACK-AC-COORDINATION-DAEMON-WIRING]
   status: draft
 
+ARCH-AC-BATCH-CLASSIFIER:
+  parent: FUNC-AC-PIPELINE
+  children: []
+  status: draft
+
 ARCH-AC-CONTROL-PLANE:
   parent: FUNC-AC-PIPELINE
   children: [STACK-AC-CONTROL-PLANE]
+  status: draft
+
+ARCH-AC-DAG-EXECUTOR:
+  parent: FUNC-AC-PIPELINE
+  children: []
+  status: draft
+
+ARCH-AC-PHASE-LABELS:
+  parent: FUNC-AC-PIPELINE
+  children: []
   status: draft
 
 ARCH-AC-SPEC-PIPELINE:
@@ -146,6 +161,11 @@ ARCH-AC-IMPLEMENTATION:
 ARCH-AC-VALIDATION:
   parent: FUNC-AC-QUALITY
   children: [STACK-AC-VALIDATION]
+  status: draft
+
+ARCH-AC-ADVERSARIAL-REVIEWER:
+  parent: FUNC-AC-QUALITY
+  children: []
   status: draft
 
 ARCH-AC-SESSION-RUNTIME:
@@ -197,6 +217,11 @@ ARCH-AC-ENRICHED-COMMITS:
   children: [STACK-AC-ENRICHED-COMMITS-WORKER, STACK-AC-ENRICHED-COMMITS-KNOWLEDGE]
   status: draft
 
+ARCH-AC-KNOWLEDGE-SYNC:
+  parent: FUNC-AC-LEARNING
+  children: [STACK-AC-KNOWLEDGE-SYNC]
+  status: draft
+
 # --- Auto-Claude L3 specs (stack-specific) ---
 
 # STACK-AC-CONVENTIONS is a cross-cutting spec — it references L0 directly
@@ -205,8 +230,15 @@ ARCH-AC-ENRICHED-COMMITS:
 STACK-AC-CONVENTIONS:
   parent: L0-AC-VISION
   children: []
-  code_paths: [packages/daemon/src/types.ts, packages/daemon/src/main.ts, packages/daemon/src/config.ts, packages/daemon/src/lib/]
-  test_paths: [packages/daemon/src/**/*.test.ts]
+  code_paths:
+    - packages/daemon/src/types.ts
+    - packages/daemon/src/main.ts
+    - packages/daemon/src/config.ts
+    - packages/daemon/src/lib/
+    - packages/daemon/src/lib/structured-output.ts
+  test_paths:
+    - packages/daemon/src/**/*.test.ts
+    - packages/daemon/src/lib/structured-output.test.ts
   status: draft
 
 STACK-AC-CONTROL-PLANE:
@@ -331,8 +363,17 @@ STACK-AC-KNOWLEDGE:
     - packages/daemon/src/knowledge/exemplar-store.ts
     - packages/daemon/src/knowledge/pattern-extractor.ts
     - packages/daemon/src/knowledge/proposal-store.ts
+    - packages/daemon/src/knowledge/prompt-contracts.ts
   test_paths:
     - packages/daemon/src/knowledge/**/*.test.ts
+    - packages/daemon/src/knowledge/prompt-contracts.test.ts
+  status: draft
+
+STACK-AC-KNOWLEDGE-SYNC:
+  parent: ARCH-AC-KNOWLEDGE-SYNC
+  children: []
+  code_paths: []  # planned: packages/daemon/src/knowledge-sync/
+  test_paths: []  # planned: packages/daemon/src/knowledge-sync/**/*.test.ts
   status: draft
 
 STACK-AC-DASHBOARD:

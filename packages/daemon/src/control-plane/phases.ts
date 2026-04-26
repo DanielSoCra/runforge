@@ -29,6 +29,8 @@ import { integrateToStaging } from './integration.js';
 import { runDeploy } from '../validation/deploy.js';
 import { runPostDeployTests } from '../validation/post-deploy-test.js';
 import { reconcileWorkspace } from './workspace.js';
+import { extractStructuredOutput } from '../lib/structured-output.js';
+import { complianceReportJsonSchema } from '../diagnosis/schema.js';
 
 // Serializes git operations on the shared repoRoot across concurrent pipeline runs.
 // Currently protects detect (which modifies checkout state via git checkout).
@@ -264,18 +266,25 @@ export function createPhaseHandlers(
           specContent,
           owner,
           repo: repoName,
-          feedback: '',
+          feedback: run.l3Feedback ?? '',
         },
         workspacePath: cwd,
       }, workRequest.issueNumber, undefined, runWriter, runId);
       if (!result.ok) {
         console.error(`[l3-generate] Session failed: ${result.error.message}`);
+        // Retain l3Feedback so the retry attempt sees the same compliance findings
+        // (Codex review 636ca05 — clearing before failure check loses feedback on
+        //  transient l3-generate self-loop retries).
         return 'failure';
       }
       if (result.value.exitStatus === 'timed-out' || result.value.exitStatus === 'failed') {
         console.error(`[l3-generate] Session exited with status: ${result.value.exitStatus}`);
         return 'failure';
       }
+      // Generator produced an accepted result — clear feedback so the next
+      // compliance failure starts a fresh round (l3-compliance success path
+      // also clears this; double-clear is safe).
+      run.l3Feedback = undefined;
       // Refresh spec refs after L3 generation
       try {
         run.specRefs = await resolveCurrentSpecRefs(cwd, workRequest.specRefs);
@@ -295,6 +304,7 @@ export function createPhaseHandlers(
       } catch (e) {
         console.warn(`[l3-compliance] Failed to load spec content:`, e);
       }
+
       const result = await runtime.spawnSession('compliance-reviewer', {
         variables: {
           issueNumber: String(workRequest.issueNumber),
@@ -305,20 +315,80 @@ export function createPhaseHandlers(
           repo: repoName,
         },
         workspacePath: cwd,
-      }, workRequest.issueNumber, undefined, runWriter, runId);
+      }, workRequest.issueNumber, { jsonSchema: complianceReportJsonSchema }, runWriter, runId);
+
+      // Helper: every failure path must increment the counter and check the cap.
+      const recordFailureAndMaybeEscalate = (feedback?: string): PhaseEvent => {
+        if (feedback !== undefined) {
+          const MAX_FEEDBACK_LENGTH = 4000;
+          run.l3Feedback = feedback.replace(/\{\{[\w-]+\}\}/g, '').slice(0, MAX_FEEDBACK_LENGTH);
+        }
+        run.l3ComplianceAttempts = (run.l3ComplianceAttempts ?? 0) + 1;
+        const MAX_L3_COMPLIANCE_ATTEMPTS = 3;
+        if (run.l3ComplianceAttempts >= MAX_L3_COMPLIANCE_ATTEMPTS) {
+          console.error(`[l3-compliance] Exhausted ${MAX_L3_COMPLIANCE_ATTEMPTS} attempts — escalating to stuck`);
+          return 'escalated';
+        }
+        return 'failure';
+      };
+
       if (!result.ok) {
         console.error(`[l3-compliance] Session failed: ${result.error.message}`);
-        return 'failure';
+        return recordFailureAndMaybeEscalate(`Compliance session error: ${result.error.message}`);
       }
       if (result.value.exitStatus === 'timed-out' || result.value.exitStatus === 'failed') {
         console.error(`[l3-compliance] Session exited with status: ${result.value.exitStatus}`);
-        return 'failure';
+        return recordFailureAndMaybeEscalate(`Compliance session ended with exit status: ${result.value.exitStatus}`);
       }
-      const structuredData = result.value?.structuredData as { compliant?: boolean } | undefined;
-      if (structuredData && structuredData.compliant === false) {
-        console.log(`[l3-compliance] Compliance check failed — gaps found`);
-        return 'failure';
+
+      // Extract compliance payload. Try wrapper unwrap first (preferred path
+      // when --json-schema produced structured_output). Then if `compliant` is
+      // missing, fall back to parsing JSON from result text (model didn't honor
+      // the schema and returned a markdown code block or bare JSON instead).
+      // Without the fallback, a noncompliant report can silently pass when
+      // structured_output is null (Codex deep review of fix/silent-prompt-vars).
+      type CompliancePayload = {
+        compliant?: boolean;
+        findings?: Array<{ type?: string; severity?: string; location?: string; description?: string }>;
+        summary?: string;
+      };
+      const rawData = result.value?.structuredData;
+      let payload = extractStructuredOutput(rawData) as CompliancePayload | undefined;
+      if (typeof payload?.compliant !== 'boolean') {
+        const rd = rawData as Record<string, unknown> | null;
+        const resultText = typeof rd?.['result'] === 'string'
+          ? (rd['result'] as string)
+          : result.value?.output ?? '';
+        const jsonMatch = resultText.match(/```json\s*([\s\S]*?)```/s) ?? resultText.match(/(\{[\s\S]*\})/s);
+        if (jsonMatch?.[1]) {
+          try { payload = JSON.parse(jsonMatch[1]) as CompliancePayload; } catch { /* fall through */ }
+        }
       }
+
+      // Defensive: treat absent or non-boolean `compliant` as failure rather
+      // than silently passing. The compliance gate exists to block bad specs;
+      // a malformed reply must not earn a free pass.
+      if (typeof payload?.compliant !== 'boolean') {
+        const preview = (JSON.stringify(payload) ?? '<undefined>').slice(0, 500);
+        console.error(`[l3-compliance] Compliance reply missing or malformed 'compliant' field — treating as failure`);
+        return recordFailureAndMaybeEscalate(
+          `Compliance session returned malformed output (compliant field missing or non-boolean). ` +
+          `Raw payload preview: ${preview}`,
+        );
+      }
+
+      if (payload.compliant === false) {
+        const findingLines = (payload.findings ?? []).map(
+          (f) => `- [${f.severity ?? 'unknown'}] ${f.location ?? ''}: ${f.description ?? ''}`,
+        ).join('\n');
+        const feedback = `Compliance findings:\n${findingLines}\n\n${payload.summary ?? ''}`;
+        console.log(`[l3-compliance] Compliance failed — captured ${payload.findings?.length ?? 0} findings`);
+        return recordFailureAndMaybeEscalate(feedback);
+      }
+
+      // Success path — clear counter and any stale feedback so the next round starts fresh.
+      run.l3ComplianceAttempts = undefined;
+      run.l3Feedback = undefined;
       return 'success';
     },
 

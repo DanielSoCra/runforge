@@ -15,6 +15,7 @@ import { DEFAULT_POLICY } from './containment-hooks.js';
 import { SessionError } from './session-error.js';
 import { auditSessionOutput } from './audit.js';
 import { renderTemplate, findUnsubstitutedVars } from '../knowledge/templates.js';
+import { assertContract, PROMPT_CONTRACTS } from '../knowledge/prompt-contracts.js';
 
 /** Resolve the prompts/ directory at the repo root. */
 function promptsDir(): string {
@@ -33,17 +34,45 @@ export async function loadPromptTemplate(
   if (name.includes('/') || name.includes('\\') || name.includes('..')) {
     return null;
   }
+
+  const isRegistered = name in PROMPT_CONTRACTS;
+  const isTest = process.env['NODE_ENV'] === 'test' || process.env['VITEST'] === 'true';
+
+  // Apply prompt contract: defaults for omitted keys + reject extras/missing.
+  // In test mode we throw (CI catches drift); in production we warn and fall
+  // back to defaults-applied variables so a contract bug never takes the
+  // daemon down at runtime — startup validation is the hard gate.
+  // Defaults are applied even on the fallback path so that, e.g., a registered
+  // prompt with `feedback` default still substitutes `{{feedback}}` with `''`
+  // rather than leaving it as a literal placeholder in the rendered output
+  // (Codex review a2737b6).
+  const defaults = PROMPT_CONTRACTS[name]?.defaults ?? {};
+  const variablesWithDefaults: Record<string, string> = { ...defaults, ...variables };
+  let finalVars: Record<string, string>;
+  try {
+    finalVars = assertContract(name, variables);
+  } catch (e) {
+    if (isTest) throw e;
+    console.warn(`[prompt-template] contract violation for ${name}: ${(e as Error).message}`);
+    finalVars = variablesWithDefaults;
+  }
+
   const filePath = join(promptsDir(), `${name}.md`);
   try {
     const template = await readFile(filePath, 'utf-8');
-    const missing = findUnsubstitutedVars(template, variables);
+    const missing = findUnsubstitutedVars(template, finalVars);
     if (missing.length > 0) {
       console.warn(
         `[prompt-template] ${name}.md has unsubstituted variables: ${missing.join(', ')}. ` +
         `These will appear as literal {{var}} in the LLM prompt.`,
       );
     }
-    return renderTemplate(template, variables);
+    // Registered prompts in test mode also enforce no-unused at render time so
+    // CI catches caller-passed variables that the template silently drops.
+    const renderOptions = isRegistered && isTest
+      ? { rejectUnused: true } as const
+      : undefined;
+    return renderTemplate(template, finalVars, renderOptions);
   } catch (e: unknown) {
     // Only treat "file not found" as a graceful fallback.
     // Re-throw permission errors, encoding issues, etc. so they surface
@@ -226,7 +255,7 @@ export class SessionRuntime {
     type: SessionType,
     context: SessionContext,
     issueNumber: number,
-    options?: { jsonSchema?: string; agentDef?: AgentDefinition },
+    options?: { jsonSchema?: string | object; agentDef?: AgentDefinition },
     runWriter?: SupabaseRunWriter,
     runId?: string,
   ): Promise<Result<SessionResult>> {
@@ -259,10 +288,16 @@ export class SessionRuntime {
     // 5. Assemble prompt and extract plugin artifacts (ARCH-AC-PLUGINS Flow 4 step 3)
     const assembled = await this.assemblePrompt(def, context);
 
-    // 6. Delegate to adapter — with containment policy and plugin MCP configs
+    // 6. Delegate to adapter — with containment policy and plugin MCP configs.
+    // jsonSchema may be passed as object (callers like l3-compliance use the
+    // exported schema constant directly) or a pre-stringified string. Adapter
+    // expects string for the CLI --json-schema arg, so serialize here.
+    const jsonSchema = typeof options?.jsonSchema === 'object' && options.jsonSchema !== null
+      ? JSON.stringify(options.jsonSchema)
+      : options?.jsonSchema;
     const result = await this.adapter.spawn(def, assembled.prompt, {
       cwd: context.workspacePath,
-      jsonSchema: options?.jsonSchema,
+      jsonSchema,
       containmentPolicy: DEFAULT_POLICY,
       mcpConfigs: assembled.mcpConfigs,
     });

@@ -2,6 +2,7 @@ import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { WorkRequest } from '../types.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import { SessionError } from '../session-runtime/session-error.js';
+import { extractStructuredOutput } from '../lib/structured-output.js';
 import { ClassificationSchema, classificationJsonSchema, type ClassificationResult } from './classifier-schema.js';
 
 export interface ClassifyResult {
@@ -61,23 +62,21 @@ export async function classify(
   // The CLI adapter sets structuredData to the full JSON response object
   // ({result, cost_usd, structured_output}). The actual schema-validated
   // payload lives in the nested structured_output field. (#411)
-  const rawData = result.value.structuredData;
-  const so = rawData !== null && typeof rawData === 'object'
-    ? (rawData as Record<string, unknown>).structured_output
-    : undefined;
+  const so = extractStructuredOutput(result.value.structuredData);
   let structuredPayload: unknown;
-  if (so !== null && so !== undefined) {
+  if (so !== result.value.structuredData) {
     structuredPayload = so;
   } else {
     // Fallback: model used markdown code block instead of structured output
-    const resultText = typeof (rawData as Record<string, unknown>)?.result === 'string'
-      ? (rawData as Record<string, unknown>).result as string
+    const rd = result.value.structuredData as Record<string, unknown> | null;
+    const resultText = typeof rd?.['result'] === 'string'
+      ? (rd['result'] as string)
       : result.value.output;
     const jsonMatch = resultText.match(/```json\s*([\s\S]*?)```/s) ?? resultText.match(/(\{[\s\S]*\})/s);
     if (jsonMatch?.[1]) {
-      try { structuredPayload = JSON.parse(jsonMatch[1]); } catch { structuredPayload = rawData; }
+      try { structuredPayload = JSON.parse(jsonMatch[1]); } catch { structuredPayload = result.value.structuredData; }
     } else {
-      structuredPayload = rawData;
+      structuredPayload = result.value.structuredData;
     }
   }
 

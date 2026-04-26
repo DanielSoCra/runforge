@@ -1631,6 +1631,53 @@ describe('createPhaseHandlers', () => {
       expect(mockResolveCurrentSpecRefs).toHaveBeenCalledTimes(2);
       expect(run.specRefs).toEqual(['FUNC-AC-FOO', 'ARCH-AC-FOO', 'STACK-AC-FOO']);
     });
+
+    it('passes run.l3Feedback as feedback variable and clears it after spawn', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: { output: 'done', structuredData: {}, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      run.l3Feedback = 'Prior compliance findings: missing X';
+
+      await handlers['l3-generate']!(run);
+
+      const spawnArgs = mockRuntime.spawnSession.mock.calls.find(
+        (c: unknown[]) => c[0] === 'l3-generator',
+      )!;
+      expect((spawnArgs[1] as { variables: { feedback: string } }).variables.feedback).toContain('missing X');
+      expect(run.l3Feedback).toBeUndefined();
+    });
+
+    it('retains run.l3Feedback when spawn returns ok=false (Codex 636ca05)', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: false,
+        error: new Error('CLI crashed'),
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      run.l3Feedback = 'Prior compliance findings: missing X';
+
+      const result = await handlers['l3-generate']!(run);
+      expect(result).toBe('failure');
+      // Feedback retained so the self-loop retry sees the same compliance findings
+      expect(run.l3Feedback).toBe('Prior compliance findings: missing X');
+    });
+
+    it('retains run.l3Feedback when session times out (Codex 636ca05)', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: { output: '', structuredData: null, cost: 0.5, pitfallMarkers: [], exitStatus: 'timed-out' },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      run.l3Feedback = 'Prior compliance findings: missing X';
+
+      const result = await handlers['l3-generate']!(run);
+      expect(result).toBe('failure');
+      expect(run.l3Feedback).toBe('Prior compliance findings: missing X');
+    });
   });
 
   describe('l3-compliance', () => {
@@ -1647,7 +1694,9 @@ describe('createPhaseHandlers', () => {
         expect.objectContaining({
           variables: expect.objectContaining({ issueNumber: '42' }),
         }),
-        42, undefined, undefined, undefined,
+        42,
+        expect.objectContaining({ jsonSchema: expect.any(Object) }),
+        undefined, undefined,
       );
     });
 
@@ -1671,27 +1720,215 @@ describe('createPhaseHandlers', () => {
       expect(result).toBe('failure');
     });
 
-    it('returns success when structuredData has no compliant field', async () => {
+    it('returns failure when structuredData has no compliant field (Codex deep review — was previously success)', async () => {
+      // Behavior changed: missing/non-boolean compliant is now treated as failure
+      // (defensive — compliance gate must not silently pass on malformed output).
       mockRuntime.spawnSession.mockResolvedValue({
         ok: true,
         value: { output: 'done', structuredData: {}, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
       });
       const { handlers } = createHandlers();
-      const result = await handlers['l3-compliance']!(makeRun());
-      expect(result).toBe('success');
+      const run = makeRun();
+      const result = await handlers['l3-compliance']!(run);
+      expect(result).toBe('failure');
+      expect(run.l3ComplianceAttempts).toBe(1);
+      expect(run.l3Feedback).toContain('malformed');
     });
 
-    it('regression #435: does NOT return failure when structuredData.passed is false (wrong field)', async () => {
-      // compliance-reviewer outputs "compliant", not "passed" — "passed" field must be ignored
+    it('regression #435 (revised): wrong field name "passed" is treated as failure, not silent success', async () => {
+      // compliance-reviewer outputs "compliant", not "passed". Originally this
+      // test asserted that "passed: false" returned success because the wrong
+      // field name was ignored. After Codex deep review, missing/wrong
+      // `compliant` is now treated as failure (defensive default).
       mockRuntime.spawnSession.mockResolvedValue({
         ok: true,
         value: { output: 'gaps found', structuredData: { passed: false }, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
       });
       const { handlers } = createHandlers();
-      const result = await handlers['l3-compliance']!(makeRun());
-      // "passed: false" is an unknown field — phase should return success (not failure)
-      // because the compliance-reviewer schema uses "compliant", not "passed"
+      const run = makeRun();
+      const result = await handlers['l3-compliance']!(run);
+      expect(result).toBe('failure');
+      expect(run.l3ComplianceAttempts).toBe(1);
+      expect(run.l3Feedback).toContain('malformed');
+    });
+
+    it('passes complianceReportJsonSchema to compliance-reviewer spawn', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: 'done',
+          structuredData: {
+            result: 'r', cost_usd: 0,
+            structured_output: { compliant: true, findings: [], summary: 'ok' },
+          },
+          cost: 0.5,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        },
+      });
+      const { handlers } = createHandlers();
+      await handlers['l3-compliance']!(makeRun());
+      const spawnArgs = mockRuntime.spawnSession.mock.calls.find(
+        (c: any[]) => c[0] === 'compliance-reviewer',
+      )!;
+      expect(spawnArgs[3]).toMatchObject({ jsonSchema: expect.any(Object) });
+    });
+
+    it('extracts compliant=false from wrapped structured_output and captures findings as l3Feedback', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: 'done',
+          structuredData: {
+            result: 'r', cost_usd: 0,
+            structured_output: {
+              compliant: false,
+              findings: [
+                { type: 'contradiction', severity: 'critical',
+                  location: 'spec.md', description: 'missing field' },
+              ],
+              summary: 'broken',
+            },
+          },
+          cost: 0.5,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers['l3-compliance']!(run);
+      expect(result).toBe('failure');
+      expect(run.l3Feedback).toContain('missing field');
+      expect(run.l3ComplianceAttempts).toBe(1);
+    });
+
+    it('also increments counter on session crash (no structuredData)', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: false,
+        error: new Error('session crashed'),
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers['l3-compliance']!(run);
+      expect(result).toBe('failure');
+      expect(run.l3ComplianceAttempts).toBe(1);
+    });
+
+    it('also increments counter on session timeout', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: '',
+          structuredData: { result: '', cost_usd: 0, structured_output: null },
+          cost: 0,
+          pitfallMarkers: [],
+          exitStatus: 'timed-out',
+        },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers['l3-compliance']!(run);
+      expect(result).toBe('failure');
+      expect(run.l3ComplianceAttempts).toBe(1);
+    });
+
+    it('routes to escalated after MAX_L3_COMPLIANCE_ATTEMPTS failures', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: 'done',
+          structuredData: {
+            result: 'r', cost_usd: 0,
+            structured_output: { compliant: false, findings: [], summary: 's' },
+          },
+          cost: 0.5,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun({ l3ComplianceAttempts: 2 }); // about to hit the cap of 3
+      const result = await handlers['l3-compliance']!(run);
+      expect(result).toBe('escalated');
+      expect(run.l3ComplianceAttempts).toBe(3);
+    });
+
+    it('returns success and clears compliance counter when compliant', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: 'done',
+          structuredData: {
+            result: 'r', cost_usd: 0,
+            structured_output: { compliant: true, findings: [], summary: 'ok' },
+          },
+          cost: 0.5,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun({ l3ComplianceAttempts: 2 });
+      const result = await handlers['l3-compliance']!(run);
       expect(result).toBe('success');
+      expect(run.l3ComplianceAttempts).toBeUndefined();
+    });
+
+    it('parses compliant=false from result text fallback when structured_output is null (Codex deep review)', async () => {
+      // Model didn't honor the JSON schema, returned the report in the result text
+      // as a markdown code block instead. Without the fallback, payload?.compliant
+      // is undefined and the gate silently passes.
+      const reportJson = JSON.stringify({
+        compliant: false,
+        findings: [{ type: 'contradiction', severity: 'critical', location: 'spec.md', description: 'mismatched layer' }],
+        summary: 'L3 contradicts L2',
+      });
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: '',
+          structuredData: {
+            result: '```json\n' + reportJson + '\n```',
+            cost_usd: 0,
+            structured_output: null,
+          },
+          cost: 0.5,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers['l3-compliance']!(run);
+      expect(result).toBe('failure');
+      expect(run.l3ComplianceAttempts).toBe(1);
+      expect(run.l3Feedback).toContain('mismatched layer');
+    });
+
+    it('treats malformed compliant field as failure (Codex deep review)', async () => {
+      // Model returned a payload but `compliant` is missing entirely. Defensive:
+      // the compliance gate exists to block bad specs; a malformed reply must
+      // not earn a free pass.
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: '',
+          structuredData: {
+            result: 'r', cost_usd: 0,
+            structured_output: { findings: [], summary: 'no compliant field here' },
+          },
+          cost: 0.5,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers['l3-compliance']!(run);
+      expect(result).toBe('failure');
+      expect(run.l3ComplianceAttempts).toBe(1);
+      expect(run.l3Feedback).toContain('malformed');
     });
   });
 

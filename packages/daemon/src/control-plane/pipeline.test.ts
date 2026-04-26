@@ -466,4 +466,65 @@ describe('runPipeline', () => {
     expect(firstCall[1]).toHaveProperty('phases');
     expect(Array.isArray(firstCall[1].phases)).toBe(true);
   });
+
+  // Cross-phase loop integration test (#437): drives the FSM through a real
+  // l3-compliance ↔ l3-generate cycle to prove the cap actually terminates.
+  // pipeline.ts's retry tracker only counts SELF-loops, so the cross-phase
+  // bound must come from run.l3ComplianceAttempts + the 'escalated' outcome.
+  // Without that, this test would run forever.
+  describe('l3-compliance ↔ l3-generate cross-phase loop is capped (#437)', () => {
+    it('loops at most MAX_L3_COMPLIANCE_ATTEMPTS times then routes to stuck', async () => {
+      let l3GenerateCalls = 0;
+      let l3ComplianceCalls = 0;
+      const seenFeedback: string[] = [];
+
+      const handlers: PhaseHandlerMap = {
+        // All other spec-driven phases need handlers for pre-flight validation,
+        // even though the run terminates in l3-compliance before reaching them.
+        detect: async () => 'success' as PhaseEvent,
+        'l2-design': async () => 'success' as PhaseEvent,
+        'l2-gate': async () => 'success' as PhaseEvent,
+        implement: async () => 'success' as PhaseEvent,
+        review: async () => 'success' as PhaseEvent,
+        holdout: async () => 'success' as PhaseEvent,
+        integrate: async () => 'success' as PhaseEvent,
+        report: async () => 'success' as PhaseEvent,
+
+        // The two phases under test:
+        'l3-generate': async (r) => {
+          l3GenerateCalls += 1;
+          seenFeedback.push(r.l3Feedback ?? '');
+          return 'success' as PhaseEvent;
+        },
+        'l3-compliance': async (r) => {
+          l3ComplianceCalls += 1;
+          // Simulate a noncompliance finding every time. Increment the
+          // cross-phase counter and stash feedback for the next l3-generate.
+          const nextAttempt = (r.l3ComplianceAttempts ?? 0) + 1;
+          r.l3Feedback = `attempt ${nextAttempt}: missing field X`.slice(0, 4000);
+          r.l3ComplianceAttempts = nextAttempt;
+          // Third failure escalates → stuck (matches phases.ts MAX cap of 3)
+          return nextAttempt >= 3 ? ('escalated' as PhaseEvent) : ('failure' as PhaseEvent);
+        },
+      };
+
+      const run = makeRun('spec-driven');
+      run.phase = 'l3-generate'; // start mid-pipeline
+      const table = getPipeline('spec-driven');
+      const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+
+      // FSM terminated rather than infinite-looping
+      expect(result.outcome).toBe('stuck');
+      expect(run.phase).toBe('stuck');
+
+      // Both phases ran exactly 3 times (initial + 2 retries before escalation)
+      expect(l3GenerateCalls).toBe(3);
+      expect(l3ComplianceCalls).toBe(3);
+
+      // Feedback flows from each compliance failure into the next l3-generate
+      expect(seenFeedback[0]).toBe(''); // first generate, no prior feedback
+      expect(seenFeedback[1]).toContain('attempt 1'); // sees first failure
+      expect(seenFeedback[2]).toContain('attempt 2'); // sees second failure
+    });
+  });
 });

@@ -33,6 +33,26 @@ test_paths:
 
 **Daemon restart recovery through Coordinator.** On startup, the Coordinator scans `state/coordination/claims/` for active claims and reconciles with running processes (per STACK-AC-COORDINATION). The daemon's existing `stateMgr.findIncompleteRuns()` crash resumption coexists during migration — incomplete runs from before the Coordinator was wired continue through the legacy path. New work always flows through the Coordinator.
 
+### l3 Feedback Round-Trip and Cross-Phase Loop Cap
+
+`run.l3Feedback` carries compliance findings from the `l3-compliance`
+phase back into the next `l3-generate` invocation, mirroring the
+`l2Feedback` pattern but driven by an autonomous gate rather than a
+human label.
+
+The transition `l3-compliance.failure → l3-generate` is cross-phase and
+is therefore not counted by the self-loop retry mechanism in
+`pipeline.ts`. A separate counter `run.l3ComplianceAttempts` is
+incremented on **every** failure path — `compliant === false`, session
+error, session timeout. When the counter reaches
+`MAX_L3_COMPLIANCE_ATTEMPTS` (default 3), the phase emits `'escalated'`,
+which the spec variant routes to `stuck`. The counter is cleared on the
+next compliance success.
+
+A general cross-phase feedback-loop counter in `pipeline.ts` is the right
+long-term solution; a follow-up issue tracks that work. The per-loop
+counter here is intentionally narrow.
+
 ## Key Decisions
 
 **Gradual migration, not big-bang replacement.** The legacy poll loop and the Coordinator can coexist during rollout. A feature flag (`coordination.useCoordinator`, default `false`) gates whether the Coordinator is instantiated and the legacy poll loop is skipped. When enabled, the Coordinator owns all dispatch decisions. When disabled, the existing behavior is unchanged. This prevents a risky all-at-once cutover.

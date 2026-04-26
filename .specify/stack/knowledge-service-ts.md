@@ -38,6 +38,25 @@ test_paths:
 
 **Glob matching for record injection.** Artifact patterns in records use glob syntax (e.g., `src/session-runtime/**/*.ts`). Matching uses `minimatch` against the unit's expected artifact locations. This is the same glob library used throughout the project for consistency.
 
+### Prompt Contract Registry
+
+`prompt-contracts.ts` declares per-prompt variable contracts (`variables`
+set plus optional `defaults`). Three enforcement points consume the
+registry:
+
+1. **Contract test** asserts `templatePlaceholders === contract.variables`
+   for every registered prompt at CI time.
+2. **Per-render check** (`assertContract` called from `loadPromptTemplate`)
+   applies defaults, rejects extras and missing-non-default keys. Throws
+   in test mode (NODE_ENV=test or VITEST=true); warns in production.
+3. **Startup validation** (`validatePromptContracts`) runs at daemon boot;
+   the daemon refuses to start on mismatch — production gate against
+   prompt-optimizer or operator drift that CI cannot see.
+
+Registry is opt-in. Unregistered prompts retain legacy behavior (no
+enforcement). Adding a new prompt to the registry is the single step
+required to bring it under contract.
+
 ## Key Decisions
 
 **Knowledge store: JSONL file at `state/knowledge.jsonl`.** Each line is a JSON object with: `id`, `recordType` (see RecordType), `artifactPatterns`, `description`, `sourceId`, `confidence`, `createdAt`, `hitCount`, `lifecycleStatus` (candidate | active | promoted | archived), `originType` (autonomous | operator | retrospective-tech-lead | retrospective-po), `priorityTier` (normal | elevated), `rootCauseTag` (optional string), `reasoning` (optional structured narrative). Append-only — updates append a new version with the same ID. On read, the last version of each ID wins. Migration from v1: the existing `state/gotchas.jsonl` is read on first access; entries are mapped to `recordType: 'technical_pitfall'`, `lifecycleStatus: 'active'`, and appended to `state/knowledge.jsonl`. The old file is renamed to `state/gotchas.jsonl.migrated`.
