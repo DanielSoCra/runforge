@@ -77,6 +77,10 @@ describe('specDrivenTransitions', () => {
     expect(transition(table, 'l3-compliance', 'success')?.next).toBe('implement');
   });
 
+  it('l3-compliance → escalated → stuck', () => {
+    expect(transition(table, 'l3-compliance', 'escalated')?.next).toBe('stuck');
+  });
+
   it('implement → success → review', () => {
     expect(transition(table, 'implement', 'success')?.next).toBe('review');
   });

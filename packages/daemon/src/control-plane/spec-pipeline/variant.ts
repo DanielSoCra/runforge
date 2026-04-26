@@ -59,7 +59,11 @@ export const specDrivenTransitions: TransitionTable = {
     failure: { next: 'stuck' },
   },
   'l3-generate':   { success: { next: 'l3-compliance' }, failure: { next: 'l3-generate' } },
-  'l3-compliance': { success: { next: 'implement' }, failure: { next: 'l3-generate' } },
+  'l3-compliance': {
+    success: { next: 'implement' },
+    failure: { next: 'l3-generate' },
+    escalated: { next: 'stuck' },
+  },
   implement:       { success: { next: 'review' }, failure: { next: 'implement' } },
   review:          { success: { next: 'holdout' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
   holdout:         { success: { next: 'integrate' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },

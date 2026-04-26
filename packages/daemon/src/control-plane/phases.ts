@@ -266,10 +266,13 @@ export function createPhaseHandlers(
           specContent,
           owner,
           repo: repoName,
-          feedback: '',
+          feedback: run.l3Feedback ?? '',
         },
         workspacePath: cwd,
       }, workRequest.issueNumber, undefined, runWriter, runId);
+      // Clear after consume so a downstream success path doesn't re-deliver stale feedback.
+      // (l3-compliance success path also clears this; double-clear is safe.)
+      run.l3Feedback = undefined;
       if (!result.ok) {
         console.error(`[l3-generate] Session failed: ${result.error.message}`);
         return 'failure';

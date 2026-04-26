@@ -1631,6 +1631,24 @@ describe('createPhaseHandlers', () => {
       expect(mockResolveCurrentSpecRefs).toHaveBeenCalledTimes(2);
       expect(run.specRefs).toEqual(['FUNC-AC-FOO', 'ARCH-AC-FOO', 'STACK-AC-FOO']);
     });
+
+    it('passes run.l3Feedback as feedback variable and clears it after spawn', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: { output: 'done', structuredData: {}, cost: 0.5, pitfallMarkers: [], exitStatus: 'completed' },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      run.l3Feedback = 'Prior compliance findings: missing X';
+
+      await handlers['l3-generate']!(run);
+
+      const spawnArgs = mockRuntime.spawnSession.mock.calls.find(
+        (c) => c[0] === 'l3-generator',
+      )!;
+      expect(spawnArgs[1].variables.feedback).toContain('missing X');
+      expect(run.l3Feedback).toBeUndefined();
+    });
   });
 
   describe('l3-compliance', () => {
