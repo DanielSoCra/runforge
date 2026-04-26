@@ -532,12 +532,16 @@ export function createPhaseHandlers(
       // production path; the worker keeps getting empty specs).
       await ensureWorkspace(run); const cwd = workspaceCwd;
       const specifyRoot = join(cwd, '.specify');
+      const effectiveRefs = run.specRefs ?? workRequest.specRefs;
       let specContent = '';
       try {
-        specContent = await loadSpecContent(run.specRefs ?? workRequest.specRefs, specifyRoot);
+        specContent = await loadSpecContent(effectiveRefs, specifyRoot);
       } catch (e) {
         console.warn(`[implement] Failed to load spec content:`, e);
       }
+      console.log(
+        `[implement] specRefs=[${effectiveRefs.join(',')}] specifyRoot=${specifyRoot} specContent.length=${specContent.length}`,
+      );
       const result = await coordinator.implement(workRequest, featureBranch, runWriter, runId, {
         handoffNotes,
         variant: run.variant,
