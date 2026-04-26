@@ -58,7 +58,11 @@ describe('fix', () => {
     expect(mergeWorktree).toHaveBeenCalledTimes(1);
   });
 
-  it('passes findings and spec content in worker session variables', async () => {
+  it('embeds findings in task context and passes spec content in worker session variables', async () => {
+    // Note: findings live inside vars.task (taskContext includes a ## Findings
+    // section); they are NOT a separate `findings` variable, because the worker
+    // prompt template does not have a {{findings}} placeholder and the contract
+    // would reject it as silent-drop.
     const runtime = createMockRuntime();
 
     await fix(mockFindings, 'feature/42', runtime, '/tmp/repo', 'spec content here');
@@ -66,8 +70,9 @@ describe('fix', () => {
     const call = runtime.spawnSession.mock.calls[0];
     expect(call[0]).toBe('worker');
     const vars = call[1].variables;
-    expect(vars.findings).toContain('Missing null check');
-    expect(vars.findings).toContain('Unclosed resource');
+    expect(vars.findings).toBeUndefined();
+    expect(vars.task).toContain('Missing null check');
+    expect(vars.task).toContain('Unclosed resource');
     expect(vars.specs).toContain('spec content here');
   });
 

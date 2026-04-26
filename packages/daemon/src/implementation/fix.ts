@@ -54,13 +54,16 @@ export async function fix(
     ].join('\n');
 
     // 3. Spawn worker session
+    // Note: findingsText is already embedded in taskContext above (## Findings
+    // section); passing it as a separate `findings` variable would be a silent
+    // drop under the worker prompt contract (Codex review of fix/silent-prompt-vars
+    // follow-up — variables not referenced in the template are now rejected).
     const sessionResult = await runtime.spawnSession(
       'worker',
       {
         variables: {
           task: taskContext,
           specs: specContent ?? '',
-          findings: findingsText,
           verification: verificationCommand ?? 'pnpm -r run test',
           pitfalls: '',
         },

@@ -120,6 +120,45 @@ describe('ImplementationCoordinator', () => {
     );
   });
 
+  it('threads options.specContent into the simple-complexity worker (Codex follow-up)', async () => {
+    const runtime = createMockRuntime(failResult);
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'simple',
+      specContent: 'L1 spec body for issue 42',
+    });
+    expect(runtime.spawnSession).toHaveBeenCalledWith(
+      'worker',
+      expect.objectContaining({
+        variables: expect.objectContaining({
+          specs: 'L1 spec body for issue 42',
+        }),
+      }),
+      42,
+      undefined,
+      undefined,
+      undefined,
+    );
+  });
+
+  it('uses default verification command for simple-complexity worker', async () => {
+    const runtime = createMockRuntime(failResult);
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    await coord.implement(mockWorkRequest, 'feature/42');
+    expect(runtime.spawnSession).toHaveBeenCalledWith(
+      'worker',
+      expect.objectContaining({
+        variables: expect.objectContaining({
+          verification: 'pnpm -r typecheck && pnpm -r test',
+        }),
+      }),
+      42,
+      undefined,
+      undefined,
+      undefined,
+    );
+  });
+
   it('returns success:true with batchesCompleted when single unit succeeds', async () => {
     const runtime = createMockRuntime(successResult);
     const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);

@@ -29,6 +29,22 @@ describe('PROMPT_CONTRACTS registry', () => {
       expect(c!.defaults).toEqual({ feedback: '' });
     }
   });
+  it('registers worker with task/specs/verification/pitfalls and pitfalls default', () => {
+    const c = PROMPT_CONTRACTS['worker'];
+    expect(c).toBeDefined();
+    expect(new Set(c!.variables)).toEqual(
+      new Set(['task', 'specs', 'verification', 'pitfalls']),
+    );
+    expect(c!.defaults).toEqual({ pitfalls: '' });
+  });
+  it('registers bug-worker with bugReport/diagnosis/specs/pitfalls and pitfalls default', () => {
+    const c = PROMPT_CONTRACTS['bug-worker'];
+    expect(c).toBeDefined();
+    expect(new Set(c!.variables)).toEqual(
+      new Set(['bugReport', 'diagnosis', 'specs', 'pitfalls']),
+    );
+    expect(c!.defaults).toEqual({ pitfalls: '' });
+  });
   it('every default key is also in variables', () => {
     for (const c of Object.values(PROMPT_CONTRACTS)) {
       for (const k of Object.keys(c.defaults ?? {})) {
@@ -73,15 +89,17 @@ describe('assertContract', () => {
   });
   it('returns input unchanged when prompt is unregistered', () => {
     const vars = { anything: 'goes' };
-    expect(assertContract('worker', vars)).toEqual(vars);
+    // 'classifier' is not in PROMPT_CONTRACTS; if it ever gets registered, swap
+    // this for another unregistered prompt name.
+    expect(assertContract('classifier', vars)).toEqual(vars);
   });
 });
 
 describe('validatePromptContracts', () => {
-  it('returns ok({checked:3}) when registered prompts on disk match their contracts', async () => {
+  it('returns ok({checked:5}) when registered prompts on disk match their contracts', async () => {
     const result = await validatePromptContracts(PROMPTS_DIR);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.checked).toBe(3);
+    if (result.ok) expect(result.value.checked).toBe(5);
   });
   it('returns err when a prompt template diverges from its contract', async () => {
     // Use a temp dir with a deliberately-wrong template
