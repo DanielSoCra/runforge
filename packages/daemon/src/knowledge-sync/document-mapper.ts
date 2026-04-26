@@ -37,7 +37,11 @@ export function applyFrontmatterDefaults(
   manifestDefaults: { confidence?: number; artifact_patterns?: string[] },
 ): { confidence: number; artifactPatterns: string[] } {
   return {
-    confidence: frontmatter.confidence ?? manifestDefaults.confidence ?? DEFAULT_CONFIDENCE,
-    artifactPatterns: frontmatter.artifact_patterns ?? manifestDefaults.artifact_patterns ?? [],
+    confidence:
+      frontmatter.confidence ??
+      manifestDefaults.confidence ??
+      DEFAULT_CONFIDENCE,
+    artifactPatterns:
+      frontmatter.artifact_patterns ?? manifestDefaults.artifact_patterns ?? [],
   };
 }

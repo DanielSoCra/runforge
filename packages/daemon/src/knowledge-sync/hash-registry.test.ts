@@ -5,7 +5,11 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { HashRegistry, computeContentHash } from './hash-registry.js';
 
-const tmpPath = () => join(tmpdir(), `hash-reg-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`);
+const tmpPath = () =>
+  join(
+    tmpdir(),
+    `hash-reg-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`,
+  );
 
 describe('computeContentHash', () => {
   it('produces a hex string', () => {
@@ -42,7 +46,11 @@ describe('HashRegistry', () => {
   });
 
   afterEach(async () => {
-    try { await rm(path); } catch { /* ignore */ }
+    try {
+      await rm(path);
+    } catch {
+      /* ignore */
+    }
   });
 
   it('returns false for unknown hash', async () => {
