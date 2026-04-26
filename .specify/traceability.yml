@@ -78,7 +78,7 @@ FUNC-AC-BUG-TRIAGE:
   status: draft
 
 FUNC-AC-LEARNING:
-  children: [ARCH-AC-KNOWLEDGE, ARCH-AC-ENRICHED-COMMITS]
+  children: [ARCH-AC-KNOWLEDGE, ARCH-AC-ENRICHED-COMMITS, ARCH-AC-KNOWLEDGE-SYNC]
   status: draft
 
 FUNC-AC-DASHBOARD:
@@ -210,6 +210,11 @@ ARCH-AC-TECH-LEAD:
 ARCH-AC-ENRICHED-COMMITS:
   parent: FUNC-AC-LEARNING
   children: [STACK-AC-ENRICHED-COMMITS-WORKER, STACK-AC-ENRICHED-COMMITS-KNOWLEDGE]
+  status: draft
+
+ARCH-AC-KNOWLEDGE-SYNC:
+  parent: FUNC-AC-LEARNING
+  children: [STACK-AC-KNOWLEDGE-SYNC]
   status: draft
 
 # --- Auto-Claude L3 specs (stack-specific) ---
@@ -348,6 +353,13 @@ STACK-AC-KNOWLEDGE:
     - packages/daemon/src/knowledge/proposal-store.ts
   test_paths:
     - packages/daemon/src/knowledge/**/*.test.ts
+  status: draft
+
+STACK-AC-KNOWLEDGE-SYNC:
+  parent: ARCH-AC-KNOWLEDGE-SYNC
+  children: []
+  code_paths: []  # planned: packages/daemon/src/knowledge-sync/
+  test_paths: []  # planned: packages/daemon/src/knowledge-sync/**/*.test.ts
   status: draft
 
 STACK-AC-DASHBOARD:
