@@ -174,6 +174,16 @@ async function executeUnit(
       };
     }
     console.log(`[batch] Session result for ${unit.id}: ${sessionResult.value.exitStatus}`);
+    if (sessionResult.value.exitStatus === 'failed' || sessionResult.value.exitStatus === 'timed-out') {
+      // Capture diagnostic context when a session ends in a failing state. Without this,
+      // the daemon log only shows "Session result: failed" with no clue what the worker
+      // actually did. Tail of output + handoff note is usually enough to triage.
+      const tail = (sessionResult.value.output ?? '').slice(-2000);
+      console.warn(`[batch] ${unit.id} ${sessionResult.value.exitStatus} — output tail (last 2KB):\n${tail}`);
+      if (sessionResult.value.handoffNote) {
+        console.warn(`[batch] ${unit.id} handoff note:\n${sessionResult.value.handoffNote}`);
+      }
+    }
 
     const result = sessionResult.value;
 

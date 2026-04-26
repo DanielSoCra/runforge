@@ -25,10 +25,14 @@ export type ReviewFindings = z.infer<typeof ReviewFindingsSchema>;
 
 const jsonSchema = JSON.stringify(z.toJSONSchema(ReviewFindingsSchema));
 
+const VALID_SEVERITIES = new Set(['critical', 'important', 'minor']);
 const SEVERITY_MAP: Record<string, string> = {
-  high: 'critical', severe: 'critical', blocker: 'critical',
-  medium: 'important', moderate: 'important', significant: 'important',
-  low: 'minor', info: 'minor', informational: 'minor', trivial: 'minor',
+  high: 'critical', severe: 'critical', blocker: 'critical', p0: 'critical', error: 'critical',
+  medium: 'important', moderate: 'important', significant: 'important', warning: 'important',
+  warn: 'important', major: 'important', p1: 'important',
+  low: 'minor', info: 'minor', informational: 'minor', trivial: 'minor', note: 'minor',
+  notice: 'minor', suggestion: 'minor', nitpick: 'minor', nit: 'minor', p2: 'minor',
+  p3: 'minor', advisory: 'minor', cosmetic: 'minor',
 };
 
 function normalizeSeverities(data: unknown): unknown {
@@ -40,9 +44,15 @@ function normalizeSeverities(data: unknown): unknown {
     findings: obj.findings.map((f: unknown) => {
       if (f === null || typeof f !== 'object') return f;
       const finding = f as Record<string, unknown>;
-      const sev = typeof finding.severity === 'string' ? finding.severity.toLowerCase() : '';
-      const normalized = SEVERITY_MAP[sev];
-      return normalized ? { ...finding, severity: normalized } : finding;
+      const rawSev = typeof finding.severity === 'string' ? finding.severity.toLowerCase().trim() : '';
+      if (VALID_SEVERITIES.has(rawSev)) return finding;
+      const mapped = SEVERITY_MAP[rawSev];
+      if (mapped) return { ...finding, severity: mapped };
+      // Unknown severity → coerce to 'minor' rather than failing the entire review.
+      // Reviewers occasionally invent labels; losing one finding to misclassification
+      // is better than discarding the whole batch and re-running the model.
+      console.warn(`[reviewer] coerced unknown severity '${finding.severity}' → 'minor'`);
+      return { ...finding, severity: 'minor' };
     }),
   };
 }
@@ -142,7 +152,7 @@ export function createReviewerGate(
           const subtype = (rawData as Record<string, unknown>)?.subtype;
           const parseErr = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
           console.warn(`[reviewer] structured output parse failed (attempt ${attempt + 1}, subtype=${subtype}): ${parseErr}`);
-          console.warn(`[reviewer] structured_output value: ${JSON.stringify(structuredPayload)?.slice(0, 500)}`);
+          console.warn(`[reviewer] structured_output value: ${(JSON.stringify(structuredPayload) ?? '<undefined>').slice(0, 4000)}`);
           if (attempt === 0) continue; // retry once
           return {
             gate: type,
