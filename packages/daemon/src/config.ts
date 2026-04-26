@@ -114,6 +114,11 @@ export const ConfigSchema = z.object({
     candidateTimeoutDays: 14,
     prospectiveSeverityThreshold: 5,
   }),
+  knowledgeSync: z.object({
+    enabled: z.boolean().default(false),
+    vaultPath: z.string().min(1),
+    syncIntervalMinutes: z.number().int().positive().default(60),
+  }).optional(),
   coordination: z.object({
     useCoordinator: z.boolean().default(false),
     tickInterval: z.number().int().min(1000).default(5000),

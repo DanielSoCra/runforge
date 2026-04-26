@@ -372,8 +372,17 @@ STACK-AC-KNOWLEDGE:
 STACK-AC-KNOWLEDGE-SYNC:
   parent: ARCH-AC-KNOWLEDGE-SYNC
   children: []
-  code_paths: []  # planned: packages/daemon/src/knowledge-sync/
-  test_paths: []  # planned: packages/daemon/src/knowledge-sync/**/*.test.ts
+  code_paths:
+    - packages/daemon/src/knowledge-sync/types.ts
+    - packages/daemon/src/knowledge-sync/manifest.ts
+    - packages/daemon/src/knowledge-sync/hash-registry.ts
+    - packages/daemon/src/knowledge-sync/document-mapper.ts
+    - packages/daemon/src/knowledge-sync/sync-service.ts
+  test_paths:
+    - packages/daemon/src/knowledge-sync/manifest.test.ts
+    - packages/daemon/src/knowledge-sync/hash-registry.test.ts
+    - packages/daemon/src/knowledge-sync/document-mapper.test.ts
+    - packages/daemon/src/knowledge-sync/sync-service.test.ts
   status: draft
 
 STACK-AC-DASHBOARD:
