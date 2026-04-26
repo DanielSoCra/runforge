@@ -25,6 +25,7 @@ import { SupabaseRunWriter, toDbOutcome } from '../supabase/run-writer.js';
 import { GotchaStore } from '../knowledge/gotcha-store.js';
 import { KnowledgeStore } from '../knowledge/knowledge-store.js';
 import { DEFAULT_POLICIES } from '../knowledge/policy-registry.js';
+import { validatePromptContracts } from '../knowledge/prompt-contracts.js';
 import { join } from 'path';
 import { createReviewScheduler } from '../coordination/review-scheduler.js';
 import { createPOAgent } from '../coordination/po-agent.js';
@@ -54,6 +55,17 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       'GITHUB_TOKEN environment variable is not set. The daemon requires a GitHub token to interact with issues and pull requests.',
     ));
   }
+
+  // 0b. Validate prompt contracts — refuse to boot if any registered prompt has drifted
+  // from its declared contract. Production gate against drift introduced by prompt-optimizer
+  // proposals or operator edits — neither of which CI can see.
+  const promptsDirPath = process.env['PROMPTS_DIR'] ?? join(import.meta.dirname, '../../../../prompts');
+  const contractCheck = await validatePromptContracts(promptsDirPath);
+  if (!contractCheck.ok) {
+    console.error(`[daemon] Prompt contract validation failed:\n${contractCheck.error.message}`);
+    return err(contractCheck.error);
+  }
+  console.log(`[daemon] Prompt contracts validated (${contractCheck.value.checked} prompts)`);
 
   // 1. Load config
   const configResult = await loadConfig(configPath);

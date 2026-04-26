@@ -11,7 +11,7 @@ const {
   mockServer, mockServerStart, mockRunPipeline, mockNotify,
   mockRunWriter, mockConfigReader, mockLoadConfig, mockSelectVariant, phaseHandlerCalls, mockCreateReviewScheduler,
   mockCreatePOAgent, mockCreateTechLeadScheduler, mockCreateCoordinator,
-  knowledgeStoreCtorArgs, mockOctokit, mockSpawnSession,
+  knowledgeStoreCtorArgs, mockOctokit, mockSpawnSession, mockValidatePromptContracts,
 } = vi.hoisted(() => ({
   mockStateMgr: {
     initialize: vi.fn().mockResolvedValue(undefined),
@@ -74,6 +74,7 @@ const {
     },
   },
   mockSpawnSession: vi.fn(),
+  mockValidatePromptContracts: vi.fn(),
 }));
 
 // --- Module mocks (use classes for constructors to work with `new`) ---
@@ -95,6 +96,9 @@ vi.mock('../knowledge/knowledge-store.js', () => {
 });
 vi.mock('../knowledge/policy-registry.js', () => ({
   DEFAULT_POLICIES: {},
+}));
+vi.mock('../knowledge/prompt-contracts.js', () => ({
+  validatePromptContracts: mockValidatePromptContracts,
 }));
 vi.mock('../implementation/coordinator.js', () => {
   return { ImplementationCoordinator: class {} };
@@ -309,6 +313,7 @@ describe('daemon', () => {
     mockCreateCoordinator.mockReturnValue({
       start: vi.fn().mockReturnValue(vi.fn()),
     });
+    mockValidatePromptContracts.mockResolvedValue(ok({ checked: 3 }));
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -336,6 +341,7 @@ describe('daemon', () => {
       mockCreateTechLeadScheduler,
       mockCreateCoordinator,
       mockSpawnSession,
+      mockValidatePromptContracts,
     ]) {
       mock.mockClear();
     }
@@ -428,6 +434,31 @@ describe('daemon', () => {
       await startDaemon('config.json');
 
       expect(mockRemoteControl.start).toHaveBeenCalled();
+    });
+  });
+
+  describe('prompt contract validation at startup', () => {
+    it('refuses to start when validatePromptContracts returns err', async () => {
+      mockValidatePromptContracts.mockResolvedValueOnce(
+        err(new Error('compliance-reviewer: template missing: [issueTitle]')),
+      );
+      const { startDaemon } = await loadDaemon();
+      const result = await startDaemon('config.json');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toMatch(/template missing.*issueTitle/);
+      }
+      // Other startup work should NOT have proceeded:
+      expect(mockStateMgr.initialize).not.toHaveBeenCalled();
+    });
+
+    it('proceeds with startup when validation passes', async () => {
+      mockValidatePromptContracts.mockResolvedValueOnce(ok({ checked: 3 }));
+      const { startDaemon } = await loadDaemon();
+      const result = await startDaemon('config.json');
+
+      expect(result.ok).toBe(true);
     });
   });
 
