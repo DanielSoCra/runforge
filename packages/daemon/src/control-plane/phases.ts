@@ -897,7 +897,13 @@ export function createPhaseHandlers(
         console.error(`[integrate] Failed:`, result.value.error);
         return 'failure';
       }
-      console.log(`[integrate] Successfully merged to ${config.branches.staging}`);
+      if (result.value.pushed) {
+        console.log(`[integrate] Successfully merged ${featureBranch} → ${config.branches.staging} and pushed to origin`);
+      } else if (result.value.pushError) {
+        console.warn(`[integrate] Merged locally but push failed (non-fatal): ${result.value.pushError}`);
+      } else {
+        console.log(`[integrate] Successfully merged to ${config.branches.staging}`);
+      }
       return 'success';
     },
 

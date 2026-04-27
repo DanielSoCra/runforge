@@ -5,6 +5,8 @@ import { ok, err, type Result } from '../lib/result.js';
 export interface IntegrationResult {
   success: boolean;
   conflicted: boolean;
+  pushed?: boolean;
+  pushError?: string;
   error?: string;
 }
 
@@ -62,7 +64,23 @@ export async function integrateToStaging(
       return err(merge.error);
     }
 
-    return ok({ success: true, conflicted: false });
+    // 3. Push the feature branch first so its commit history is preserved as
+    // a reviewable unit on the remote (otherwise it only appears as part of
+    // the integrate merge into staging). Best-effort — non-fatal on failure.
+    await git(['push', 'origin', featureBranch], repoRoot);
+
+    // 4. Push the staging branch to origin so the autonomous loop's output is
+    // visible to the Operator without manual intervention. Per L0-AC-VISION
+    // and FUNC-AC-PIPELINE: pre-production delivery is autonomous; only
+    // production releases need Operator approval. A push failure does NOT
+    // fail the integration — the local merge already happened and is
+    // recoverable; we just record it on the result for downstream logging.
+    const push = await git(['push', 'origin', stagingBranch], repoRoot);
+    if (!push.ok) {
+      return ok({ success: true, conflicted: false, pushed: false, pushError: push.error.message });
+    }
+
+    return ok({ success: true, conflicted: false, pushed: true });
   } finally {
     releaseIntegrationLock();
   }
