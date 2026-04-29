@@ -129,7 +129,7 @@ ARCH-AC-COORDINATION:
 
 ARCH-AC-BATCH-CLASSIFIER:
   parent: FUNC-AC-PIPELINE
-  children: []
+  children: [STACK-AC-BATCH-CLASSIFIER]
   status: draft
 
 ARCH-AC-CONTROL-PLANE:
@@ -808,4 +808,12 @@ STACK-AC-CONTAINMENT:
     - packages/daemon/src/session-runtime/containment-hooks.test.ts
     - packages/daemon/src/session-runtime/audit.test.ts
     - packages/daemon/src/session-runtime/generate-containment-script.test.ts
+  status: draft
+
+STACK-AC-BATCH-CLASSIFIER:
+  parent: ARCH-AC-BATCH-CLASSIFIER
+  children: []
+  # Paths planned in spec (#470); empty until implementation PR re-adds them.
+  code_paths: []
+  test_paths: []
   status: draft
