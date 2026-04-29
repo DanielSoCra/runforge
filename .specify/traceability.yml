@@ -70,7 +70,7 @@ FUNC-AC-QUALITY:
   status: draft
 
 FUNC-AC-SAFETY:
-  children: [ARCH-AC-SESSION-RUNTIME, ARCH-AC-OPERATIONAL-SAFETY, ARCH-AC-CONTAINMENT]
+  children: [ARCH-AC-SESSION-RUNTIME, ARCH-AC-OPERATIONAL-SAFETY, ARCH-AC-CONTAINMENT, ARCH-AC-SESSION-PROVIDERS]
   status: draft
 
 FUNC-AC-BUG-TRIAGE:
@@ -139,12 +139,12 @@ ARCH-AC-CONTROL-PLANE:
 
 ARCH-AC-DAG-EXECUTOR:
   parent: FUNC-AC-PIPELINE
-  children: []
+  children: [STACK-AC-DAG-EXECUTOR]
   status: draft
 
 ARCH-AC-PHASE-LABELS:
   parent: FUNC-AC-PIPELINE
-  children: []
+  children: [STACK-AC-PHASE-LABELS]
   status: draft
 
 ARCH-AC-SPEC-PIPELINE:
@@ -184,6 +184,12 @@ ARCH-AC-OPERATIONAL-SAFETY:
 
 ARCH-AC-CONTAINMENT:
   parent: FUNC-AC-SAFETY
+  children: [STACK-AC-CONTAINMENT]
+  status: draft
+
+ARCH-AC-SESSION-PROVIDERS:
+  parent: FUNC-AC-SAFETY
+  children: []
   status: draft
 
 ARCH-AC-DIAGNOSIS:
@@ -773,4 +779,33 @@ STACK-AC-PRODUCT-OWNER-INTERACTIVE:
   # implementation PR re-adds the real paths.
   code_paths: []
   test_paths: []
+  status: draft
+
+STACK-AC-PHASE-LABELS:
+  parent: ARCH-AC-PHASE-LABELS
+  children: []
+  # Paths planned in spec (#469); empty until implementation PR re-adds them.
+  code_paths: []
+  test_paths: []
+  status: draft
+
+STACK-AC-DAG-EXECUTOR:
+  parent: ARCH-AC-DAG-EXECUTOR
+  children: []
+  # Paths planned in spec (#483); empty until implementation PR re-adds them.
+  code_paths: []
+  test_paths: []
+  status: draft
+
+STACK-AC-CONTAINMENT:
+  parent: ARCH-AC-CONTAINMENT
+  children: []
+  code_paths:
+    - packages/daemon/src/session-runtime/containment-hooks.ts
+    - packages/daemon/src/session-runtime/audit.ts
+    - packages/daemon/src/session-runtime/generate-containment-script.ts
+  test_paths:
+    - packages/daemon/src/session-runtime/containment-hooks.test.ts
+    - packages/daemon/src/session-runtime/audit.test.ts
+    - packages/daemon/src/session-runtime/generate-containment-script.test.ts
   status: draft
