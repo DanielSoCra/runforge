@@ -126,13 +126,19 @@ describe('fix', () => {
     expect(deleteUnitBranch).toHaveBeenCalled();
   });
 
-  it('uses regression-test-first protocol in worker prompt', async () => {
+  it('instructs worker to choose protocol per finding type (test-first for code, direct-edit for prose)', async () => {
     const runtime = createMockRuntime();
     await fix(mockFindings, 'feature/42', runtime, '/tmp/repo');
 
     const call = runtime.spawnSession.mock.calls[0];
     const vars = call[1].variables;
-    expect(vars.task).toContain('Regression-Test-First');
+    // Code findings still get regression-test-first guidance.
+    expect(vars.task).toContain('regression-test-first');
+    // Prose/spec/prompt findings get direct-edit guidance. The earlier protocol
+    // mandated a regression test for every finding, which made prompt-text fixes
+    // impossible to address (worker either reported BLOCKED or produced 0-diff).
+    expect(vars.task).toContain('prompts/*.md');
+    expect(vars.task).toContain('directly');
   });
 
   it('preserves cost from SessionError when spawnSession returns error Result', async () => {
