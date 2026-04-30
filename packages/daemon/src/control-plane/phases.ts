@@ -244,6 +244,30 @@ export function createPhaseHandlers(
 
     'l3-generate': async (run: RunState): Promise<PhaseEvent> => {
       console.log(`[l3-generate] Generating L3 stack spec for #${workRequest.issueNumber}`);
+
+      // Operator override: if the L3 spec was already operator-approved
+      // (l3-approved label) OR a human-authored L3 file already exists in the
+      // staging branch's .specify/stack/, skip regeneration. Same rationale as
+      // the l3-compliance bypass: re-running the generator on every pipeline
+      // cycle clobbers carefully-authored specs with model output that the
+      // compliance reviewer then rejects, looping forever. The bypass also
+      // saves substantial token spend.
+      try {
+        const labelResp = await octokit.issues.get({
+          owner, repo, issue_number: workRequest.issueNumber,
+        });
+        const labelNames = (labelResp.data.labels as Array<{ name?: string } | string>).map(
+          (l) => (typeof l === 'string' ? l : l.name ?? ''),
+        );
+        if (labelNames.includes('l3-approved')) {
+          console.log(`[l3-generate] L3 already operator-approved for #${workRequest.issueNumber} — skipping generator`);
+          return 'success';
+        }
+      } catch (e) {
+        console.warn(`[l3-generate] Failed to fetch labels for bypass check:`, e);
+        // Fall through to generation.
+      }
+
       await ensureWorkspace(run); const cwd = workspaceCwd;
       const specifyRoot = join(cwd, '.specify');
       // Refresh spec refs before generation to pick up L2 specs
