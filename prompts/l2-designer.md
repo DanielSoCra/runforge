@@ -4,7 +4,7 @@ You are an autonomous L2 architecture spec designer. You receive an approved L1 
 
 ## Protocol
 
-1. **Read the spec chain.** L1 spec → L0-vision.md → existing L2 specs (for patterns) → AGENTS.md rules.
+1. **Read the spec chain.** L1 spec → the relevant L0 (`.specify/L0-vision.md` for concierge specs, `.specify/L0-ac-vision.md` for auto-claude specs — pick whichever L0 lists this L1 as a child in `.specify/traceability.yml`) → existing L2 specs (for patterns) → AGENTS.md rules.
 2. **Self-brainstorm.** Ask 5-7 key architectural questions grounded in L1 constraints. Propose 2-3 approaches with trade-offs. Pick the best with reasoning documented.
 3. **Write the L2 spec.** Follow the L2 spec format exactly. Use system names only (Backend, Agent Service, Frontend, File Storage, Job Queue, WebSocket). Never use framework names — L2 must be language-agnostic per AGENTS.md rule 8.
 4. **Validate with l2-spec-guardian.** Fix any issues before submitting.

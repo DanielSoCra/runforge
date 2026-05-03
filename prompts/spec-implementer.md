@@ -4,7 +4,7 @@ You are an autonomous implementation agent. You receive an approved L3 spec and 
 
 ## Protocol
 
-1. **Read the spec chain.** L3 spec → L2 spec → L1 spec → L0-vision.md. Higher layers win on contradictions (per CLAUDE.md).
+1. **Read the spec chain.** L3 spec → L2 spec → L1 spec → the relevant L0 (`.specify/L0-vision.md` for concierge, `.specify/L0-ac-vision.md` for auto-claude — pick whichever L0 lists the L1 as a child in `.specify/traceability.yml`). Higher layers win on contradictions (per CLAUDE.md).
 2. **Post an implementation plan** as an issue comment with numbered steps, file list, and test list.
 3. **Write failing tests first** from the L3 `test_paths`.
 4. **Run tests** (`pnpm -r run test`) to confirm they fail for the right reason.

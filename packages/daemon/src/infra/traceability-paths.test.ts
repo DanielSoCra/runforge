@@ -69,3 +69,24 @@ describe('traceability.yml path validation', () => {
     );
   });
 });
+
+describe('concierge spec tree', () => {
+  it('L0-CONCIERGE-VISION exists with five L1 children', () => {
+    const raw = readFileSync(resolve(ROOT, '.specify/traceability.yml'), 'utf-8');
+    expect(raw).toContain('L0-CONCIERGE-VISION:');
+    expect(raw).toMatch(/L0-CONCIERGE-VISION:[\s\S]*?children:\s*\[FUNC-CONCIERGE-CORE.*FUNC-CONCIERGE-AWARENESS\]/);
+  });
+
+  it('all new concierge specs have entries', () => {
+    const raw = readFileSync(resolve(ROOT, '.specify/traceability.yml'), 'utf-8');
+    for (const id of [
+      'FUNC-CONCIERGE-CORE', 'FUNC-CONCIERGE-MEMORY', 'FUNC-CONCIERGE-BOARD',
+      'FUNC-CONCIERGE-CHANNEL', 'FUNC-CONCIERGE-AWARENESS',
+      'ARCH-CONCIERGE-RUNTIME', 'ARCH-EVENT-BUS', 'ARCH-TOOL-REGISTRY',
+      'ARCH-CONFIRMATION-LIFECYCLE',
+      'STACK-CONCIERGE-NODE', 'STACK-CONCIERGE-BOARD',
+    ]) {
+      expect(raw, `expected ${id} in traceability`).toContain(`${id}:`);
+    }
+  });
+});

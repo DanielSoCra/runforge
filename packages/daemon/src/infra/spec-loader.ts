@@ -3,6 +3,36 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const SPEC_DIRS = ['functional', 'architecture', 'stack'] as const;
+const L0_FILE_PATTERN = /^L0-.*\.md$/;
+
+/**
+ * Scan the .specify/ root directory for L0-*.md files. Concierge pivot
+ * (2026-05-01) introduced a multi-L0 layout where L0-vision.md and
+ * L0-ac-vision.md coexist; this helper makes both discoverable by id.
+ */
+async function loadRootLevelL0Specs(
+  specifyRoot: string,
+  refSet: Set<string>,
+  matched: string[],
+): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await readdir(specifyRoot);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!L0_FILE_PATTERN.test(entry)) continue;
+    const filePath = join(specifyRoot, entry);
+    const content = await readFile(filePath, 'utf-8');
+    const id = extractSpecId(content);
+    if (id && refSet.has(id)) {
+      matched.push(content);
+      refSet.delete(id);
+      if (refSet.size === 0) return;
+    }
+  }
+}
 
 /**
  * Load spec file content for given spec IDs by scanning .specify/ frontmatter.
@@ -17,6 +47,9 @@ export async function loadSpecContent(
 
   const refSet = new Set(specRefs);
   const matched: string[] = [];
+
+  await loadRootLevelL0Specs(specifyRoot, refSet, matched);
+  if (refSet.size === 0) return matched.join('\n\n---\n\n');
 
   for (const dir of SPEC_DIRS) {
     const dirPath = join(specifyRoot, dir);

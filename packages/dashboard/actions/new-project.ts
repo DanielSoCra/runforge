@@ -70,6 +70,9 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
     const owner = repo.full_name.split('/')[0];
     const repoName = repo.name;
 
+    // Scaffolds a single .specify/L0-vision.md with id L0-AC-VISION-style.
+    // New top-level L0s (like L0-CONCIERGE-VISION in this very repo) are
+    // authored by hand once per product and not via the dashboard.
     await commitFile(token, {
       owner, repo: repoName,
       path: '.specify/L0-vision.md',

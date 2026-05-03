@@ -1,39 +1,55 @@
 ---
-id: L0-AC-VISION
+id: L0-CONCIERGE-VISION
 type: vision
-domain: auto-claude
+domain: concierge
 status: draft
-version: 4
+version: 1
 layer: 0
 ---
 
-# L0-AC-VISION — Auto-Claude
+# L0-CONCIERGE-VISION — Concierge
 
-**Auto-Claude** is an agent harness that turns a reasoning engine into a reliable, autonomous spec implementer.
+**Concierge** is a single conversational entry point — a Slack DM with a bot, served from the Operator's Mac mini — that turns intent into action across all his tools. It is an LLM agent with a fixed toolbox (auto-claude, knowledge-vault Obsidian vault, Slack, calendar, email, GitHub, web, observer) and a single mobile-friendly triage board for the small set of items that genuinely need human judgment.
 
-**Why:** A language model can reason about code, but it cannot — on its own — run tests, enforce budgets, isolate workspaces, review its own output independently, or learn from past mistakes. The harness provides all of that. Without it, the model is a copilot that needs constant supervision. With it, the model becomes a worker that operates unattended overnight.
+**Why:** the Operator runs three workstreams in parallel — a B2B CTO role, a freelance product project, and church ministry — plus operates an autonomous software-development pipeline (auto-claude). Each surface (GitHub issues, Obsidian, Slack, email, calendar) demands its own context switch. The cost is not the individual tools; it is the routing decision he makes a hundred times a day: "where does this thing live, who needs to act on it, when do I get back to it?" The concierge collapses that routing to one chat.
 
-**For:** An Operator who writes specifications, creates work requests, and collaborates with agents through interactive sessions when decisions require discussion. The Operator defines what gets built. The harness executes. The Operator reviews results and approves production releases. The system earns the Operator's trust through a warmup period before gaining autonomy.
+**For:** the Operator, single-tenant. No multi-user mode. No team accounts.
 
-**What the harness provides:**
-- **Orchestration** — detects work, classifies complexity, decomposes into parallel units, drives an FSM pipeline through implementation, review, integration, and deployment; coordinates batches of concurrent work across repositories with dependency-aware merge ordering
-- **Containment** — isolated environments, structural access controls, cost circuit breakers, credential isolation from intelligent sessions
-- **Quality gates** — independent heterogeneous review (not self-certification), holdout validation with scenarios the agent never sees, static analysis enforcement
-- **Technical leadership** — monitors code health, detects spec-code drift, identifies failure patterns and dependency risks, proposes technical improvements — always flowing through product ownership for priority assessment before reaching the Operator
-- **Learning** — captures pitfalls, injects them into future sessions, promotes recurring patterns to permanent documentation, proposes instruction improvements — all with Operator approval
-- **Interactive sessions** — any agent that operates autonomously in the daemon is also available as an interactive collaborator. The Operator can open a conversation with the PO to discuss priorities, with the Tech Lead to explore technical decisions, or with any other agent. The agent brings its current state (proposals, findings, health signals) into the conversation and can execute decisions on the spot. Same agent identity, same tools, same shared state — just a different execution mode.
-- **Product co-ownership** (evolutionary) —
-  - **Phase 1 (Medium PO):** Synthesizes existing signals — spec pipeline gaps, delivery health, backlog staleness, operator ideas — to propose the next most valuable work. Reactive intelligence: sees what exists and what is stuck.
-  - **Phase 2 (Wide PO):** Develops domain understanding by reading L0 vision, project history, and operator patterns over time. Proactive intelligence: identifies strategic gaps, proposes new capabilities aligned with project vision, anticipates roadmap direction. Requires elevated operator trust, gated by demonstrated proposal quality.
-  - Both phases require Operator approval before any work begins.
+**What the concierge provides:**
 
-**What the model provides:** Reasoning within the boundaries the harness sets — decomposition, implementation, code review, conflict resolution, bug diagnosis.
+- **One inbox** — a Slack DM with the bot is the primary input/output. Long-form work, decisions, "remember this", "did X happen?", "kick off Y" — all flow through the DM.
+- **One triage board** — a small mobile-friendly web view (behind Cloudflare Tunnel from the Mac mini, Cloudflare-Access-gated to the Operator's email) holding two sections: items that need the Operator's decision and items currently in flight. Glanceable; not a notification firehose.
+- **A fixed toolbox** — the concierge has direct, audited tool calls into ~10 subsystems. Most actions happen autonomously. High-blast-radius actions (external email, public Slack post, merge-to-main, vault writes under client folders) require a Slack-confirm tap before executing.
+- **Two-tier memory** — the Obsidian vault at `~/code/knowledge-vault` is the durable cortex (decisions, captures, daily summaries written nightly via MCP). A local SQLite store is the ephemeral hippocampus (recent threads, audit log, board cards, 7-day rolling summaries). Older memory always falls back to vault search.
+- **Coexistence with manual sessions** — the Operator runs Claude Code, Codex, and pi.dev sessions on his own initiative. The concierge **observes** (commits, branches, worktrees) but never manages or warns about manual work. He can ask the concierge "what am I in the middle of?"; the concierge never volunteers it.
+- **Skill-distillation loop (Hermes-inspired)** — when the concierge executes the same multi-step pattern several times, it proposes (with confirmation) a distilled skill file in the knowledge-vault `personal-claude` plugin marketplace, named after the pattern. Future executions invoke the skill instead of re-deriving the steps.
+- **Subsumes the existing `~/code/knowledge-vault-slack-bot`** — the Python daemon currently doing Slack capture, briefing, and agent routing. Its responsibilities are absorbed by the concierge in Phase 1+; the existing daemon stays running until feature parity is reached, then is retired.
+
+**What the harness does NOT provide:**
+
+- Calendar / email / Obsidian replacement. The concierge calls them; it does not replace them.
+- Session orchestration. Concierge does not start, supervise, or kill Claude Code / Codex / pi.dev sessions.
+- Multi-user / team mode. Single-tenant by design.
+- Notification firehose. Only events the concierge has classified as relevant ever surface to the Operator.
+- A general-purpose chatbot. The concierge has a toolbox and an opinion. Out-of-scope requests get a polite "that's not what I do."
+
+**Operator role (the Operator):**
+
+1. Author L1 specs when adding new subsystems.
+2. Approve production releases of any subsystem.
+3. Decide on board cards the concierge surfaces (snooze, approve, deny, defer).
+
+Everything else is autonomous. The concierge does not ask permission for routine reads, drafts, captures, or audited tool calls below the blast-radius gate.
+
+**Subsystem position of `auto-claude`:**
+
+The existing `packages/daemon` (the GitHub-issue → PR pipeline) is one subsystem the concierge calls. Its governing L0 is `L0-AC-VISION` (this repository's `.specify/L0-ac-vision.md`); that subtree of 14 `FUNC-AC-*` specs is unchanged by this restructure. The relationship between `L0-CONCIERGE-VISION` and `L0-AC-VISION` is expressed in prose only — there is no `parent:` field in `traceability.yml` linking them. The concierge tree is **additive** to the auto-claude tree. Spec resolvers that walk children find them as siblings in `traceability.yml` and load both via the multi-L0-aware spec-loader.
 
 **Boundaries:**
-- Never deploys to production without Operator approval
-- Never acts on self-generated proposals without Operator approval
-- Never writes or modifies specifications
-- Never modifies its own implementation or evaluation criteria
-- All permanent knowledge changes require Operator approval
 
-**Success:** The Operator creates an Issue before bed and wakes up to a working, reviewed implementation on a dev URL — with confidence that cost, safety, and quality were maintained overnight.
+- Never sends external email, posts to non-DM Slack channels, merges to `main`, or writes vault notes under `20-Areas/clients/` without explicit Slack confirmation.
+- Never deletes vault content, edits knowledge-vault notes outside its allow-listed paths, or modifies its own implementation/specs.
+- Never warns the Operator about his own manual coding sessions.
+- Never spawns parallel writer agents for one logical task (single-threaded linear agent per Cognition's "Don't Build Multi-Agents"). Subagents are spawned only for read-heavy noisy tools (gh log scans, web fetches, email triage) where they return a short summary instead of polluting the main loop.
+
+**Success:** On a typical Tuesday, the Operator sends ≤3 chat messages, glances at the board ≤2 times, and the system handles ≥80 % of routine coordination work — issue triage, draft replies, calendar prep, knowledge-vault captures, auto-claude babysitting — without further input.

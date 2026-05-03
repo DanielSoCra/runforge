@@ -817,3 +817,76 @@ STACK-AC-BATCH-CLASSIFIER:
   code_paths: []
   test_paths: []
   status: draft
+
+# --- Concierge L0 spec (vision — root of all concierge specs) ---
+# Note: relationship to L0-AC-VISION is expressed in prose inside the
+# L0-CONCIERGE-VISION document. NO parent: field is set on L0-AC-VISION.
+
+L0-CONCIERGE-VISION:
+  children: [FUNC-CONCIERGE-CORE, FUNC-CONCIERGE-MEMORY, FUNC-CONCIERGE-BOARD, FUNC-CONCIERGE-CHANNEL, FUNC-CONCIERGE-AWARENESS]
+  status: draft
+
+# --- Concierge L1 specs ---
+
+FUNC-CONCIERGE-CORE:
+  children: [ARCH-CONCIERGE-RUNTIME, ARCH-TOOL-REGISTRY, ARCH-CONFIRMATION-LIFECYCLE]
+  status: draft
+
+FUNC-CONCIERGE-MEMORY:
+  children: [ARCH-CONCIERGE-RUNTIME]
+  status: draft
+
+FUNC-CONCIERGE-BOARD:
+  children: [ARCH-CONCIERGE-RUNTIME, ARCH-EVENT-BUS]
+  related: [FUNC-AC-DASHBOARD]   # boundary documented in concierge-board.md spec
+  status: draft
+
+FUNC-CONCIERGE-CHANNEL:
+  children: [ARCH-CONCIERGE-RUNTIME]
+  status: draft
+
+FUNC-CONCIERGE-AWARENESS:
+  children: [ARCH-EVENT-BUS]
+  status: draft
+
+# --- Concierge L2 specs ---
+
+ARCH-CONCIERGE-RUNTIME:
+  parent: FUNC-CONCIERGE-CORE
+  children: [STACK-CONCIERGE-NODE, STACK-CONCIERGE-BOARD]
+  status: draft
+
+ARCH-EVENT-BUS:
+  parent: FUNC-CONCIERGE-AWARENESS
+  children: [STACK-CONCIERGE-NODE]
+  status: draft
+
+ARCH-TOOL-REGISTRY:
+  parent: FUNC-CONCIERGE-CORE
+  children: [STACK-CONCIERGE-NODE]
+  status: draft
+
+ARCH-CONFIRMATION-LIFECYCLE:
+  parent: FUNC-CONCIERGE-CORE
+  children: [STACK-CONCIERGE-NODE]
+  status: draft
+
+# --- Concierge L3 specs ---
+
+STACK-CONCIERGE-NODE:
+  parent: ARCH-CONCIERGE-RUNTIME
+  children: []
+  code_paths:
+    - packages/concierge/
+  test_paths:
+    - packages/concierge/**/*.test.ts
+  status: draft
+
+STACK-CONCIERGE-BOARD:
+  parent: ARCH-CONCIERGE-RUNTIME
+  children: []
+  code_paths:
+    - packages/concierge/src/board/
+  test_paths:
+    - packages/concierge/src/board/**/*.test.ts
+  status: draft
