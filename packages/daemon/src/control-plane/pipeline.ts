@@ -5,6 +5,7 @@ import { hashError, isCircularError, recordErrorHash } from './error-hash.js';
 import type { StateManager } from './state.js';
 import type { CostTracker } from '../session-runtime/cost.js';
 import type { SupabaseRunWriter, PhaseRecord } from '../supabase/run-writer.js';
+import type { PhaseLabelMirror } from './phase-labels.js';
 
 export type PhaseHandler = (run: RunState) => Promise<PhaseEvent>;
 
@@ -45,10 +46,19 @@ export async function runPipeline(
   costTracker: CostTracker,
   config?: Partial<PipelineConfig>,
   runWriter?: SupabaseRunWriter,
+  phaseLabelMirror?: PhaseLabelMirror,
 ): Promise<PipelineResult> {
   const maxAttempts = { ...DEFAULT_MAX_ATTEMPTS, ...config?.maxAttempts };
   const retryCounts: Record<string, number> = {};
   let lastError: string | undefined;
+  const mirrorCurrentPhase = () => {
+    if (!phaseLabelMirror) return;
+    if (run.phase === 'report') {
+      phaseLabelMirror.clearPhaseLabels(run.issueNumber, run);
+      return;
+    }
+    phaseLabelMirror.applyPhaseLabel(run.issueNumber, run.phase, run);
+  };
 
   // Pre-flight: validate all non-terminal phases have handlers
   const missingHandlers: string[] = [];
@@ -62,10 +72,13 @@ export async function runPipeline(
     const msg = `Missing handlers for phases: ${missingHandlers.join(', ')} in variant`;
     console.error(`[pipeline] ${msg}`);
     run.phase = 'stuck';
+    phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
     await stateMgr.saveRunState(run);
     void runWriter?.upsertRun(run.id, { current_phase: 'stuck', phases: buildPhaseRecords(run) });
     return { outcome: 'stuck', run, error: msg };
   }
+
+  mirrorCurrentPhase();
 
   while (true) {
     // Check for terminal states
@@ -83,6 +96,7 @@ export async function runPipeline(
       // Daily budget exceeded → paused (resumes on daily reset)
       const isPerRun = budget.reason === 'per-run-budget-exceeded';
       run.phase = isPerRun ? 'stuck' : 'paused';
+      if (isPerRun) phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
       await stateMgr.saveRunState(run);
       void runWriter?.upsertRun(run.id, {
         current_phase: run.phase,
@@ -101,6 +115,7 @@ export async function runPipeline(
       // Check for completion before advancing (prevents infinite loop on report)
       if (isComplete(currentPhase, event)) {
         run.phaseCompletions[currentPhase] = true;
+        phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
         await stateMgr.saveRunState(run);
         void runWriter?.upsertRun(run.id, {
           current_phase: run.phase,
@@ -112,6 +127,11 @@ export async function runPipeline(
       const advanced = advancePhase(run, table, event, maxAttempts, retryCounts);
       if (!advanced) {
         return { outcome: 'error', run, error: `No transition for ${currentPhase}:${event}` };
+      }
+      if (run.phase === 'stuck') {
+        phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
+      } else {
+        mirrorCurrentPhase();
       }
       // Persist auto-advanced phases (crash recovery)
       await stateMgr.saveRunState(run);
@@ -152,6 +172,7 @@ export async function runPipeline(
     const globalNext = applyGlobalTransition(event);
     if (globalNext) {
       run.phase = globalNext;
+      if (globalNext === 'stuck') phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
       await stateMgr.saveRunState(run);
       void runWriter?.upsertRun(run.id, {
         current_phase: run.phase,
@@ -164,6 +185,7 @@ export async function runPipeline(
     // Check for completion
     if (isComplete(run.phase, event)) {
       run.phaseCompletions[run.phase] = true;
+      phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
       await stateMgr.saveRunState(run);
       void runWriter?.upsertRun(run.id, {
         current_phase: run.phase,
@@ -181,6 +203,7 @@ export async function runPipeline(
       if (isCircularError(errHash, run.errorHashes)) {
         console.log(`[pipeline] Circular error detected in ${run.phase} (hash ${errHash}), transitioning to stuck`);
         run.phase = 'stuck';
+        phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
         await stateMgr.saveRunState(run);
         void runWriter?.upsertRun(run.id, {
           current_phase: run.phase,
@@ -195,6 +218,7 @@ export async function runPipeline(
     const advanced = advancePhase(run, table, event, maxAttempts, retryCounts);
     if (!advanced) {
       run.phase = 'stuck';
+      phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
       await stateMgr.saveRunState(run);
       void runWriter?.upsertRun(run.id, {
         current_phase: run.phase,
@@ -204,6 +228,11 @@ export async function runPipeline(
     }
 
     // Save state after each phase transition
+    if (run.phase === 'stuck') {
+      phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
+    } else {
+      mirrorCurrentPhase();
+    }
     await stateMgr.saveRunState(run);
     void runWriter?.upsertRun(run.id, {
       current_phase: run.phase,

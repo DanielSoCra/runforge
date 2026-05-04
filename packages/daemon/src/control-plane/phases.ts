@@ -1,5 +1,6 @@
 // src/control-plane/phases.ts
 import type { PhaseHandlerMap } from './pipeline.js';
+import type { PhaseLabelMirror } from './phase-labels.js';
 import type { RunState, PhaseEvent, WorkRequest } from '../types.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { ImplementationCoordinator } from '../implementation/coordinator.js';
@@ -71,6 +72,7 @@ export function createPhaseHandlers(
   repoRoot?: string,
   activePlugins?: Array<{ id: string; activatedAt: string }>,
   knowledgeStore?: KnowledgeStore,
+  phaseLabelMirror?: PhaseLabelMirror,
 ): PhaseHandlerMap {
   const repo = repoName;
   const detector = createWorkDetector(octokit, owner, repo);
@@ -996,6 +998,7 @@ export function createPhaseHandlers(
         reportBody = `Issue #${workRequest.issueNumber} completed (report generation failed)`;
       }
       run.report = reportBody;
+      phaseLabelMirror?.clearPhaseLabels(workRequest.issueNumber, run);
 
       // Report phase is best-effort: the implementation work is already done.
       // If any GitHub/notification call fails, log the error but still return

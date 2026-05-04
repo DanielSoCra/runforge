@@ -117,6 +117,7 @@ export interface RunState {
   l3Feedback?: string;
   /** Counter for l3-compliance failure attempts (every failure path); capped to prevent infinite cross-phase loop. */
   l3ComplianceAttempts?: number;
+  activePhaseLabel?: string;
   workspacePath?: string; // Persisted worktree path — survives daemon restarts
 }
 

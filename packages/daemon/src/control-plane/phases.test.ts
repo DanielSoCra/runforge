@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { RunState, WorkRequest } from '../types.js';
 import type { Config } from '../config.js';
+import type { PhaseLabelMirror } from './phase-labels.js';
 
 // Mock all external dependencies before importing the module under test
 vi.mock('../lib/git.js', () => ({
@@ -207,13 +208,19 @@ const mockOctokit = {
 } as any;
 const mockRuntime = { spawnSession: vi.fn() } as any;
 
-function createHandlers(configOverrides: Partial<Config> = {}, workReq?: WorkRequest, repoRoot?: string) {
+function createHandlers(
+  configOverrides: Partial<Config> = {},
+  workReq?: WorkRequest,
+  repoRoot?: string,
+  phaseLabelMirror?: PhaseLabelMirror,
+) {
   const config = makeConfig(configOverrides);
   const mockCoordinator = { implement: vi.fn() } as any;
   return {
     handlers: createPhaseHandlers(
       config, 'owner', 'repo', mockRuntime, mockCoordinator,
       mockOctokit, workReq ?? makeWorkRequest(), '/tmp/state', undefined, undefined, repoRoot,
+      undefined, undefined, phaseLabelMirror,
     ),
     coordinator: mockCoordinator,
     config,
@@ -1049,6 +1056,25 @@ describe('createPhaseHandlers', () => {
           issueNumber: 42,
         }),
       );
+    });
+
+    it('clears phase labels before completing work (#469)', async () => {
+      const phaseLabelMirror: PhaseLabelMirror = {
+        applyPhaseLabel: vi.fn(),
+        clearPhaseLabels: vi.fn(),
+        provisionLabels: vi.fn().mockResolvedValue(undefined),
+      };
+      const { handlers } = createHandlers({}, undefined, undefined, phaseLabelMirror);
+      const run = makeRun({ activePhaseLabel: 'phase:test' });
+
+      const result = await handlers.report!(run);
+
+      expect(result).toBe('success');
+      expect(phaseLabelMirror.clearPhaseLabels).toHaveBeenCalledWith(42, run);
+      const detector = mockCreateWorkDetector.mock.results[0]!.value;
+      expect(
+        vi.mocked(phaseLabelMirror.clearPhaseLabels).mock.invocationCallOrder[0],
+      ).toBeLessThan(detector.completeWork.mock.invocationCallOrder[0]);
     });
 
     it('returns success even when postReport throws (#107)', async () => {

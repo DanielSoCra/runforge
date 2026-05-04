@@ -5,6 +5,7 @@ import { getPipeline } from './fsm.js';
 import { StateManager } from './state.js';
 import { CostTracker } from '../session-runtime/cost.js';
 import type { RunState, PhaseEvent } from '../types.js';
+import type { PhaseLabelMirror } from './phase-labels.js';
 import { mkdtemp } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -465,6 +466,79 @@ describe('runPipeline', () => {
     expect(firstCall[1]).toHaveProperty('current_phase');
     expect(firstCall[1]).toHaveProperty('phases');
     expect(Array.isArray(firstCall[1].phases)).toBe(true);
+  });
+
+  it('mirrors phase labels on transitions and clears them on completion (#469)', async () => {
+    const run = makeRun('feature-simple');
+    const handlers: PhaseHandlerMap = { ...featureSimpleAllSuccess };
+    const appliedPhases: string[] = [];
+    const phaseLabelMirror: PhaseLabelMirror = {
+      applyPhaseLabel: vi.fn((_issueNumber, phase, targetRun) => {
+        appliedPhases.push(phase);
+        targetRun.activePhaseLabel = `phase:${phase}`;
+      }),
+      clearPhaseLabels: vi.fn((_issueNumber, targetRun) => {
+        targetRun.activePhaseLabel = undefined;
+      }),
+      provisionLabels: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await runPipeline(
+      run,
+      getPipeline('feature-simple'),
+      handlers,
+      stateMgr,
+      costTracker,
+      undefined,
+      undefined,
+      phaseLabelMirror,
+    );
+
+    expect(result.outcome).toBe('complete');
+    expect(appliedPhases).toEqual(expect.arrayContaining([
+      'classify',
+      'implement',
+      'review',
+      'holdout',
+      'integrate',
+      'deploy',
+      'test',
+    ]));
+    expect(appliedPhases).not.toContain('report');
+    expect(phaseLabelMirror.clearPhaseLabels).toHaveBeenCalledWith(1, run);
+    expect(run.activePhaseLabel).toBeUndefined();
+  });
+
+  it('clears phase labels when a run transitions to stuck (#469)', async () => {
+    const run = makeRun('feature-simple');
+    const handlers: PhaseHandlerMap = {
+      ...featureSimpleAllSuccess,
+      implement: async () => 'failure' as PhaseEvent,
+    };
+    const phaseLabelMirror: PhaseLabelMirror = {
+      applyPhaseLabel: vi.fn((_issueNumber, phase, targetRun) => {
+        targetRun.activePhaseLabel = `phase:${phase}`;
+      }),
+      clearPhaseLabels: vi.fn((_issueNumber, targetRun) => {
+        targetRun.activePhaseLabel = undefined;
+      }),
+      provisionLabels: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await runPipeline(
+      run,
+      getPipeline('feature-simple'),
+      handlers,
+      stateMgr,
+      costTracker,
+      undefined,
+      undefined,
+      phaseLabelMirror,
+    );
+
+    expect(result.outcome).toBe('stuck');
+    expect(phaseLabelMirror.clearPhaseLabels).toHaveBeenCalledWith(1, run);
+    expect(run.activePhaseLabel).toBeUndefined();
   });
 
   // Cross-phase loop integration test (#437): drives the FSM through a real

@@ -791,9 +791,18 @@ STACK-AC-PRODUCT-OWNER-INTERACTIVE:
 STACK-AC-PHASE-LABELS:
   parent: ARCH-AC-PHASE-LABELS
   children: []
-  # Paths planned in spec (#469); empty until implementation PR re-adds them.
-  code_paths: []
-  test_paths: []
+  code_paths:
+    - packages/daemon/src/control-plane/phase-labels.ts
+    - packages/daemon/src/control-plane/pipeline.ts
+    - packages/daemon/src/control-plane/phases.ts
+    - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/control-plane/repo-manager.ts
+    - packages/daemon/src/control-plane/process-single.ts
+    - packages/daemon/src/types.ts
+  test_paths:
+    - packages/daemon/src/control-plane/phase-labels.test.ts
+    - packages/daemon/src/control-plane/pipeline.test.ts
+    - packages/daemon/src/control-plane/phases.test.ts
   status: draft
 
 STACK-AC-DAG-EXECUTOR:

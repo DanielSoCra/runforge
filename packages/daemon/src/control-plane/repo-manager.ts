@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { Octokit } from '@octokit/rest';
 import { createWorkDetector, type WorkDetector } from './work-detection.js';
 import { ok, err, type Result } from '../lib/result.js';
+import { createPhaseLabelMirror } from './phase-labels.js';
 
 export interface RepoRecord {
   id: string;
@@ -177,6 +178,7 @@ export class RepoManager {
     const token = await this.resolveToken(repo.id, repo.connection_id);
     if (repo.connection_id && !token) return;
     const octokit = new Octokit({ auth: token });
+    void createPhaseLabelMirror(octokit, repo.owner, repo.name).provisionLabels();
     const detector = createWorkDetector(octokit, repo.owner, repo.name);
     const intervalMs = repo.poll_interval_ms ?? this.defaultPollIntervalMs;
 

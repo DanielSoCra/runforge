@@ -14,6 +14,7 @@ import { createPhaseHandlers } from './phases.js';
 import { createWebsitePhaseHandlers } from './phases-website.js';
 import { readAgencyConfig } from './agency-config.js';
 import { runPipeline } from './pipeline.js';
+import { createPhaseLabelMirror } from './phase-labels.js';
 import { getPipeline, getStartPhase } from './fsm.js';
 import { selectVariant } from './variants.js';
 import { notify } from './notify.js';
@@ -590,6 +591,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     }
     const legacyOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
     legacyDetector = createWorkDetector(legacyOctokit, config.repo.owner, config.repo.name);
+    void createPhaseLabelMirror(legacyOctokit, config.repo.owner, config.repo.name).provisionLabels();
   }
 
   // 6. Start control server
@@ -679,6 +681,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       ? await repoManager.resolveTokenForRepo(resumeRepoId)
       : process.env.GITHUB_TOKEN;
     const notifyOctokit = new Octokit({ auth: resumeToken });
+    const phaseLabelMirror = createPhaseLabelMirror(notifyOctokit, runOwner, runRepoName);
     const agencyConfig = await readAgencyConfig(null, '');
     const resumedRequest: WorkRequest = {
       issueNumber: run.issueNumber,
@@ -689,11 +692,11 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     };
     const handlers = run.variant === 'website'
       ? createWebsitePhaseHandlers(agencyConfig, null, notifyOctokit, runOwner, runRepoName, run.issueNumber, null)
-      : createPhaseHandlers(config, runOwner, runRepoName, runtime, coordinator, notifyOctokit, resumedRequest, stateDir, runWriter ?? undefined, run.id, repoRoot, configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins, knowledgeStore);
+      : createPhaseHandlers(config, runOwner, runRepoName, runtime, coordinator, notifyOctokit, resumedRequest, stateDir, runWriter ?? undefined, run.id, repoRoot, configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins, knowledgeStore, phaseLabelMirror);
     const table = getPipeline(run.variant);
 
     const resumeDetector = legacyDetector ?? createWorkDetector(new Octokit({ auth: resumeToken }), runOwner, runRepoName);
-    runPipeline(run, table, handlers, stateMgr, costTracker, undefined, runWriter ?? undefined)
+    runPipeline(run, table, handlers, stateMgr, costTracker, undefined, runWriter ?? undefined, phaseLabelMirror)
       .then(async (result) => {
         console.log(`[daemon] Resumed run #${run.issueNumber} finished: ${result.outcome}`);
 
@@ -753,6 +756,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
         ? await repoManager.resolveTokenForRepo(resumeRepoId)
         : process.env.GITHUB_TOKEN;
       const runOctokit = new Octokit({ auth: resumeToken });
+      const phaseLabelMirror = createPhaseLabelMirror(runOctokit, runOwner, runRepoName);
 
       // Fetch current labels from GitHub
       let issueLabels: string[];
@@ -804,10 +808,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       };
       const handlers = run.variant === 'website'
         ? createWebsitePhaseHandlers(agencyConfig, null, notifyOctokit, runOwner, runRepoName, run.issueNumber, null)
-        : createPhaseHandlers(config, runOwner, runRepoName, runtime, coordinator, notifyOctokit, resumedRequest, stateDir, runWriter ?? undefined, run.id, repoRoot, configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins, knowledgeStore);
+        : createPhaseHandlers(config, runOwner, runRepoName, runtime, coordinator, notifyOctokit, resumedRequest, stateDir, runWriter ?? undefined, run.id, repoRoot, configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins, knowledgeStore, phaseLabelMirror);
       const table = getPipeline(run.variant);
 
-      runPipeline(run, table, handlers, stateMgr, costTracker, undefined, runWriter ?? undefined)
+      runPipeline(run, table, handlers, stateMgr, costTracker, undefined, runWriter ?? undefined, phaseLabelMirror)
         .then(async (result) => {
           console.log(`[daemon] Parked run #${run.issueNumber} finished: ${result.outcome}`);
           void runWriter?.upsertRun(run.id, {
@@ -1059,6 +1063,7 @@ async function processWorkRequest(
   // Build a notifyOctokit using per-connection token when available
   const resolvedToken = repoManager ? await repoManager.resolveTokenForRepo(repoId) : process.env.GITHUB_TOKEN;
   const notifyOctokit = new Octokit({ auth: resolvedToken });
+  const phaseLabelMirror = createPhaseLabelMirror(notifyOctokit, owner, repoName);
   const agencyConfig = await readAgencyConfig(null, '');
   const handlers = variant === 'website'
     ? createWebsitePhaseHandlers(
@@ -1070,11 +1075,11 @@ async function processWorkRequest(
         request.issueNumber,
         null,          // repoId — wired in follow-on
       )
-    : createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir, runWriter ?? undefined, run.id, repoRoot, repoConfig?.activePlugins, knowledgeStore);
+    : createPhaseHandlers(config, owner, repoName, runtime, coordinator, notifyOctokit, request, stateDir, runWriter ?? undefined, run.id, repoRoot, repoConfig?.activePlugins, knowledgeStore, phaseLabelMirror);
   const table = getPipeline(variant);
 
   console.log(`[daemon] Pipeline start for #${request.issueNumber}: ${request.title}`);
-  const result = await runPipeline(run, table, handlers, stateMgr, costTracker, undefined, runWriter ?? undefined);
+  const result = await runPipeline(run, table, handlers, stateMgr, costTracker, undefined, runWriter ?? undefined, phaseLabelMirror);
   console.log(`[daemon] Pipeline done for #${request.issueNumber}: ${result.outcome}${result.error ? ` — ${result.error}` : ''}`);
 
   void runWriter?.upsertRun(run.id, {

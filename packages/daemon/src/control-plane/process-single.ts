@@ -12,6 +12,7 @@ import { selectVariant } from './variants.js';
 import { notify } from './notify.js';
 import type { RunState, DetectedWorkType } from '../types.js';
 import { ok, err, type Result } from '../lib/result.js';
+import { createPhaseLabelMirror } from './phase-labels.js';
 
 /** Feature-pipeline label → work type mapping. Checked in priority order. */
 const FEATURE_PIPELINE_TIERS: ReadonlyArray<{ required: string; workType: FeaturePipelineWorkType }> = [
@@ -76,6 +77,8 @@ export async function processSingleIssue(issueNumber: number, configPath: string
   const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
   const { owner, name: repo } = config.repo;
   const detector = createWorkDetector(octokit, owner, repo);
+  const phaseLabelMirror = createPhaseLabelMirror(octokit, owner, repo);
+  void phaseLabelMirror.provisionLabels();
 
   let issueData;
   try {
@@ -119,9 +122,24 @@ export async function processSingleIssue(issueNumber: number, configPath: string
   await stateMgr.saveRunState(run);
 
   console.log(`[process] Running pipeline for #${issueNumber}: ${request.title}`);
-  const handlers = createPhaseHandlers(config, owner, repo, runtime, coordinator, octokit, request, stateDir, undefined, undefined, repoRoot);
+  const handlers = createPhaseHandlers(
+    config,
+    owner,
+    repo,
+    runtime,
+    coordinator,
+    octokit,
+    request,
+    stateDir,
+    undefined,
+    undefined,
+    repoRoot,
+    undefined,
+    undefined,
+    phaseLabelMirror,
+  );
   const table = getPipeline(variant);
-  const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+  const result = await runPipeline(run, table, handlers, stateMgr, costTracker, undefined, undefined, phaseLabelMirror);
   console.log(`[process] Result: ${result.outcome}${result.error ? ` — ${result.error}` : ''}`);
 
   if (result.outcome === 'stuck') {
