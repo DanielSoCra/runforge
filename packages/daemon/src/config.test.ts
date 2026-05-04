@@ -37,6 +37,22 @@ describe('ConfigSchema', () => {
     const result = ConfigSchema.safeParse(validConfig);
     if (result.success) {
       expect(result.data.pollIntervalMs).toBe(30000);
+      expect(result.data.governance).toEqual({
+        documentPath: 'FACTORY_RULES.md',
+        maxPrLinesChanged: 2000,
+      });
+    }
+  });
+
+  it('accepts governance guardrail overrides', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      governance: { documentPath: '.auto-claude/FACTORY_RULES.md', maxPrLinesChanged: 750 },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.governance.maxPrLinesChanged).toBe(750);
     }
   });
 
@@ -109,6 +125,7 @@ describe('zod v4 compatibility', () => {
       expect(result.data.validation.maxFixCycles).toBe(3);
       expect(result.data.diagnosis.confidenceThreshold).toBe(0.7);
       expect(result.data.warmup.threshold).toBe(10);
+      expect(result.data.governance.documentPath).toBe('FACTORY_RULES.md');
     }
   });
 });

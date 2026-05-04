@@ -86,6 +86,14 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   if (!configResult.ok) return configResult;
   const config = configResult.value;
 
+  const { preloadGovernanceContext } = await import('../session-runtime/governance-context.js');
+  try {
+    const governance = await preloadGovernanceContext(config, process.cwd());
+    console.log(`[daemon] Governance context loaded from ${governance.sourcePath}`);
+  } catch (e) {
+    return err(e instanceof Error ? e : new Error(String(e)));
+  }
+
   // 2. Initialize state
   const stateDir = 'state';
   const stateMgr = new StateManager(stateDir);

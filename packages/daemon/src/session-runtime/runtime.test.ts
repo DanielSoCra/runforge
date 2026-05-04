@@ -9,6 +9,7 @@ import { SessionError } from './session-error.js';
 import { mkdtemp, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { __clearGovernanceCacheForTests } from './governance-context.js';
 
 vi.mock('./plugin-loader.js', () => ({
   readPluginsForContext: vi.fn().mockResolvedValue([{
@@ -34,6 +35,10 @@ const testConfig = {
   adapter: 'cli' as const,
   dailyBudget: 50,
   perRunBudget: 10,
+  governance: {
+    documentPath: 'FACTORY_RULES.md',
+    maxPrLinesChanged: 900,
+  },
 } as Config;
 
 // Full variable set for the registered worker prompt contract
@@ -44,10 +49,25 @@ const WORKER_VARS = { task: 'do it', specs: '', verification: '', pitfalls: '' }
 describe('SessionRuntime', () => {
   let runtime: SessionRuntime;
   let costTracker: CostTracker;
+  let governanceDir: string;
+  const originalCwd = process.cwd();
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    governanceDir = await mkdtemp(join(tmpdir(), 'runtime-governance-'));
+    process.chdir(governanceDir);
+    await writeFile(
+      join(governanceDir, 'FACTORY_RULES.md'),
+      '# FACTORY_RULES\n\nDaily {{dailyBudget}}\nRun {{perRunBudget}}\nMax {{maxPrLinesChanged}}',
+    );
+    __clearGovernanceCacheForTests();
     costTracker = new CostTracker({ dailyBudget: 50, perRunBudget: 10 });
     runtime = new SessionRuntime(testConfig, costTracker);
+  });
+
+  afterEach(async () => {
+    process.chdir(originalCwd);
+    __clearGovernanceCacheForTests();
+    await rm(governanceDir, { recursive: true, force: true });
   });
 
   it('rejects unknown session types', async () => {
@@ -145,6 +165,33 @@ describe('SessionRuntime', () => {
     expect(result.prompt.indexOf('PLUGIN INJECTION')).toBeLessThan(result.prompt.indexOf('SYSTEM PROMPT'));
     expect(result.prompt.indexOf('SKILL CONTENT')).toBeLessThan(result.prompt.indexOf('SYSTEM PROMPT'));
     expect(result.prompt.indexOf('AGENT CONTENT')).toBeLessThan(result.prompt.indexOf('SYSTEM PROMPT'));
+  });
+
+  it('prepends governance before plugins and system prompt', async () => {
+    const result = await (runtime as any).assemblePrompt(
+      { name: 'test-agent', systemPrompt: 'SYSTEM PROMPT' },
+      { variables: {}, activePlugins: [{ id: 'test', activatedAt: '2024-01-01T00:00:00Z' }] },
+    );
+
+    expect(result.prompt).toContain('# FACTORY_RULES');
+    expect(result.prompt).toContain('Daily $50');
+    expect(result.prompt.indexOf('# FACTORY_RULES')).toBeLessThan(result.prompt.indexOf('PLUGIN INJECTION'));
+    expect(result.prompt.indexOf('# FACTORY_RULES')).toBeLessThan(result.prompt.indexOf('SYSTEM PROMPT'));
+  });
+
+  it('returns an error instead of spawning when governance cannot load', async () => {
+    mockSpawn.mockClear();
+    const missingConfig = {
+      ...testConfig,
+      governance: { documentPath: 'missing-rules.md', maxPrLinesChanged: 900 },
+    } as Config;
+    const missingRuntime = new SessionRuntime(missingConfig, costTracker);
+
+    const result = await missingRuntime.spawnSession('worker', { variables: WORKER_VARS }, 1);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('governance document not found');
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it('composite context prompt injection appears before system prompt', () => {

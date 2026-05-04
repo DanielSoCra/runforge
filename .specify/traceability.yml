@@ -70,7 +70,7 @@ FUNC-AC-QUALITY:
   status: draft
 
 FUNC-AC-SAFETY:
-  children: [ARCH-AC-SESSION-RUNTIME, ARCH-AC-OPERATIONAL-SAFETY, ARCH-AC-CONTAINMENT, ARCH-AC-SESSION-PROVIDERS]
+  children: [ARCH-AC-SESSION-RUNTIME, ARCH-AC-OPERATIONAL-SAFETY, ARCH-AC-CONTAINMENT, ARCH-AC-SESSION-PROVIDERS, ARCH-AC-GOVERNANCE]
   status: draft
 
 FUNC-AC-BUG-TRIAGE:
@@ -190,6 +190,11 @@ ARCH-AC-CONTAINMENT:
 ARCH-AC-SESSION-PROVIDERS:
   parent: FUNC-AC-SAFETY
   children: []
+  status: draft
+
+ARCH-AC-GOVERNANCE:
+  parent: FUNC-AC-SAFETY
+  children: [STACK-AC-GOVERNANCE-DAEMON]
   status: draft
 
 ARCH-AC-DIAGNOSIS:
@@ -606,6 +611,24 @@ STACK-AC-PLUGINS-DASHBOARD:
     - packages/dashboard/actions/plugins.test.ts
     - packages/dashboard/components/enable-all-form.test.tsx
     - packages/dashboard/lib/plugins/registry.test.ts
+  status: draft
+
+STACK-AC-GOVERNANCE-DAEMON:
+  parent: ARCH-AC-GOVERNANCE
+  children: []
+  code_paths:
+    - FACTORY_RULES.md
+    - packages/daemon/src/config.ts
+    - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/control-plane/process-single.ts
+    - packages/daemon/src/session-runtime/governance-context.ts
+    - packages/daemon/src/session-runtime/plugin-injection.ts
+    - packages/daemon/src/session-runtime/runtime.ts
+  test_paths:
+    - packages/daemon/src/config.test.ts
+    - packages/daemon/src/session-runtime/governance-context.test.ts
+    - packages/daemon/src/session-runtime/plugin-injection.test.ts
+    - packages/daemon/src/session-runtime/runtime.test.ts
   status: draft
 
 STACK-AC-ENRICHED-COMMITS-KNOWLEDGE:

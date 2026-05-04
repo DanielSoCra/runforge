@@ -65,6 +65,13 @@ export async function processSingleIssue(issueNumber: number, configPath: string
   if (!configResult.ok) return configResult;
   const config = configResult.value;
 
+  const { preloadGovernanceContext } = await import('../session-runtime/governance-context.js');
+  try {
+    await preloadGovernanceContext(config, process.cwd());
+  } catch (e) {
+    return err(e instanceof Error ? e : new Error(String(e)));
+  }
+
   const stateDir = 'state';
   const stateMgr = new StateManager(stateDir);
   await stateMgr.initialize();

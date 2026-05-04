@@ -11,6 +11,7 @@ import { RateLimiter } from './rate-limiter.js';
 import { createAdapter, type ProviderAdapter } from './adapters/index.js';
 import { buildCompositeContext, type McpConfig } from './plugin-injection.js';
 import { readPluginsForContext } from './plugin-loader.js';
+import { loadGovernanceContext } from './governance-context.js';
 import { DEFAULT_POLICY } from './containment-hooks.js';
 import { SessionError } from './session-error.js';
 import { auditSessionOutput } from './audit.js';
@@ -298,12 +299,14 @@ export class SessionRuntime {
   private rateLimiter: RateLimiter;
   private lastSpawnTime = 0;
   private staggerMs: number;
+  private config: Config;
 
   constructor(config: Config, costTracker: CostTracker, rateLimiter?: RateLimiter) {
     this.adapter = createAdapter(config.adapter);
     this.costTracker = costTracker;
     this.rateLimiter = rateLimiter ?? new RateLimiter();
     this.staggerMs = 2000; // 2 second stagger between session starts
+    this.config = config;
   }
 
   async spawnSession(
@@ -341,7 +344,12 @@ export class SessionRuntime {
     this.lastSpawnTime = Date.now();
 
     // 5. Assemble prompt and extract plugin artifacts (ARCH-AC-PLUGINS Flow 4 step 3)
-    const assembled = await this.assemblePrompt(def, context);
+    let assembled: { prompt: string; mcpConfigs: McpConfig[]; gates: string[] };
+    try {
+      assembled = await this.assemblePrompt(def, context);
+    } catch (e) {
+      return err(e instanceof Error ? e : new Error(String(e)));
+    }
 
     // 6. Delegate to adapter — with containment policy and plugin MCP configs.
     // jsonSchema may be passed as object (callers like l3-compliance use the
@@ -422,15 +430,16 @@ export class SessionRuntime {
       }
     }
 
-    // If no active plugins, return prompt with empty plugin artifacts
-    if (!context.activePlugins?.length) return { prompt, mcpConfigs: [], gates: [] };
-
-    const pluginIds = context.activePlugins.map(e => e.id);
-    const activations = new Map(context.activePlugins.map(e => [e.id, e.activatedAt]));
-    const loaded = await readPluginsForContext(pluginIds, activations);
-    const composite = buildCompositeContext(loaded);
+    const governance = await loadGovernanceContext(this.config);
+    const pluginIds = context.activePlugins?.map(e => e.id) ?? [];
+    const activations = new Map(context.activePlugins?.map(e => [e.id, e.activatedAt]) ?? []);
+    const loaded = pluginIds.length > 0
+      ? await readPluginsForContext(pluginIds, activations)
+      : [];
+    const composite = buildCompositeContext(loaded, { governanceDocument: governance.content });
 
     const parts: string[] = [];
+    if (composite.governanceDocument) parts.push(composite.governanceDocument);
     if (composite.promptInjection) parts.push(composite.promptInjection);
     for (const skill of composite.skills) {
       if (skill.content) parts.push(skill.content);

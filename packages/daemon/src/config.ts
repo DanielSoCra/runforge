@@ -97,6 +97,10 @@ export const ConfigSchema = z.object({
   maxRunsPerIssue: z.number().int().min(1).default(3),
   retryBackoffBaseMs: z.number().int().min(1000).default(60_000),
   retryBackoffMaxMs: z.number().int().min(10_000).default(1_800_000),
+  governance: z.object({
+    documentPath: z.string().min(1).default('FACTORY_RULES.md'),
+    maxPrLinesChanged: z.number().int().min(1).default(2000),
+  }).default({ documentPath: 'FACTORY_RULES.md', maxPrLinesChanged: 2000 }),
   activePlugins: z.array(z.string()).default([]),
   knowledge: z.object({
     systemicProposalThreshold: z.number().int().min(1).default(3),
