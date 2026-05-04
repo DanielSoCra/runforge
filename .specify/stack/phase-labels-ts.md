@@ -9,8 +9,16 @@ stack: typescript
 references: ARCH-AC-PHASE-LABELS
 code_paths:
   - packages/daemon/src/control-plane/phase-labels.ts
+  - packages/daemon/src/control-plane/pipeline.ts
+  - packages/daemon/src/control-plane/phases.ts
+  - packages/daemon/src/control-plane/daemon.ts
+  - packages/daemon/src/control-plane/repo-manager.ts
+  - packages/daemon/src/control-plane/process-single.ts
+  - packages/daemon/src/types.ts
 test_paths:
   - packages/daemon/src/control-plane/phase-labels.test.ts
+  - packages/daemon/src/control-plane/pipeline.test.ts
+  - packages/daemon/src/control-plane/phases.test.ts
 ---
 
 # STACK-AC-PHASE-LABELS — Phase Label Mirroring (TypeScript)
@@ -66,7 +74,7 @@ applyPhaseLabel(issueNumber: number, newPhase: Phase, run: RunState): void {
   const newLabel = PHASE_LABEL_MAP[newPhase as keyof typeof PHASE_LABEL_MAP];
   const oldLabel = run.activePhaseLabel;
   run.activePhaseLabel = newLabel;             // sync: RunState is source of truth
-  if (!newLabel && !oldLabel) return;          // both unlabeled — skip entirely
+  if (!newLabel) return;                       // unlabeled phases never write labels
   fireAndForget(async () => { /* remove old, add new via octokit */ }, `${newPhase}#${issueNumber}`);
 },
 ```
@@ -83,6 +91,7 @@ for (const label of Object.values(PHASE_LABEL_MAP)) {
 // Integration in pipeline.ts — after advancePhase, before saveRunState
 const advanced = advancePhase(run, table, event, maxAttempts, retryCounts);
 if (!advanced) { run.phase = 'stuck'; phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run); }
+else if (run.phase === 'report') { phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run); }
 else { phaseLabelMirror?.applyPhaseLabel(run.issueNumber, run.phase, run); }
 await stateMgr.saveRunState(run);
 ```
@@ -93,6 +102,6 @@ await stateMgr.saveRunState(run);
 - The 8 `phase:*` labels must exist on each monitored repository before label operations will succeed. `provisionLabels` is called fire-and-forget from `daemon.ts` on startup per repository. If provisioning races with the first FSM transition, a label write may fail softly — corrected on the next phase transition.
 - `PHASE_LABEL_MAP` is `Partial<Record<Phase, string>>` because `Phase` includes `detect`, `report`, `stuck`, `paused`, and others that have no phase label. Use `newPhase as keyof typeof PHASE_LABEL_MAP` to index safely without a type error. Do not widen the lookup — the `as const` inference on the map's values is what gives TypeScript the literal string types.
 - `clearPhaseLabels` must be called before `completeWork`/`markStuck` apply their respective labels in `work-detection.ts`. The call order in `phases.ts` (report handler) and `pipeline.ts` (stuck paths) must remove the `phase:*` label before the `complete`/`stuck` label is applied — external tooling querying label state should never see both simultaneously.
-- On crash resumption, `applyPhaseLabel` is called at FSM re-entry even when the phase hasn't changed. This is correct: it re-syncs the GitHub label to the RunState-persisted intent. Adding a label that's already present on the issue is idempotent at the GitHub API level (no error, no duplicate).
+- On crash resumption, the current phase is mirrored at FSM re-entry even when the phase hasn't changed. Labeled phases call `applyPhaseLabel`; the unlabeled `report` phase calls `clearPhaseLabels`. This re-syncs the GitHub label to the RunState-persisted intent. Adding a label that's already present on the issue is idempotent at the GitHub API level (no error, no duplicate).
 - `provisionLabels` runs sequentially (one `createLabel` at a time) rather than in parallel. This avoids a burst of 8 concurrent API calls on every daemon startup. At one call per startup per repository, the latency cost is negligible and the rate-limit cost is minimal.
 - `PhaseLabelMirror` should be passed through from `daemon.ts` where both Octokit and owner/repo are available. Do not create the mirror inside `phases.ts` — the factory should be instantiated once per repository run, not once per phase handler invocation.

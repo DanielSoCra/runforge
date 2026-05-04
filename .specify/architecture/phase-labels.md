@@ -43,9 +43,9 @@ The Phase Label Mirror exposes no external API. It is an internal component of t
 
 **Internal interface — Phase Label Mirror:**
 
-- `applyPhaseLabel(issueNumber, newPhase)` — Derives the new `phase:*` label from PhaseLabelMap. If the phase has no label entry, returns immediately without making a network call. Removes the previously-applied `phase:*` label from RunState.activePhaseLabel (if any) and applies the new label in a single atomic swap at the work request source. Updates RunState.activePhaseLabel to the new label. The call is fire-and-forget: errors are caught, logged with issue number and phase name, and not propagated to the FSM.
+- `applyPhaseLabel(workRequestIdentifier, newPhase, runState)` — Derives the new `phase:*` label from PhaseLabelMap. If the phase has no label entry, updates `runState.activePhaseLabel` to absent and returns without making a network call; unlabeled terminal coordination phases use `clearPhaseLabels` when a previous phase label must be removed. Otherwise, removes the previously-applied `phase:*` label from `runState.activePhaseLabel` (if any), applies the new label at the work request source, and updates `runState.activePhaseLabel` to the new label synchronously before the fire-and-forget network call. Errors are caught, logged with work request identifier and phase name, and not propagated to the FSM.
 
-- `clearPhaseLabels(issueNumber)` — Removes the label stored in RunState.activePhaseLabel (if any). Used on stuck and completion transitions. Also fire-and-forget with error logging.
+- `clearPhaseLabels(workRequestIdentifier, runState)` — Reads the label stored in `runState.activePhaseLabel` and removes that label from the work request source if one is present, then updates `runState.activePhaseLabel` to absent synchronously before the fire-and-forget network call. Used when entering unlabeled report/completion handling and on stuck transitions. Errors are caught, logged with work request identifier, and not propagated to the FSM.
 
 - `provisionLabels(repositoryIdentifier)` — Ensures the 8 `phase:*` labels exist on the specified repository. Called once per repository on daemon startup. Fire-and-forget: provisioning failure logs a warning but does not block daemon startup or work claiming.
 
@@ -67,21 +67,21 @@ The Phase Label Mirror exposes no external API. It is an internal component of t
 
 **FSM phase transition (after authoritative phase state is written):**
 1. Determine the new phase name from the FSM.
-2. Call `applyPhaseLabel(issueNumber, newPhase)` — fire-and-forget.
+2. Call `applyPhaseLabel(workRequestIdentifier, newPhase, runState)` — fire-and-forget.
 3. On success: RunState.activePhaseLabel is updated to the new label (or null if the phase has no label entry).
 4. On error: log the error with context; FSM continues to the next phase unaffected.
 
 **Stuck transition (during stuck handling in ARCH-AC-CONTROL-PLANE):**
-1. Call `clearPhaseLabels(issueNumber)` — fire-and-forget.
+1. Call `clearPhaseLabels(workRequestIdentifier, runState)` — fire-and-forget.
 2. Apply existing `stuck` label per the Control Plane's existing flow.
 
 **Completion (during completion flow in ARCH-AC-CONTROL-PLANE):**
-1. Call `clearPhaseLabels(issueNumber)` — fire-and-forget.
+1. Call `clearPhaseLabels(workRequestIdentifier, runState)` — fire-and-forget.
 2. Apply existing `complete` label per the Control Plane's existing flow.
 
 **Crash resumption:**
 1. Control Plane loads RunState from persistent storage. RunState.activePhaseLabel contains the last-applied label (may be stale if crash occurred between remove-old and add-new).
-2. The FSM re-enters the saved phase. `applyPhaseLabel` is called at FSM re-entry, which reapplies the correct label for the resumed phase — correcting any stale state from before the crash.
+2. The FSM re-enters the saved phase. The Control Plane mirrors the saved phase against the loaded run state: labeled phases call `applyPhaseLabel`, and unlabeled report/completion handling calls `clearPhaseLabels`. This reapplies or removes the correct phase label for the resumed phase, correcting any stale state from before the crash.
 
 **Label query by external tooling (e.g., Dashboard filter by phase):**
 - Query the work request source for issues labeled `phase:implement` (or any phase label).
