@@ -3,6 +3,10 @@ import {
   type ConfirmationRecord,
   type ConfirmationStore,
 } from '../confirmation/state-machine.js';
+import {
+  createEventCardMaterializer,
+  type EventCardMaterializer,
+} from '../event-bus/classifier.js';
 import type { ConciergeStateDatabase } from '../memory/node-sqlite.js';
 import type { Migration, MigrationStore } from '../memory/sqlite.js';
 import { createConciergeStateStores, type ConciergeStateStores } from '../memory/state-stores.js';
@@ -91,10 +95,12 @@ export interface ConciergeRuntime {
   handleSlackMessage(message: NormalizedSlackMessage): Promise<void>;
   handleConfirmationAction(action: ConfirmationAction): Promise<void>;
   handleBoardCardAction(action: BoardCardActionRequest): Promise<BoardCardActionResult>;
+  processEventCardsOnce(): number;
   expireConfirmations(): number;
 }
 
 const CONFIRMATION_EXPIRY_INTERVAL_MS = 60_000;
+const EVENT_CARD_MATERIALIZER_INTERVAL_MS = 30_000;
 const DEFAULT_VAULT_ALLOW_LIST = ['00-inbox', '10-projects'];
 const DEFAULT_VAULT_CONFIRMATION_PREFIXES = ['20-Areas/clients'];
 
@@ -145,8 +151,11 @@ export function createConciergeRuntime(options: ConciergeRuntimeOptions): Concie
   const boardActions: BoardCardActionService | undefined = state
     ? createBoardCardActionService({ cards: state.cards, router: core.router })
     : undefined;
+  const eventCards: EventCardMaterializer | undefined = state
+    ? createEventCardMaterializer({ events: state.events, cards: state.cards })
+    : undefined;
   const slackConversationIds = new Map<string, string>();
-  let intervalHandle: unknown;
+  const intervalHandles: unknown[] = [];
   let started = false;
 
   const runtime: ConciergeRuntime = {
@@ -168,15 +177,21 @@ export function createConciergeRuntime(options: ConciergeRuntimeOptions): Concie
           boardCardAction: runtime.handleBoardCardAction,
         });
       }
-      intervalHandle = scheduler.setInterval(runtime.expireConfirmations, CONFIRMATION_EXPIRY_INTERVAL_MS);
+      runtime.processEventCardsOnce();
+      intervalHandles.push(scheduler.setInterval(runtime.expireConfirmations, CONFIRMATION_EXPIRY_INTERVAL_MS));
+      if (eventCards) {
+        intervalHandles.push(scheduler.setInterval(
+          runtime.processEventCardsOnce,
+          EVENT_CARD_MATERIALIZER_INTERVAL_MS,
+        ));
+      }
       started = true;
     },
 
     async stop(): Promise<void> {
       if (!started) return;
-      if (intervalHandle !== undefined) {
-        scheduler.clearInterval(intervalHandle);
-        intervalHandle = undefined;
+      while (intervalHandles.length > 0) {
+        scheduler.clearInterval(intervalHandles.pop());
       }
       if (options.slackReceiver) {
         await options.slackReceiver.stop();
@@ -211,6 +226,11 @@ export function createConciergeRuntime(options: ConciergeRuntimeOptions): Concie
         return { status: 'errored', error: 'concierge state is unavailable for board actions' };
       }
       return boardActions.invoke(action);
+    },
+
+    processEventCardsOnce(): number {
+      if (!eventCards) return 0;
+      return eventCards.processOnce();
     },
 
     expireConfirmations(): number {
