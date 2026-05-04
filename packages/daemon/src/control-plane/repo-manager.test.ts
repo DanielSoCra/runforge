@@ -191,6 +191,46 @@ describe('RepoManager', () => {
     mgr.stop();
   });
 
+  it('does not start an overlapping interval poll while the previous poll is still running', async () => {
+    vi.useFakeTimers();
+    let resolvePoll!: () => void;
+    const pendingPoll = new Promise<void>((resolve) => {
+      resolvePoll = resolve;
+    });
+    const onPoll = vi.fn(() => pendingPoll);
+    const supabase = {
+      from: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        is: vi.fn().mockResolvedValue({
+          data: [{ id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: 1000, connection_id: null }],
+          error: null,
+        }),
+      }),
+      rpc: vi.fn().mockResolvedValue({ data: 'token', error: null }),
+    } as unknown as ConstructorParameters<typeof RepoManager>[0];
+
+    const mgr = new RepoManager(supabase, 60_000, onPoll);
+    try {
+      await mgr.initialize();
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onPoll).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onPoll).toHaveBeenCalledTimes(1);
+
+      resolvePoll();
+      await vi.advanceTimersByTimeAsync(0);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onPoll).toHaveBeenCalledTimes(2);
+    } finally {
+      mgr.stop();
+      vi.useRealTimers();
+    }
+  });
+
   it('upsertRepo returns err() when Supabase returns null data without error', async () => {
     const onPoll = vi.fn();
     const supabase = {

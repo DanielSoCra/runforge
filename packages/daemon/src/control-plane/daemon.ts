@@ -820,71 +820,78 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
 
   // 7. Legacy polling loop (only used when repoManager is null AND coordinator is off)
   let legacyPoller: ReturnType<typeof setInterval> | null = null;
+  let legacyPollInProgress = false;
   if (legacyDetector && !config.coordination.useCoordinator) {
     const detector = legacyDetector;
     legacyPoller = setInterval(async () => {
-      if (paused || draining || shuttingDown) return;
-      if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
-      costTracker.maybeResetDaily();
-      const claimedIssues = new Set<number>();
-      const workResult = await detector.detectReadyWork();
-      if (!workResult.ok) return;
-      for (const request of workResult.value) {
-        if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) break;
-        if (paused || draining || shuttingDown) break;
-        if (activeIssues.has(request.issueNumber)) continue;
-        if (isBackedOff(issueKey(config.repo!.owner, config.repo!.name, request.issueNumber), config)) {
-          console.log(`[daemon] Issue #${request.issueNumber} is in backoff — skipping`);
-          continue;
-        }
-        const claimResult = await detector.claimWork(request.issueNumber);
-        if (!claimResult.ok) continue;
-        claimedIssues.add(request.issueNumber);
-        activeIssues.add(request.issueNumber);
-        activeRuns++;
-        processWorkRequest(config, '', config.repo!.owner, config.repo!.name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot, knowledgeStore)
-          .then((outcome) => handleRunOutcome(outcome, request.issueNumber, config.repo!.owner, config.repo!.name))
-          .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
-          .finally(() => { activeRuns--; activeIssues.delete(request.issueNumber); });
-      }
-
-      // Bug-fix detection — lower priority than ready work (#284)
-      if (paused || draining || shuttingDown) return;
-      if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
-      const bugResult = await detector.detectBugFixWork();
-      if (bugResult.ok && bugResult.value && !claimedIssues.has(bugResult.value.issueNumber) && !activeIssues.has(bugResult.value.issueNumber)) {
-        const bugRequest = bugResult.value;
-        const bugClaimResult = await detector.claimBugFixWork(bugRequest.issueNumber);
-        if (bugClaimResult.ok) {
-          claimedIssues.add(bugRequest.issueNumber);
-          activeIssues.add(bugRequest.issueNumber);
+      if (legacyPollInProgress) return;
+      legacyPollInProgress = true;
+      try {
+        if (paused || draining || shuttingDown) return;
+        if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
+        costTracker.maybeResetDaily();
+        const claimedIssues = new Set<number>();
+        const workResult = await detector.detectReadyWork();
+        if (!workResult.ok) return;
+        for (const request of workResult.value) {
+          if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) break;
+          if (paused || draining || shuttingDown) break;
+          if (activeIssues.has(request.issueNumber)) continue;
+          if (isBackedOff(issueKey(config.repo!.owner, config.repo!.name, request.issueNumber), config)) {
+            console.log(`[daemon] Issue #${request.issueNumber} is in backoff — skipping`);
+            continue;
+          }
+          const claimResult = await detector.claimWork(request.issueNumber);
+          if (!claimResult.ok) continue;
+          claimedIssues.add(request.issueNumber);
+          activeIssues.add(request.issueNumber);
           activeRuns++;
-          processWorkRequest(config, '', config.repo!.owner, config.repo!.name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot, knowledgeStore)
-            .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber, config.repo!.owner, config.repo!.name))
-            .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
-            .finally(() => { activeRuns--; activeIssues.delete(bugRequest.issueNumber); });
+          processWorkRequest(config, '', config.repo!.owner, config.repo!.name, request, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot, knowledgeStore)
+            .then((outcome) => handleRunOutcome(outcome, request.issueNumber, config.repo!.owner, config.repo!.name))
+            .catch((e) => console.error(`Run failed for #${request.issueNumber}:`, e))
+            .finally(() => { activeRuns--; activeIssues.delete(request.issueNumber); });
         }
-      }
 
-      // Feature-pipeline detection — lowest priority (#282)
-      if (paused || draining || shuttingDown) return;
-      if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
-      const fpResult = await detector.detectFeaturePipelineWork();
-      if (fpResult.ok && fpResult.value && !claimedIssues.has(fpResult.value.issueNumber) && !activeIssues.has(fpResult.value.issueNumber)) {
-        const fpRequest = fpResult.value;
-        const fpClaimResult = await detector.claimFeaturePipelineWork(fpRequest.issueNumber, fpRequest.workType as FeaturePipelineWorkType);
-        if (fpClaimResult.ok) {
-          activeIssues.add(fpRequest.issueNumber);
-          activeRuns++;
-          processWorkRequest(config, '', config.repo!.owner, config.repo!.name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot, knowledgeStore)
-            .then((outcome) => handleRunOutcome(outcome, fpRequest.issueNumber, config.repo!.owner, config.repo!.name))
-            .catch((e) => console.error(`Run failed for #${fpRequest.issueNumber}:`, e))
-            .finally(() => { activeRuns--; activeIssues.delete(fpRequest.issueNumber); });
+        // Bug-fix detection — lower priority than ready work (#284)
+        if (paused || draining || shuttingDown) return;
+        if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
+        const bugResult = await detector.detectBugFixWork();
+        if (bugResult.ok && bugResult.value && !claimedIssues.has(bugResult.value.issueNumber) && !activeIssues.has(bugResult.value.issueNumber)) {
+          const bugRequest = bugResult.value;
+          const bugClaimResult = await detector.claimBugFixWork(bugRequest.issueNumber);
+          if (bugClaimResult.ok) {
+            claimedIssues.add(bugRequest.issueNumber);
+            activeIssues.add(bugRequest.issueNumber);
+            activeRuns++;
+            processWorkRequest(config, '', config.repo!.owner, config.repo!.name, bugRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot, knowledgeStore)
+              .then((outcome) => handleRunOutcome(outcome, bugRequest.issueNumber, config.repo!.owner, config.repo!.name))
+              .catch((e) => console.error(`Run failed for #${bugRequest.issueNumber}:`, e))
+              .finally(() => { activeRuns--; activeIssues.delete(bugRequest.issueNumber); });
+          }
         }
-      }
 
-      // Parked-run resume scan — after all normal work detection
-      await resumeParkedRuns().catch((e) => console.error('[daemon] resumeParkedRuns error:', e));
+        // Feature-pipeline detection — lowest priority (#282)
+        if (paused || draining || shuttingDown) return;
+        if (activeRuns >= (configReader?.getGlobalConfig()?.concurrencyLimit ?? config.maxConcurrentRuns)) return;
+        const fpResult = await detector.detectFeaturePipelineWork();
+        if (fpResult.ok && fpResult.value && !claimedIssues.has(fpResult.value.issueNumber) && !activeIssues.has(fpResult.value.issueNumber)) {
+          const fpRequest = fpResult.value;
+          const fpClaimResult = await detector.claimFeaturePipelineWork(fpRequest.issueNumber, fpRequest.workType as FeaturePipelineWorkType);
+          if (fpClaimResult.ok) {
+            activeIssues.add(fpRequest.issueNumber);
+            activeRuns++;
+            processWorkRequest(config, '', config.repo!.owner, config.repo!.name, fpRequest, runtime, coordinator, costTracker, stateMgr, detector, stateDir, undefined, undefined, repoRoot, knowledgeStore)
+              .then((outcome) => handleRunOutcome(outcome, fpRequest.issueNumber, config.repo!.owner, config.repo!.name))
+              .catch((e) => console.error(`Run failed for #${fpRequest.issueNumber}:`, e))
+              .finally(() => { activeRuns--; activeIssues.delete(fpRequest.issueNumber); });
+          }
+        }
+
+        // Parked-run resume scan — after all normal work detection
+        await resumeParkedRuns().catch((e) => console.error('[daemon] resumeParkedRuns error:', e));
+      } finally {
+        legacyPollInProgress = false;
+      }
     }, config.pollIntervalMs);
   }
 

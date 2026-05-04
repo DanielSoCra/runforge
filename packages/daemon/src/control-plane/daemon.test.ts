@@ -810,6 +810,32 @@ describe('daemon', () => {
       expect(mockDetector.detectReadyWork).toHaveBeenCalledTimes(2);
     });
 
+    it('does not start an overlapping poll tick while work detection is still running', async () => {
+      const config = makeConfig({ pollIntervalMs: 1000, maxConcurrentRuns: 10 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      let resolveDetect!: (value: Awaited<ReturnType<typeof mockDetector.detectReadyWork>>) => void;
+      const pendingDetect = new Promise<Awaited<ReturnType<typeof mockDetector.detectReadyWork>>>((resolve) => {
+        resolveDetect = resolve;
+      });
+      mockDetector.detectReadyWork.mockReturnValueOnce(pendingDetect);
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(mockDetector.detectReadyWork).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(mockDetector.detectReadyWork).toHaveBeenCalledTimes(1);
+
+      resolveDetect(ok([]));
+      await vi.advanceTimersByTimeAsync(0);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(mockDetector.detectReadyWork).toHaveBeenCalledTimes(2);
+    });
+
     it('skips work item when claim fails', async () => {
       const requests = [makeWorkRequest({ issueNumber: 1 }), makeWorkRequest({ issueNumber: 2 })];
       mockDetector.detectReadyWork.mockResolvedValue(ok(requests));

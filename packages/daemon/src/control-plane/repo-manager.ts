@@ -15,6 +15,7 @@ interface PollEntry {
   detector: WorkDetector;
   intervalHandle: ReturnType<typeof setInterval>;
   activeRuns: number;
+  pollInProgress: boolean;
   pendingDisable: boolean;
   owner: string;
   name: string;
@@ -30,7 +31,7 @@ export class RepoManager {
   constructor(
     private readonly supabase: SupabaseClient,
     private readonly defaultPollIntervalMs: number,
-    private readonly onPoll: (repoId: string, owner: string, name: string, detector: WorkDetector) => void,
+    private readonly onPoll: (repoId: string, owner: string, name: string, detector: WorkDetector) => void | Promise<void>,
   ) {}
 
   async initialize(): Promise<Result<void>> {
@@ -52,8 +53,7 @@ export class RepoManager {
     let scanned = 0;
     for (const [repoId, entry] of this.pollers) {
       if (entry.pendingDisable) continue;
-      this.onPoll(repoId, entry.owner, entry.name, entry.detector);
-      scanned++;
+      if (this.startPoll(repoId, entry)) scanned++;
     }
     return { scanned };
   }
@@ -159,20 +159,32 @@ export class RepoManager {
 
     const intervalHandle = setInterval(() => {
       const entry = this.pollers.get(repo.id);
-      if (entry && !entry.pendingDisable) {
-        this.onPoll(repo.id, repo.owner, repo.name, detector);
-      }
+      if (entry) this.startPoll(repo.id, entry);
     }, intervalMs);
 
     this.pollers.set(repo.id, {
       detector,
       intervalHandle,
       activeRuns: 0,
+      pollInProgress: false,
       pendingDisable: false,
       owner: repo.owner,
       name: repo.name,
       connectionId: repo.connection_id,
     });
+  }
+
+  private startPoll(repoId: string, entry: PollEntry): boolean {
+    if (entry.pendingDisable || entry.pollInProgress) return false;
+    entry.pollInProgress = true;
+    Promise.resolve()
+      .then(() => this.onPoll(repoId, entry.owner, entry.name, entry.detector))
+      .catch((e) => console.error(`[repo-manager] Poll failed for ${entry.owner}/${entry.name}:`, e))
+      .finally(() => {
+        const latest = this.pollers.get(repoId);
+        if (latest) latest.pollInProgress = false;
+      });
+    return true;
   }
 
   private removePoller(repoId: string): void {
