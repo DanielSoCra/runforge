@@ -2,7 +2,13 @@
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import type { Config } from '../config.js';
-import type { SessionType, AgentDefinition, SessionContext, SessionResult, ViolationRecord } from '../types.js';
+import type {
+  SessionType,
+  AgentDefinition,
+  SessionContext,
+  SessionResult,
+  ViolationRecord,
+} from '../types.js';
 import type { Result } from '../lib/result.js';
 import { ok, err } from '../lib/result.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
@@ -15,19 +21,41 @@ import { loadGovernanceContext } from './governance-context.js';
 import { DEFAULT_POLICY } from './containment-hooks.js';
 import { SessionError } from './session-error.js';
 import { auditSessionOutput } from './audit.js';
-import { renderTemplate, findUnsubstitutedVars } from '../knowledge/templates.js';
-import { assertContract, PROMPT_CONTRACTS } from '../knowledge/prompt-contracts.js';
-import { buildScopeRegistry, resolveDirectoryScope, type ScopeRegistry } from './scope-registry.js';
+import {
+  renderTemplate,
+  findUnsubstitutedVars,
+} from '../knowledge/templates.js';
+import {
+  assertContract,
+  PROMPT_CONTRACTS,
+} from '../knowledge/prompt-contracts.js';
+import {
+  buildScopeRegistry,
+  resolveDirectoryScope,
+  type ScopeRegistry,
+} from './scope-registry.js';
 import { auditScope, captureScopeBaseCommit } from './scope-audit.js';
+
+export interface SpawnSessionOptions {
+  jsonSchema?: string | object;
+  agentDef?: AgentDefinition;
+  costAttributionIssueNumbers?: number[];
+}
 
 /** Resolve the prompts/ directory at the repo root. */
 function promptsDir(): string {
-  return process.env['PROMPTS_DIR'] ?? join(import.meta.dirname, '../../../../prompts');
+  return (
+    process.env['PROMPTS_DIR'] ??
+    join(import.meta.dirname, '../../../../prompts')
+  );
 }
 
 function formatScopeViolations(violations: ViolationRecord[]): string {
   return violations
-    .map(v => `${v.violationType} ${v.path} (${v.detectionLayer}, ${v.agentType}, ${v.sessionId})`)
+    .map(
+      (v) =>
+        `${v.violationType} ${v.path} (${v.detectionLayer}, ${v.agentType}, ${v.sessionId})`,
+    )
     .join('; ');
 }
 
@@ -104,13 +132,18 @@ export async function loadPromptTemplate(
   // rather than leaving it as a literal placeholder in the rendered output
   // (Codex review a2737b6).
   const defaults = PROMPT_CONTRACTS[name]?.defaults ?? {};
-  const variablesWithDefaults: Record<string, string> = { ...defaults, ...variables };
+  const variablesWithDefaults: Record<string, string> = {
+    ...defaults,
+    ...variables,
+  };
   let finalVars: Record<string, string>;
   try {
     finalVars = assertContract(name, variables);
   } catch (e) {
     if (isTest) throw e;
-    console.warn(`[prompt-template] contract violation for ${name}: ${(e as Error).message}`);
+    console.warn(
+      `[prompt-template] contract violation for ${name}: ${(e as Error).message}`,
+    );
     finalVars = variablesWithDefaults;
   }
 
@@ -128,20 +161,23 @@ export async function loadPromptTemplate(
     if (missing.length > 0) {
       console.warn(
         `[prompt-template] ${name}.md has unsubstituted variables: ${missing.join(', ')}. ` +
-        `These will appear as literal {{var}} in the LLM prompt.`,
+          `These will appear as literal {{var}} in the LLM prompt.`,
       );
     }
     // Registered prompts in test mode also enforce no-unused at render time so
     // CI catches caller-passed variables that the template silently drops.
-    const renderOptions = isRegistered && isTest
-      ? { rejectUnused: true } as const
-      : undefined;
+    const renderOptions =
+      isRegistered && isTest ? ({ rejectUnused: true } as const) : undefined;
     return renderTemplate(template, finalVars, renderOptions);
   } catch (e: unknown) {
     // Only treat "file not found" as a graceful fallback.
     // Re-throw permission errors, encoding issues, etc. so they surface
     // rather than silently producing the same empty-prompt bug this fixes.
-    if (e instanceof Error && 'code' in e && (e as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (
+      e instanceof Error &&
+      'code' in e &&
+      (e as NodeJS.ErrnoException).code === 'ENOENT'
+    ) {
       return null;
     }
     throw e;
@@ -241,7 +277,8 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
   },
   'codebase-reviewer': {
     name: 'codebase-reviewer',
-    description: 'Periodic codebase review — discovery, verification, filtered issue creation',
+    description:
+      'Periodic codebase review — discovery, verification, filtered issue creation',
     systemPrompt: '', // loaded from prompts/codebase-reviewer.md
     allowedTools: ['Read', 'Glob', 'Grep', 'Bash'],
     modelOverride: 'claude-sonnet-4-6',
@@ -261,7 +298,8 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
   },
   'tech-lead': {
     name: 'tech-lead',
-    description: 'Analyzes technical signals and generates improvement proposals',
+    description:
+      'Analyzes technical signals and generates improvement proposals',
     systemPrompt: '', // loaded from prompts/tech-lead.md
     allowedTools: ['Read', 'Glob', 'Grep'],
     modelOverride: 'claude-sonnet-4-6',
@@ -272,7 +310,8 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
   'l2-designer': {
     name: 'l2-designer',
     description: 'Generates L2 architecture specs from L1 functional specs',
-    systemPrompt: 'You are an L2 architecture spec designer. Use the spec-brainstorm-l2 and l2-spec-guardian skills. Generate or update the ARCH-* spec file in .specify/architecture/. Commit the result.',
+    systemPrompt:
+      'You are an L2 architecture spec designer. Use the spec-brainstorm-l2 and l2-spec-guardian skills. Generate or update the ARCH-* spec file in .specify/architecture/. Commit the result.',
     allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
     modelOverride: 'claude-sonnet-4-6',
     maxTurns: 30,
@@ -281,8 +320,10 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
   },
   'l3-generator': {
     name: 'l3-generator',
-    description: 'Generates L3 stack-specific specs from approved L2 architecture specs',
-    systemPrompt: 'You are an L3 spec generator. Use the spec-generate-l3 and l3-spec-guardian skills. Generate the STACK-* spec file in .specify/stack/. Run spec-review-compliance in inline mode as self-check. Commit the result.',
+    description:
+      'Generates L3 stack-specific specs from approved L2 architecture specs',
+    systemPrompt:
+      'You are an L3 spec generator. Use the spec-generate-l3 and l3-spec-guardian skills. Generate the STACK-* spec file in .specify/stack/. Run spec-review-compliance in inline mode as self-check. Commit the result.',
     allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
     modelOverride: 'claude-sonnet-4-6',
     maxTurns: 30,
@@ -292,7 +333,8 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
   'compliance-reviewer': {
     name: 'compliance-reviewer',
     description: 'Reviews L3 specs for compliance with L1 and L2 specs',
-    systemPrompt: 'You are a spec compliance reviewer. Use the spec-review-compliance skill to verify the L3 spec is consistent with L1 and L2. Report pass/fail with specific gaps found.',
+    systemPrompt:
+      'You are a spec compliance reviewer. Use the spec-review-compliance skill to verify the L3 spec is consistent with L1 and L2. Report pass/fail with specific gaps found.',
     allowedTools: ['Read', 'Glob', 'Grep'],
     modelOverride: 'claude-sonnet-4-6',
     maxTurns: 15,
@@ -310,7 +352,11 @@ export class SessionRuntime {
   private config: Config;
   private scopeRegistry: ScopeRegistry;
 
-  constructor(config: Config, costTracker: CostTracker, rateLimiter?: RateLimiter) {
+  constructor(
+    config: Config,
+    costTracker: CostTracker,
+    rateLimiter?: RateLimiter,
+  ) {
     this.adapter = createAdapter(config.adapter);
     this.costTracker = costTracker;
     this.rateLimiter = rateLimiter ?? new RateLimiter();
@@ -323,7 +369,7 @@ export class SessionRuntime {
     type: SessionType,
     context: SessionContext,
     issueNumber: number,
-    options?: { jsonSchema?: string | object; agentDef?: AgentDefinition },
+    options?: SpawnSessionOptions,
     runWriter?: SupabaseRunWriter,
     runId?: string,
   ): Promise<Result<SessionResult>> {
@@ -334,9 +380,15 @@ export class SessionRuntime {
     }
 
     // 2. Check budget — fail-safe guard clause (STACK-AC-OPERATIONAL-SAFETY)
-    const budget = this.costTracker.checkBudget(issueNumber);
-    if (!budget.available) {
-      return err(SessionError.budgetExceeded(budget.reason));
+    const costAttributionIssueNumbers = normalizeCostAttributionIssueNumbers(
+      options?.costAttributionIssueNumbers,
+      issueNumber,
+    );
+    for (const budgetIssueNumber of costAttributionIssueNumbers) {
+      const budget = this.costTracker.checkBudget(budgetIssueNumber);
+      if (!budget.available) {
+        return err(SessionError.budgetExceeded(budget.reason));
+      }
     }
 
     // 3. Check rate limit (ARCH-AC-SESSION-RUNTIME step 3)
@@ -349,7 +401,9 @@ export class SessionRuntime {
     const now = Date.now();
     const elapsed = now - this.lastSpawnTime;
     if (elapsed < this.staggerMs) {
-      await new Promise((resolve) => setTimeout(resolve, this.staggerMs - elapsed));
+      await new Promise((resolve) =>
+        setTimeout(resolve, this.staggerMs - elapsed),
+      );
     }
     this.lastSpawnTime = Date.now();
 
@@ -365,12 +419,14 @@ export class SessionRuntime {
     // jsonSchema may be passed as object (callers like l3-compliance use the
     // exported schema constant directly) or a pre-stringified string. Adapter
     // expects string for the CLI --json-schema arg, so serialize here.
-    const jsonSchema = typeof options?.jsonSchema === 'object' && options.jsonSchema !== null
-      ? JSON.stringify(options.jsonSchema)
-      : options?.jsonSchema;
-    const directoryScope = options?.agentDef?.directoryScope
-      ?? def.directoryScope
-      ?? resolveDirectoryScope(type, this.scopeRegistry, DEFAULT_POLICY);
+    const jsonSchema =
+      typeof options?.jsonSchema === 'object' && options.jsonSchema !== null
+        ? JSON.stringify(options.jsonSchema)
+        : options?.jsonSchema;
+    const directoryScope =
+      options?.agentDef?.directoryScope ??
+      def.directoryScope ??
+      resolveDirectoryScope(type, this.scopeRegistry, DEFAULT_POLICY);
     const scopeBaseCommit = context.workspacePath
       ? await this.tryCaptureScopeBaseCommit(context.workspacePath)
       : undefined;
@@ -389,14 +445,21 @@ export class SessionRuntime {
         ? result.error.cost
         : 0;
     if (cost > 0) {
-      this.costTracker.recordCost(issueNumber, cost);
+      const allocatedCost = cost / costAttributionIssueNumbers.length;
+      for (const costIssueNumber of costAttributionIssueNumbers) {
+        this.costTracker.recordCost(costIssueNumber, allocatedCost);
+      }
       if (runWriter && runId) {
         void runWriter.writeCostEvent(runId, type, cost);
       }
     }
 
     // 8. Detect rate limit in adapter response (ARCH-AC-SESSION-RUNTIME rate limit detection flow)
-    if (!result.ok && result.error instanceof SessionError && result.error.rateLimited) {
+    if (
+      !result.ok &&
+      result.error instanceof SessionError &&
+      result.error.rateLimited
+    ) {
       this.rateLimiter.reportRateLimit();
     }
 
@@ -409,7 +472,12 @@ export class SessionRuntime {
         scope: directoryScope,
       });
       if (!scopeAudit.ok) {
-        return err(SessionError.scopeViolated(formatScopeViolations(scopeAudit.error), result.value.cost));
+        return err(
+          SessionError.scopeViolated(
+            formatScopeViolations(scopeAudit.error),
+            result.value.cost,
+          ),
+        );
       }
     }
 
@@ -443,7 +511,9 @@ export class SessionRuntime {
     return result;
   }
 
-  private async tryCaptureScopeBaseCommit(workspacePath: string): Promise<string | undefined> {
+  private async tryCaptureScopeBaseCommit(
+    workspacePath: string,
+  ): Promise<string | undefined> {
     try {
       return await captureScopeBaseCommit(workspacePath);
     } catch {
@@ -469,12 +539,17 @@ export class SessionRuntime {
     }
 
     const governance = await loadGovernanceContext(this.config);
-    const pluginIds = context.activePlugins?.map(e => e.id) ?? [];
-    const activations = new Map(context.activePlugins?.map(e => [e.id, e.activatedAt]) ?? []);
-    const loaded = pluginIds.length > 0
-      ? await readPluginsForContext(pluginIds, activations)
-      : [];
-    const composite = buildCompositeContext(loaded, { governanceDocument: governance.content });
+    const pluginIds = context.activePlugins?.map((e) => e.id) ?? [];
+    const activations = new Map(
+      context.activePlugins?.map((e) => [e.id, e.activatedAt]) ?? [],
+    );
+    const loaded =
+      pluginIds.length > 0
+        ? await readPluginsForContext(pluginIds, activations)
+        : [];
+    const composite = buildCompositeContext(loaded, {
+      governanceDocument: governance.content,
+    });
 
     const parts: string[] = [];
     if (composite.governanceDocument) parts.push(composite.governanceDocument);
@@ -499,4 +574,15 @@ export class SessionRuntime {
   getRateLimiter(): RateLimiter {
     return this.rateLimiter;
   }
+}
+
+function normalizeCostAttributionIssueNumbers(
+  issueNumbers: number[] | undefined,
+  fallbackIssueNumber: number,
+): number[] {
+  const normalized = (issueNumbers ?? [fallbackIssueNumber]).filter(
+    (issueNumber) => Number.isInteger(issueNumber) && issueNumber > 0,
+  );
+  const unique = [...new Set(normalized)];
+  return unique.length > 0 ? unique : [fallbackIssueNumber];
 }

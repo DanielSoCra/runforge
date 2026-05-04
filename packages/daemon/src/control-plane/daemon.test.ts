@@ -7,11 +7,28 @@ import type { WorkRequest } from '../types.js';
 // --- Hoisted mocks (vi.mock factories are hoisted above all other code) ---
 
 const {
-  mockStateMgr, mockCostTracker, mockRemoteControl, mockDetector,
-  mockServer, mockServerStart, mockRunPipeline, mockNotify,
-  mockRunWriter, mockConfigReader, mockLoadConfig, mockSelectVariant, phaseHandlerCalls, mockCreateReviewScheduler,
-  mockCreatePOAgent, mockCreateTechLeadScheduler, mockCreateCoordinator,
-  knowledgeStoreCtorArgs, mockOctokit, mockSpawnSession, mockValidatePromptContracts,
+  mockStateMgr,
+  mockCostTracker,
+  mockRemoteControl,
+  mockDetector,
+  mockServer,
+  mockServerStart,
+  mockRunPipeline,
+  mockNotify,
+  mockRunWriter,
+  mockConfigReader,
+  mockLoadConfig,
+  mockSelectVariant,
+  phaseHandlerCalls,
+  mockCreateReviewScheduler,
+  mockCreatePOAgent,
+  mockCreateTechLeadScheduler,
+  mockCreateCoordinator,
+  knowledgeStoreCtorArgs,
+  mockOctokit,
+  mockSpawnSession,
+  mockValidatePromptContracts,
+  mockClassifyBatch,
 } = vi.hoisted(() => ({
   mockStateMgr: {
     initialize: vi.fn().mockResolvedValue(undefined),
@@ -38,7 +55,11 @@ const {
     claimFeaturePipelineWork: vi.fn(),
     markStuck: vi.fn(),
   },
-  mockServer: { close: vi.fn((cb?: () => void) => { if (cb) cb(); }) },
+  mockServer: {
+    close: vi.fn((cb?: () => void) => {
+      if (cb) cb();
+    }),
+  },
   mockServerStart: vi.fn(),
   mockRunPipeline: vi.fn(),
   mockNotify: vi.fn(),
@@ -52,10 +73,21 @@ const {
   mockLoadConfig: vi.fn(),
   mockSelectVariant: vi.fn(),
   phaseHandlerCalls: [] as unknown[][],
-  mockCreateReviewScheduler: vi.fn().mockReturnValue({ start: () => () => {}, getStatus: () => ({}) }),
+  mockCreateReviewScheduler: vi
+    .fn()
+    .mockReturnValue({ start: () => () => {}, getStatus: () => ({}) }),
   mockCreatePOAgent: vi.fn().mockReturnValue({
     start: vi.fn().mockReturnValue(vi.fn()),
-    submitIdea: vi.fn().mockResolvedValue({ id: 'idea-1', submittedBy: 'operator', description: 'test', status: 'pending', proposalId: null, createdAt: '2026-03-23T00:00:00Z' }),
+    submitIdea: vi
+      .fn()
+      .mockResolvedValue({
+        id: 'idea-1',
+        submittedBy: 'operator',
+        description: 'test',
+        status: 'pending',
+        proposalId: null,
+        createdAt: '2026-03-23T00:00:00Z',
+      }),
   }),
   mockCreateTechLeadScheduler: vi.fn().mockReturnValue({
     start: vi.fn().mockReturnValue(vi.fn()),
@@ -75,19 +107,34 @@ const {
   },
   mockSpawnSession: vi.fn(),
   mockValidatePromptContracts: vi.fn(),
+  mockClassifyBatch: vi.fn(),
 }));
 
 // --- Module mocks (use classes for constructors to work with `new`) ---
 
 vi.mock('./state.js', () => {
-  return { StateManager: class { initialize = mockStateMgr.initialize; saveRunState = mockStateMgr.saveRunState; findIncompleteRuns = mockStateMgr.findIncompleteRuns; findParkedRuns = mockStateMgr.findParkedRuns; } };
+  return {
+    StateManager: class {
+      initialize = mockStateMgr.initialize;
+      saveRunState = mockStateMgr.saveRunState;
+      findIncompleteRuns = mockStateMgr.findIncompleteRuns;
+      findParkedRuns = mockStateMgr.findParkedRuns;
+    },
+  };
 });
 vi.mock('../session-runtime/cost.js', () => {
-  return { CostTracker: class { getDailyCost = mockCostTracker.getDailyCost; maybeResetDaily = mockCostTracker.maybeResetDaily; } };
+  return {
+    CostTracker: class {
+      getDailyCost = mockCostTracker.getDailyCost;
+      maybeResetDaily = mockCostTracker.maybeResetDaily;
+    },
+  };
 });
 vi.mock('../session-runtime/runtime.js', () => {
   return {
-    SessionRuntime: class { spawnSession = mockSpawnSession; },
+    SessionRuntime: class {
+      spawnSession = mockSpawnSession;
+    },
     preloadPromptCache: async () => 0,
   };
 });
@@ -95,7 +142,14 @@ vi.mock('../knowledge/gotcha-store.js', () => {
   return { GotchaStore: class {} };
 });
 vi.mock('../knowledge/knowledge-store.js', () => {
-  return { KnowledgeStore: class { constructor(...args: unknown[]) { knowledgeStoreCtorArgs.length = 0; knowledgeStoreCtorArgs.push(...args); } } };
+  return {
+    KnowledgeStore: class {
+      constructor(...args: unknown[]) {
+        knowledgeStoreCtorArgs.length = 0;
+        knowledgeStoreCtorArgs.push(...args);
+      }
+    },
+  };
 });
 vi.mock('../knowledge/policy-registry.js', () => ({
   DEFAULT_POLICIES: {},
@@ -107,10 +161,20 @@ vi.mock('../implementation/coordinator.js', () => {
   return { ImplementationCoordinator: class {} };
 });
 vi.mock('./remote-control.js', () => {
-  return { RemoteControlManager: class { start = mockRemoteControl.start; stop = mockRemoteControl.stop; restart = mockRemoteControl.restart; getState = mockRemoteControl.getState; } };
+  return {
+    RemoteControlManager: class {
+      start = mockRemoteControl.start;
+      stop = mockRemoteControl.stop;
+      restart = mockRemoteControl.restart;
+      getState = mockRemoteControl.getState;
+    },
+  };
 });
 vi.mock('./work-detection.js', () => ({
   createWorkDetector: () => mockDetector,
+}));
+vi.mock('./batch-classifier.js', () => ({
+  classifyBatch: (...args: unknown[]) => mockClassifyBatch(...args),
 }));
 vi.mock('./server.js', () => ({
   createControlServer: vi.fn((_port: number, _handlers: unknown) => ({
@@ -119,7 +183,10 @@ vi.mock('./server.js', () => ({
   })),
 }));
 vi.mock('./phases.js', () => ({
-  createPhaseHandlers: (...args: unknown[]) => { phaseHandlerCalls.push(args); return {}; },
+  createPhaseHandlers: (...args: unknown[]) => {
+    phaseHandlerCalls.push(args);
+    return {};
+  },
 }));
 vi.mock('./phases-website.js', () => ({
   createWebsitePhaseHandlers: () => ({}),
@@ -144,28 +211,43 @@ vi.mock('../supabase/client.js', () => ({
   getSupabaseClient: () => null,
 }));
 vi.mock('../supabase/config-reader.js', () => {
-  return { SupabaseConfigReader: class { start = mockConfigReader.start; stop = mockConfigReader.stop; getGlobalConfig = mockConfigReader.getGlobalConfig; getRepoConfig = mockConfigReader.getRepoConfig; } };
+  return {
+    SupabaseConfigReader: class {
+      start = mockConfigReader.start;
+      stop = mockConfigReader.stop;
+      getGlobalConfig = mockConfigReader.getGlobalConfig;
+      getRepoConfig = mockConfigReader.getRepoConfig;
+    },
+  };
 });
 vi.mock('../supabase/run-writer.js', () => {
   return {
-    SupabaseRunWriter: class { upsertRun = mockRunWriter.upsertRun; },
+    SupabaseRunWriter: class {
+      upsertRun = mockRunWriter.upsertRun;
+    },
     toDbOutcome: (o: string) => o,
   };
 });
 vi.mock('@octokit/rest', () => {
-  return { Octokit: class { issues = mockOctokit.issues; } };
+  return {
+    Octokit: class {
+      issues = mockOctokit.issues;
+    },
+  };
 });
 vi.mock('../config.js', () => ({
   loadConfig: (...args: unknown[]) => mockLoadConfig(...args),
 }));
 vi.mock('../coordination/review-scheduler.js', () => ({
-  createReviewScheduler: (...args: unknown[]) => mockCreateReviewScheduler(...args),
+  createReviewScheduler: (...args: unknown[]) =>
+    mockCreateReviewScheduler(...args),
 }));
 vi.mock('../coordination/po-agent.js', () => ({
   createPOAgent: (...args: unknown[]) => mockCreatePOAgent(...args),
 }));
 vi.mock('../coordination/tech-lead-scheduler.js', () => ({
-  createTechLeadScheduler: (...args: unknown[]) => mockCreateTechLeadScheduler(...args),
+  createTechLeadScheduler: (...args: unknown[]) =>
+    mockCreateTechLeadScheduler(...args),
 }));
 vi.mock('../coordination/coordinator.js', () => ({
   createCoordinator: (...args: unknown[]) => mockCreateCoordinator(...args),
@@ -183,10 +265,32 @@ vi.mock('../coordination/merge-queue.js', () => ({
   createMergeQueue: vi.fn().mockReturnValue({}),
 }));
 vi.mock('../coordination/tech-lead/proposal-store.js', () => ({
-  TechProposalStore: class { init = vi.fn().mockResolvedValue(undefined); loadActiveProposals = vi.fn().mockResolvedValue([]); loadRejectedProposals = vi.fn().mockResolvedValue([]); loadAllProposals = vi.fn().mockResolvedValue([]); findDuplicate = vi.fn().mockResolvedValue(undefined); saveProposal = vi.fn().mockResolvedValue(undefined); },
+  TechProposalStore: class {
+    init = vi.fn().mockResolvedValue(undefined);
+    loadActiveProposals = vi.fn().mockResolvedValue([]);
+    loadRejectedProposals = vi.fn().mockResolvedValue([]);
+    loadAllProposals = vi.fn().mockResolvedValue([]);
+    findDuplicate = vi.fn().mockResolvedValue(undefined);
+    saveProposal = vi.fn().mockResolvedValue(undefined);
+  },
 }));
 vi.mock('../coordination/tech-lead/signal-digest.js', () => ({
-  assembleSignalDigest: vi.fn().mockResolvedValue({ id: 'digest-1', trigger: 'scheduled', reviewFindings: [], runOutcomes: [], driftIndicators: [], deferredWork: [], testHealth: [], dependencyRisks: [], activeProposals: [], priorRejections: [], missingSources: [], assembledAt: '2026-03-23T00:00:00Z' }),
+  assembleSignalDigest: vi
+    .fn()
+    .mockResolvedValue({
+      id: 'digest-1',
+      trigger: 'scheduled',
+      reviewFindings: [],
+      runOutcomes: [],
+      driftIndicators: [],
+      deferredWork: [],
+      testHealth: [],
+      dependencyRisks: [],
+      activeProposals: [],
+      priorRejections: [],
+      missingSources: [],
+      assembledAt: '2026-03-23T00:00:00Z',
+    }),
 }));
 vi.mock('../coordination/tech-lead/proposal-lifecycle.js', () => ({
   isTerminalStatus: vi.fn().mockReturnValue(false),
@@ -199,6 +303,7 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
   controlHost: '127.0.0.1',
   pollIntervalMs: 30000,
   maxConcurrentRuns: 1,
+  classifierBatchSize: 10,
   dailyBudget: 50,
   perRunBudget: 10,
   adapter: 'cli' as const,
@@ -207,7 +312,11 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
   validation: {
     gate1Commands: [],
     maxFixCycles: 3,
-    staticAnalysis: { maxComplexity: 15, maxFunctionLength: 50, maxFileSize: 500 },
+    staticAnalysis: {
+      maxComplexity: 15,
+      maxFunctionLength: 50,
+      maxFileSize: 500,
+    },
     diminishingReturns: { minCycles: 2, improvementThreshold: 0.2 },
     healthCheckIntervalMs: 5000,
     deployTimeoutMs: 120000,
@@ -221,20 +330,37 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
     proactiveRecentCommits: 20,
   },
   coordination: {
-    useCoordinator: false, tickInterval: 5000,
-    maxAgents: 10, reviewerInterval: 3600000, poInterval: 3600000,
-    poIdeaDebounce: 300000, poFindingDailyCap: 5,
-    plannerTimeout: 60000, maxAttemptsPerIssue: 3, diskSpaceThreshold: 2_000_000_000,
-    gcInterval: 600000, conflictFileThreshold: 3, conflictLineThreshold: 100,
-    mergeDependencyTimeout: 1800000, mergeValidationTimeout: 600000,
-    mergePollInterval: 5000, mergePollMaxInterval: 60000,
-    techLeadInterval: 7200000, techLeadEventDebounce: 300000,
-    techLeadProposalExpiryMs: 604800000, techLeadLookbackWindowMs: 172800000,
+    useCoordinator: false,
+    tickInterval: 5000,
+    maxAgents: 10,
+    reviewerInterval: 3600000,
+    poInterval: 3600000,
+    poIdeaDebounce: 300000,
+    poFindingDailyCap: 5,
+    plannerTimeout: 60000,
+    maxAttemptsPerIssue: 3,
+    diskSpaceThreshold: 2_000_000_000,
+    gcInterval: 600000,
+    conflictFileThreshold: 3,
+    conflictLineThreshold: 100,
+    mergeDependencyTimeout: 1800000,
+    mergeValidationTimeout: 600000,
+    mergePollInterval: 5000,
+    mergePollMaxInterval: 60000,
+    techLeadInterval: 7200000,
+    techLeadEventDebounce: 300000,
+    techLeadProposalExpiryMs: 604800000,
+    techLeadLookbackWindowMs: 172800000,
     techLeadMaxEntriesPerSection: 50,
     maxConsecutiveTickErrors: 5,
   },
   diagnosis: { confidenceThreshold: 0.7 },
-  warmup: { threshold: 10, regressionThreshold: 3, samplingRate: 0.1, minSamplingRate: 0.01 },
+  warmup: {
+    threshold: 10,
+    regressionThreshold: 3,
+    samplingRate: 0.1,
+    minSamplingRate: 0.01,
+  },
   knowledge: {
     systemicProposalThreshold: 3,
     systemicProposalCooldownDays: 30,
@@ -270,7 +396,7 @@ const loadDaemon = () => {
 };
 
 describe('daemon', () => {
-  const signalHandlers: Record<string, (() => Promise<void>)> = {};
+  const signalHandlers: Record<string, () => Promise<void>> = {};
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -278,7 +404,10 @@ describe('daemon', () => {
     process.env.GITHUB_TOKEN = 'ghp_test_token';
     // Capture signal handlers — cast to any to avoid process.on overload complexity
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.spyOn(process, 'on').mockImplementation(((event: string, handler: () => Promise<void>) => {
+    vi.spyOn(process, 'on').mockImplementation(((
+      event: string,
+      handler: () => Promise<void>,
+    ) => {
       signalHandlers[event] = handler;
       return process;
     }) as any);
@@ -304,10 +433,36 @@ describe('daemon', () => {
     mockRemoteControl.stop.mockResolvedValue(undefined);
     mockCostTracker.getDailyCost.mockReturnValue(0);
     mockRunWriter.upsertRun.mockResolvedValue(undefined);
-    mockCreateReviewScheduler.mockReturnValue({ start: () => () => {}, getStatus: () => ({}) });
+    mockClassifyBatch.mockImplementation(
+      async (_runtime: unknown, requests: Array<{ issueNumber: number }>) => ({
+        results: requests.map((request) => ({
+          issueNumber: request.issueNumber,
+          classified: true,
+          event: 'success:simple',
+          complexity: 'simple',
+          allocatedCost: 0,
+        })),
+        totalCost: 0,
+        batchSequenceId: 'batch-test',
+        status: 'complete',
+      }),
+    );
+    mockCreateReviewScheduler.mockReturnValue({
+      start: () => () => {},
+      getStatus: () => ({}),
+    });
     mockCreatePOAgent.mockReturnValue({
       start: vi.fn().mockReturnValue(vi.fn()),
-      submitIdea: vi.fn().mockResolvedValue({ id: 'idea-1', submittedBy: 'operator', description: 'test', status: 'pending', proposalId: null, createdAt: '2026-03-23T00:00:00Z' }),
+      submitIdea: vi
+        .fn()
+        .mockResolvedValue({
+          id: 'idea-1',
+          submittedBy: 'operator',
+          description: 'test',
+          status: 'pending',
+          proposalId: null,
+          createdAt: '2026-03-23T00:00:00Z',
+        }),
     });
     mockCreateTechLeadScheduler.mockReturnValue({
       start: vi.fn().mockReturnValue(vi.fn()),
@@ -331,15 +486,34 @@ describe('daemon', () => {
     vi.restoreAllMocks();
     // vi.restoreAllMocks only restores spies, not hoisted vi.fn() — clear them explicitly
     for (const mock of [
-      mockDetector.detectReadyWork, mockDetector.detectBugFixWork, mockDetector.detectFeaturePipelineWork, mockDetector.claimWork, mockDetector.claimBugFixWork, mockDetector.claimFeaturePipelineWork, mockDetector.markStuck,
-      mockRunPipeline, mockNotify, mockServerStart, mockLoadConfig,
-      mockStateMgr.initialize, mockStateMgr.saveRunState, mockStateMgr.findIncompleteRuns, mockStateMgr.findParkedRuns,
-      mockOctokit.issues.get, mockOctokit.issues.removeLabel,
-      mockServer.close, mockRemoteControl.start, mockRemoteControl.stop,
-      mockCostTracker.getDailyCost, mockCostTracker.maybeResetDaily,
+      mockDetector.detectReadyWork,
+      mockDetector.detectBugFixWork,
+      mockDetector.detectFeaturePipelineWork,
+      mockDetector.claimWork,
+      mockDetector.claimBugFixWork,
+      mockDetector.claimFeaturePipelineWork,
+      mockDetector.markStuck,
+      mockRunPipeline,
+      mockNotify,
+      mockServerStart,
+      mockLoadConfig,
+      mockStateMgr.initialize,
+      mockStateMgr.saveRunState,
+      mockStateMgr.findIncompleteRuns,
+      mockStateMgr.findParkedRuns,
+      mockOctokit.issues.get,
+      mockOctokit.issues.removeLabel,
+      mockServer.close,
+      mockRemoteControl.start,
+      mockRemoteControl.stop,
+      mockCostTracker.getDailyCost,
+      mockCostTracker.maybeResetDaily,
       mockRunWriter.upsertRun,
-      mockConfigReader.start, mockConfigReader.stop,
-      mockConfigReader.getGlobalConfig, mockConfigReader.getRepoConfig,
+      mockClassifyBatch,
+      mockConfigReader.start,
+      mockConfigReader.stop,
+      mockConfigReader.getGlobalConfig,
+      mockConfigReader.getRepoConfig,
       mockSelectVariant,
       mockCreateReviewScheduler,
       mockCreatePOAgent,
@@ -400,7 +574,9 @@ describe('daemon', () => {
     });
 
     it('rejects hostname controlHost from config before starting control server (#248)', async () => {
-      mockLoadConfig.mockResolvedValue(ok(makeConfig({ controlHost: 'my-server.local' })));
+      mockLoadConfig.mockResolvedValue(
+        ok(makeConfig({ controlHost: 'my-server.local' })),
+      );
 
       const { startDaemon } = await loadDaemon();
       const result = await startDaemon('config.json');
@@ -515,7 +691,10 @@ describe('daemon', () => {
 
       expect(mockRunPipeline).toHaveBeenCalled();
       const callArgs = mockRunPipeline.mock.calls[0]!;
-      expect(callArgs[0]).toMatchObject({ issueNumber: 55, phase: 'implement' });
+      expect(callArgs[0]).toMatchObject({
+        issueNumber: 55,
+        phase: 'implement',
+      });
     });
 
     it('falls back to config.repo when run has no repoOwner/repoName', async () => {
@@ -576,7 +755,10 @@ describe('daemon', () => {
       const workRequest = phaseHandlerCalls[0]![6] as WorkRequest;
       expect(workRequest.body).toBe('Original issue body with details');
       expect(workRequest.labels).toEqual(['ready', 'enhancement']);
-      expect(workRequest.specRefs).toEqual(['FUNC-AC-PIPELINE', 'ARCH-AC-CONTROL-PLANE']);
+      expect(workRequest.specRefs).toEqual([
+        'FUNC-AC-PIPELINE',
+        'ARCH-AC-CONTROL-PLANE',
+      ]);
     });
 
     it('falls back to empty defaults when RunState lacks body/labels/specRefs (#108)', async () => {
@@ -615,7 +797,12 @@ describe('daemon', () => {
       mockLoadConfig.mockResolvedValue(ok(config));
 
       let resolveResume!: (v: { outcome: string }) => void;
-      mockRunPipeline.mockImplementationOnce(() => new Promise((r) => { resolveResume = r; }));
+      mockRunPipeline.mockImplementationOnce(
+        () =>
+          new Promise((r) => {
+            resolveResume = r;
+          }),
+      );
 
       const incompleteRun = {
         id: 'run-block',
@@ -657,7 +844,10 @@ describe('daemon', () => {
     });
 
     it('auto-pauses after maxConsecutiveStuck crash-resumed stuck runs (#291)', async () => {
-      const config = makeConfig({ maxConsecutiveStuck: 2, webhooks: ['https://hooks.example.com/test'] });
+      const config = makeConfig({
+        maxConsecutiveStuck: 2,
+        webhooks: ['https://hooks.example.com/test'],
+      });
       mockLoadConfig.mockResolvedValue(ok(config));
 
       // Two incomplete runs that will both finish stuck
@@ -678,9 +868,17 @@ describe('daemon', () => {
         startedAt: '2026-03-21T00:00:00Z',
         updatedAt: '2026-03-21T01:00:00Z',
       };
-      const run2 = { ...run1, id: 'run-stuck-2', issueNumber: 81, title: 'Stuck resumed run 2' };
+      const run2 = {
+        ...run1,
+        id: 'run-stuck-2',
+        issueNumber: 81,
+        title: 'Stuck resumed run 2',
+      };
       mockStateMgr.findIncompleteRuns.mockResolvedValue([run1, run2]);
-      mockRunPipeline.mockResolvedValue({ outcome: 'stuck', error: 'test failure' });
+      mockRunPipeline.mockResolvedValue({
+        outcome: 'stuck',
+        error: 'test failure',
+      });
 
       const { startDaemon } = await loadDaemon();
       await startDaemon('config.json');
@@ -688,8 +886,14 @@ describe('daemon', () => {
 
       const { createControlServer } = await import('./server.js');
       const handlers = vi.mocked(createControlServer).mock.lastCall![1];
-      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(true);
-      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(2);
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(
+        true,
+      );
+      expect(
+        (handlers.getStatus() as Record<string, unknown>)[
+          'consecutiveStuckCount'
+        ],
+      ).toBe(2);
       expect(mockNotify).toHaveBeenCalledWith(
         ['https://hooks.example.com/test'],
         expect.objectContaining({
@@ -736,7 +940,11 @@ describe('daemon', () => {
       const { createControlServer } = await import('./server.js');
       const handlers = vi.mocked(createControlServer).mock.lastCall![1];
       // The crash-resumed run completed first (resetting count to 0), then poll run stuck (count = 1)
-      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
+      expect(
+        (handlers.getStatus() as Record<string, unknown>)[
+          'consecutiveStuckCount'
+        ],
+      ).toBe(1);
     });
   });
 
@@ -782,10 +990,80 @@ describe('daemon', () => {
       await vi.advanceTimersByTimeAsync(30000);
 
       expect(mockDetector.claimWork).toHaveBeenCalledWith(42);
+      expect(mockClassifyBatch).toHaveBeenCalledTimes(1);
       // Flush microtask queue so processWorkRequest's .then/.catch/.finally resolve
       await vi.advanceTimersByTimeAsync(0);
       expect(mockStateMgr.saveRunState).toHaveBeenCalled();
       expect(mockRunPipeline).toHaveBeenCalled();
+    });
+
+    it('classifies multiple ready issues in one batch before pipeline start (#470)', async () => {
+      const config = makeConfig({
+        maxConcurrentRuns: 3,
+        classifierBatchSize: 2,
+      });
+      mockLoadConfig.mockResolvedValue(ok(config));
+      const requests = [
+        makeWorkRequest({ issueNumber: 1 }),
+        makeWorkRequest({ issueNumber: 2 }),
+        makeWorkRequest({ issueNumber: 3 }),
+      ];
+      mockDetector.detectReadyWork.mockResolvedValue(ok(requests));
+      mockClassifyBatch.mockResolvedValueOnce({
+        results: [
+          {
+            issueNumber: 1,
+            classified: true,
+            event: 'success:simple',
+            complexity: 'simple',
+            allocatedCost: 0.05,
+          },
+          {
+            issueNumber: 2,
+            classified: true,
+            event: 'success',
+            complexity: 'complex',
+            allocatedCost: 0.05,
+          },
+        ],
+        totalCost: 0.1,
+        batchSequenceId: 'batch-1',
+        status: 'complete',
+      });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(1);
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(2);
+      expect(mockDetector.claimWork).not.toHaveBeenCalledWith(3);
+      expect(mockClassifyBatch).toHaveBeenCalledTimes(1);
+      expect(mockClassifyBatch.mock.calls[0]?.[1]).toEqual([
+        expect.objectContaining({ issueNumber: 1 }),
+        expect.objectContaining({ issueNumber: 2 }),
+      ]);
+      const startedRequests = phaseHandlerCalls.map(
+        (call) => call[6] as WorkRequest,
+      );
+      expect(startedRequests).toEqual([
+        expect.objectContaining({
+          issueNumber: 1,
+          preClassification: expect.objectContaining({
+            complexity: 'simple',
+            allocatedCost: 0.05,
+          }),
+        }),
+        expect.objectContaining({
+          issueNumber: 2,
+          preClassification: expect.objectContaining({
+            complexity: 'complex',
+            allocatedCost: 0.05,
+          }),
+        }),
+      ]);
     });
 
     it('skips claiming when at max concurrency', async () => {
@@ -812,7 +1090,9 @@ describe('daemon', () => {
     });
 
     it('continues polling when work detection returns error', async () => {
-      mockDetector.detectReadyWork.mockResolvedValue(err(new Error('API rate limited')));
+      mockDetector.detectReadyWork.mockResolvedValue(
+        err(new Error('API rate limited')),
+      );
 
       const { startDaemon } = await loadDaemon();
       await startDaemon('config.json');
@@ -827,11 +1107,18 @@ describe('daemon', () => {
     });
 
     it('does not start an overlapping poll tick while work detection is still running', async () => {
-      const config = makeConfig({ pollIntervalMs: 1000, maxConcurrentRuns: 10 });
+      const config = makeConfig({
+        pollIntervalMs: 1000,
+        maxConcurrentRuns: 10,
+      });
       mockLoadConfig.mockResolvedValue(ok(config));
 
-      let resolveDetect!: (value: Awaited<ReturnType<typeof mockDetector.detectReadyWork>>) => void;
-      const pendingDetect = new Promise<Awaited<ReturnType<typeof mockDetector.detectReadyWork>>>((resolve) => {
+      let resolveDetect!: (
+        value: Awaited<ReturnType<typeof mockDetector.detectReadyWork>>,
+      ) => void;
+      const pendingDetect = new Promise<
+        Awaited<ReturnType<typeof mockDetector.detectReadyWork>>
+      >((resolve) => {
         resolveDetect = resolve;
       });
       mockDetector.detectReadyWork.mockReturnValueOnce(pendingDetect);
@@ -853,7 +1140,10 @@ describe('daemon', () => {
     });
 
     it('skips work item when claim fails', async () => {
-      const requests = [makeWorkRequest({ issueNumber: 1 }), makeWorkRequest({ issueNumber: 2 })];
+      const requests = [
+        makeWorkRequest({ issueNumber: 1 }),
+        makeWorkRequest({ issueNumber: 2 }),
+      ];
       mockDetector.detectReadyWork.mockResolvedValue(ok(requests));
       mockDetector.claimWork
         .mockResolvedValueOnce(err(new Error('already claimed')))
@@ -930,12 +1220,17 @@ describe('daemon', () => {
     });
 
     it('marks stuck and notifies on stuck outcome', async () => {
-      mockRunPipeline.mockResolvedValue({ outcome: 'stuck', error: 'budget exceeded' });
+      mockRunPipeline.mockResolvedValue({
+        outcome: 'stuck',
+        error: 'budget exceeded',
+      });
 
       const request = makeWorkRequest({ issueNumber: 7 });
       mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
 
-      const config = makeConfig({ webhooks: ['https://hooks.example.com/test'] });
+      const config = makeConfig({
+        webhooks: ['https://hooks.example.com/test'],
+      });
       mockLoadConfig.mockResolvedValue(ok(config));
 
       const { startDaemon } = await loadDaemon();
@@ -1015,9 +1310,15 @@ describe('daemon', () => {
 
   describe('consecutive stuck auto-pause (#90)', () => {
     it('auto-pauses after maxConsecutiveStuck stuck runs and notifies', async () => {
-      const config = makeConfig({ maxConsecutiveStuck: 2, webhooks: ['https://hooks.example.com/test'] });
+      const config = makeConfig({
+        maxConsecutiveStuck: 2,
+        webhooks: ['https://hooks.example.com/test'],
+      });
       mockLoadConfig.mockResolvedValue(ok(config));
-      mockRunPipeline.mockResolvedValue({ outcome: 'stuck', error: 'test failure' });
+      mockRunPipeline.mockResolvedValue({
+        outcome: 'stuck',
+        error: 'test failure',
+      });
 
       const request1 = makeWorkRequest({ issueNumber: 1 });
       const request2 = makeWorkRequest({ issueNumber: 2 });
@@ -1033,15 +1334,23 @@ describe('daemon', () => {
       // After first stuck: not yet paused
       const { createControlServer } = await import('./server.js');
       const handlers = vi.mocked(createControlServer).mock.lastCall![1];
-      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(false);
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(
+        false,
+      );
 
       // Second poll: another stuck run → auto-pause
       mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request2]));
       await vi.advanceTimersByTimeAsync(30000);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(true);
-      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(2);
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(
+        true,
+      );
+      expect(
+        (handlers.getStatus() as Record<string, unknown>)[
+          'consecutiveStuckCount'
+        ],
+      ).toBe(2);
       expect(mockNotify).toHaveBeenCalledWith(
         ['https://hooks.example.com/test'],
         expect.objectContaining({
@@ -1056,7 +1365,10 @@ describe('daemon', () => {
       mockLoadConfig.mockResolvedValue(ok(config));
 
       // First run: stuck
-      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail' });
+      mockRunPipeline.mockResolvedValueOnce({
+        outcome: 'stuck',
+        error: 'fail',
+      });
       const request1 = makeWorkRequest({ issueNumber: 1 });
       mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request1]));
 
@@ -1068,7 +1380,11 @@ describe('daemon', () => {
 
       const { createControlServer } = await import('./server.js');
       const handlers = vi.mocked(createControlServer).mock.lastCall![1];
-      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
+      expect(
+        (handlers.getStatus() as Record<string, unknown>)[
+          'consecutiveStuckCount'
+        ],
+      ).toBe(1);
 
       // Second run: complete → resets count
       mockRunPipeline.mockResolvedValueOnce({ outcome: 'complete' });
@@ -1078,7 +1394,11 @@ describe('daemon', () => {
       await vi.advanceTimersByTimeAsync(30000);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(0);
+      expect(
+        (handlers.getStatus() as Record<string, unknown>)[
+          'consecutiveStuckCount'
+        ],
+      ).toBe(0);
     });
 
     it('resets stuck count and pauses daemon on paused outcome (#109, #293)', async () => {
@@ -1086,7 +1406,10 @@ describe('daemon', () => {
       mockLoadConfig.mockResolvedValue(ok(config));
 
       // First run: stuck
-      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail' });
+      mockRunPipeline.mockResolvedValueOnce({
+        outcome: 'stuck',
+        error: 'fail',
+      });
       const request1 = makeWorkRequest({ issueNumber: 1 });
       mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request1]));
 
@@ -1098,7 +1421,11 @@ describe('daemon', () => {
 
       const { createControlServer } = await import('./server.js');
       const handlers = vi.mocked(createControlServer).mock.lastCall![1];
-      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
+      expect(
+        (handlers.getStatus() as Record<string, unknown>)[
+          'consecutiveStuckCount'
+        ],
+      ).toBe(1);
 
       // Second run: paused (budget exceeded) → resets count AND pauses daemon
       mockRunPipeline.mockResolvedValueOnce({ outcome: 'paused' });
@@ -1110,15 +1437,27 @@ describe('daemon', () => {
       await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(0);
-      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(true);
+      expect(
+        (handlers.getStatus() as Record<string, unknown>)[
+          'consecutiveStuckCount'
+        ],
+      ).toBe(0);
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(
+        true,
+      );
 
       // Daemon is paused — no new work will be processed, so stuck count stays 0
-      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(0);
+      expect(
+        (handlers.getStatus() as Record<string, unknown>)[
+          'consecutiveStuckCount'
+        ],
+      ).toBe(0);
     });
 
     it('auto-pauses daemon on budget-exceeded paused outcome (#293)', async () => {
-      const config = makeConfig({ webhooks: ['https://hooks.example.com/test'] });
+      const config = makeConfig({
+        webhooks: ['https://hooks.example.com/test'],
+      });
       mockLoadConfig.mockResolvedValue(ok(config));
 
       mockRunPipeline.mockResolvedValueOnce({ outcome: 'paused' });
@@ -1136,7 +1475,9 @@ describe('daemon', () => {
       const { createControlServer } = await import('./server.js');
       const handlers = vi.mocked(createControlServer).mock.lastCall![1];
 
-      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(true);
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(
+        true,
+      );
       expect(mockNotify).toHaveBeenCalledWith(
         ['https://hooks.example.com/test'],
         expect.objectContaining({
@@ -1251,11 +1592,17 @@ describe('daemon', () => {
 
       const handlers = vi.mocked(createControlServer).mock.lastCall![1];
 
-      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(false);
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(
+        false,
+      );
       handlers.pause();
-      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(true);
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(
+        true,
+      );
       handlers.resume();
-      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(false);
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(
+        false,
+      );
     });
 
     it('exposes dailyRunCount: 0 in status before any runs', async () => {
@@ -1281,13 +1628,17 @@ describe('daemon', () => {
 
       const handlers = vi.mocked(createControlServer).mock.lastCall![1];
 
-      expect((handlers.getStatus() as Record<string, unknown>)['dailyRunCount']).toBe(0);
+      expect(
+        (handlers.getStatus() as Record<string, unknown>)['dailyRunCount'],
+      ).toBe(0);
 
       // Trigger a poll so one run is processed
       await vi.advanceTimersByTimeAsync(30000);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect((handlers.getStatus() as Record<string, unknown>)['dailyRunCount']).toBe(1);
+      expect(
+        (handlers.getStatus() as Record<string, unknown>)['dailyRunCount'],
+      ).toBe(1);
     });
   });
 
@@ -1378,7 +1729,9 @@ describe('daemon', () => {
         workType: 'bug-fix',
       });
       mockDetector.detectBugFixWork.mockResolvedValue(ok(bugRequest));
-      mockDetector.claimBugFixWork.mockResolvedValue(err(new Error('already claimed')));
+      mockDetector.claimBugFixWork.mockResolvedValue(
+        err(new Error('already claimed')),
+      );
 
       const { startDaemon } = await loadDaemon();
       await startDaemon('config.json');
@@ -1391,7 +1744,9 @@ describe('daemon', () => {
     });
 
     it('handles detectBugFixWork returning an error gracefully', async () => {
-      mockDetector.detectBugFixWork.mockResolvedValue(err(new Error('API error')));
+      mockDetector.detectBugFixWork.mockResolvedValue(
+        err(new Error('API error')),
+      );
 
       const { startDaemon } = await loadDaemon();
       await startDaemon('config.json');
@@ -1444,7 +1799,10 @@ describe('daemon', () => {
 
       await vi.advanceTimersByTimeAsync(30000);
 
-      expect(mockDetector.claimFeaturePipelineWork).toHaveBeenCalledWith(60, 'l2-brainstorm');
+      expect(mockDetector.claimFeaturePipelineWork).toHaveBeenCalledWith(
+        60,
+        'l2-brainstorm',
+      );
       await vi.advanceTimersByTimeAsync(0);
       expect(mockRunPipeline).toHaveBeenCalled();
     });
@@ -1505,7 +1863,9 @@ describe('daemon', () => {
         workType: 'l2-brainstorm',
       });
       mockDetector.detectFeaturePipelineWork.mockResolvedValue(ok(fpRequest));
-      mockDetector.claimFeaturePipelineWork.mockResolvedValue(err(new Error('already claimed')));
+      mockDetector.claimFeaturePipelineWork.mockResolvedValue(
+        err(new Error('already claimed')),
+      );
 
       const { startDaemon } = await loadDaemon();
       await startDaemon('config.json');
@@ -1513,12 +1873,17 @@ describe('daemon', () => {
       await vi.advanceTimersByTimeAsync(30000);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(mockDetector.claimFeaturePipelineWork).toHaveBeenCalledWith(60, 'l2-brainstorm');
+      expect(mockDetector.claimFeaturePipelineWork).toHaveBeenCalledWith(
+        60,
+        'l2-brainstorm',
+      );
       expect(mockRunPipeline).not.toHaveBeenCalled();
     });
 
     it('handles detectFeaturePipelineWork returning an error gracefully', async () => {
-      mockDetector.detectFeaturePipelineWork.mockResolvedValue(err(new Error('API error')));
+      mockDetector.detectFeaturePipelineWork.mockResolvedValue(
+        err(new Error('API error')),
+      );
 
       const { startDaemon } = await loadDaemon();
       await startDaemon('config.json');
@@ -1638,7 +2003,10 @@ describe('daemon', () => {
       const result = await handlers.submitIdea!('operator', 'Build dark mode');
 
       const agent = mockCreatePOAgent.mock.results[0]!.value;
-      expect(agent.submitIdea).toHaveBeenCalledWith('operator', 'Build dark mode');
+      expect(agent.submitIdea).toHaveBeenCalledWith(
+        'operator',
+        'Build dark mode',
+      );
       expect(result.id).toBe('idea-1');
     });
   });
@@ -1648,11 +2016,11 @@ describe('daemon', () => {
       const config = makeConfig({
         coordination: {
           ...makeConfig().coordination,
-          reviewerInterval: 7200000,  // 2 hours — non-default
+          reviewerInterval: 7200000, // 2 hours — non-default
         },
         validation: {
           ...makeConfig().validation,
-          proactiveThrottleThreshold: 0.75,  // non-default
+          proactiveThrottleThreshold: 0.75, // non-default
         },
       });
       mockLoadConfig.mockResolvedValue(ok(config));
@@ -1670,11 +2038,11 @@ describe('daemon', () => {
       const config = makeConfig({
         coordination: {
           ...makeConfig().coordination,
-          reviewerInterval: 5400000,  // 90 minutes
+          reviewerInterval: 5400000, // 90 minutes
         },
         validation: {
           ...makeConfig().validation,
-          proactiveIntervalMs: 900000,  // 15 minutes — must be ignored
+          proactiveIntervalMs: 900000, // 15 minutes — must be ignored
         },
       });
       mockLoadConfig.mockResolvedValue(ok(config));
@@ -1698,23 +2066,37 @@ describe('daemon', () => {
       const [deps] = mockCreateReviewScheduler.mock.calls[0]!;
 
       // Mock spawnSession to return codebase-reviewer output format
-      mockSpawnSession.mockResolvedValueOnce(ok({
-        output: 'review output',
-        structuredData: {
-          category: 'correctness',
-          findings: [
-            { title: 'Bug A', severity: 'important', location: 'foo.ts:1', description: 'd', evidence: 'e' },
-            { title: 'Bug B', severity: 'critical', location: 'bar.ts:2', description: 'd', evidence: 'e' },
-          ],
-          scannedFiles: 15,
-          candidatesFound: 8,
-          candidatesDropped: 6,
-          summary: 'Found 2 verified issues',
-        },
-        cost: 0.05,
-        pitfallMarkers: [],
-        exitStatus: 'success',
-      }));
+      mockSpawnSession.mockResolvedValueOnce(
+        ok({
+          output: 'review output',
+          structuredData: {
+            category: 'correctness',
+            findings: [
+              {
+                title: 'Bug A',
+                severity: 'important',
+                location: 'foo.ts:1',
+                description: 'd',
+                evidence: 'e',
+              },
+              {
+                title: 'Bug B',
+                severity: 'critical',
+                location: 'bar.ts:2',
+                description: 'd',
+                evidence: 'e',
+              },
+            ],
+            scannedFiles: 15,
+            candidatesFound: 8,
+            candidatesDropped: 6,
+            summary: 'Found 2 verified issues',
+          },
+          cost: 0.05,
+          pitfallMarkers: [],
+          exitStatus: 'success',
+        }),
+      );
 
       const result = await deps.spawnReviewSession('correctness', 5);
       expect(result.findingsCount).toBe(2);
@@ -1727,13 +2109,15 @@ describe('daemon', () => {
 
       const [deps] = mockCreateReviewScheduler.mock.calls[0]!;
 
-      mockSpawnSession.mockResolvedValueOnce(ok({
-        output: 'review output',
-        structuredData: null,
-        cost: 0.01,
-        pitfallMarkers: [],
-        exitStatus: 'success',
-      }));
+      mockSpawnSession.mockResolvedValueOnce(
+        ok({
+          output: 'review output',
+          structuredData: null,
+          cost: 0.01,
+          pitfallMarkers: [],
+          exitStatus: 'success',
+        }),
+      );
 
       const result = await deps.spawnReviewSession('security', 5);
       expect(result.findingsCount).toBe(0);
@@ -1760,13 +2144,23 @@ describe('daemon', () => {
 
     it('passes CoordinatorConfig with correct values from config', async () => {
       const config = makeConfig({
-        coordination: { ...makeConfig().coordination, useCoordinator: true, tickInterval: 3000, maxAgents: 5, diskSpaceThreshold: 1_000_000_000 },
+        coordination: {
+          ...makeConfig().coordination,
+          useCoordinator: true,
+          tickInterval: 3000,
+          maxAgents: 5,
+          diskSpaceThreshold: 1_000_000_000,
+        },
       });
       mockLoadConfig.mockResolvedValue(ok(config));
       const { startDaemon } = await loadDaemon();
       await startDaemon('config.json');
       const [, coordConfig] = mockCreateCoordinator.mock.calls[0]!;
-      expect(coordConfig).toMatchObject({ tickIntervalMs: 3000, maxAgents: 5, diskSpaceThreshold: 1_000_000_000 });
+      expect(coordConfig).toMatchObject({
+        tickIntervalMs: 3000,
+        maxAgents: 5,
+        diskSpaceThreshold: 1_000_000_000,
+      });
     });
 
     it('calls coordinator.start() and receives stop function', async () => {
@@ -1821,7 +2215,9 @@ describe('daemon', () => {
 
     it('stops coordinator on shutdown', async () => {
       const mockStopCoordinator = vi.fn();
-      mockCreateCoordinator.mockReturnValue({ start: vi.fn().mockReturnValue(mockStopCoordinator) });
+      mockCreateCoordinator.mockReturnValue({
+        start: vi.fn().mockReturnValue(mockStopCoordinator),
+      });
       const config = makeConfig({
         coordination: { ...makeConfig().coordination, useCoordinator: true },
       });
@@ -1870,7 +2266,11 @@ describe('daemon', () => {
 
       const { createControlServer } = await import('./server.js');
       const handlers = vi.mocked(createControlServer).mock.lastCall![1];
-      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(0);
+      expect(
+        (handlers.getStatus() as Record<string, unknown>)[
+          'consecutiveStuckCount'
+        ],
+      ).toBe(0);
     });
 
     it('does not auto-pause daemon on parked outcome', async () => {
@@ -1889,7 +2289,9 @@ describe('daemon', () => {
 
       const { createControlServer } = await import('./server.js');
       const handlers = vi.mocked(createControlServer).mock.lastCall![1];
-      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(false);
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(
+        false,
+      );
     });
 
     it('logs a message on parked outcome', async () => {
@@ -1914,7 +2316,10 @@ describe('daemon', () => {
       mockLoadConfig.mockResolvedValue(ok(config));
 
       // First run: stuck
-      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail' });
+      mockRunPipeline.mockResolvedValueOnce({
+        outcome: 'stuck',
+        error: 'fail',
+      });
       const request1 = makeWorkRequest({ issueNumber: 1 });
       mockDetector.detectReadyWork.mockResolvedValueOnce(ok([request1]));
 
@@ -1926,7 +2331,11 @@ describe('daemon', () => {
 
       const { createControlServer } = await import('./server.js');
       const handlers = vi.mocked(createControlServer).mock.lastCall![1];
-      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
+      expect(
+        (handlers.getStatus() as Record<string, unknown>)[
+          'consecutiveStuckCount'
+        ],
+      ).toBe(1);
 
       // Second run: parked — should NOT change consecutiveStuckCount
       mockRunPipeline.mockResolvedValueOnce({ outcome: 'parked' });
@@ -1937,18 +2346,30 @@ describe('daemon', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       // Parked is a no-op — stuck count stays at 1
-      expect((handlers.getStatus() as Record<string, unknown>)['consecutiveStuckCount']).toBe(1);
-      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(false);
+      expect(
+        (handlers.getStatus() as Record<string, unknown>)[
+          'consecutiveStuckCount'
+        ],
+      ).toBe(1);
+      expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(
+        false,
+      );
     });
   });
 
   describe('retry backoff', () => {
     it('skips issue in backoff window after it went stuck', async () => {
-      const config = makeConfig({ retryBackoffBaseMs: 60_000, retryBackoffMaxMs: 1_800_000 });
+      const config = makeConfig({
+        retryBackoffBaseMs: 60_000,
+        retryBackoffMaxMs: 1_800_000,
+      });
       mockLoadConfig.mockResolvedValue(ok(config));
 
       // First run: stuck
-      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail' });
+      mockRunPipeline.mockResolvedValueOnce({
+        outcome: 'stuck',
+        error: 'fail',
+      });
       const request = makeWorkRequest({ issueNumber: 42 });
       mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
 
@@ -1970,11 +2391,17 @@ describe('daemon', () => {
     });
 
     it('allows retry after backoff window expires', async () => {
-      const config = makeConfig({ retryBackoffBaseMs: 1_000, retryBackoffMaxMs: 5_000 });
+      const config = makeConfig({
+        retryBackoffBaseMs: 1_000,
+        retryBackoffMaxMs: 5_000,
+      });
       mockLoadConfig.mockResolvedValue(ok(config));
 
       // First run: stuck
-      mockRunPipeline.mockResolvedValueOnce({ outcome: 'stuck', error: 'fail' });
+      mockRunPipeline.mockResolvedValueOnce({
+        outcome: 'stuck',
+        error: 'fail',
+      });
       const request = makeWorkRequest({ issueNumber: 42 });
       mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
 
@@ -2007,7 +2434,12 @@ describe('daemon', () => {
       phase: 'paused',
       pausedAtPhase: 'l2-gate',
       variant: 'feature',
-      phaseCompletions: { detect: true, classify: true, 'l1-design': true, 'l2-design': true },
+      phaseCompletions: {
+        detect: true,
+        classify: true,
+        'l1-design': true,
+        'l2-design': true,
+      },
       checkpoints: [],
       cost: 5,
       perRunBudget: 10,
@@ -2028,7 +2460,9 @@ describe('daemon', () => {
       const parkedRun = makeParkedRun();
       mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
       mockOctokit.issues.get.mockResolvedValue({
-        data: { labels: [{ name: 'l2-approved' }, { name: 'awaiting-l2-review' }] },
+        data: {
+          labels: [{ name: 'l2-approved' }, { name: 'awaiting-l2-review' }],
+        },
       });
       mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
 
@@ -2041,15 +2475,26 @@ describe('daemon', () => {
 
       // Should have fetched issue labels
       expect(mockOctokit.issues.get).toHaveBeenCalledWith(
-        expect.objectContaining({ owner: 'test-owner', repo: 'test-repo', issue_number: 100 }),
+        expect.objectContaining({
+          owner: 'test-owner',
+          repo: 'test-repo',
+          issue_number: 100,
+        }),
       );
       // Should have removed awaiting-l2-review label (best-effort)
       expect(mockOctokit.issues.removeLabel).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'awaiting-l2-review', issue_number: 100 }),
+        expect.objectContaining({
+          name: 'awaiting-l2-review',
+          issue_number: 100,
+        }),
       );
       // Should have reset state and re-entered pipeline
       expect(mockStateMgr.saveRunState).toHaveBeenCalledWith(
-        expect.objectContaining({ issueNumber: 100, phase: 'l2-gate', pausedAtPhase: undefined }),
+        expect.objectContaining({
+          issueNumber: 100,
+          phase: 'l2-gate',
+          pausedAtPhase: undefined,
+        }),
       );
       expect(mockRunPipeline).toHaveBeenCalled();
     });
@@ -2069,7 +2514,11 @@ describe('daemon', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(mockStateMgr.saveRunState).toHaveBeenCalledWith(
-        expect.objectContaining({ issueNumber: 100, phase: 'l2-gate', pausedAtPhase: undefined }),
+        expect.objectContaining({
+          issueNumber: 100,
+          phase: 'l2-gate',
+          pausedAtPhase: undefined,
+        }),
       );
       expect(mockRunPipeline).toHaveBeenCalled();
     });
@@ -2091,7 +2540,9 @@ describe('daemon', () => {
       expect(mockRunPipeline).not.toHaveBeenCalled();
       // saveRunState should not have been called with phase reset
       const saveCallsWithReset = mockStateMgr.saveRunState.mock.calls.filter(
-        (call) => (call[0] as Record<string, unknown>)['issueNumber'] === 100 && (call[0] as Record<string, unknown>)['phase'] === 'l2-gate',
+        (call) =>
+          (call[0] as Record<string, unknown>)['issueNumber'] === 100 &&
+          (call[0] as Record<string, unknown>)['phase'] === 'l2-gate',
       );
       expect(saveCallsWithReset).toHaveLength(0);
     });
@@ -2171,15 +2622,20 @@ describe('daemon', () => {
 
   describe('spawnTechLeadSession returns output not structuredData (#436)', () => {
     it('returns result.value.output (LLM text) so parseTechLeadOutput sees real proposals, not CLI wrapper', async () => {
-      const proposalsJson = JSON.stringify({ proposals: [], protocolTriggers: [] });
+      const proposalsJson = JSON.stringify({
+        proposals: [],
+        protocolTriggers: [],
+      });
       const cliWrapper = { result: proposalsJson, cost_usd: 0.01 };
-      mockSpawnSession.mockResolvedValue(ok({
-        output: proposalsJson,
-        structuredData: cliWrapper,
-        cost: 0.01,
-        pitfallMarkers: [],
-        exitStatus: 'success',
-      }));
+      mockSpawnSession.mockResolvedValue(
+        ok({
+          output: proposalsJson,
+          structuredData: cliWrapper,
+          cost: 0.01,
+          pitfallMarkers: [],
+          exitStatus: 'success',
+        }),
+      );
 
       const { startDaemon } = await loadDaemon();
       await startDaemon('config.json');
@@ -2188,9 +2644,15 @@ describe('daemon', () => {
       const calls = mockCreateTechLeadScheduler.mock.calls;
       expect(calls.length).toBeGreaterThan(0);
       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-      const deps = calls[0]![0] as { spawnTechLeadSession: (digest: unknown) => Promise<string> };
+      const deps = calls[0]![0] as {
+        spawnTechLeadSession: (digest: unknown) => Promise<string>;
+      };
 
-      const digest = { id: '00000000-0000-0000-0000-000000000000', trigger: 'scheduled', assembledAt: new Date().toISOString() };
+      const digest = {
+        id: '00000000-0000-0000-0000-000000000000',
+        trigger: 'scheduled',
+        assembledAt: new Date().toISOString(),
+      };
       const result = await deps.spawnTechLeadSession(digest);
 
       // Must be the raw LLM output, not the stringified CLI wrapper
