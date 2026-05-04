@@ -5,6 +5,7 @@ import {
   type ConciergeRuntime,
   type ConciergeRuntimeClients,
 } from './runtime.js';
+import { createSlackHttpReceiver } from '../slack/http-receiver.js';
 
 type ProcessSignal = 'SIGINT' | 'SIGTERM';
 
@@ -30,6 +31,9 @@ export async function startConciergeCoreProcess(
       config,
       clients: createProcessRuntimeClients(config),
       planner: async () => ({ kind: 'none' }),
+      slackReceiver: createSlackHttpReceiver({
+        signingSecret: config.slackSigningSecret,
+      }),
     });
 
   await runtime.start();
