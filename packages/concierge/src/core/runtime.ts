@@ -7,6 +7,11 @@ import {
   createEventCardMaterializer,
   type EventCardMaterializer,
 } from '../event-bus/classifier.js';
+import {
+  createDailyActivityConsolidator,
+  type DailyActivityConsolidationResult,
+  type DailyActivityConsolidator,
+} from '../memory/consolidator.js';
 import type { ConciergeStateDatabase } from '../memory/node-sqlite.js';
 import type { Migration, MigrationStore } from '../memory/sqlite.js';
 import { createConciergeStateStores, type ConciergeStateStores } from '../memory/state-stores.js';
@@ -96,11 +101,13 @@ export interface ConciergeRuntime {
   handleConfirmationAction(action: ConfirmationAction): Promise<void>;
   handleBoardCardAction(action: BoardCardActionRequest): Promise<BoardCardActionResult>;
   processEventCardsOnce(): number;
+  processConsolidationOnce(): Promise<DailyActivityConsolidationResult | undefined>;
   expireConfirmations(): number;
 }
 
 const CONFIRMATION_EXPIRY_INTERVAL_MS = 60_000;
 const EVENT_CARD_MATERIALIZER_INTERVAL_MS = 30_000;
+const CONSOLIDATOR_INTERVAL_MS = 60 * 60 * 1_000;
 const DEFAULT_VAULT_ALLOW_LIST = ['00-inbox', '10-projects'];
 const DEFAULT_VAULT_CONFIRMATION_PREFIXES = ['20-Areas/clients'];
 
@@ -154,6 +161,16 @@ export function createConciergeRuntime(options: ConciergeRuntimeOptions): Concie
   const eventCards: EventCardMaterializer | undefined = state
     ? createEventCardMaterializer({ events: state.events, cards: state.cards })
     : undefined;
+  const consolidator: DailyActivityConsolidator | undefined = options.stateDatabase
+    && options.clients.secondBrain.writeDailySummary
+    ? createDailyActivityConsolidator({
+      db: options.stateDatabase,
+      writer: {
+        writeDailySummary: options.clients.secondBrain.writeDailySummary,
+      },
+      now: options.now,
+    })
+    : undefined;
   const slackConversationIds = new Map<string, string>();
   const intervalHandles: unknown[] = [];
   let started = false;
@@ -183,6 +200,16 @@ export function createConciergeRuntime(options: ConciergeRuntimeOptions): Concie
         intervalHandles.push(scheduler.setInterval(
           runtime.processEventCardsOnce,
           EVENT_CARD_MATERIALIZER_INTERVAL_MS,
+        ));
+      }
+      if (consolidator) {
+        intervalHandles.push(scheduler.setInterval(
+          () => {
+            void runtime.processConsolidationOnce().catch((error: unknown) => {
+              console.warn('[concierge] daily activity consolidation failed:', error);
+            });
+          },
+          CONSOLIDATOR_INTERVAL_MS,
         ));
       }
       started = true;
@@ -231,6 +258,10 @@ export function createConciergeRuntime(options: ConciergeRuntimeOptions): Concie
     processEventCardsOnce(): number {
       if (!eventCards) return 0;
       return eventCards.processOnce();
+    },
+
+    async processConsolidationOnce(): Promise<DailyActivityConsolidationResult | undefined> {
+      return consolidator?.runOnce();
     },
 
     expireConfirmations(): number {

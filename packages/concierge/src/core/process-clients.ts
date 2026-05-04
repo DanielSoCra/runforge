@@ -150,6 +150,16 @@ export function createSecondBrainFileClient(options: { vaultPath: string }): Con
       await writeFile(safePath, '', { encoding: 'utf-8', flag: 'a' });
       return { path: safePath };
     },
+
+    writeDailySummary: async (input) => {
+      const path = assertInsideVault(
+        vaultRoot,
+        join(vaultRoot, '10-projects/concierge/daily-summaries', `${input.date}.md`),
+      );
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, input.body, 'utf-8');
+      return { path };
+    },
   };
 }
 

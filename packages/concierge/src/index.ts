@@ -13,6 +13,8 @@ export * from './core/process-clients.js';
 export * from './core/router.js';
 export * from './core/runtime.js';
 export * from './event-bus/classifier.js';
+export * from './memory/consolidator.js';
+export * from './memory/consolidator-main.js';
 export * from './memory/node-sqlite.js';
 export * from './memory/sqlite.js';
 export * from './memory/state-schema.js';
