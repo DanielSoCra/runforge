@@ -9,6 +9,7 @@ export * from './core/main.js';
 export * from './core/process-clients.js';
 export * from './core/router.js';
 export * from './core/runtime.js';
+export * from './memory/node-sqlite.js';
 export * from './memory/sqlite.js';
 export * from './memory/state-schema.js';
 export * from './memory/vault.js';

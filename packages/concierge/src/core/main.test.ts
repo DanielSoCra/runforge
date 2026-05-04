@@ -42,6 +42,40 @@ describe('concierge core process entrypoint', () => {
     expect(runtime.stop).toHaveBeenCalledOnce();
   });
 
+  it('applies state schema migrations before starting an injected runtime', async () => {
+    const runtime = fakeRuntime();
+    const calls: string[] = [];
+    const stateDb = {
+      exec: async () => {
+        calls.push('exec');
+      },
+      hasMigration: () => false,
+      recordMigration: (id: string) => {
+        calls.push(`record:${id}`);
+      },
+      appliedMigrationIds: () => [],
+      close: () => {
+        calls.push('close');
+      },
+      tableNames: () => [],
+    };
+
+    await startConciergeCoreProcess({
+      loadConfig: async () => config,
+      createRuntime: () => runtime,
+      stateDbPath: '/tmp/concierge-state.db',
+      openStateDatabase: (path) => {
+        expect(path).toBe('/tmp/concierge-state.db');
+        return stateDb;
+      },
+      onSignal: () => undefined,
+      logger: { log: vi.fn(), error: vi.fn() },
+    });
+
+    expect(calls).toEqual(['exec', 'record:001-concierge-state-schema']);
+    expect(runtime.start).toHaveBeenCalledOnce();
+  });
+
   it('posts Slack messages through the Slack Web API client', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const clients = createProcessRuntimeClients(config, {
