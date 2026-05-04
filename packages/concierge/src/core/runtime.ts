@@ -3,7 +3,9 @@ import {
   type ConfirmationRecord,
   type ConfirmationStore,
 } from '../confirmation/state-machine.js';
+import type { ConciergeStateDatabase } from '../memory/node-sqlite.js';
 import type { Migration, MigrationStore } from '../memory/sqlite.js';
+import { createConciergeStateStores, type ConciergeStateStores } from '../memory/state-stores.js';
 import { runForwardOnlyMigrations } from '../memory/sqlite.js';
 import type { ConfirmationAction, NormalizedSlackMessage } from '../slack/adapter.js';
 import { createAutoClaudeToolHandlers, type FetchLike } from '../tools/ac.js';
@@ -64,6 +66,7 @@ export interface ConciergeRuntimeOptions {
   planner: ConciergePlanner;
   migrations?: Migration[];
   migrationStore?: MigrationStore;
+  stateDatabase?: ConciergeStateDatabase;
   slackReceiver?: SlackRuntimeReceiver;
   scheduler?: RuntimeScheduler;
   now?: () => number;
@@ -75,6 +78,7 @@ export interface ConciergeRuntime {
   core: ConciergeCore;
   confirmations: ConfirmationStore;
   registry: ReturnType<typeof createDefaultToolRegistry>;
+  state?: ConciergeStateStores;
   start(): Promise<void>;
   stop(): Promise<void>;
   handleSlackMessage(message: NormalizedSlackMessage): Promise<void>;
@@ -91,11 +95,17 @@ export function createConciergeRuntime(options: ConciergeRuntimeOptions): Concie
     setInterval: (callback: () => void, delayMs: number) => setInterval(callback, delayMs),
     clearInterval: (handle: unknown) => clearInterval(handle as ReturnType<typeof setInterval>),
   };
-  const confirmations = createConfirmationStore({
+  const state = options.stateDatabase
+    ? createConciergeStateStores(options.stateDatabase, {
+      now: options.now,
+      createId: options.createId,
+    })
+    : undefined;
+  const confirmations = state?.confirmations ?? createConfirmationStore({
     now: options.now,
     createId: options.createId,
   });
-  const auditLog = createAuditLog({
+  const auditLog = state?.auditLog ?? createAuditLog({
     now: options.now,
     createId: options.createId,
   });
@@ -122,6 +132,7 @@ export function createConciergeRuntime(options: ConciergeRuntimeOptions): Concie
     confirmations,
     planner: options.planner,
     auditLog,
+    conversations: state?.conversations,
   });
   const slackConversationIds = new Map<string, string>();
   let intervalHandle: unknown;
@@ -132,6 +143,7 @@ export function createConciergeRuntime(options: ConciergeRuntimeOptions): Concie
     core,
     confirmations,
     registry,
+    state,
 
     async start(): Promise<void> {
       if (started) return;

@@ -12,6 +12,7 @@ export * from './core/runtime.js';
 export * from './memory/node-sqlite.js';
 export * from './memory/sqlite.js';
 export * from './memory/state-schema.js';
+export * from './memory/state-stores.js';
 export * from './memory/vault.js';
 export * from './observer/filters.js';
 export * from './slack/adapter.js';

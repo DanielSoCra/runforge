@@ -49,6 +49,9 @@ describe('concierge core process entrypoint', () => {
       exec: async () => {
         calls.push('exec');
       },
+      run: () => undefined,
+      get: () => undefined,
+      all: () => [],
       hasMigration: () => false,
       recordMigration: (id: string) => {
         calls.push(`record:${id}`);
