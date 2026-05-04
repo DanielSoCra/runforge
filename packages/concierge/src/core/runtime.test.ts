@@ -221,6 +221,69 @@ describe('concierge runtime composition', () => {
     }));
     db.close();
   });
+
+  it('materializes observer events into board cards from the core lifecycle job', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'concierge-runtime-events-'));
+    const db = openConciergeStateDatabase(join(dir, 'state.db'));
+    await applyConciergeStateSchemaMigrations(db, db);
+    const stores = createConciergeStateStores(db);
+    stores.events.append({
+      source: 'observer',
+      type: 'daemon_stuck',
+      status: 'new',
+      payload: {
+        activeIssues: [504],
+        consecutiveStuckCount: 2,
+      },
+    });
+
+    const intervals: Array<{ delayMs: number; callback: () => void }> = [];
+    const cleared: unknown[] = [];
+    const runtime = createConciergeRuntime({
+      config,
+      clients: clients(),
+      planner: async () => ({ kind: 'none' }),
+      stateDatabase: db,
+      scheduler: {
+        setInterval: (callback, delayMs) => {
+          intervals.push({ callback, delayMs });
+          return { id: intervals.length };
+        },
+        clearInterval: (handle) => cleared.push(handle),
+      },
+    });
+
+    await runtime.start();
+
+    expect(stores.cards.get('event-1')).toEqual(expect.objectContaining({
+      status: 'needs_decision',
+      title: 'Daemon stuck',
+      body: 'consecutiveStuckCount: 2; activeIssues: 504',
+    }));
+    expect(intervals.map((interval) => interval.delayMs)).toEqual([60_000, 30_000]);
+
+    stores.events.append({
+      source: 'observer',
+      type: 'daemon_run_completed',
+      status: 'new',
+      payload: {
+        status: 'completed-with-concerns',
+        issue: 504,
+        concerns: ['needs review'],
+      },
+    });
+    intervals[1]?.callback();
+
+    expect(stores.cards.get('event-2')).toEqual(expect.objectContaining({
+      status: 'needs_decision',
+      title: 'Daemon run needs review',
+      body: 'issue: 504; status: completed-with-concerns; concerns: needs review',
+    }));
+
+    await runtime.stop();
+    expect(cleared).toEqual([{ id: 2 }, { id: 1 }]);
+    db.close();
+  });
 });
 
 function clients(overrides: Partial<ConciergeRuntimeClients> = {}): ConciergeRuntimeClients {
