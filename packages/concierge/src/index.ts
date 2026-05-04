@@ -6,6 +6,7 @@ export * from './core/config.js';
 export * from './core/conversation.js';
 export * from './core/llm.js';
 export * from './core/main.js';
+export * from './core/process-clients.js';
 export * from './core/router.js';
 export * from './core/runtime.js';
 export * from './memory/sqlite.js';
