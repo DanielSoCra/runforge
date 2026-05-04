@@ -11,22 +11,34 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { __clearGovernanceCacheForTests } from './governance-context.js';
 
-const mockCaptureScopeBaseCommit = vi.hoisted(() => vi.fn().mockResolvedValue('base-sha'));
-const mockAuditScope = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true, value: undefined }));
+const mockCaptureScopeBaseCommit = vi.hoisted(() =>
+  vi.fn().mockResolvedValue('base-sha'),
+);
+const mockAuditScope = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ ok: true, value: undefined }),
+);
 
 vi.mock('./plugin-loader.js', () => ({
-  readPluginsForContext: vi.fn().mockResolvedValue([{
-    id: 'test',
-    activatedAt: '2024-01-01T00:00:00Z',
-    promptInjection: 'PLUGIN INJECTION',
-    skills: [{ name: 'skill.md', content: 'SKILL CONTENT', pluginId: 'test' }],
-    agents: [{ name: 'agent.md', content: 'AGENT CONTENT', pluginId: 'test' }],
-    mcpConfigs: [],
-    gates: [],
-  }]),
+  readPluginsForContext: vi.fn().mockResolvedValue([
+    {
+      id: 'test',
+      activatedAt: '2024-01-01T00:00:00Z',
+      promptInjection: 'PLUGIN INJECTION',
+      skills: [
+        { name: 'skill.md', content: 'SKILL CONTENT', pluginId: 'test' },
+      ],
+      agents: [
+        { name: 'agent.md', content: 'AGENT CONTENT', pluginId: 'test' },
+      ],
+      mcpConfigs: [],
+      gates: [],
+    },
+  ]),
 }));
 
-const mockSpawn = vi.fn().mockResolvedValue({ ok: true, value: { output: '', cost: 0.05 } });
+const mockSpawn = vi
+  .fn()
+  .mockResolvedValue({ ok: true, value: { output: '', cost: 0.05 } });
 vi.mock('./adapters/index.js', () => ({
   createAdapter: vi.fn(() => ({
     spawn: mockSpawn,
@@ -52,7 +64,12 @@ const testConfig = {
 // Full variable set for the registered worker prompt contract
 // (task, specs, verification, pitfalls — pitfalls has default ''; the others
 // must be present or assertContract throws in test mode).
-const WORKER_VARS = { task: 'do it', specs: '', verification: '', pitfalls: '' };
+const WORKER_VARS = {
+  task: 'do it',
+  specs: '',
+  verification: '',
+  pitfalls: '',
+};
 
 describe('SessionRuntime', () => {
   let runtime: SessionRuntime;
@@ -90,23 +107,41 @@ describe('SessionRuntime', () => {
       1,
     );
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.message).toContain('No agent definition');
+    if (!result.ok)
+      expect(result.error.message).toContain('No agent definition');
   });
 
   it('spawns product-owner session type without error (#342)', async () => {
-    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '{}', cost: 0.02 } });
-    const result = await runtime.spawnSession('product-owner', { variables: {} }, 1);
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: '{}', cost: 0.02 },
+    });
+    const result = await runtime.spawnSession(
+      'product-owner',
+      { variables: {} },
+      1,
+    );
     expect(result.ok).toBe(true);
   });
 
   it('spawns tech-lead session type without error (#342)', async () => {
-    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '{}', cost: 0.02 } });
-    const result = await runtime.spawnSession('tech-lead', { variables: {} }, 1);
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: '{}', cost: 0.02 },
+    });
+    const result = await runtime.spawnSession(
+      'tech-lead',
+      { variables: {} },
+      1,
+    );
     expect(result.ok).toBe(true);
   });
 
   it('product-owner has read-only tools (#342)', async () => {
-    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '{}', cost: 0.01 } });
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: '{}', cost: 0.01 },
+    });
     await runtime.spawnSession('product-owner', { variables: {} }, 1);
     const calledDef = mockSpawn.mock.calls[mockSpawn.mock.calls.length - 1]![0];
     expect(calledDef.allowedTools).not.toContain('Write');
@@ -115,7 +150,10 @@ describe('SessionRuntime', () => {
   });
 
   it('tech-lead has read-only tools (#342)', async () => {
-    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '{}', cost: 0.01 } });
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: '{}', cost: 0.01 },
+    });
     await runtime.spawnSession('tech-lead', { variables: {} }, 1);
     const calledDef = mockSpawn.mock.calls[mockSpawn.mock.calls.length - 1]![0];
     expect(calledDef.allowedTools).not.toContain('Write');
@@ -127,14 +165,23 @@ describe('SessionRuntime', () => {
     // The reporter prompt template and agent definition were dead code:
     // phases.ts calls formatReport() directly, no session is spawned.
     // Attempting to spawn a reporter session should fail with "No agent definition".
-    const result = await runtime.spawnSession('reporter' as any, { variables: {} }, 1);
+    const result = await runtime.spawnSession(
+      'reporter' as any,
+      { variables: {} },
+      1,
+    );
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.message).toContain('No agent definition');
+    if (!result.ok)
+      expect(result.error.message).toContain('No agent definition');
   });
 
   it('rejects when daily budget exceeded with SessionError', async () => {
     costTracker.recordCost(1, 51);
-    const result = await runtime.spawnSession('worker', { variables: WORKER_VARS }, 2);
+    const result = await runtime.spawnSession(
+      'worker',
+      { variables: WORKER_VARS },
+      2,
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.message).toContain('Budget exceeded');
@@ -145,7 +192,11 @@ describe('SessionRuntime', () => {
 
   it('rejects when per-run budget exceeded with SessionError', async () => {
     costTracker.recordCost(1, 11);
-    const result = await runtime.spawnSession('worker', { variables: WORKER_VARS }, 1);
+    const result = await runtime.spawnSession(
+      'worker',
+      { variables: WORKER_VARS },
+      1,
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.message).toContain('Budget exceeded');
@@ -170,26 +221,42 @@ describe('SessionRuntime', () => {
   it('includes plugin skills and agents before system prompt', async () => {
     const result = await (runtime as any).assemblePrompt(
       { name: 'test-agent', systemPrompt: 'SYSTEM PROMPT' },
-      { variables: {}, activePlugins: [{ id: 'test', activatedAt: '2024-01-01T00:00:00Z' }] },
+      {
+        variables: {},
+        activePlugins: [{ id: 'test', activatedAt: '2024-01-01T00:00:00Z' }],
+      },
     );
     expect(result.prompt).toContain('SKILL CONTENT');
     expect(result.prompt).toContain('AGENT CONTENT');
     expect(result.prompt).toContain('PLUGIN INJECTION');
-    expect(result.prompt.indexOf('PLUGIN INJECTION')).toBeLessThan(result.prompt.indexOf('SYSTEM PROMPT'));
-    expect(result.prompt.indexOf('SKILL CONTENT')).toBeLessThan(result.prompt.indexOf('SYSTEM PROMPT'));
-    expect(result.prompt.indexOf('AGENT CONTENT')).toBeLessThan(result.prompt.indexOf('SYSTEM PROMPT'));
+    expect(result.prompt.indexOf('PLUGIN INJECTION')).toBeLessThan(
+      result.prompt.indexOf('SYSTEM PROMPT'),
+    );
+    expect(result.prompt.indexOf('SKILL CONTENT')).toBeLessThan(
+      result.prompt.indexOf('SYSTEM PROMPT'),
+    );
+    expect(result.prompt.indexOf('AGENT CONTENT')).toBeLessThan(
+      result.prompt.indexOf('SYSTEM PROMPT'),
+    );
   });
 
   it('prepends governance before plugins and system prompt', async () => {
     const result = await (runtime as any).assemblePrompt(
       { name: 'test-agent', systemPrompt: 'SYSTEM PROMPT' },
-      { variables: {}, activePlugins: [{ id: 'test', activatedAt: '2024-01-01T00:00:00Z' }] },
+      {
+        variables: {},
+        activePlugins: [{ id: 'test', activatedAt: '2024-01-01T00:00:00Z' }],
+      },
     );
 
     expect(result.prompt).toContain('# FACTORY_RULES');
     expect(result.prompt).toContain('Daily $50');
-    expect(result.prompt.indexOf('# FACTORY_RULES')).toBeLessThan(result.prompt.indexOf('PLUGIN INJECTION'));
-    expect(result.prompt.indexOf('# FACTORY_RULES')).toBeLessThan(result.prompt.indexOf('SYSTEM PROMPT'));
+    expect(result.prompt.indexOf('# FACTORY_RULES')).toBeLessThan(
+      result.prompt.indexOf('PLUGIN INJECTION'),
+    );
+    expect(result.prompt.indexOf('# FACTORY_RULES')).toBeLessThan(
+      result.prompt.indexOf('SYSTEM PROMPT'),
+    );
   });
 
   it('returns an error instead of spawning when governance cannot load', async () => {
@@ -200,27 +267,49 @@ describe('SessionRuntime', () => {
     } as Config;
     const missingRuntime = new SessionRuntime(missingConfig, costTracker);
 
-    const result = await missingRuntime.spawnSession('worker', { variables: WORKER_VARS }, 1);
+    const result = await missingRuntime.spawnSession(
+      'worker',
+      { variables: WORKER_VARS },
+      1,
+    );
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.message).toContain('governance document not found');
+    if (!result.ok)
+      expect(result.error.message).toContain('governance document not found');
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it('composite context prompt injection appears before system prompt', () => {
-    const ctx = buildCompositeContext([{
-      id: 'test', activatedAt: '2024-01-01T00:00:00Z',
-      promptInjection: 'PLUGIN INJECTION',
-      skills: [], agents: [], mcpConfigs: [], gates: [],
-    }]);
+    const ctx = buildCompositeContext([
+      {
+        id: 'test',
+        activatedAt: '2024-01-01T00:00:00Z',
+        promptInjection: 'PLUGIN INJECTION',
+        skills: [],
+        agents: [],
+        mcpConfigs: [],
+        gates: [],
+      },
+    ]);
     const systemPrompt = 'SYSTEM PROMPT';
-    const assembled = [ctx.promptInjection, systemPrompt].filter(Boolean).join('\n\n---\n\n');
-    expect(assembled.indexOf('PLUGIN INJECTION')).toBeLessThan(assembled.indexOf('SYSTEM PROMPT'));
+    const assembled = [ctx.promptInjection, systemPrompt]
+      .filter(Boolean)
+      .join('\n\n---\n\n');
+    expect(assembled.indexOf('PLUGIN INJECTION')).toBeLessThan(
+      assembled.indexOf('SYSTEM PROMPT'),
+    );
   });
 
   it('serializes object jsonSchema to string before adapter.spawn (Codex 057caeb)', async () => {
-    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '', cost: 0.01 } });
-    const schema = { type: 'object', properties: { nested: { type: 'array', items: { type: 'string' } } }, required: ['nested'] };
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: '', cost: 0.01 },
+    });
+    const schema = {
+      type: 'object',
+      properties: { nested: { type: 'array', items: { type: 'string' } } },
+      required: ['nested'],
+    };
     await runtime.spawnSession(
       'worker',
       { variables: WORKER_VARS, workspacePath: '/tmp/ws' },
@@ -235,7 +324,10 @@ describe('SessionRuntime', () => {
   });
 
   it('passes through string jsonSchema unchanged to adapter.spawn', async () => {
-    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '', cost: 0.01 } });
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: '', cost: 0.01 },
+    });
     const schemaString = '{"type":"object"}';
     await runtime.spawnSession(
       'worker',
@@ -251,7 +343,10 @@ describe('SessionRuntime', () => {
   });
 
   it('passes containmentPolicy to adapter.spawn', async () => {
-    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '', cost: 0.01 } });
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: '', cost: 0.01 },
+    });
     await runtime.spawnSession(
       'worker',
       { variables: WORKER_VARS, workspacePath: '/tmp/ws' },
@@ -271,7 +366,10 @@ describe('SessionRuntime', () => {
   });
 
   it('passes resolved directory scope to adapter.spawn', async () => {
-    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '', cost: 0.01 } });
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: '', cost: 0.01 },
+    });
     await runtime.spawnSession(
       'worker',
       { variables: WORKER_VARS, workspacePath: '/tmp/ws' },
@@ -291,17 +389,22 @@ describe('SessionRuntime', () => {
   });
 
   it('returns scopeViolation SessionError when post-session scope audit fails', async () => {
-    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: 'done', cost: 0.01 } });
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: 'done', cost: 0.01 },
+    });
     mockAuditScope.mockResolvedValueOnce({
       ok: false,
-      error: [{
-        sessionId: 'worker-99',
-        agentType: 'worker',
-        path: 'README.md',
-        violationType: 'write-outside-permitted',
-        detectionLayer: 'post-session',
-        timestamp: '2026-05-04T00:00:00.000Z',
-      }],
+      error: [
+        {
+          sessionId: 'worker-99',
+          agentType: 'worker',
+          path: 'README.md',
+          violationType: 'write-outside-permitted',
+          detectionLayer: 'post-session',
+          timestamp: '2026-05-04T00:00:00.000Z',
+        },
+      ],
     });
 
     const result = await runtime.spawnSession(
@@ -333,12 +436,44 @@ describe('SessionRuntime', () => {
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(writeCostEvent).toHaveBeenCalledWith('my-run-id', 'worker', expect.any(Number));
+      expect(writeCostEvent).toHaveBeenCalledWith(
+        'my-run-id',
+        'worker',
+        expect.any(Number),
+      );
     }
   });
 
+  it('allocates one session cost across multiple issue numbers (#470)', async () => {
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        output: '',
+        structuredData: {},
+        cost: 0.3,
+        pitfallMarkers: [],
+        exitStatus: 'completed',
+      },
+    });
+
+    await runtime.spawnSession(
+      'classifier',
+      { variables: { workRequest: '', specRefs: 'none', scope: '' } },
+      1,
+      { costAttributionIssueNumbers: [1, 2, 3] },
+    );
+
+    expect(costTracker.getDailyCost()).toBe(0.3);
+    expect(costTracker.getRunCost(1)).toBeCloseTo(0.1);
+    expect(costTracker.getRunCost(2)).toBeCloseTo(0.1);
+    expect(costTracker.getRunCost(3)).toBeCloseTo(0.1);
+  });
+
   it('records cost even when session fails with SessionError (#13)', async () => {
-    mockSpawn.mockResolvedValueOnce({ ok: false, error: new SessionError('CLI crashed', 0.42) });
+    mockSpawn.mockResolvedValueOnce({
+      ok: false,
+      error: new SessionError('CLI crashed', 0.42),
+    });
 
     await runtime.spawnSession(
       'worker',
@@ -351,7 +486,10 @@ describe('SessionRuntime', () => {
   });
 
   it('records cost from failed session to runWriter (#13)', async () => {
-    mockSpawn.mockResolvedValueOnce({ ok: false, error: new SessionError('CLI crashed', 1.5) });
+    mockSpawn.mockResolvedValueOnce({
+      ok: false,
+      error: new SessionError('CLI crashed', 1.5),
+    });
     const writeCostEvent = vi.fn().mockResolvedValue(undefined);
     const runWriter = { writeCostEvent, upsertRun: vi.fn() } as any;
 
@@ -369,7 +507,10 @@ describe('SessionRuntime', () => {
   });
 
   it('does not record cost when failure has zero cost', async () => {
-    mockSpawn.mockResolvedValueOnce({ ok: false, error: new SessionError('spawn failed', 0) });
+    mockSpawn.mockResolvedValueOnce({
+      ok: false,
+      error: new SessionError('spawn failed', 0),
+    });
 
     await runtime.spawnSession(
       'worker',
@@ -382,7 +523,10 @@ describe('SessionRuntime', () => {
   });
 
   it('does not record cost when failure is a plain Error', async () => {
-    mockSpawn.mockResolvedValueOnce({ ok: false, error: new Error('unknown error') });
+    mockSpawn.mockResolvedValueOnce({
+      ok: false,
+      error: new Error('unknown error'),
+    });
 
     await runtime.spawnSession(
       'worker',
@@ -395,11 +539,18 @@ describe('SessionRuntime', () => {
   });
 
   it('rejects when rate limited (cooldown active) with rateLimited flag', async () => {
-    const rateLimiter = new RateLimiter({ baseBackoffMs: 60000, maxBackoffMs: 300000 });
+    const rateLimiter = new RateLimiter({
+      baseBackoffMs: 60000,
+      maxBackoffMs: 300000,
+    });
     rateLimiter.reportRateLimit(); // activate cooldown
     const rl = new SessionRuntime(testConfig, costTracker, rateLimiter);
 
-    const result = await rl.spawnSession('worker', { variables: WORKER_VARS }, 1);
+    const result = await rl.spawnSession(
+      'worker',
+      { variables: WORKER_VARS },
+      1,
+    );
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error.message).toContain('Rate limited');
@@ -410,7 +561,10 @@ describe('SessionRuntime', () => {
   });
 
   it('reports rate limit to limiter when adapter returns rateLimited error', async () => {
-    const rateLimiter = new RateLimiter({ baseBackoffMs: 1000, maxBackoffMs: 60000 });
+    const rateLimiter = new RateLimiter({
+      baseBackoffMs: 1000,
+      maxBackoffMs: 60000,
+    });
     const rl = new SessionRuntime(testConfig, costTracker, rateLimiter);
 
     mockSpawn.mockResolvedValueOnce({
@@ -446,7 +600,11 @@ describe('SessionRuntime', () => {
     // Output that merely mentions blocked paths should pass audit.
     mockSpawn.mockResolvedValueOnce({
       ok: true,
-      value: { output: 'I read the file .specify/scenarios/secret.md and found test data', cost: 0.03 },
+      value: {
+        output:
+          'I read the file .specify/scenarios/secret.md and found test data',
+        cost: 0.03,
+      },
     });
 
     const result = await runtime.spawnSession(
@@ -461,7 +619,10 @@ describe('SessionRuntime', () => {
   it('does not flag containment breach when session output is clean (#222)', async () => {
     mockSpawn.mockResolvedValueOnce({
       ok: true,
-      value: { output: 'Successfully implemented the feature in src/index.ts', cost: 0.02 },
+      value: {
+        output: 'Successfully implemented the feature in src/index.ts',
+        cost: 0.02,
+      },
     });
 
     const result = await runtime.spawnSession(
@@ -478,20 +639,38 @@ describe('SessionRuntime', () => {
 
   it('passes plugin mcpConfigs to adapter.spawn (#314)', async () => {
     const { readPluginsForContext } = await import('./plugin-loader.js');
-    (readPluginsForContext as ReturnType<typeof vi.fn>).mockResolvedValueOnce([{
-      id: 'figma-plugin',
-      activatedAt: '2024-01-01T00:00:00Z',
-      promptInjection: '',
-      skills: [],
-      agents: [],
-      mcpConfigs: [{ name: 'figma-mcp', command: 'npx', args: ['figma-mcp-server'], env: { TOKEN: 'abc' } }],
-      gates: ['pnpm run lint'],
-    }]);
+    (readPluginsForContext as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        id: 'figma-plugin',
+        activatedAt: '2024-01-01T00:00:00Z',
+        promptInjection: '',
+        skills: [],
+        agents: [],
+        mcpConfigs: [
+          {
+            name: 'figma-mcp',
+            command: 'npx',
+            args: ['figma-mcp-server'],
+            env: { TOKEN: 'abc' },
+          },
+        ],
+        gates: ['pnpm run lint'],
+      },
+    ]);
 
-    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: 'done', cost: 0.01 } });
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: 'done', cost: 0.01 },
+    });
     await runtime.spawnSession(
       'worker',
-      { variables: WORKER_VARS, workspacePath: '/tmp/ws', activePlugins: [{ id: 'figma-plugin', activatedAt: '2024-01-01T00:00:00Z' }] },
+      {
+        variables: WORKER_VARS,
+        workspacePath: '/tmp/ws',
+        activePlugins: [
+          { id: 'figma-plugin', activatedAt: '2024-01-01T00:00:00Z' },
+        ],
+      },
       200,
     );
 
@@ -499,51 +678,76 @@ describe('SessionRuntime', () => {
       expect.anything(),
       expect.any(String),
       expect.objectContaining({
-        mcpConfigs: [expect.objectContaining({ name: 'figma-mcp', command: 'npx' })],
+        mcpConfigs: [
+          expect.objectContaining({ name: 'figma-mcp', command: 'npx' }),
+        ],
       }),
     );
   });
 
   it('returns plugin gates in session result (#314)', async () => {
     const { readPluginsForContext } = await import('./plugin-loader.js');
-    (readPluginsForContext as ReturnType<typeof vi.fn>).mockResolvedValueOnce([{
-      id: 'lint-plugin',
-      activatedAt: '2024-01-01T00:00:00Z',
-      promptInjection: '',
-      skills: [],
-      agents: [],
-      mcpConfigs: [],
-      gates: ['pnpm run lint', 'pnpm run typecheck'],
-    }]);
+    (readPluginsForContext as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        id: 'lint-plugin',
+        activatedAt: '2024-01-01T00:00:00Z',
+        promptInjection: '',
+        skills: [],
+        agents: [],
+        mcpConfigs: [],
+        gates: ['pnpm run lint', 'pnpm run typecheck'],
+      },
+    ]);
 
-    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: 'done', cost: 0.01 } });
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: { output: 'done', cost: 0.01 },
+    });
     const result = await runtime.spawnSession(
       'worker',
-      { variables: WORKER_VARS, workspacePath: '/tmp/ws', activePlugins: [{ id: 'lint-plugin', activatedAt: '2024-01-01T00:00:00Z' }] },
+      {
+        variables: WORKER_VARS,
+        workspacePath: '/tmp/ws',
+        activePlugins: [
+          { id: 'lint-plugin', activatedAt: '2024-01-01T00:00:00Z' },
+        ],
+      },
       201,
     );
 
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.pluginGates).toEqual(['pnpm run lint', 'pnpm run typecheck']);
+      expect(result.value.pluginGates).toEqual([
+        'pnpm run lint',
+        'pnpm run typecheck',
+      ]);
     }
   });
 
   it('assemblePrompt returns mcpConfigs and gates from plugins (#314)', async () => {
     const { readPluginsForContext } = await import('./plugin-loader.js');
-    (readPluginsForContext as ReturnType<typeof vi.fn>).mockResolvedValueOnce([{
-      id: 'test-plugin',
-      activatedAt: '2024-01-01T00:00:00Z',
-      promptInjection: '',
-      skills: [],
-      agents: [],
-      mcpConfigs: [{ name: 'test-mcp', command: 'node', args: ['server.js'] }],
-      gates: ['npm test'],
-    }]);
+    (readPluginsForContext as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        id: 'test-plugin',
+        activatedAt: '2024-01-01T00:00:00Z',
+        promptInjection: '',
+        skills: [],
+        agents: [],
+        mcpConfigs: [
+          { name: 'test-mcp', command: 'node', args: ['server.js'] },
+        ],
+        gates: ['npm test'],
+      },
+    ]);
 
     const result = await (runtime as any).assemblePrompt(
       { name: 'test-agent', systemPrompt: 'PROMPT' },
-      { variables: {}, activePlugins: [{ id: 'test-plugin', activatedAt: '2024-01-01T00:00:00Z' }] },
+      {
+        variables: {},
+        activePlugins: [
+          { id: 'test-plugin', activatedAt: '2024-01-01T00:00:00Z' },
+        ],
+      },
     );
 
     expect(result.mcpConfigs).toHaveLength(1);
@@ -566,7 +770,10 @@ describe('SessionRuntime', () => {
     // Path scanning removed — preventive hooks handle this
     mockSpawn.mockResolvedValueOnce({
       ok: true,
-      value: { output: 'Accessed state/runs/42.json for debugging', cost: 0.07 },
+      value: {
+        output: 'Accessed state/runs/42.json for debugging',
+        cost: 0.07,
+      },
     });
 
     const result = await runtime.spawnSession(
@@ -599,8 +806,14 @@ describe('loadPromptTemplate', () => {
 
   it('loads template from prompts/{name}.md and substitutes {{variables}}', async () => {
     // Using an unregistered synthetic prompt name so the contract registry doesn't apply
-    await writeFile(join(tmpDir, 'test-loader.md'), '# Worker\n\nTask: {{task}}\nSpecs: {{specs}}');
-    const result = await loadPromptTemplate('test-loader', { task: 'build feature', specs: 'FUNC-1' });
+    await writeFile(
+      join(tmpDir, 'test-loader.md'),
+      '# Worker\n\nTask: {{task}}\nSpecs: {{specs}}',
+    );
+    const result = await loadPromptTemplate('test-loader', {
+      task: 'build feature',
+      specs: 'FUNC-1',
+    });
     expect(result).toBe('# Worker\n\nTask: build feature\nSpecs: FUNC-1');
   });
 
@@ -610,13 +823,19 @@ describe('loadPromptTemplate', () => {
   });
 
   it('returns template unchanged when no variables match placeholders', async () => {
-    await writeFile(join(tmpDir, 'classifier.md'), '# Classifier\n\nNo placeholders here.');
+    await writeFile(
+      join(tmpDir, 'classifier.md'),
+      '# Classifier\n\nNo placeholders here.',
+    );
     const result = await loadPromptTemplate('classifier', { unused: 'value' });
     expect(result).toBe('# Classifier\n\nNo placeholders here.');
   });
 
   it('replaces all occurrences of the same placeholder', async () => {
-    await writeFile(join(tmpDir, 'test-repeat.md'), 'Run {{cmd}} then {{cmd}} again');
+    await writeFile(
+      join(tmpDir, 'test-repeat.md'),
+      'Run {{cmd}} then {{cmd}} again',
+    );
     const result = await loadPromptTemplate('test-repeat', { cmd: 'vitest' });
     expect(result).toBe('Run vitest then vitest again');
   });
@@ -628,8 +847,13 @@ describe('loadPromptTemplate', () => {
   });
 
   it('leaves unknown placeholders intact (delegates to knowledge/renderTemplate)', async () => {
-    await writeFile(join(tmpDir, 'test-placeholder.md'), 'Task: {{task}}\nPitfalls: {{pitfalls}}');
-    const result = await loadPromptTemplate('test-placeholder', { task: 'build feature' });
+    await writeFile(
+      join(tmpDir, 'test-placeholder.md'),
+      'Task: {{task}}\nPitfalls: {{pitfalls}}',
+    );
+    const result = await loadPromptTemplate('test-placeholder', {
+      task: 'build feature',
+    });
     expect(result).toBe('Task: build feature\nPitfalls: {{pitfalls}}');
   });
 
@@ -639,11 +863,15 @@ describe('loadPromptTemplate', () => {
     await writeFile(
       join(tmpDir, 'l2-designer.md'),
       'Issue {{issueNumber}}: {{issueTitle}}\nBody: {{issueBody}}\n' +
-      'Spec: {{specContent}}\nRepo: {{owner}}/{{repo}}\nFeedback: {{feedback}}',
+        'Spec: {{specContent}}\nRepo: {{owner}}/{{repo}}\nFeedback: {{feedback}}',
     );
     const out = await loadPromptTemplate('l2-designer', {
-      issueNumber: '1', issueTitle: 't', issueBody: 'b',
-      specContent: 's', owner: 'o', repo: 'r',
+      issueNumber: '1',
+      issueTitle: 't',
+      issueBody: 'b',
+      specContent: 's',
+      owner: 'o',
+      repo: 'r',
     });
     expect(out).not.toBeNull();
     // {{feedback}} should have been substituted with the default (empty string)
@@ -651,23 +879,39 @@ describe('loadPromptTemplate', () => {
   });
 
   it('throws when caller passes an unknown variable to a registered prompt (test mode)', async () => {
-    await expect(loadPromptTemplate('l2-designer', {
-      issueNumber: '1', issueTitle: 't', issueBody: 'b',
-      specContent: 's', owner: 'o', repo: 'r', feedback: '',
-      surprise: 'x',
-    } as Record<string, string>)).rejects.toThrow(/unknown variable.*surprise/);
+    await expect(
+      loadPromptTemplate('l2-designer', {
+        issueNumber: '1',
+        issueTitle: 't',
+        issueBody: 'b',
+        specContent: 's',
+        owner: 'o',
+        repo: 'r',
+        feedback: '',
+        surprise: 'x',
+      } as Record<string, string>),
+    ).rejects.toThrow(/unknown variable.*surprise/);
   });
 
   it('throws when caller omits a required variable for a registered prompt (test mode)', async () => {
-    await expect(loadPromptTemplate('compliance-reviewer', {
-      issueNumber: '1', repo: 'r',
-    } as Record<string, string>)).rejects.toThrow(/missing required variable/);
+    await expect(
+      loadPromptTemplate('compliance-reviewer', {
+        issueNumber: '1',
+        repo: 'r',
+      } as Record<string, string>),
+    ).rejects.toThrow(/missing required variable/);
   });
 
   it('leaves unregistered prompts unchanged (legacy behavior)', async () => {
     // test-unregistered is not in PROMPT_CONTRACTS — caller can pass anything
-    await writeFile(join(tmpDir, 'test-unregistered.md'), 'Task: {{task}}\nSpecs: {{specs}}');
-    const out = await loadPromptTemplate('test-unregistered', { task: 'x', specs: 'y' });
+    await writeFile(
+      join(tmpDir, 'test-unregistered.md'),
+      'Task: {{task}}\nSpecs: {{specs}}',
+    );
+    const out = await loadPromptTemplate('test-unregistered', {
+      task: 'x',
+      specs: 'y',
+    });
     expect(out).not.toBeNull();
   });
 });
@@ -691,7 +935,10 @@ describe('SessionRuntime prompt assembly with templates', () => {
   });
 
   it('assemblePrompt loads template instead of using empty systemPrompt', async () => {
-    await writeFile(join(tmpDir, 'worker.md'), '# Worker\n\nYou implement {{task}} per {{specs}}.\nVerify: {{verification}}\n{{pitfalls}}');
+    await writeFile(
+      join(tmpDir, 'worker.md'),
+      '# Worker\n\nYou implement {{task}} per {{specs}}.\nVerify: {{verification}}\n{{pitfalls}}',
+    );
     const costTracker = new CostTracker({ dailyBudget: 50, perRunBudget: 10 });
     const runtime = new SessionRuntime(
       { adapter: 'cli', dailyBudget: 50, perRunBudget: 10 } as Config,
@@ -699,10 +946,19 @@ describe('SessionRuntime prompt assembly with templates', () => {
     );
     const result = await (runtime as any).assemblePrompt(
       { name: 'worker', systemPrompt: '' },
-      { variables: { task: 'add auth', specs: 'FUNC-AC-SAFETY', verification: 'pnpm test', pitfalls: '' } },
+      {
+        variables: {
+          task: 'add auth',
+          specs: 'FUNC-AC-SAFETY',
+          verification: 'pnpm test',
+          pitfalls: '',
+        },
+      },
     );
     expect(result.prompt).toContain('# Worker');
-    expect(result.prompt).toContain('You implement add auth per FUNC-AC-SAFETY.');
+    expect(result.prompt).toContain(
+      'You implement add auth per FUNC-AC-SAFETY.',
+    );
     // Must NOT contain the old appended-variable format when template is loaded
     expect(result.prompt).not.toContain('## task');
   });
@@ -745,25 +1001,38 @@ These are reference examples; I will not execute them.
 
     const costTracker = new CostTracker({ dailyBudget: 50, perRunBudget: 10 });
     const runtime = new SessionRuntime(testConfig, costTracker);
-    const result = await runtime.spawnSession('product-owner', { variables: {} }, 1);
+    const result = await runtime.spawnSession(
+      'product-owner',
+      { variables: {} },
+      1,
+    );
 
     expect(result.ok).toBe(true);
     if (result.ok) {
       // Warnings recorded — but session continues
       expect(result.value.auditWarnings).toBeDefined();
       expect(result.value.auditWarnings!.length).toBeGreaterThan(0);
-      expect(result.value.auditWarnings!.some(v => v.includes("'git'"))).toBe(true);
+      expect(result.value.auditWarnings!.some((v) => v.includes("'git'"))).toBe(
+        true,
+      );
     }
   });
 
   it('does NOT set auditWarnings when output is clean prose with no command patterns', async () => {
     mockSpawn.mockResolvedValueOnce({
       ok: true,
-      value: { output: 'I added a helper function to format strings.', cost: 0.01 },
+      value: {
+        output: 'I added a helper function to format strings.',
+        cost: 0.01,
+      },
     });
     const costTracker = new CostTracker({ dailyBudget: 50, perRunBudget: 10 });
     const runtime = new SessionRuntime(testConfig, costTracker);
-    const result = await runtime.spawnSession('product-owner', { variables: {} }, 1);
+    const result = await runtime.spawnSession(
+      'product-owner',
+      { variables: {} },
+      1,
+    );
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -777,11 +1046,20 @@ These are reference examples; I will not execute them.
     // post-session audit is non-terminal but does not mask actual failures.
     mockSpawn.mockResolvedValueOnce({
       ok: false,
-      error: new SessionError('hook denied: git push to forbidden remote', 0.01, false, true),
+      error: new SessionError(
+        'hook denied: git push to forbidden remote',
+        0.01,
+        false,
+        true,
+      ),
     });
     const costTracker = new CostTracker({ dailyBudget: 50, perRunBudget: 10 });
     const runtime = new SessionRuntime(testConfig, costTracker);
-    const result = await runtime.spawnSession('product-owner', { variables: {} }, 1);
+    const result = await runtime.spawnSession(
+      'product-owner',
+      { variables: {} },
+      1,
+    );
 
     expect(result.ok).toBe(false);
     if (!result.ok) {

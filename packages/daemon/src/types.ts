@@ -3,32 +3,97 @@
 // --- Pipeline ---
 
 export type Phase =
-  | 'detect' | 'diagnose' | 'classify' | 'decompose' | 'implement'
-  | 'review' | 'holdout' | 'integrate' | 'deploy'
-  | 'test' | 'report' | 'stuck' | 'paused'
-  | 'init' | 'intelligence' | 'brand' | 'design'
-  | 'seo' | 'content' | 'assets' | 'build' | 'qa' | 'launch'
-  | 'l2-design' | 'l2-gate' | 'l3-generate' | 'l3-compliance';
+  | 'detect'
+  | 'diagnose'
+  | 'classify'
+  | 'decompose'
+  | 'implement'
+  | 'review'
+  | 'holdout'
+  | 'integrate'
+  | 'deploy'
+  | 'test'
+  | 'report'
+  | 'stuck'
+  | 'paused'
+  | 'init'
+  | 'intelligence'
+  | 'brand'
+  | 'design'
+  | 'seo'
+  | 'content'
+  | 'assets'
+  | 'build'
+  | 'qa'
+  | 'launch'
+  | 'l2-design'
+  | 'l2-gate'
+  | 'l3-generate'
+  | 'l3-compliance';
 
-export type PhaseEvent = 'success' | 'success:simple' | 'failure' | 'escalated' | 'budget-exceeded' | 'per-run-budget-exceeded' | 'rate-limited' | 'containment-breach' | 'feedback' | 'unchanged';
+export type PhaseEvent =
+  | 'success'
+  | 'success:simple'
+  | 'failure'
+  | 'escalated'
+  | 'budget-exceeded'
+  | 'per-run-budget-exceeded'
+  | 'rate-limited'
+  | 'containment-breach'
+  | 'feedback'
+  | 'unchanged';
 
-export type PipelineVariant = 'feature' | 'feature-simple' | 'bug' | 'website' | 'spec-driven' | 'adversarial-dev';
+export type ClassificationComplexity = 'simple' | 'standard' | 'complex';
+
+export interface PreClassification {
+  event: Extract<
+    PhaseEvent,
+    | 'success'
+    | 'success:simple'
+    | 'budget-exceeded'
+    | 'rate-limited'
+    | 'containment-breach'
+  >;
+  complexity?: ClassificationComplexity;
+  allocatedCost?: number;
+  batchSequenceId?: string;
+}
+
+export type PipelineVariant =
+  | 'feature'
+  | 'feature-simple'
+  | 'bug'
+  | 'website'
+  | 'spec-driven'
+  | 'adversarial-dev';
 
 export type Outcome = 'complete' | 'stuck' | 'escalated';
 
 // --- Session ---
 
 export type SessionType =
-  | 'coordinator' | 'classifier' | 'worker'
-  | 'reviewer-spec' | 'reviewer-quality' | 'reviewer-security'
-  | 'bug-worker' | 'diagnostician'
+  | 'coordinator'
+  | 'classifier'
+  | 'worker'
+  | 'reviewer-spec'
+  | 'reviewer-quality'
+  | 'reviewer-security'
+  | 'bug-worker'
+  | 'diagnostician'
   | 'codebase-reviewer'
-  | 'product-owner' | 'tech-lead'
-  | 'l2-designer' | 'l3-generator' | 'compliance-reviewer';
+  | 'product-owner'
+  | 'tech-lead'
+  | 'l2-designer'
+  | 'l3-generator'
+  | 'compliance-reviewer';
 
 export type ExitStatus =
-  | 'completed' | 'completed-with-concerns'
-  | 'blocked' | 'needs-context' | 'failed' | 'timed-out';
+  | 'completed'
+  | 'completed-with-concerns'
+  | 'blocked'
+  | 'needs-context'
+  | 'failed'
+  | 'timed-out';
 
 export interface AgentDefinition {
   name: string;
@@ -46,7 +111,7 @@ export interface SessionContext {
   variables: Record<string, string>;
   workspacePath?: string;
   baseBranch?: string;
-  activePlugins?: Array<{ id: string; activatedAt: string }>;  // plugins active for this repo, from Supabase sync
+  activePlugins?: Array<{ id: string; activatedAt: string }>; // plugins active for this repo, from Supabase sync
 }
 
 export interface SessionResult {
@@ -56,7 +121,7 @@ export interface SessionResult {
   pitfallMarkers: PitfallMarker[];
   exitStatus: ExitStatus;
   handoffNote?: string;
-  pluginGates?: string[];  // Gate scripts from active plugins — additive with repo validation commands
+  pluginGates?: string[]; // Gate scripts from active plugins — additive with repo validation commands
   // Non-terminal warnings from post-session output audit (audit.ts).
   // Output text matching blocked command patterns is recorded here rather than
   // terminating the session; preventive containment via Bash hooks still
@@ -93,7 +158,12 @@ export interface PitfallMarker {
 
 // --- Work Request ---
 
-export type DetectedWorkType = 'feature' | 'bug-fix' | 'implementation' | 'l3-generate' | 'l2-brainstorm';
+export type DetectedWorkType =
+  | 'feature'
+  | 'bug-fix'
+  | 'implementation'
+  | 'l3-generate'
+  | 'l2-brainstorm';
 
 export interface WorkRequest {
   issueNumber: number;
@@ -103,6 +173,7 @@ export interface WorkRequest {
   specRefs: string[];
   scopeDescription?: string;
   workType?: DetectedWorkType;
+  preClassification?: PreClassification;
 }
 
 // --- Run State ---
@@ -130,7 +201,7 @@ export interface RunState {
   diagnosisType?: BugType;
   diagnosisConfidence?: number;
   diagnosisDetail?: string; // Serialized BugDiagnosis JSON — passed to bug-worker sessions
-  classificationComplexity?: 'simple' | 'standard' | 'complex';
+  classificationComplexity?: ClassificationComplexity;
   handoffNotes?: Record<string, string>;
   workerClaimId?: string;
   pausedAtPhase?: Phase;
@@ -221,8 +292,14 @@ export interface Unit {
 
 export interface UnitState {
   unitId: string;
-  status: 'pending' | 'running' | 'completed' | 'completed-with-concerns'
-    | 'blocked' | 'needs-context' | 'failed';
+  status:
+    | 'pending'
+    | 'running'
+    | 'completed'
+    | 'completed-with-concerns'
+    | 'blocked'
+    | 'needs-context'
+    | 'failed';
   workspacePath?: string;
   attempt: number;
   error?: string;
@@ -231,7 +308,11 @@ export interface UnitState {
 
 // --- Validation ---
 
-export type GateType = 'deterministic' | 'spec-compliance' | 'quality' | 'security';
+export type GateType =
+  | 'deterministic'
+  | 'spec-compliance'
+  | 'quality'
+  | 'security';
 
 export interface ReviewFinding {
   severity: 'critical' | 'important' | 'minor';

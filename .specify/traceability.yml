@@ -880,9 +880,21 @@ STACK-AC-CONTAINMENT:
 STACK-AC-BATCH-CLASSIFIER:
   parent: ARCH-AC-BATCH-CLASSIFIER
   children: []
-  # Paths planned in spec (#470); empty until implementation PR re-adds them.
-  code_paths: []
-  test_paths: []
+  code_paths:
+    - packages/daemon/src/control-plane/batch-classifier.ts
+    - packages/daemon/src/control-plane/batch-classifier-schema.ts
+    - packages/daemon/src/config.ts
+    - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/control-plane/phases.ts
+    - packages/daemon/src/session-runtime/runtime.ts
+    - packages/daemon/src/types.ts
+  test_paths:
+    - packages/daemon/src/config.test.ts
+    - packages/daemon/src/control-plane/batch-classifier.test.ts
+    - packages/daemon/src/control-plane/batch-classifier-schema.test.ts
+    - packages/daemon/src/control-plane/daemon.test.ts
+    - packages/daemon/src/control-plane/phases.test.ts
+    - packages/daemon/src/session-runtime/runtime.test.ts
   status: draft
 
 # --- Concierge L0 spec (vision — root of all concierge specs) ---
