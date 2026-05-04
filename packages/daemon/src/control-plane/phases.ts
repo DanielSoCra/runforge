@@ -612,6 +612,7 @@ export function createPhaseHandlers(
         activePlugins,
         complexity: run.classificationComplexity,
         specContent,
+        baseBranch: config.branches.staging,
       });
       if (!result.ok) { console.error(`[implement] Error:`, result.error.message); return 'failure'; }
       if (!result.value.success) {

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { createWorktree, removeWorktree, listWorktrees, mergeWorktree, getWorktreeDiffSize, deleteUnitBranch } from './worktree.js';
+import { createWorktree, removeWorktree, listWorktrees, mergeWorktree, getBranchDiffSize, getWorktreeDiffSize, deleteUnitBranch } from './worktree.js';
 import { git } from '../lib/git.js';
 
 describe('worktree management', () => {
@@ -101,6 +101,20 @@ describe('worktree management', () => {
     expect(diffResult.ok).toBe(true);
     if (diffResult.ok) {
       expect(diffResult.value).toBe(0);
+    }
+  });
+
+  it('getBranchDiffSize returns insertion+deletion count between branches', async () => {
+    await git(['checkout', '-b', 'feature/branch-diff'], repoDir);
+    await writeFile(join(repoDir, 'branch-file.txt'), 'line1\nline2\n');
+    await git(['add', '.'], repoDir);
+    await git(['commit', '-m', 'branch change'], repoDir);
+
+    const diffResult = await getBranchDiffSize('main', 'feature/branch-diff', repoDir);
+
+    expect(diffResult.ok).toBe(true);
+    if (diffResult.ok) {
+      expect(diffResult.value).toBe(2);
     }
   });
 

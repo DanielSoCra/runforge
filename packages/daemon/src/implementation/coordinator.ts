@@ -57,6 +57,7 @@ export class ImplementationCoordinator {
       variant?: PipelineVariant;
       diagnosisDetail?: string;
       activePlugins?: Array<{ id: string; activatedAt: string }>;
+      baseBranch?: string;
     },
   ): Promise<Result<ImplementResult>> {
     // 1. Get task graph
@@ -159,7 +160,7 @@ export class ImplementationCoordinator {
         request.issueNumber,
         this.runtime,
         this.repoRoot,
-        { staggerMs: this.staggerMs, maxDiffLines: this.maxDiffLines },
+        { staggerMs: this.staggerMs, maxDiffLines: this.maxDiffLines, baseBranch: options?.baseBranch },
         runWriter,
         runId,
         unitPitfalls,

@@ -4,13 +4,14 @@ import { executeBatch, type UnitResult } from './batch.js';
 import type { Unit, SessionResult } from '../types.js';
 import { ok, err } from '../lib/result.js';
 import { SessionError } from '../session-runtime/session-error.js';
-import { createWorktree, getWorktreeDiffSize } from './worktree.js';
+import { createWorktree, getBranchDiffSize, getWorktreeDiffSize } from './worktree.js';
 
 // Mock the worktree module
 vi.mock('./worktree.js', () => ({
   createWorktree: vi.fn().mockResolvedValue({ ok: true, value: '/tmp/workspace' }),
   removeWorktree: vi.fn().mockResolvedValue({ ok: true, value: undefined }),
   getWorktreeDiffSize: vi.fn().mockResolvedValue({ ok: true, value: 50 }),
+  getBranchDiffSize: vi.fn().mockResolvedValue({ ok: true, value: 0 }),
 }));
 
 const makeUnit = (id: string, batch: number = 0): Unit => ({
@@ -212,6 +213,22 @@ describe('executeBatch', () => {
     expect(result.results[0]?.exitStatus).toBe('failed');
     expect(result.results[0]?.error).toContain('produced no diff');
     expect(result.results[0]?.cost).toBe(0.5);
+  });
+
+  it('accepts a completed no-op unit when the feature branch already has diff from base', async () => {
+    vi.mocked(getWorktreeDiffSize).mockResolvedValueOnce({ ok: true, value: 0 });
+    vi.mocked(getBranchDiffSize).mockResolvedValueOnce({ ok: true, value: 125 });
+    const runtime = createMockRuntime();
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', {
+      staggerMs: 0,
+      baseBranch: 'dev',
+    });
+
+    expect(result.results[0]?.exitStatus).toBe('completed');
+    expect(result.results[0]?.error).toBeUndefined();
+    expect(getBranchDiffSize).toHaveBeenCalledWith('dev', 'feature/1', '/tmp/repo');
   });
 
   it('returns failed when getWorktreeDiffSize returns an error (#141)', async () => {

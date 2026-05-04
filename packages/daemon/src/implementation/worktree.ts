@@ -103,14 +103,26 @@ export async function getWorktreeDiffSize(
     return err(result.error);
   }
 
+  return ok(parseDiffStatSize(result.value));
+}
+
+export async function getBranchDiffSize(
+  baseBranch: string,
+  targetBranch: string,
+  repoRoot?: string,
+): Promise<Result<number>> {
+  const result = await git(['diff', '--stat', `${baseBranch}...${targetBranch}`], repoRoot);
+  if (!result.ok) return err(result.error);
+  return ok(parseDiffStatSize(result.value));
+}
+
+function parseDiffStatSize(diffStat: string): number {
   // Parse last line: " X files changed, Y insertions(+), Z deletions(-)"
-  const lines = result.value.split('\n').filter(Boolean);
+  const lines = diffStat.split('\n').filter(Boolean);
   const lastLine = lines[lines.length - 1] ?? '';
   const insertions = lastLine.match(/(\d+) insertion/);
   const deletions = lastLine.match(/(\d+) deletion/);
-  return ok(
-    (insertions ? Number(insertions[1]) : 0) + (deletions ? Number(deletions[1]) : 0),
-  );
+  return (insertions ? Number(insertions[1]) : 0) + (deletions ? Number(deletions[1]) : 0);
 }
 
 export async function mergeWorktree(

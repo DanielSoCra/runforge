@@ -6,7 +6,7 @@ import type { GotchaStore } from '../knowledge/gotcha-store.js';
 import type { KnowledgeStore } from '../knowledge/knowledge-store.js';
 import { extractKnowledgeMarkers } from '../knowledge/extractor.js';
 import { SessionError } from '../session-runtime/session-error.js';
-import { createWorktree, getWorktreeDiffSize } from './worktree.js';
+import { createWorktree, getBranchDiffSize, getWorktreeDiffSize } from './worktree.js';
 import { isMergeable } from './exit-status.js';
 import { git } from '../lib/git.js';
 import { runCommand } from '../lib/process.js';
@@ -37,7 +37,7 @@ export async function executeBatch(
   issueNumber: number,
   runtime: SessionRuntime,
   repoRoot: string,
-  options?: { staggerMs?: number; maxDiffLines?: number },
+  options?: { staggerMs?: number; maxDiffLines?: number; baseBranch?: string },
   runWriter?: SupabaseRunWriter,
   runId?: string,
   unitPitfalls?: Map<string, string>,
@@ -55,7 +55,7 @@ export async function executeBatch(
     // Stagger delay between starts
     if (index > 0) await delay(index * staggerMs);
     const pitfalls = unitPitfalls?.get(unit.id) ?? '';
-    return executeUnit(unit, featureBranch, issueNumber, runtime, repoRoot, maxDiffLines, runWriter, runId, pitfalls, gotchaStore, unitHandoffs?.get(unit.id), variant, bugContext, activePlugins, knowledgeStore);
+    return executeUnit(unit, featureBranch, issueNumber, runtime, repoRoot, maxDiffLines, options?.baseBranch, runWriter, runId, pitfalls, gotchaStore, unitHandoffs?.get(unit.id), variant, bugContext, activePlugins, knowledgeStore);
   });
 
   const settled = await Promise.allSettled(promises);
@@ -86,6 +86,7 @@ async function executeUnit(
   runtime: SessionRuntime,
   repoRoot: string,
   maxDiffLines: number,
+  baseBranch?: string,
   runWriter?: SupabaseRunWriter,
   runId?: string,
   pitfalls?: string,
@@ -266,6 +267,27 @@ async function executeUnit(
       };
     }
     if (diffSize.value === 0 && isMergeable(result.exitStatus)) {
+      if (baseBranch) {
+        const featureDiffSize = await getBranchDiffSize(baseBranch, featureBranch, repoRoot);
+        if (featureDiffSize.ok && featureDiffSize.value > 0) {
+          console.log(
+            `[batch] ${unit.id} completed with no unit diff; ${featureBranch} already has diff size ${featureDiffSize.value} against ${baseBranch}`,
+          );
+          return {
+            unitId: unit.id,
+            exitStatus: result.exitStatus,
+            cost: result.cost,
+            output: result.output,
+            pitfallMarkers: result.pitfallMarkers,
+            handoffNote: result.handoffNote,
+          };
+        }
+        if (!featureDiffSize.ok) {
+          console.warn(
+            `[batch] feature diff check failed for ${featureBranch} against ${baseBranch}: ${featureDiffSize.error.message}`,
+          );
+        }
+      }
       console.warn(`[batch] ${unit.id} completed with no diff; failing this unit`);
       return {
         unitId: unit.id,
