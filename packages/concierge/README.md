@@ -1,5 +1,19 @@
 # @auto-claude/concierge
 
-Placeholder. Phase 1+ of the concierge plan adds real source.
-See `docs/superpowers/specs/2026-05-01-concierge-design.md` and
-`docs/superpowers/plans/2026-05-01-concierge-phase-0.md` (and amendments v1–v4).
+Spec-governed concierge core package.
+
+Implemented surfaces:
+
+- conversation lifecycle store
+- cache-stable prompt block assembly
+- auditable tool registry and router
+- high-blast-radius confirmation lifecycle
+- default toolbox manifest from `ARCH-TOOL-REGISTRY`
+- Slack request signature verification and confirmation action parsing
+- vault access policy boundaries
+- forward-only migration runner boundary
+- observer secret-path filtering
+
+External clients are intentionally injected or left as explicit not-configured
+handlers. The package does not silently pretend Slack, mail, vault, GitHub, or
+auto-claude clients exist before they are wired.
