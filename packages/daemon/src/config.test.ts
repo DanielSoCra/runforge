@@ -40,6 +40,19 @@ describe('ConfigSchema', () => {
     }
   });
 
+  it('accepts IPv4 controlHost values (#248)', () => {
+    expect(ConfigSchema.safeParse({ ...validConfig, controlHost: '127.0.0.1' }).success).toBe(true);
+    expect(ConfigSchema.safeParse({ ...validConfig, controlHost: '0.0.0.0' }).success).toBe(true);
+  });
+
+  it('rejects hostname controlHost values (#248)', () => {
+    for (const controlHost of ['localhost', 'my-server.local', 'example.com', '::1']) {
+      const result = ConfigSchema.safeParse({ ...validConfig, controlHost });
+
+      expect(result.success).toBe(false);
+    }
+  });
+
   it('rejects invalid adapter', () => {
     const result = ConfigSchema.safeParse({ ...validConfig, adapter: 'invalid' });
     expect(result.success).toBe(false);

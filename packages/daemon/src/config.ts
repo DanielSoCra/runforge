@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isIP } from 'node:net';
 import { readFile } from 'fs/promises';
 import { ok, err, type Result } from './lib/result.js';
 import { validateGate1Command } from './validation/gates.js';
@@ -11,7 +12,9 @@ export const ConfigSchema = z.object({
     name: z.string().min(1),
   }).optional(),
   controlPort: z.number().int().min(1024).max(65535).default(3847),
-  controlHost: z.string().regex(/^[\w.:]+$/, 'controlHost must be a valid IP or hostname').default('127.0.0.1'),
+  controlHost: z.string()
+    .refine((host) => isIP(host) === 4, { message: 'controlHost must be a valid IPv4 address' })
+    .default('127.0.0.1'),
   pollIntervalMs: z.number().int().min(5000).default(30000),
   maxConcurrentRuns: z.number().int().min(1).default(1),
   dailyBudget: z.number().positive().default(50),

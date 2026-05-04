@@ -397,6 +397,20 @@ describe('daemon', () => {
       expect(mockServerStart).toHaveBeenCalled();
     });
 
+    it('rejects hostname controlHost from config before starting control server (#248)', async () => {
+      mockLoadConfig.mockResolvedValue(ok(makeConfig({ controlHost: 'my-server.local' })));
+
+      const { startDaemon } = await loadDaemon();
+      const result = await startDaemon('config.json');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('controlHost');
+        expect(result.error.message).toContain('valid IPv4 address');
+      }
+      expect(mockServerStart).not.toHaveBeenCalled();
+    });
+
     it('returns error when control server fails to start', async () => {
       mockServerStart.mockResolvedValue(err(new Error('EADDRINUSE')));
 

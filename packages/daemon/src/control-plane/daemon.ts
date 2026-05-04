@@ -593,10 +593,11 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
 
   // 6. Start control server
   const envHost = process.env.DAEMON_HOST;
-  if (envHost !== undefined && isIP(envHost) !== 4) {
-    return err(new Error(`Invalid DAEMON_HOST: "${envHost}" — must be a valid IPv4 address`));
-  }
   const daemonHost = envHost ?? config.controlHost;
+  const daemonHostSource = envHost !== undefined ? 'DAEMON_HOST' : 'controlHost';
+  if (isIP(daemonHost) !== 4) {
+    return err(new Error(`Invalid ${daemonHostSource}: "${daemonHost}" — must be a valid IPv4 address`));
+  }
   const { server, start } = createControlServer(config.controlPort, {
     getStatus: () => {
       const { remote_control_url: _, ...safeState } = remoteControl.getState() ?? {};
