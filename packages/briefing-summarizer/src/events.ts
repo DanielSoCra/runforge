@@ -96,9 +96,9 @@ function detectRunTransitions(
     // Check for outcome change
     if (run.outcome && run.outcome !== prev.outcome) {
       const severity: ActivitySeverity =
-        run.outcome === 'stuck' ? 'error' : run.outcome === 'success' ? 'info' : 'warning';
+        isErrorOutcome(run.outcome) ? 'error' : run.outcome === 'success' ? 'info' : 'warning';
       const eventType: ActivityEventType =
-        run.outcome === 'stuck' ? 'error' : run.outcome === 'success' ? 'completion' : 'state-transition';
+        isErrorOutcome(run.outcome) ? 'error' : run.outcome === 'success' ? 'completion' : 'state-transition';
 
       events.push({
         occurred_at: (run.updated_at as string) ?? now,
@@ -167,14 +167,14 @@ function detectErrors(
   const events: ActivityEventInsert[] = [];
 
   for (const run of currentRuns) {
-    if (run.outcome !== 'stuck') continue;
+    if (!isErrorOutcome(run.outcome)) continue;
     if (skipRunIds?.has(String(run.id))) continue;
 
     events.push({
       occurred_at: (run.updated_at as string) ?? now,
       event_type: 'error',
       severity: 'error',
-      summary: `Run ${String(run.id)} is stuck (issue #${run.issue_number ?? 'unknown'})`,
+      summary: `Run ${String(run.id)} is ${String(run.outcome)} (issue #${run.issue_number ?? 'unknown'})`,
       links: buildRunLinks(run),
     });
   }
@@ -185,6 +185,10 @@ function detectErrors(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function isErrorOutcome(outcome: unknown): boolean {
+  return outcome === 'stuck' || outcome === 'failed';
+}
 
 function buildRunLinks(run: Record<string, unknown>): { label: string; url: string }[] {
   const links: { label: string; url: string }[] = [];

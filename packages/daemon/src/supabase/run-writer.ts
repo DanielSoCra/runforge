@@ -3,14 +3,17 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { SessionType } from '../types.js';
 import type { PipelineResult } from '../control-plane/pipeline.js';
 
-export type DbOutcome = 'in-progress' | 'complete' | 'stuck' | 'escalated';
+export type DbOutcome = 'in-progress' | 'complete' | 'stuck' | 'escalated' | 'failed';
+export type RunWriterOutcome = PipelineResult['outcome'] | 'failed';
 export type DbSessionType = 'planning' | 'implementation' | 'validation' | 'diagnosis';
 
-export function toDbOutcome(outcome: PipelineResult['outcome']): DbOutcome {
+export function toDbOutcome(outcome: RunWriterOutcome): DbOutcome {
   if (outcome === 'complete') return 'complete';
-  if (outcome === 'stuck')    return 'stuck';
-  if (outcome === 'parked')   return 'in-progress';
-  return 'in-progress'; // 'paused' and 'error' are non-terminal from DB perspective
+  if (outcome === 'stuck') return 'stuck';
+  if (outcome === 'failed') return 'failed';
+  if (outcome === 'error') return 'failed';
+  if (outcome === 'parked') return 'in-progress';
+  return 'in-progress'; // 'paused' is suspended, not terminal from the DB perspective
 }
 
 export function toDbSessionType(type: SessionType): DbSessionType {

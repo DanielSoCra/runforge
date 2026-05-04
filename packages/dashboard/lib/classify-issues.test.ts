@@ -71,6 +71,14 @@ describe('classifyIssues', () => {
     expect(cards[0]?.column).toBe('stuck');
   });
 
+  it('DB failed run maps issue to stuck column', () => {
+    const cards = classifyIssues(
+      [{ ...REPO, issues: [issue(6)] }],
+      [run(6, 'failed')],
+    );
+    expect(cards[0]?.column).toBe('stuck');
+  });
+
   it('most recent run takes priority over older runs for the same issue', () => {
     const cards = classifyIssues(
       [{ ...REPO, issues: [issue(3, ['ready'])] }],

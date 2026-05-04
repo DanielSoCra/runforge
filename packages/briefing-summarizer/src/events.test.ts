@@ -83,6 +83,39 @@ describe('extractActivityEvents', () => {
       expect(run2Event!.severity).toBe('error');
     });
 
+    it('treats failed outcome transitions as error events', () => {
+      const signals: SignalResult = {
+        ...baseSignals,
+        runs: [
+          {
+            id: 'run-failed',
+            issue_number: 123,
+            outcome: 'failed',
+            phase: 'report',
+            updated_at: '2026-03-22T10:00:00Z',
+          },
+        ],
+      };
+      const prev: PreviousSnapshot = {
+        runs: [
+          {
+            id: 'run-failed',
+            issue_number: 123,
+            outcome: 'in-progress',
+            phase: 'report',
+            updated_at: '2026-03-22T09:00:00Z',
+          },
+        ],
+      };
+
+      const events = extractActivityEvents(signals, prev);
+
+      const failedEvent = events.find((e) => e.summary.includes('run-failed'));
+      expect(failedEvent).toBeDefined();
+      expect(failedEvent!.event_type).toBe('error');
+      expect(failedEvent!.severity).toBe('error');
+    });
+
     it('detects phase changes from previous snapshot', () => {
       const signals: SignalResult = {
         ...baseSignals,
@@ -201,6 +234,27 @@ describe('extractActivityEvents', () => {
       expect(stuckEvent).toBeDefined();
       expect(stuckEvent!.severity).toBe('error');
       expect(stuckEvent!.summary).toContain('stuck');
+    });
+
+    it('detects failed runs as errors', () => {
+      const signals: SignalResult = {
+        ...baseSignals,
+        runs: [
+          { id: 'run-failed', issue_number: 123, outcome: 'failed', updated_at: '2026-03-22T10:00:00Z' },
+        ],
+      };
+      const prev: PreviousSnapshot = {
+        runs: [
+          { id: 'run-failed', issue_number: 123, outcome: 'failed', updated_at: '2026-03-22T09:00:00Z' },
+        ],
+      };
+
+      const events = extractActivityEvents(signals, prev);
+
+      const failedEvent = events.find((e) => e.event_type === 'error' && e.summary.includes('run-failed'));
+      expect(failedEvent).toBeDefined();
+      expect(failedEvent!.severity).toBe('error');
+      expect(failedEvent!.summary).toContain('failed');
     });
 
     it('does not flag non-stuck runs as errors', () => {
