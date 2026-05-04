@@ -2,7 +2,7 @@
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import type { Config } from '../config.js';
-import type { SessionType, AgentDefinition, SessionContext, SessionResult } from '../types.js';
+import type { SessionType, AgentDefinition, SessionContext, SessionResult, ViolationRecord } from '../types.js';
 import type { Result } from '../lib/result.js';
 import { ok, err } from '../lib/result.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
@@ -17,10 +17,18 @@ import { SessionError } from './session-error.js';
 import { auditSessionOutput } from './audit.js';
 import { renderTemplate, findUnsubstitutedVars } from '../knowledge/templates.js';
 import { assertContract, PROMPT_CONTRACTS } from '../knowledge/prompt-contracts.js';
+import { buildScopeRegistry, resolveDirectoryScope, type ScopeRegistry } from './scope-registry.js';
+import { auditScope, captureScopeBaseCommit } from './scope-audit.js';
 
 /** Resolve the prompts/ directory at the repo root. */
 function promptsDir(): string {
   return process.env['PROMPTS_DIR'] ?? join(import.meta.dirname, '../../../../prompts');
+}
+
+function formatScopeViolations(violations: ViolationRecord[]): string {
+  return violations
+    .map(v => `${v.violationType} ${v.path} (${v.detectionLayer}, ${v.agentType}, ${v.sessionId})`)
+    .join('; ');
 }
 
 /**
@@ -300,6 +308,7 @@ export class SessionRuntime {
   private lastSpawnTime = 0;
   private staggerMs: number;
   private config: Config;
+  private scopeRegistry: ScopeRegistry;
 
   constructor(config: Config, costTracker: CostTracker, rateLimiter?: RateLimiter) {
     this.adapter = createAdapter(config.adapter);
@@ -307,6 +316,7 @@ export class SessionRuntime {
     this.rateLimiter = rateLimiter ?? new RateLimiter();
     this.staggerMs = 2000; // 2 second stagger between session starts
     this.config = config;
+    this.scopeRegistry = buildScopeRegistry(config.agentScopes ?? {});
   }
 
   async spawnSession(
@@ -358,11 +368,18 @@ export class SessionRuntime {
     const jsonSchema = typeof options?.jsonSchema === 'object' && options.jsonSchema !== null
       ? JSON.stringify(options.jsonSchema)
       : options?.jsonSchema;
+    const directoryScope = options?.agentDef?.directoryScope
+      ?? def.directoryScope
+      ?? resolveDirectoryScope(type, this.scopeRegistry, DEFAULT_POLICY);
+    const scopeBaseCommit = context.workspacePath
+      ? await this.tryCaptureScopeBaseCommit(context.workspacePath)
+      : undefined;
     const result = await this.adapter.spawn(def, assembled.prompt, {
       cwd: context.workspacePath,
       jsonSchema,
       containmentPolicy: DEFAULT_POLICY,
       mcpConfigs: assembled.mcpConfigs,
+      directoryScope,
     });
 
     // 7. Record cost — always, even on failure (ARCH-AC-SESSION-RUNTIME step 10)
@@ -381,6 +398,19 @@ export class SessionRuntime {
     // 8. Detect rate limit in adapter response (ARCH-AC-SESSION-RUNTIME rate limit detection flow)
     if (!result.ok && result.error instanceof SessionError && result.error.rateLimited) {
       this.rateLimiter.reportRateLimit();
+    }
+
+    if (result.ok && context.workspacePath) {
+      const scopeAudit = await auditScope({
+        workspacePath: context.workspacePath,
+        baseCommit: scopeBaseCommit,
+        sessionId: `${type}-${issueNumber}`,
+        agentType: type,
+        scope: directoryScope,
+      });
+      if (!scopeAudit.ok) {
+        return err(SessionError.scopeViolated(formatScopeViolations(scopeAudit.error), result.value.cost));
+      }
     }
 
     // 9. Post-session audit — containment layer 6 (detective, advisory).
@@ -411,6 +441,14 @@ export class SessionRuntime {
     }
 
     return result;
+  }
+
+  private async tryCaptureScopeBaseCommit(workspacePath: string): Promise<string | undefined> {
+    try {
+      return await captureScopeBaseCommit(workspacePath);
+    } catch {
+      return undefined;
+    }
   }
 
   private async assemblePrompt(

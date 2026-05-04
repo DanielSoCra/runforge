@@ -840,13 +840,29 @@ STACK-AC-CONTAINMENT:
   parent: ARCH-AC-CONTAINMENT
   children: []
   code_paths:
+    - packages/daemon/src/types.ts
+    - packages/daemon/src/config.ts
     - packages/daemon/src/session-runtime/containment-hooks.ts
     - packages/daemon/src/session-runtime/audit.ts
     - packages/daemon/src/session-runtime/generate-containment-script.ts
+    - packages/daemon/src/session-runtime/scope-registry.ts
+    - packages/daemon/src/session-runtime/scope-audit.ts
+    - packages/daemon/src/session-runtime/scope-enforcement.ts
+    - packages/daemon/src/session-runtime/session-error.ts
+    - packages/daemon/src/session-runtime/runtime.ts
+    - packages/daemon/src/session-runtime/adapters/types.ts
+    - packages/daemon/src/session-runtime/adapters/cli.ts
   test_paths:
+    - packages/daemon/src/config.test.ts
     - packages/daemon/src/session-runtime/containment-hooks.test.ts
     - packages/daemon/src/session-runtime/audit.test.ts
     - packages/daemon/src/session-runtime/generate-containment-script.test.ts
+    - packages/daemon/src/session-runtime/scope-registry.test.ts
+    - packages/daemon/src/session-runtime/scope-audit.test.ts
+    - packages/daemon/src/session-runtime/scope-enforcement.test.ts
+    - packages/daemon/src/session-runtime/session-error.test.ts
+    - packages/daemon/src/session-runtime/runtime.test.ts
+    - packages/daemon/src/session-runtime/adapters/cli.test.ts
   status: draft
 
 STACK-AC-BATCH-CLASSIFIER:

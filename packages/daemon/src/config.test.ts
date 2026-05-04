@@ -41,6 +41,25 @@ describe('ConfigSchema', () => {
         documentPath: 'FACTORY_RULES.md',
         maxPrLinesChanged: 2000,
       });
+      expect(result.data.agentScopes).toEqual({});
+    }
+  });
+
+  it('accepts directory scope overrides per agent type', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      agentScopes: {
+        worker: {
+          readPaths: ['src/**'],
+          writePaths: ['src/generated/**'],
+          denyPaths: ['src/generated/private/**'],
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.agentScopes.worker?.writePaths).toEqual(['src/generated/**']);
     }
   });
 
@@ -126,6 +145,7 @@ describe('zod v4 compatibility', () => {
       expect(result.data.diagnosis.confidenceThreshold).toBe(0.7);
       expect(result.data.warmup.threshold).toBe(10);
       expect(result.data.governance.documentPath).toBe('FACTORY_RULES.md');
+      expect(result.data.agentScopes).toEqual({});
     }
   });
 });

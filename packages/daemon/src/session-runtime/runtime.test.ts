@@ -11,6 +11,9 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { __clearGovernanceCacheForTests } from './governance-context.js';
 
+const mockCaptureScopeBaseCommit = vi.hoisted(() => vi.fn().mockResolvedValue('base-sha'));
+const mockAuditScope = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true, value: undefined }));
+
 vi.mock('./plugin-loader.js', () => ({
   readPluginsForContext: vi.fn().mockResolvedValue([{
     id: 'test',
@@ -28,6 +31,11 @@ vi.mock('./adapters/index.js', () => ({
   createAdapter: vi.fn(() => ({
     spawn: mockSpawn,
   })),
+}));
+
+vi.mock('./scope-audit.js', () => ({
+  captureScopeBaseCommit: mockCaptureScopeBaseCommit,
+  auditScope: mockAuditScope,
 }));
 
 // Minimal config for testing
@@ -60,6 +68,11 @@ describe('SessionRuntime', () => {
       '# FACTORY_RULES\n\nDaily {{dailyBudget}}\nRun {{perRunBudget}}\nMax {{maxPrLinesChanged}}',
     );
     __clearGovernanceCacheForTests();
+    mockSpawn.mockClear();
+    mockCaptureScopeBaseCommit.mockClear();
+    mockCaptureScopeBaseCommit.mockResolvedValue('base-sha');
+    mockAuditScope.mockClear();
+    mockAuditScope.mockResolvedValue({ ok: true, value: undefined });
     costTracker = new CostTracker({ dailyBudget: 50, perRunBudget: 10 });
     runtime = new SessionRuntime(testConfig, costTracker);
   });
@@ -255,6 +268,54 @@ describe('SessionRuntime', () => {
         }),
       }),
     );
+  });
+
+  it('passes resolved directory scope to adapter.spawn', async () => {
+    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '', cost: 0.01 } });
+    await runtime.spawnSession(
+      'worker',
+      { variables: WORKER_VARS, workspacePath: '/tmp/ws' },
+      99,
+    );
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      expect.objectContaining({
+        directoryScope: expect.objectContaining({
+          writePaths: ['src/**', 'packages/**', 'tests/**'],
+          denyPaths: expect.arrayContaining(['.specify/scenarios/**']),
+        }),
+      }),
+    );
+  });
+
+  it('returns scopeViolation SessionError when post-session scope audit fails', async () => {
+    mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: 'done', cost: 0.01 } });
+    mockAuditScope.mockResolvedValueOnce({
+      ok: false,
+      error: [{
+        sessionId: 'worker-99',
+        agentType: 'worker',
+        path: 'README.md',
+        violationType: 'write-outside-permitted',
+        detectionLayer: 'post-session',
+        timestamp: '2026-05-04T00:00:00.000Z',
+      }],
+    });
+
+    const result = await runtime.spawnSession(
+      'worker',
+      { variables: WORKER_VARS, workspacePath: '/tmp/ws' },
+      99,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toBeInstanceOf(SessionError);
+      expect((result.error as SessionError).scopeViolation).toBe(true);
+      expect((result.error as SessionError).containmentBreach).toBe(true);
+    }
   });
 
   it('calls runWriter.writeCostEvent after a successful session', async () => {
