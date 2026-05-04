@@ -20,6 +20,7 @@ export * from './memory/vault.js';
 export * from './observer/daemon-poll.js';
 export * from './observer/filters.js';
 export * from './observer/main.js';
+export * from './observer/repo-activity.js';
 export * from './observer/runtime.js';
 export * from './slack/adapter.js';
 export * from './slack/http-receiver.js';
