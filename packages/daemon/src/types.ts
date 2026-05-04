@@ -12,7 +12,7 @@ export type Phase =
 
 export type PhaseEvent = 'success' | 'success:simple' | 'failure' | 'escalated' | 'budget-exceeded' | 'per-run-budget-exceeded' | 'rate-limited' | 'containment-breach' | 'feedback' | 'unchanged';
 
-export type PipelineVariant = 'feature' | 'feature-simple' | 'bug' | 'website' | 'spec-driven';
+export type PipelineVariant = 'feature' | 'feature-simple' | 'bug' | 'website' | 'spec-driven' | 'adversarial-dev';
 
 export type Outcome = 'complete' | 'stuck' | 'escalated';
 
@@ -142,6 +142,29 @@ export interface RunState {
   l3ComplianceAttempts?: number;
   activePhaseLabel?: string;
   workspacePath?: string; // Persisted worktree path — survives daemon restarts
+  nodeStates?: Record<string, WorkflowNodeRunState>;
+  currentNodeId?: string;
+  activeNodeIds?: string[];
+  workflowFallbackReason?: string;
+}
+
+export type WorkflowNodeRunStatus =
+  | 'pending'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'skipped'
+  | 'cancelled';
+
+export interface WorkflowNodeRunState {
+  nodeId: string;
+  status: WorkflowNodeRunStatus;
+  startedAt?: string;
+  completedAt?: string;
+  iterationCount?: number;
+  attempts?: number;
+  errorHash?: string;
+  lastEvent?: string;
 }
 
 // --- Daemon State ---

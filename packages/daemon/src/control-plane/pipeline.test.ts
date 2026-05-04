@@ -92,6 +92,21 @@ describe('runPipeline', () => {
     expect(result.outcome).toBe('complete');
   });
 
+  it('mirrors feature-simple phase progress into workflow node state (#483)', async () => {
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+
+    const result = await runPipeline(run, table, featureSimpleAllSuccess, stateMgr, costTracker);
+
+    expect(result.outcome).toBe('complete');
+    expect(run.currentNodeId).toBe('report');
+    expect(run.activeNodeIds).toEqual([]);
+    expect(run.nodeStates?.detect?.status).toBe('succeeded');
+    expect(run.nodeStates?.classify?.status).toBe('succeeded');
+    expect(run.nodeStates?.implement?.status).toBe('succeeded');
+    expect(run.nodeStates?.report?.status).toBe('succeeded');
+  });
+
   it('transitions to stuck after max retries on implement failure', async () => {
     let attempts = 0;
     const handlers: PhaseHandlerMap = {

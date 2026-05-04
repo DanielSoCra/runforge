@@ -77,6 +77,10 @@ const PIPELINES: Record<PipelineVariant, TransitionTable> = {
   bug: bugTransitions,
   website: websiteTransitions,
   'spec-driven': specDrivenTransitions,
+  // The DAG registry falls back from adversarial-dev to feature until the
+  // required reviewer/model-tier capabilities are present. This transition
+  // table keeps persisted variant strings loadable during that staged rollout.
+  'adversarial-dev': featureTransitions,
 };
 
 export function getPipeline(variant: PipelineVariant): TransitionTable {
