@@ -190,13 +190,14 @@ interface GitHubIssue {
  * excludes issues with in-progress runs, and sorts by label priority.
  */
 export async function getUpNext(): Promise<UpNextItem[]> {
-  const service = createServiceClient();
   const supabase = await createClient();
   await requireUser(supabase);
+  let service: ReturnType<typeof createServiceClient> | null = null;
+  const getService = () => service ??= createServiceClient();
 
   // Fetch enabled repos and active runs in parallel
   const [reposResult, runsResult] = await Promise.all([
-    service
+    supabase
       .from('repos')
       .select('id, owner, name, connection_id')
       .eq('enabled', true)
@@ -234,7 +235,7 @@ export async function getUpNext(): Promise<UpNextItem[]> {
     repos.map(async (repo): Promise<UpNextItem[]> => {
       let token: string | undefined;
       if (repo.connection_id) {
-        const { data } = await service.rpc('decrypt_github_token', {
+        const { data } = await getService().rpc('decrypt_github_token', {
           p_connection_id: repo.connection_id,
         });
         token = (data as string | null) ?? process.env.GITHUB_TOKEN;

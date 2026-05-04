@@ -454,22 +454,30 @@ describe('getNeedsAttention', () => {
 });
 
 describe('getUpNext', () => {
-  function setupReposQuery(repos: Array<{ id: string; owner: string; name: string; connection_id: string | null }>) {
-    mockServiceFrom.mockReturnValueOnce({
+  function reposQueryResult(repos: Array<{ id: string; owner: string; name: string; connection_id: string | null }>) {
+    return {
       select: vi.fn().mockReturnValue({
         eq: vi.fn().mockReturnValue({
           is: vi.fn().mockResolvedValue({ data: repos, error: null }),
         }),
       }),
-    });
+    };
   }
 
-  function setupActiveRunsQuery(runs: Array<{ issue_number: number; repo_owner: string; repo_name: string }>) {
-    mockFrom.mockReturnValueOnce({
+  function activeRunsQueryResult(runs: Array<{ issue_number: number; repo_owner: string; repo_name: string }>) {
+    return {
       select: vi.fn().mockReturnValue({
         eq: vi.fn().mockResolvedValue({ data: runs, error: null }),
       }),
-    });
+    };
+  }
+
+  function setupReposQuery(repos: Array<{ id: string; owner: string; name: string; connection_id: string | null }>) {
+    mockFrom.mockReturnValueOnce(reposQueryResult(repos));
+  }
+
+  function setupActiveRunsQuery(runs: Array<{ issue_number: number; repo_owner: string; repo_name: string }>) {
+    mockFrom.mockReturnValueOnce(activeRunsQueryResult(runs));
   }
 
   function setupGitHubIssuesResponse(issues: Array<{ number: number; title: string; html_url: string; labels: Array<{ name: string }> }>) {
@@ -502,6 +510,34 @@ describe('getUpNext', () => {
     expect(result[1].issueNumber).toBe(30);
     expect(result[2].pipelineLabel).toBe('l1-approved');
     expect(result[2].issueNumber).toBe(10);
+  });
+
+  it('queries visible repos through the user-scoped client before service-role token decrypt', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'repos') {
+        return reposQueryResult([
+          { id: 'r1', owner: 'acme', name: 'web', connection_id: 'conn-1' },
+        ]);
+      }
+      if (table === 'runs') {
+        return activeRunsQueryResult([]);
+      }
+      throw new Error(`unexpected table: ${table}`);
+    });
+    mockServiceRpc.mockResolvedValueOnce({ data: 'repo-token', error: null });
+    setupGitHubIssuesResponse([
+      { number: 20, title: 'Ready', html_url: 'https://github.com/acme/web/issues/20', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }] },
+    ]);
+
+    const { getUpNext } = await import('./briefing');
+    const result = await getUpNext();
+
+    expect(mockFrom).toHaveBeenCalledWith('repos');
+    expect(mockServiceFrom).not.toHaveBeenCalled();
+    expect(mockServiceRpc).toHaveBeenCalledWith('decrypt_github_token', {
+      p_connection_id: 'conn-1',
+    });
+    expect(result).toHaveLength(1);
   });
 
   it('excludes issues that have in-progress runs', async () => {
@@ -563,7 +599,7 @@ describe('getUpNext', () => {
   });
 
   it('throws when repos query fails (ERR-32 regression — #388)', async () => {
-    mockServiceFrom.mockReturnValueOnce({
+    mockFrom.mockReturnValueOnce({
       select: vi.fn().mockReturnValue({
         eq: vi.fn().mockReturnValue({
           is: vi.fn().mockResolvedValue({
