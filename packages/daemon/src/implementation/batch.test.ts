@@ -187,6 +187,33 @@ describe('executeBatch', () => {
     expect(result.results[0]?.cost).toBe(0.5);
   });
 
+  it('returns failed when a completed worker produces no diff', async () => {
+    vi.mocked(getWorktreeDiffSize).mockResolvedValueOnce({ ok: true, value: 0 });
+    const runtime = createMockRuntime();
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    expect(result.results[0]?.exitStatus).toBe('failed');
+    expect(result.results[0]?.error).toContain('produced no diff');
+    expect(result.results[0]?.cost).toBe(0.5);
+  });
+
+  it('returns failed when a completed-with-concerns worker produces no diff', async () => {
+    vi.mocked(getWorktreeDiffSize).mockResolvedValueOnce({ ok: true, value: 0 });
+    const runtime = createMockRuntime({
+      ...successResult,
+      exitStatus: 'completed-with-concerns',
+    });
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    expect(result.results[0]?.exitStatus).toBe('failed');
+    expect(result.results[0]?.error).toContain('produced no diff');
+    expect(result.results[0]?.cost).toBe(0.5);
+  });
+
   it('returns failed when getWorktreeDiffSize returns an error (#141)', async () => {
     vi.mocked(getWorktreeDiffSize).mockResolvedValueOnce(
       err(new Error('bad revision')),

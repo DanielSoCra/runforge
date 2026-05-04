@@ -7,6 +7,7 @@ import type { KnowledgeStore } from '../knowledge/knowledge-store.js';
 import { extractKnowledgeMarkers } from '../knowledge/extractor.js';
 import { SessionError } from '../session-runtime/session-error.js';
 import { createWorktree, getWorktreeDiffSize } from './worktree.js';
+import { isMergeable } from './exit-status.js';
 import { git } from '../lib/git.js';
 import { runCommand } from '../lib/process.js';
 
@@ -262,6 +263,18 @@ async function executeUnit(
         pitfallMarkers: result.pitfallMarkers,
         handoffNote: result.handoffNote,
         error: `Diff size ${diffSize.value} exceeds limit of ${maxDiffLines}`,
+      };
+    }
+    if (diffSize.value === 0 && isMergeable(result.exitStatus)) {
+      console.warn(`[batch] ${unit.id} completed with no diff; failing this unit`);
+      return {
+        unitId: unit.id,
+        exitStatus: 'failed',
+        cost: result.cost,
+        output: result.output,
+        pitfallMarkers: result.pitfallMarkers,
+        handoffNote: result.handoffNote,
+        error: 'Worker reported completion but produced no diff',
       };
     }
     console.log(`[batch] ${unit.id} diff size ${diffSize.value} (limit ${maxDiffLines})`);
