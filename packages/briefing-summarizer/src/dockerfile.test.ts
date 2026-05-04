@@ -35,4 +35,10 @@ describe('Briefing-summarizer Dockerfile', () => {
     // Without git installed, these fail silently and degrade briefing quality.
     expect(DOCKERFILE).toMatch(/apk add.*git/);
   });
+
+  it('should define a HEALTHCHECK for the local health endpoint (#418)', () => {
+    expect(DOCKERFILE).toMatch(/apk add.*curl/);
+    expect(DOCKERFILE).toMatch(/HEALTHCHECK/);
+    expect(DOCKERFILE).toMatch(/curl -f http:\/\/127\.0\.0\.1:\d+\/health \|\| exit 1/);
+  });
 });

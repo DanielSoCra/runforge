@@ -15,12 +15,16 @@ import { buildSignalPrompt, briefingTool, type PreviousBriefing } from './prompt
 import { extractActivityEvents, type PreviousSnapshot } from './events.js';
 import { log } from './log.js';
 import { createCycleRunner } from './cycle-runner.js';
+import { startHealthServer } from './health-server.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
 
 const INTERVAL_MS = Number(process.env.SUMMARIZER_INTERVAL_MS) || 5 * 60 * 1000;
+const HEALTH_PORT = Number(process.env.HEALTH_PORT) || 3099;
+const HEALTH_MAX_CYCLE_MS = Number(process.env.HEALTH_MAX_CYCLE_MS)
+  || Math.max(INTERVAL_MS * 2, 10 * 60 * 1000);
 const DAEMON_URL = process.env.DAEMON_URL ?? 'http://daemon:3847';
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -284,6 +288,11 @@ async function main(): Promise<void> {
   log('info', `Briefing summarizer starting (interval=${INTERVAL_MS}ms, daemon=${DAEMON_URL}, repo=${repoUrl ?? 'unknown'})`);
 
   const runner = createCycleRunner(() => runCycle(supabase, anthropic, repoUrl));
+  const healthServer = await startHealthServer(HEALTH_PORT, {
+    getStatus: runner.getStatus,
+    maxCycleMs: HEALTH_MAX_CYCLE_MS,
+  });
+  log('info', `Health endpoint listening on 127.0.0.1:${HEALTH_PORT}/health`);
 
   // Run first cycle immediately
   await runner.wrappedCycle();
@@ -297,6 +306,7 @@ async function main(): Promise<void> {
     try {
       await runner.shutdown(signal);
     } finally {
+      healthServer.close();
       process.exit(0);
     }
   };
