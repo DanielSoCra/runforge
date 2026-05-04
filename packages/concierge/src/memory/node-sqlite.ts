@@ -5,7 +5,13 @@ import { DatabaseSync } from 'node:sqlite';
 import type { MigrationStore } from './sqlite.js';
 import type { SqlExecutor } from './state-schema.js';
 
+export type SqlParameter = string | number | bigint | Buffer | Uint8Array | null;
+export type SqlRow = object;
+
 export interface ConciergeStateDatabase extends MigrationStore, SqlExecutor {
+  run(sql: string, ...params: SqlParameter[]): void;
+  get<Row extends SqlRow>(sql: string, ...params: SqlParameter[]): Row | undefined;
+  all<Row extends SqlRow>(sql: string, ...params: SqlParameter[]): Row[];
   close(): void;
   tableNames(): string[];
 }
@@ -23,11 +29,21 @@ export function openConciergeStateDatabase(path = defaultConciergeStateDbPath())
       database.exec(sql);
     },
 
+    run(sql, ...params): void {
+      database.prepare(sql).run(...params);
+    },
+
+    get(sql, ...params) {
+      return database.prepare(sql).get(...params) as never;
+    },
+
+    all(sql, ...params) {
+      return database.prepare(sql).all(...params) as never;
+    },
+
     hasMigration(id): boolean {
       try {
-        const row = database
-          .prepare('SELECT id FROM schema_migrations WHERE id = ?')
-          .get(id) as { id?: string } | undefined;
+        const row = this.get<{ id?: string }>('SELECT id FROM schema_migrations WHERE id = ?', id);
         return row?.id === id;
       } catch (error) {
         if (isMissingTable(error)) return false;
@@ -36,16 +52,12 @@ export function openConciergeStateDatabase(path = defaultConciergeStateDbPath())
     },
 
     recordMigration(id): void {
-      database
-        .prepare('INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)')
-        .run(id, Date.now());
+      this.run('INSERT OR IGNORE INTO schema_migrations (id, applied_at) VALUES (?, ?)', id, Date.now());
     },
 
     appliedMigrationIds(): string[] {
       try {
-        const rows = database
-          .prepare('SELECT id FROM schema_migrations ORDER BY id')
-          .all() as Array<{ id: string }>;
+        const rows = this.all<{ id: string }>('SELECT id FROM schema_migrations ORDER BY id');
         return rows.map((row) => row.id);
       } catch (error) {
         if (isMissingTable(error)) return [];
@@ -54,9 +66,7 @@ export function openConciergeStateDatabase(path = defaultConciergeStateDbPath())
     },
 
     tableNames(): string[] {
-      const rows = database
-        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
-        .all() as Array<{ name: string }>;
+      const rows = this.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name");
       return rows.map((row) => row.name);
     },
 

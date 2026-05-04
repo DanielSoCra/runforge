@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createInMemoryMigrationStore } from '../memory/sqlite.js';
+import { openConciergeStateDatabase } from '../memory/node-sqlite.js';
+import { applyConciergeStateSchemaMigrations } from '../memory/state-schema.js';
+import { createConciergeStateStores } from '../memory/state-stores.js';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ConciergeConfig } from './config.js';
 import { createConciergeRuntime, type ConciergeRuntimeClients } from './runtime.js';
 
@@ -178,6 +184,42 @@ describe('concierge runtime composition', () => {
     expect(runtime.expireConfirmations()).toBe(1);
     expect(runtime.confirmations.get('confirmation-1')?.status).toBe('expired');
     expect(runtime.core.auditLog.get('tool-call-1')?.status).toBe('expired');
+  });
+
+  it('uses the supplied state database for conversations, audit, and confirmations', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'concierge-runtime-state-'));
+    const db = openConciergeStateDatabase(join(dir, 'state.db'));
+    await applyConciergeStateSchemaMigrations(db, db);
+    const runtime = createConciergeRuntime({
+      config,
+      clients: clients(),
+      planner: async () => ({ kind: 'tool', toolName: 'mail_send', args: { draftId: 'draft-1' } }),
+      stateDatabase: db,
+      now: () => 7_000,
+      createId: vi.fn()
+        .mockReturnValueOnce('conversation-1')
+        .mockReturnValueOnce('turn-1')
+        .mockReturnValueOnce('tool-call-1')
+        .mockReturnValueOnce('confirmation-1')
+        .mockReturnValueOnce('turn-2'),
+    });
+
+    await runtime.core.handleOperatorMessage({ text: 'send the draft' });
+
+    const stores = createConciergeStateStores(db);
+    expect(stores.conversations.getConversation('conversation-1')?.turns.map((turn) => turn.role)).toEqual([
+      'operator',
+      'assistant',
+    ]);
+    expect(stores.auditLog.get('tool-call-1')).toEqual(expect.objectContaining({
+      status: 'pending_confirmation',
+      confirmationId: 'confirmation-1',
+    }));
+    expect(stores.confirmations.get('confirmation-1')).toEqual(expect.objectContaining({
+      status: 'pending',
+      toolName: 'mail_send',
+    }));
+    db.close();
   });
 });
 

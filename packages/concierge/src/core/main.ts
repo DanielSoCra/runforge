@@ -35,6 +35,7 @@ export async function startConciergeCoreProcess(
     : createConciergeRuntime({
       config,
       clients: createProcessRuntimeClients(config),
+      stateDatabase: stateDb,
       planner: async () => ({ kind: 'none' }),
       slackReceiver: createSlackHttpReceiver({
         signingSecret: config.slackSigningSecret,
