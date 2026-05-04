@@ -831,9 +831,21 @@ STACK-AC-PHASE-LABELS:
 STACK-AC-DAG-EXECUTOR:
   parent: ARCH-AC-DAG-EXECUTOR
   children: []
-  # Paths planned in spec (#483); empty until implementation PR re-adds them.
-  code_paths: []
-  test_paths: []
+  code_paths:
+    - packages/daemon/src/control-plane/dag-executor.ts
+    - packages/daemon/src/control-plane/workflow-types.ts
+    - packages/daemon/src/control-plane/workflow-registry.ts
+    - packages/daemon/src/control-plane/builtin-workflows.ts
+    - packages/daemon/src/control-plane/run-state-migration.ts
+    - packages/daemon/src/control-plane/pipeline.ts
+    - packages/daemon/src/control-plane/fsm.ts
+    - packages/daemon/src/types.ts
+  test_paths:
+    - packages/daemon/src/control-plane/dag-executor.test.ts
+    - packages/daemon/src/control-plane/workflow-types.test.ts
+    - packages/daemon/src/control-plane/workflow-registry.test.ts
+    - packages/daemon/src/control-plane/run-state-migration.test.ts
+    - packages/daemon/src/control-plane/pipeline.test.ts
   status: draft
 
 STACK-AC-CONTAINMENT:
