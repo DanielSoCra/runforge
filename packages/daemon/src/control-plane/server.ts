@@ -2,6 +2,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { ok, err, type Result } from '../lib/result.js';
 import { getDashboardHtml } from './dashboard.js';
 import { readResults } from './results.js';
+import type { ReleaseProposalResult } from './release.js';
 
 export interface ControlHandlers {
   getStatus: () => unknown;
@@ -13,6 +14,7 @@ export interface ControlHandlers {
   reloadRepos?: () => Promise<{ active: number }>;
   restartRemoteControl?: () => void | Promise<void>;
   scanIssues?: () => Promise<{ scanned: number }>;
+  release?: () => Promise<ReleaseProposalResult>;
   submitIdea?: (submittedBy: string, description: string) => Promise<{ id: string }>;
   stateDir?: string;
 }
@@ -90,6 +92,17 @@ export function createControlServer(
         }).catch((e: unknown) => {
           console.error('[control-plane] POST /issues/scan failed:', e);
           json(res, 500, { error: 'scan failed' });
+        });
+      } else {
+        json(res, 501, { error: 'not configured' });
+      }
+    } else if (method === 'POST' && url.pathname === '/release') {
+      if (handlers.release) {
+        handlers.release().then((result) => {
+          json(res, 200, result);
+        }).catch((e: unknown) => {
+          console.error('[control-plane] POST /release failed:', e);
+          json(res, 500, { error: 'release failed' });
         });
       } else {
         json(res, 501, { error: 'not configured' });

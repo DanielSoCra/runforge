@@ -504,7 +504,12 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/app/api/daemon/remote-control/restart/route.ts
     - packages/dashboard/app/api/daemon/issues/scan/route.ts
     - packages/dashboard/app/(dashboard)/issues/page.tsx
+    - packages/dashboard/app/(dashboard)/releases/page.tsx
+    - packages/dashboard/app/(dashboard)/releases/page.test.tsx
+    - packages/dashboard/app/api/daemon/release/route.ts
     - packages/dashboard/components/issues-board.tsx
+    - packages/dashboard/components/release-approval-panel.tsx
+    - packages/dashboard/components/release-approval-panel.test.tsx
     - packages/dashboard/lib/classify-issues.ts
     - packages/dashboard/actions/github-connections.ts
     - packages/dashboard/components/github-connections-section.tsx

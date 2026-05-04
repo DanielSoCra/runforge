@@ -75,6 +75,7 @@ const inlineAuthRoutes = [
   { name: 'resume', path: './resume/route.js', daemonPath: '/resume' },
   { name: 'repos-reload', path: './repos-reload/route.js', daemonPath: '/repos/reload' },
   { name: 'issues/scan', path: './issues/scan/route.js', daemonPath: '/issues/scan' },
+  { name: 'release', path: './release/route.js', daemonPath: '/release' },
 ];
 
 describe.each(inlineAuthRoutes)('POST /api/daemon/$name', ({ path, daemonPath }) => {

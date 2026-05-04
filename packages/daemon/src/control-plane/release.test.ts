@@ -1,10 +1,10 @@
 // src/control-plane/release.test.ts
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mkdtemp } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { appendResult } from './results.js';
-import { aggregateReleaseNotes } from './release.js';
+import { aggregateReleaseNotes, createReleaseProposal } from './release.js';
 import type { ResultsRecord } from '../types.js';
 
 const makeRecord = (
@@ -20,6 +20,72 @@ const makeRecord = (
   fixAttemptCount: 0,
   outcome: 'complete',
   ...overrides,
+});
+
+describe('createReleaseProposal', () => {
+  let stateDir: string;
+
+  beforeEach(async () => {
+    stateDir = await mkdtemp(join(tmpdir(), 'release-proposal-'));
+  });
+
+  it('returns no-completed-work without creating a PR when no completed results exist', async () => {
+    const octokit = {
+      pulls: { create: vi.fn() },
+    };
+
+    const result = await createReleaseProposal(
+      octokit as never,
+      'DANIELSOCRAHANDLEZZ',
+      'auto-claude',
+      'dev',
+      'main',
+      stateDir,
+    );
+
+    expect(result.status).toBe('no-completed-work');
+    expect(result.issueCount).toBe(0);
+    expect(octokit.pulls.create).not.toHaveBeenCalled();
+  });
+
+  it('creates a staging-to-production PR with aggregated release notes', async () => {
+    await appendResult(makeRecord(519, { totalCost: 1.25 }), stateDir);
+    const octokit = {
+      pulls: {
+        create: vi.fn().mockResolvedValue({
+          data: {
+            number: 42,
+            html_url: 'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/pull/42',
+          },
+        }),
+      },
+    };
+
+    const result = await createReleaseProposal(
+      octokit as never,
+      'DANIELSOCRAHANDLEZZ',
+      'auto-claude',
+      'dev',
+      'main',
+      stateDir,
+    );
+
+    expect(result).toMatchObject({
+      status: 'success',
+      prNumber: 42,
+      prUrl: 'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/pull/42',
+      issueCount: 1,
+      totalCost: 1.25,
+    });
+    expect(octokit.pulls.create).toHaveBeenCalledWith(expect.objectContaining({
+      owner: 'DANIELSOCRAHANDLEZZ',
+      repo: 'auto-claude',
+      head: 'dev',
+      base: 'main',
+      title: 'Release: 1 issue',
+      body: expect.stringContaining('#519:'),
+    }));
+  });
 });
 
 describe('aggregateReleaseNotes', () => {

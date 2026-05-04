@@ -141,6 +141,42 @@ describe('ControlServer', () => {
     expect(res.status).toBe(501);
   });
 
+  it('POST /release calls release handler and returns release proposal details', async () => {
+    const release = vi.fn().mockResolvedValue({
+      status: 'success',
+      prNumber: 12,
+      prUrl: 'https://github.com/example/repo/pull/12',
+      issueCount: 2,
+      totalCost: 3.5,
+    });
+    const { server, start } = createControlServer(PORT + 12, {
+      ...handlers,
+      release,
+    });
+    const result = await start();
+    expect(result.ok).toBe(true);
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT + 12}/release`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        status: 'success',
+        prNumber: 12,
+        prUrl: 'https://github.com/example/repo/pull/12',
+        issueCount: 2,
+        totalCost: 3.5,
+      });
+      expect(release).toHaveBeenCalledOnce();
+    } finally {
+      server.close();
+    }
+  });
+
+  it('POST /release returns 501 when handler not wired', async () => {
+    await startServer();
+    const res = await fetch(`http://127.0.0.1:${PORT}/release`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+    expect(res.status).toBe(501);
+  });
+
   it('allows immediate rebind after close (SO_REUSEADDR / no TIME_WAIT block)', async () => {
     const server1 = await startServer();
     // Close the first server and immediately try to rebind the same port

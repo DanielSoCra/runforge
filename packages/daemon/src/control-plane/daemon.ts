@@ -7,6 +7,7 @@ import { CostTracker } from '../session-runtime/cost.js';
 import { ImplementationCoordinator } from '../implementation/coordinator.js';
 import { StateManager } from './state.js';
 import { createControlServer } from './server.js';
+import { createReleaseProposal } from './release.js';
 import { RepoManager } from './repo-manager.js';
 import { createWorkDetector, type WorkDetector, type FeaturePipelineWorkType } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
@@ -629,6 +630,16 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     restartRemoteControl: async () => { await remoteControl.restart(); },
     scanIssues: repoManager
       ? async () => repoManager!.scanNow()
+      : undefined,
+    release: config.repo
+      ? async () => createReleaseProposal(
+          new Octokit({ auth: process.env.GITHUB_TOKEN }),
+          config.repo!.owner,
+          config.repo!.name,
+          config.branches.staging,
+          config.branches.production,
+          stateDir,
+        )
       : undefined,
     submitIdea: async (submittedBy, description) => {
       const idea = await poAgent.submitIdea(submittedBy, description);
