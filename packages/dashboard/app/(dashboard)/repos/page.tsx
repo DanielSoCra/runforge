@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { BudgetBadge } from '@/components/budget-badge';
 import Link from 'next/link';
 import { Plus, AlertTriangle } from 'lucide-react';
 import { PageError } from '@/components/page-error';
@@ -9,13 +10,33 @@ import { ImportReposModal } from '@/components/import-repos-modal';
 
 export default async function ReposPage() {
   const supabase = await createClient();
-  const [{ data: repos, error: reposError }, { data: connections }] = await Promise.all([
-    supabase.from('repos').select('*, github_connections(display_name, github_login)').is('deleted_at', null).order('created_at', { ascending: false }),
+  const [
+    { data: repos, error: reposError },
+    { data: connections },
+    { data: activeRuns, error: runsError },
+  ] = await Promise.all([
+    supabase
+      .from('repos')
+      .select('*, github_connections(display_name, github_login)')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false }),
     supabase.from('github_connections').select('id, display_name, github_login, status').order('created_at'),
+    supabase.from('runs').select('repo_id, total_cost').eq('outcome', 'in-progress'),
   ]);
   if (reposError) {
     console.error('[repos] failed to load repos:', reposError);
     return <PageError />;
+  }
+  if (runsError) {
+    console.error('[repos] failed to load active run budgets:', runsError);
+  }
+
+  const activeCostByRepoId = new Map<string, number>();
+  for (const run of activeRuns ?? []) {
+    if (!run.repo_id) continue;
+    const cost = Number(run.total_cost ?? 0);
+    const current = activeCostByRepoId.get(run.repo_id) ?? 0;
+    if (cost > current) activeCostByRepoId.set(run.repo_id, cost);
   }
 
   return (
@@ -52,6 +73,10 @@ export default async function ReposPage() {
                   <Badge variant={repo.enabled ? 'default' : 'secondary'}>
                     {repo.enabled ? 'active' : 'disabled'}
                   </Badge>
+                  <BudgetBadge
+                    totalCost={activeCostByRepoId.get(repo.id) ?? 0}
+                    budgetLimit={repo.budget_limit == null ? null : Number(repo.budget_limit)}
+                  />
                   {conn && (
                     <Badge variant="outline" className="text-xs">{conn.display_name}</Badge>
                   )}
