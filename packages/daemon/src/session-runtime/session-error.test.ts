@@ -4,10 +4,11 @@ import { SessionError } from './session-error.js';
 
 describe('SessionError', () => {
   it('carries cost, rateLimited, and containmentBreach flags', () => {
-    const err = new SessionError('test', 1.5, true, false);
+    const err = new SessionError('test', 1.5, true, false, true);
     expect(err.cost).toBe(1.5);
     expect(err.rateLimited).toBe(true);
     expect(err.containmentBreach).toBe(false);
+    expect(err.scopeViolation).toBe(true);
     expect(err.name).toBe('SessionError');
   });
 
@@ -16,6 +17,7 @@ describe('SessionError', () => {
     expect(err.cost).toBe(0);
     expect(err.rateLimited).toBe(false);
     expect(err.containmentBreach).toBe(false);
+    expect(err.scopeViolation).toBe(false);
   });
 
   describe('static factory methods', () => {
@@ -52,6 +54,16 @@ describe('SessionError', () => {
       expect(err.cost).toBe(0.07);
       expect(err.rateLimited).toBe(false);
       expect(err.containmentBreach).toBe(true);
+    });
+
+    it('scopeViolated creates error with scope and containment flags', () => {
+      const err = SessionError.scopeViolated('README.md', 0.09);
+      expect(err.message).toContain('Scope violation');
+      expect(err.message).toContain('README.md');
+      expect(err.cost).toBe(0.09);
+      expect(err.rateLimited).toBe(false);
+      expect(err.containmentBreach).toBe(true);
+      expect(err.scopeViolation).toBe(true);
     });
   });
 });

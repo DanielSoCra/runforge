@@ -323,6 +323,45 @@ describe('CliAdapter containment hook setup', () => {
     adapter.cleanupHooks(paths);
   });
 
+  it('adds scope hook and permission deny entries when directory scope is provided', () => {
+    const adapter = new CliAdapter();
+    const paths = adapter.setupHooks(tempDir, DEFAULT_POLICY, 30000, undefined, [], {
+      readPaths: ['**/*'],
+      writePaths: ['src/**'],
+      denyPaths: ['secret/**'],
+    });
+
+    expect(paths.scriptPaths.length).toBe(3);
+    expect(paths.scriptPaths.some(p => p.includes('scope-hook-'))).toBe(true);
+
+    const settings = JSON.parse(readFileSync(paths.settingsPath, 'utf8'));
+    expect(settings.hooks.PreToolUse.length).toBe(3);
+    expect(settings.permissions.deny).toContain('secret/**');
+
+    adapter.cleanupHooks(paths);
+  });
+
+  it('preserves pre-existing permission denies when cleaning up scope entries', () => {
+    const adapter = new CliAdapter();
+    const { mkdirSync, writeFileSync } = require('fs');
+    mkdirSync(join(tempDir, '.claude'), { recursive: true });
+    writeFileSync(
+      join(tempDir, '.claude', 'settings.local.json'),
+      JSON.stringify({ permissions: { deny: ['pre-existing/**'] } }),
+    );
+
+    const paths = adapter.setupHooks(tempDir, DEFAULT_POLICY, 30000, undefined, [], {
+      readPaths: ['**/*'],
+      writePaths: ['src/**'],
+      denyPaths: ['secret/**'],
+    });
+
+    adapter.cleanupHooks(paths);
+
+    const restored = JSON.parse(readFileSync(paths.settingsPath, 'utf8'));
+    expect(restored.permissions.deny).toEqual(['pre-existing/**']);
+  });
+
   it('cleans up hook scripts and settings after cleanup', () => {
     const adapter = new CliAdapter();
     const paths = adapter.setupHooks(tempDir, DEFAULT_POLICY, 30000);
@@ -687,7 +726,14 @@ describe('CliAdapter.spawn() (#102)', () => {
       containmentPolicy: DEFAULT_POLICY,
     });
 
-    expect(setupSpy).toHaveBeenCalledWith(tempDir, DEFAULT_POLICY, mockDef.timeoutMs, expect.any(Number), undefined);
+    expect(setupSpy).toHaveBeenCalledWith(
+      tempDir,
+      DEFAULT_POLICY,
+      mockDef.timeoutMs,
+      expect.any(Number),
+      undefined,
+      undefined,
+    );
 
     mockProc.stdout.emit('data', Buffer.from(JSON.stringify({ result: 'ok' })));
     mockProc.emit('close', 0);

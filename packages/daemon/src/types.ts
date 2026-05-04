@@ -39,6 +39,7 @@ export interface AgentDefinition {
   maxTurns: number;
   timeoutMs: number;
   budgetCap: number;
+  directoryScope?: DirectoryScope;
 }
 
 export interface SessionContext {
@@ -61,6 +62,28 @@ export interface SessionResult {
   // terminating the session; preventive containment via Bash hooks still
   // terminates as before. Issue #489 acceptance criteria 5–6.
   auditWarnings?: string[];
+}
+
+export interface DirectoryScope {
+  readPaths: string[];
+  writePaths: string[];
+  denyPaths: string[];
+}
+
+export type ScopeViolationType =
+  | 'write-outside-permitted'
+  | 'access-to-denied'
+  | 'audit-unavailable';
+
+export type ScopeDetectionLayer = 'pre-execution' | 'post-session';
+
+export interface ViolationRecord {
+  sessionId: string;
+  agentType: string;
+  path: string;
+  violationType: ScopeViolationType;
+  detectionLayer: ScopeDetectionLayer;
+  timestamp: string;
 }
 
 export interface PitfallMarker {

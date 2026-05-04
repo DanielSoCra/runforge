@@ -4,6 +4,12 @@ import { readFile } from 'fs/promises';
 import { ok, err, type Result } from './lib/result.js';
 import { validateGate1Command } from './validation/gates.js';
 
+const DirectoryScopeSchema = z.object({
+  readPaths: z.array(z.string()).default([]),
+  writePaths: z.array(z.string()).default([]),
+  denyPaths: z.array(z.string()).default([]),
+});
+
 // zod v4 requires .default() on nested objects to include explicit values
 // matching the inner field defaults. Keep these in sync when changing defaults.
 export const ConfigSchema = z.object({
@@ -101,6 +107,7 @@ export const ConfigSchema = z.object({
     documentPath: z.string().min(1).default('FACTORY_RULES.md'),
     maxPrLinesChanged: z.number().int().min(1).default(2000),
   }).default({ documentPath: 'FACTORY_RULES.md', maxPrLinesChanged: 2000 }),
+  agentScopes: z.record(z.string(), DirectoryScopeSchema).default({}),
   activePlugins: z.array(z.string()).default([]),
   knowledge: z.object({
     systemicProposalThreshold: z.number().int().min(1).default(3),
