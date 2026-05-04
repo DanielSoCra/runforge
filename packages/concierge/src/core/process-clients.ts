@@ -24,9 +24,9 @@ export function createProcessRuntimeClients(
   const execFile = options.execFile ?? defaultExecFile;
   return {
     slack: createSlackWebApiClient(config, fetchImpl),
-    mail: unavailableMailClient(),
+    mail: createMailAppleScriptClient({ execFile }),
     github: createGitHubCliClient({ execFile }),
-    calendar: unavailableCalendarClient(),
+    calendar: createCalendarAppleScriptClient({ execFile }),
     observer: createObserverProcessClient({
       autoClaudeBaseUrl: config.autoClaudeBaseUrl,
       watchedRepos: config.watchedRepos,
@@ -101,6 +101,57 @@ export function createObserverProcessClient(options: {
         method: 'GET',
       });
       return readJsonBody(response);
+    },
+  };
+}
+
+export function createMailAppleScriptClient(options: { execFile: ExecFile }): ConciergeRuntimeClients['mail'] {
+  return {
+    draft: async (input) => {
+      const result = await options.execFile('osascript', [
+        '-e',
+        MAIL_DRAFT_SCRIPT,
+        '--',
+        input.to,
+        input.subject,
+        input.body,
+      ]);
+      const draftId = result.stdout.trim();
+      if (!draftId) throw new Error('Mail draft did not return a draft id');
+      return { draftId };
+    },
+
+    send: async (draftId) => {
+      await options.execFile('osascript', [
+        '-e',
+        MAIL_SEND_SCRIPT,
+        '--',
+        draftId,
+      ]);
+      return { sent: true, draftId };
+    },
+  };
+}
+
+export function createCalendarAppleScriptClient(options: {
+  execFile: ExecFile;
+  lookaheadHours?: number;
+}): ConciergeRuntimeClients['calendar'] {
+  const lookaheadHours = options.lookaheadHours ?? 24;
+
+  return {
+    read: async () => {
+      const result = await options.execFile('osascript', [
+        '-l',
+        'JavaScript',
+        '-e',
+        CALENDAR_READ_SCRIPT,
+        '--',
+        String(lookaheadHours),
+      ]);
+      const parsed = JSON.parse(result.stdout.trim() || '[]') as unknown;
+      if (!Array.isArray(parsed)) throw new Error('Calendar read did not return an array');
+      return { events: parsed };
     },
   };
 }
@@ -236,26 +287,66 @@ function safeSlug(slug: string): string {
   return slug;
 }
 
-function unavailableMailClient(): ConciergeRuntimeClients['mail'] {
-  return {
-    draft: async () => unavailable('mail client'),
-    send: async () => unavailable('mail client'),
-  };
-}
-
-function unavailableCalendarClient(): ConciergeRuntimeClients['calendar'] {
-  return {
-    read: async () => unavailable('calendar client'),
-  };
-}
-
-function unavailable(name: string): never {
-  throw new Error(`${name} is not configured for the concierge-core process`);
-}
-
 function isNotFound(error: unknown): boolean {
   return typeof error === 'object'
     && error !== null
     && 'code' in error
     && (error as { code?: unknown }).code === 'ENOENT';
 }
+
+const MAIL_DRAFT_SCRIPT = `
+on run argv
+  set recipientAddress to item 1 of argv
+  set messageSubject to item 2 of argv
+  set messageBody to item 3 of argv
+  tell application "Mail"
+    set newMessage to make new outgoing message with properties {subject:messageSubject, content:messageBody, visible:false}
+    tell newMessage
+      make new to recipient at end of to recipients with properties {address:recipientAddress}
+      save
+    end tell
+    return id of newMessage as string
+  end tell
+end run
+`.trim();
+
+const MAIL_SEND_SCRIPT = `
+on run argv
+  set draftId to item 1 of argv
+  tell application "Mail"
+    repeat with candidate in outgoing messages
+      if (id of candidate as string) is draftId then
+        send candidate
+        return "sent"
+      end if
+    end repeat
+  end tell
+  error "draft not found: " & draftId
+end run
+`.trim();
+
+const CALENDAR_READ_SCRIPT = `
+function run(argv) {
+  const lookaheadHours = Number(argv[0] || '24');
+  const start = new Date();
+  const end = new Date(start.getTime() + lookaheadHours * 60 * 60 * 1000);
+  const Calendar = Application('Calendar');
+  const events = [];
+  for (const calendar of Calendar.calendars()) {
+    for (const event of calendar.events()) {
+      const eventStart = event.startDate();
+      if (!(eventStart instanceof Date) || eventStart < start || eventStart >= end) continue;
+      const eventEnd = event.endDate();
+      events.push({
+        calendar: calendar.name(),
+        title: event.summary(),
+        start: eventStart.toISOString(),
+        end: eventEnd instanceof Date ? eventEnd.toISOString() : null,
+        location: event.location() || undefined,
+      });
+    }
+  }
+  events.sort((a, b) => a.start.localeCompare(b.start) || a.title.localeCompare(b.title));
+  return JSON.stringify(events);
+}
+`.trim();

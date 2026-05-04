@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import type { ConciergeConfig } from './config.js';
 import {
+  createCalendarAppleScriptClient,
   createGitHubCliClient,
+  createMailAppleScriptClient,
   createObserverProcessClient,
   createProcessRuntimeClients,
   createSecondBrainFileClient,
@@ -114,15 +116,87 @@ describe('process runtime clients', () => {
     ]);
   });
 
+  it('uses Mail through osascript for drafts and confirmed sends', async () => {
+    const calls: Array<{ file: string; args: string[] }> = [];
+    const client = createMailAppleScriptClient({
+      execFile: async (file, args) => {
+        calls.push({ file, args });
+        return { stdout: calls.length === 1 ? 'mail-draft-42\n' : 'sent\n' };
+      },
+    });
+
+    await expect(client.draft({
+      to: 'operator@example.com',
+      subject: 'Daily prep',
+      body: 'Agenda',
+    })).resolves.toEqual({ draftId: 'mail-draft-42' });
+    await expect(client.send('mail-draft-42')).resolves.toEqual({ sent: true, draftId: 'mail-draft-42' });
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.file).toBe('osascript');
+    expect(calls[0]?.args.at(0)).toBe('-e');
+    expect(calls[0]?.args.at(1)).toContain('make new outgoing message');
+    expect(calls[0]?.args.slice(-3)).toEqual(['operator@example.com', 'Daily prep', 'Agenda']);
+    expect(calls[1]?.args.at(1)).toContain('send candidate');
+    expect(calls[1]?.args.at(-1)).toBe('mail-draft-42');
+  });
+
+  it('reads upcoming Calendar events through read-only osascript JSON', async () => {
+    const calls: Array<{ file: string; args: string[] }> = [];
+    const client = createCalendarAppleScriptClient({
+      execFile: async (file, args) => {
+        calls.push({ file, args });
+        return {
+          stdout: JSON.stringify([
+            {
+              calendar: 'Work',
+              title: 'Planning',
+              start: '2026-05-04T10:00:00.000Z',
+              end: '2026-05-04T10:30:00.000Z',
+            },
+          ]),
+        };
+      },
+      lookaheadHours: 48,
+    });
+
+    await expect(client.read()).resolves.toEqual({
+      events: [
+        {
+          calendar: 'Work',
+          title: 'Planning',
+          start: '2026-05-04T10:00:00.000Z',
+          end: '2026-05-04T10:30:00.000Z',
+        },
+      ],
+    });
+    expect(calls).toEqual([
+      {
+        file: 'osascript',
+        args: expect.arrayContaining(['-l', 'JavaScript', '48']),
+      },
+    ]);
+    expect(calls[0]?.args.join('\n')).toContain("Application('Calendar')");
+  });
+
   it('composes process runtime clients with real adapters where configured', async () => {
+    const calls: Array<{ file: string; args: string[] }> = [];
     const clients = createProcessRuntimeClients(config, {
       fetch: async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
-      execFile: async () => ({ stdout: '[]' }),
+      execFile: async (file, args) => {
+        calls.push({ file, args });
+        if (file === 'osascript' && args.join('\n').includes('application "Mail"')) {
+          return { stdout: 'draft-1\n' };
+        }
+        return { stdout: '[]' };
+      },
     });
 
     await expect(clients.github.search('repo:auto-claude')).resolves.toEqual({ items: [] });
     await expect(clients.secondBrain.search('anything')).resolves.toEqual({ matches: [] });
     await expect(clients.mail.draft({ to: 'a@example.com', subject: 's', body: 'b' }))
-      .rejects.toThrow(/mail client is not configured/);
+      .resolves.toEqual({ draftId: 'draft-1' });
+    await expect(clients.calendar.read()).resolves.toEqual({ events: [] });
+    expect(calls.some((call) => call.file === 'osascript')).toBe(true);
   });
 });
