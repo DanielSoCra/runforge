@@ -7,6 +7,12 @@ export interface ValidationError {
   message: string;
 }
 
+const SAFE_UNIT_ID = /^[A-Za-z0-9_-]+$/;
+
+export function isValidUnitId(unitId: string): boolean {
+  return SAFE_UNIT_ID.test(unitId);
+}
+
 export function validateTaskGraph(graph: TaskGraph): Result<TaskGraph, ValidationError[]> {
   const errors: ValidationError[] = [];
 
@@ -18,6 +24,12 @@ export function validateTaskGraph(graph: TaskGraph): Result<TaskGraph, Validatio
   // Check unique IDs
   const ids = new Set<string>();
   for (const unit of graph.units) {
+    if (!isValidUnitId(unit.id)) {
+      errors.push({
+        field: `units[${unit.id}].id`,
+        message: `Unit ID must contain only letters, numbers, hyphen, or underscore: ${unit.id}`,
+      });
+    }
     if (ids.has(unit.id)) {
       errors.push({ field: `units[${unit.id}].id`, message: `Duplicate unit ID: ${unit.id}` });
     }

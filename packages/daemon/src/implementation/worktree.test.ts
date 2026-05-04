@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createWorktree, removeWorktree, listWorktrees, mergeWorktree, getWorktreeDiffSize, deleteUnitBranch } from './worktree.js';
@@ -14,7 +14,6 @@ describe('worktree management', () => {
     await git(['init'], repoDir);
     await git(['checkout', '-b', 'main'], repoDir);
     // Need at least one commit for worktrees to work
-    const { writeFile } = await import('fs/promises');
     await writeFile(join(repoDir, 'README.md'), '# Test');
     await git(['add', '.'], repoDir);
     await git(['commit', '-m', 'initial'], repoDir);
@@ -52,7 +51,6 @@ describe('worktree management', () => {
     if (!createResult.ok) throw new Error('Failed to create worktree');
 
     // Make a change in the worktree
-    const { writeFile } = await import('fs/promises');
     await writeFile(join(createResult.value, 'new-file.txt'), 'content');
     await git(['add', '.'], createResult.value);
     await git(['commit', '-m', 'add file'], createResult.value);
@@ -67,12 +65,23 @@ describe('worktree management', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('rejects path traversal unit IDs before deleting stale paths (#455)', async () => {
+    const sentinelDir = join(repoDir, 'sentinel');
+    const sentinelFile = join(sentinelDir, 'keep.txt');
+    await mkdir(sentinelDir);
+    await writeFile(sentinelFile, 'do not delete');
+
+    const result = await createWorktree('../sentinel', 'main', repoDir);
+
+    expect(result.ok).toBe(false);
+    await expect(readFile(sentinelFile, 'utf8')).resolves.toBe('do not delete');
+  });
+
   it('getWorktreeDiffSize returns correct insertion+deletion count', async () => {
     const createResult = await createWorktree('unit-diff', 'main', repoDir);
     if (!createResult.ok) throw new Error('Failed to create worktree');
 
     // Make changes in the worktree
-    const { writeFile } = await import('fs/promises');
     await writeFile(join(createResult.value, 'new-file.txt'), 'line1\nline2\nline3\n');
     await git(['add', '.'], createResult.value);
     await git(['commit', '-m', 'add 3 lines'], createResult.value);

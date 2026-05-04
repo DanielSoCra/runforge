@@ -33,6 +33,24 @@ describe('validateTaskGraph', () => {
     if (!result.ok) expect(result.error[0]?.message).toContain('Duplicate');
   });
 
+  it('rejects unit IDs that are unsafe for worktree paths and branch names (#455)', () => {
+    const invalidIds = ['../src', '..', 'unit/name', 'unit\\name', 'unit name', 'unit.name', ''];
+
+    for (const id of invalidIds) {
+      const graph: TaskGraph = {
+        issueNumber: 1, featureBranch: 'f',
+        units: [makeUnit(id, 0)],
+      };
+
+      const result = validateTaskGraph(graph);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.some((error) => error.field === `units[${id}].id`)).toBe(true);
+      }
+    }
+  });
+
   it('rejects non-sequential batch numbers', () => {
     const graph: TaskGraph = {
       issueNumber: 1, featureBranch: 'f',

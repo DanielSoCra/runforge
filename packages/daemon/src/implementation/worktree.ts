@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { git } from '../lib/git.js';
 import { ok, err, type Result } from '../lib/result.js';
 import { join } from 'path';
+import { isValidUnitId } from './task-graph.js';
 
 const WORKTREE_DIR = 'workspaces';
 
@@ -11,6 +12,10 @@ export async function createWorktree(
   baseBranch: string,
   repoRoot?: string,
 ): Promise<Result<string>> {
+  if (!isValidUnitId(unitId)) {
+    return err(new Error(`Invalid unit ID: ${unitId}`));
+  }
+
   const worktreePath = join(repoRoot ?? process.cwd(), WORKTREE_DIR, unitId);
   const branchName = `unit/${unitId}`;
 
@@ -36,6 +41,10 @@ export async function removeWorktree(
   unitId: string,
   repoRoot?: string,
 ): Promise<Result<void>> {
+  if (!isValidUnitId(unitId)) {
+    return err(new Error(`Invalid unit ID: ${unitId}`));
+  }
+
   const worktreePath = join(repoRoot ?? process.cwd(), WORKTREE_DIR, unitId);
 
   // Remove the worktree (--force handles dirty state)
@@ -55,6 +64,10 @@ export async function deleteUnitBranch(
   unitId: string,
   repoRoot?: string,
 ): Promise<Result<void>> {
+  if (!isValidUnitId(unitId)) {
+    return err(new Error(`Invalid unit ID: ${unitId}`));
+  }
+
   const branchName = `unit/${unitId}`;
   const result = await git(['branch', '-D', branchName], repoRoot);
   if (!result.ok) return err(result.error);
@@ -78,6 +91,10 @@ export async function getWorktreeDiffSize(
   baseBranch: string,
   repoRoot?: string,
 ): Promise<Result<number>> {
+  if (!isValidUnitId(unitId)) {
+    return err(new Error(`Invalid unit ID: ${unitId}`));
+  }
+
   const branchName = `unit/${unitId}`;
   const result = await git(['diff', '--stat', `${baseBranch}...${branchName}`], repoRoot);
   if (!result.ok) {
@@ -101,6 +118,10 @@ export async function mergeWorktree(
   targetBranch: string,
   repoRoot?: string,
 ): Promise<Result<void>> {
+  if (!isValidUnitId(unitId)) {
+    return err(new Error(`Invalid unit ID: ${unitId}`));
+  }
+
   const branchName = `unit/${unitId}`;
   const result = await git(
     ['merge', '--no-ff', branchName, '-m', `merge: unit ${unitId}`],
