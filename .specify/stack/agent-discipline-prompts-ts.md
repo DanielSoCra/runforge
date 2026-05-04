@@ -8,6 +8,7 @@ layer: 3
 stack: typescript
 references: ARCH-AC-AGENT-DISCIPLINE
 code_paths:
+  - prompts/classifier.md
   - prompts/coordinator.md
   - prompts/worker.md
   - prompts/spec-implementer.md
@@ -16,6 +17,7 @@ code_paths:
   - packages/daemon/src/implementation/context.ts
   - packages/daemon/src/implementation/exit-status.ts
 test_paths:
+  - packages/daemon/src/control-plane/classifier.test.ts
   - packages/daemon/src/implementation/decompose.test.ts
   - packages/daemon/src/implementation/context.test.ts
   - packages/daemon/src/implementation/exit-status.test.ts

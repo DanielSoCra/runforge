@@ -5,6 +5,7 @@ import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import { validateTaskGraph } from './task-graph.js';
 import { createSingleUnitGraph } from './task-graph.js';
 import { ok, err, type Result } from '../lib/result.js';
+import { formatUserIssueContent } from '../lib/prompt-boundary.js';
 
 export async function decompose(
   request: WorkRequest,
@@ -15,12 +16,18 @@ export async function decompose(
   runId?: string,
   activePlugins?: Array<{ id: string; activatedAt: string }>,
 ): Promise<Result<TaskGraph>> {
+  const workRequest = formatUserIssueContent({
+    issueNumber: request.issueNumber,
+    title: request.title,
+    body: request.body,
+  });
+
   // Spawn coordinator session to produce a task graph
   const result = await runtime.spawnSession(
     'coordinator',
     {
       variables: {
-        workRequest: `Title: ${request.title}\n\n${request.body}`,
+        workRequest,
         specs: specContent,
         specRefs: request.specRefs.join(', '),
       },
@@ -35,25 +42,44 @@ export async function decompose(
   if (!result.ok) return result;
 
   // Parse structured output as TaskGraph
-  const graph = parseTaskGraph(result.value.structuredData, request.issueNumber, featureBranch);
+  const graph = parseTaskGraph(
+    result.value.structuredData,
+    request.issueNumber,
+    featureBranch,
+  );
   if (!graph.ok) {
     // Retry once
     const retry = await runtime.spawnSession(
       'coordinator',
-      { variables: { workRequest: `Title: ${request.title}\n\n${request.body}`, specs: specContent, specRefs: request.specRefs.join(', ') }, activePlugins },
+      {
+        variables: {
+          workRequest,
+          specs: specContent,
+          specRefs: request.specRefs.join(', '),
+        },
+        activePlugins,
+      },
       request.issueNumber,
       undefined,
       runWriter,
       runId,
     );
     if (!retry.ok) return retry;
-    return parseTaskGraph(retry.value.structuredData, request.issueNumber, featureBranch);
+    return parseTaskGraph(
+      retry.value.structuredData,
+      request.issueNumber,
+      featureBranch,
+    );
   }
 
   return graph;
 }
 
-function parseTaskGraph(data: unknown, issueNumber: number, featureBranch: string): Result<TaskGraph> {
+function parseTaskGraph(
+  data: unknown,
+  issueNumber: number,
+  featureBranch: string,
+): Result<TaskGraph> {
   if (!data || typeof data !== 'object') {
     return err(new Error('Structured output is not an object'));
   }
@@ -73,19 +99,27 @@ function parseTaskGraph(data: unknown, issueNumber: number, featureBranch: strin
         title: String(unit.title ?? `Unit ${i}`),
         specIds: Array.isArray(unit.specIds) ? unit.specIds.map(String) : [],
         specContent: String(unit.specContent ?? ''),
-        expectedArtifacts: Array.isArray(unit.expectedArtifacts) ? unit.expectedArtifacts.map(String) : [],
-        dependencies: Array.isArray(unit.dependencies) ? unit.dependencies.map(String) : [],
+        expectedArtifacts: Array.isArray(unit.expectedArtifacts)
+          ? unit.expectedArtifacts.map(String)
+          : [],
+        dependencies: Array.isArray(unit.dependencies)
+          ? unit.dependencies.map(String)
+          : [],
         batchNumber: Number(unit.batchNumber ?? 0),
         verificationCommand: String(unit.verificationCommand ?? ''),
         context: String(unit.context ?? ''),
-        estimatedChangeSize: unit.estimatedChangeSize ? Number(unit.estimatedChangeSize) : undefined,
+        estimatedChangeSize: unit.estimatedChangeSize
+          ? Number(unit.estimatedChangeSize)
+          : undefined,
       };
     }),
   };
 
   const validated = validateTaskGraph(graph);
   if (!validated.ok) {
-    const messages = validated.error.map((e) => `${e.field}: ${e.message}`).join('; ');
+    const messages = validated.error
+      .map((e) => `${e.field}: ${e.message}`)
+      .join('; ');
     return err(new Error(`TaskGraph validation failed: ${messages}`));
   }
 

@@ -1,7 +1,12 @@
 import { ok, err, type Result } from '../lib/result.js';
 import { SessionError } from '../session-runtime/session-error.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
-import type { WorkRequest, TaskGraph, Gotcha, PipelineVariant } from '../types.js';
+import type {
+  WorkRequest,
+  TaskGraph,
+  Gotcha,
+  PipelineVariant,
+} from '../types.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import type { GotchaStore } from '../knowledge/gotcha-store.js';
 import type { KnowledgeStore } from '../knowledge/knowledge-store.js';
@@ -12,6 +17,7 @@ import { deleteUnitBranch } from './worktree.js';
 import { mergeUnitsSequentially } from './merge.js';
 import { isMergeable } from './exit-status.js';
 import { decompose } from './decompose.js';
+import { formatUserIssueContent } from '../lib/prompt-boundary.js';
 import { git } from '../lib/git.js';
 
 export interface ImplementResult {
@@ -43,16 +49,30 @@ export class ImplementationCoordinator {
     featureBranch: string,
     runWriter?: SupabaseRunWriter,
     runId?: string,
-    options?: { complexity?: 'simple' | 'standard' | 'complex'; specContent?: string; checkpoint?: number; handoffNotes?: Map<string, string>; variant?: PipelineVariant; diagnosisDetail?: string; activePlugins?: Array<{ id: string; activatedAt: string }> },
+    options?: {
+      complexity?: 'simple' | 'standard' | 'complex';
+      specContent?: string;
+      checkpoint?: number;
+      handoffNotes?: Map<string, string>;
+      variant?: PipelineVariant;
+      diagnosisDetail?: string;
+      activePlugins?: Array<{ id: string; activatedAt: string }>;
+    },
   ): Promise<Result<ImplementResult>> {
     // 1. Get task graph
     let graph: TaskGraph;
+    const workRequestContext = formatUserIssueContent({
+      issueNumber: request.issueNumber,
+      title: request.title,
+      body: request.body,
+    });
+
     if (options?.complexity === 'simple' || !options?.complexity) {
       graph = createSingleUnitGraph(
         request.issueNumber,
         featureBranch,
         request.title,
-        `Title: ${request.title}\n\n${request.body}`,
+        workRequestContext,
         options?.specContent ?? '',
         // verification command: leave to createSingleUnitGraph's default
       );
@@ -70,7 +90,9 @@ export class ImplementationCoordinator {
         if (decomposeResult.error instanceof SessionError) {
           return err(decomposeResult.error);
         }
-        return err(new Error(`Decomposition failed: ${decomposeResult.error.message}`));
+        return err(
+          new Error(`Decomposition failed: ${decomposeResult.error.message}`),
+        );
       }
       graph = decomposeResult.value;
     }
@@ -93,24 +115,35 @@ export class ImplementationCoordinator {
         // v1 GotchaStore (legacy)
         if (this.gotchaStore) {
           try {
-            const matched = await this.gotchaStore.match(unit.expectedArtifacts);
+            const matched = await this.gotchaStore.match(
+              unit.expectedArtifacts,
+            );
             if (matched.length > 0) {
               sections.push(formatGotchas(matched));
             }
           } catch (e) {
-            console.warn(`[coordinator] Failed to match gotchas for ${unit.id}:`, e);
+            console.warn(
+              `[coordinator] Failed to match gotchas for ${unit.id}:`,
+              e,
+            );
           }
         }
 
         // v2 KnowledgeStore — query with 'implementation' session type
         if (this.knowledgeStore) {
           try {
-            const records = await this.knowledgeStore.matchRecords(unit.expectedArtifacts, 'implementation');
+            const records = await this.knowledgeStore.matchRecords(
+              unit.expectedArtifacts,
+              'implementation',
+            );
             if (records.length > 0) {
               sections.push(formatKnowledgeRecords(records));
             }
           } catch (e) {
-            console.warn(`[coordinator] Failed to match knowledge records for ${unit.id}:`, e);
+            console.warn(
+              `[coordinator] Failed to match knowledge records for ${unit.id}:`,
+              e,
+            );
           }
         }
 
@@ -133,7 +166,12 @@ export class ImplementationCoordinator {
         this.gotchaStore,
         options?.handoffNotes,
         options?.variant,
-        options?.variant === 'bug' ? { bugReport: request.body, diagnosis: options?.diagnosisDetail ?? '' } : undefined,
+        options?.variant === 'bug'
+          ? {
+              bugReport: workRequestContext,
+              diagnosis: options?.diagnosisDetail ?? '',
+            }
+          : undefined,
         options?.activePlugins,
         this.knowledgeStore,
       );
@@ -143,7 +181,10 @@ export class ImplementationCoordinator {
 
       // Check for failures
       const failures = batchResult.results.filter(
-        (r) => r.exitStatus === 'failed' || r.exitStatus === 'timed-out' || r.exitStatus === 'needs-context',
+        (r) =>
+          r.exitStatus === 'failed' ||
+          r.exitStatus === 'timed-out' ||
+          r.exitStatus === 'needs-context',
       );
       const blocked = batchResult.results.filter(
         (r) => r.exitStatus === 'blocked',
@@ -185,7 +226,10 @@ export class ImplementationCoordinator {
       }
 
       // 3. Merge successful units sequentially into feature branch (STACK-AC-IMPLEMENTATION: merge.ts)
-      const checkoutResult = await git(['checkout', featureBranch], this.repoRoot);
+      const checkoutResult = await git(
+        ['checkout', featureBranch],
+        this.repoRoot,
+      );
       if (!checkoutResult.ok) {
         return ok({
           success: false,
@@ -197,8 +241,12 @@ export class ImplementationCoordinator {
           containmentBreach: breached || undefined,
         });
       }
-      const successfulUnits = batchResult.results.filter((r) => isMergeable(r.exitStatus));
-      const nonMergedUnits = batchResult.results.filter((r) => !isMergeable(r.exitStatus));
+      const successfulUnits = batchResult.results.filter((r) =>
+        isMergeable(r.exitStatus),
+      );
+      const nonMergedUnits = batchResult.results.filter(
+        (r) => !isMergeable(r.exitStatus),
+      );
 
       const mergeResult = await mergeUnitsSequentially(
         successfulUnits.map((r) => r.unitId),
@@ -236,7 +284,9 @@ export class ImplementationCoordinator {
 }
 
 /** Collect handoff notes from unit results for use in retry attempts (ARCH-AC-HANDOFF step 6). */
-function collectHandoffNotes(results: UnitResult[]): Map<string, string> | undefined {
+function collectHandoffNotes(
+  results: UnitResult[],
+): Map<string, string> | undefined {
   const notes = new Map<string, string>();
   for (const r of results) {
     if (r.handoffNote) {
@@ -248,12 +298,18 @@ function collectHandoffNotes(results: UnitResult[]): Map<string, string> | undef
 
 function formatGotchas(gotchas: Gotcha[]): string {
   return gotchas
-    .map((g) => `- [${g.priorityTier === 'elevated' ? 'IMPORTANT' : 'note'}] ${g.description} (patterns: ${g.artifactPatterns.join(', ')})`)
+    .map(
+      (g) =>
+        `- [${g.priorityTier === 'elevated' ? 'IMPORTANT' : 'note'}] ${g.description} (patterns: ${g.artifactPatterns.join(', ')})`,
+    )
     .join('\n');
 }
 
 function formatKnowledgeRecords(records: KnowledgeRecord[]): string {
   return records
-    .map((r) => `- [${r.priorityTier === 'elevated' ? 'IMPORTANT' : 'note'}] ${r.description} (patterns: ${r.artifactPatterns.join(', ')})`)
+    .map(
+      (r) =>
+        `- [${r.priorityTier === 'elevated' ? 'IMPORTANT' : 'note'}] ${r.description} (patterns: ${r.artifactPatterns.join(', ')})`,
+    )
     .join('\n');
 }
