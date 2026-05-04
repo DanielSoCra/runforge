@@ -284,6 +284,47 @@ describe('concierge runtime composition', () => {
     expect(cleared).toEqual([{ id: 2 }, { id: 1 }]);
     db.close();
   });
+
+  it('schedules and exposes the daily activity consolidator when durable summary writes are available', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'concierge-runtime-consolidator-'));
+    const db = openConciergeStateDatabase(join(dir, 'state.db'));
+    await applyConciergeStateSchemaMigrations(db, db);
+    const intervals: Array<{ delayMs: number; callback: () => void }> = [];
+    const writes: Array<{ date: string; body: string }> = [];
+    const runtime = createConciergeRuntime({
+      config,
+      clients: clients({
+        secondBrain: {
+          ...clients().secondBrain,
+          writeDailySummary: async (input) => {
+            writes.push(input);
+            return { path: `/vault/${input.date}.md` };
+          },
+        },
+      }),
+      planner: async () => ({ kind: 'none' }),
+      stateDatabase: db,
+      scheduler: {
+        setInterval: (callback, delayMs) => {
+          intervals.push({ callback, delayMs });
+          return { id: intervals.length };
+        },
+        clearInterval: () => undefined,
+      },
+      now: () => new Date(2026, 4, 4, 3).getTime(),
+    });
+
+    await runtime.start();
+    expect(intervals.map((interval) => interval.delayMs)).toEqual([60_000, 30_000, 60 * 60 * 1_000]);
+
+    await expect(runtime.processConsolidationOnce()).resolves.toEqual(expect.objectContaining({
+      date: '2026-05-03',
+      summaryWritten: true,
+    }));
+    expect(writes).toHaveLength(1);
+
+    db.close();
+  });
 });
 
 function clients(overrides: Partial<ConciergeRuntimeClients> = {}): ConciergeRuntimeClients {

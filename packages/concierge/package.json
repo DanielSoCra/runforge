@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start:board": "tsx src/board/main.ts",
+    "start:consolidator": "tsx src/memory/consolidator-main.ts",
     "start:core": "tsx src/core/main.ts",
     "start:observer": "tsx src/observer/main.ts",
     "test": "vitest run",

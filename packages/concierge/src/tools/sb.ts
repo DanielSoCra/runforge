@@ -8,6 +8,7 @@ export interface SecondBrainClient {
   appendInbox(input: { slug: string; body: string }): Promise<unknown>;
   writeDecision(path: string): Promise<unknown>;
   writeClient(path: string): Promise<unknown>;
+  writeDailySummary?: (input: { date: string; body: string }) => Promise<unknown>;
 }
 
 export interface SecondBrainToolOptions {
