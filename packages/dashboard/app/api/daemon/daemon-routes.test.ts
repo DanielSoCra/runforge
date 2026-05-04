@@ -147,15 +147,15 @@ describe.each(inlineAuthRoutes)('POST /api/daemon/$name', ({ path, daemonPath })
   });
 });
 
-// ---------- remote-control/restart (uses requireAdmin — returns 403 for both unauth and non-admin) ----------
+// ---------- remote-control/restart ----------
 
 describe('POST /api/daemon/remote-control/restart', () => {
-  it('returns 403 when not authenticated', async () => {
+  it('returns 401 when not authenticated', async () => {
     const createClient = await getCreateClient();
     createClient.mockResolvedValueOnce(mockSupabaseUnauthenticated());
     const { POST } = await import('./remote-control/restart/route.js');
     const res = await POST();
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
