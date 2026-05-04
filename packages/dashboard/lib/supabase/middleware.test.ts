@@ -86,6 +86,15 @@ describe('updateSession middleware', () => {
     expect(response.headers.get('location')).toBeNull();
   });
 
+  it('allows unauthenticated API routes to return their own JSON auth errors', async () => {
+    mockGetUser.mockResolvedValue({ data: { user: null } });
+
+    const response = await updateSession(makeRequest('/api/daemon/status'));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('location')).toBeNull();
+  });
+
   it('allows authenticated users on public paths without redirect', async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: 'u1' } } });
 
