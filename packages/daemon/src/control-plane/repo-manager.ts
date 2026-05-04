@@ -136,23 +136,46 @@ export class RepoManager {
     return ok((data ?? []) as RepoRecord[]);
   }
 
-  private async resolveToken(connectionId: string | null): Promise<string | undefined> {
+  private async markCredentialStatus(
+    repoId: string,
+    status: 'ok' | 'error',
+    message: string | null,
+  ): Promise<void> {
+    const { error } = await (this.supabase.from('repos') as any)
+      .update({
+        credential_status: status,
+        credential_error: message,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', repoId);
+    if (error) {
+      console.warn(`[repo-manager] failed to update credential status for repo ${repoId}: ${error.message}`);
+    }
+  }
+
+  private async resolveToken(repoId: string, connectionId: string | null): Promise<string | undefined> {
     if (!connectionId) return process.env.GITHUB_TOKEN;
     const { data, error } = await (this.supabase.rpc as any)('decrypt_github_token', {
       p_connection_id: connectionId,
     });
     if (error) {
-      console.warn(`[repo-manager] decrypt_github_token RPC failed for connection ${connectionId}: ${error.message} — falling back to GITHUB_TOKEN`);
-      return process.env.GITHUB_TOKEN;
+      console.warn(`[repo-manager] decrypt_github_token RPC failed for connection ${connectionId}: ${error.message}`);
+      await this.markCredentialStatus(repoId, 'error', error.message);
+      return undefined;
     }
     if (!data) {
-      console.warn(`[repo-manager] decrypt_github_token returned null for connection ${connectionId} — falling back to GITHUB_TOKEN`);
+      const message = 'decrypt_github_token returned null';
+      console.warn(`[repo-manager] ${message} for connection ${connectionId}`);
+      await this.markCredentialStatus(repoId, 'error', message);
+      return undefined;
     }
-    return (data as string | null) ?? process.env.GITHUB_TOKEN;
+    await this.markCredentialStatus(repoId, 'ok', null);
+    return data as string;
   }
 
   private async startPoller(repo: RepoRecord): Promise<void> {
-    const token = await this.resolveToken(repo.connection_id);
+    const token = await this.resolveToken(repo.id, repo.connection_id);
+    if (repo.connection_id && !token) return;
     const octokit = new Octokit({ auth: token });
     const detector = createWorkDetector(octokit, repo.owner, repo.name);
     const intervalMs = repo.poll_interval_ms ?? this.defaultPollIntervalMs;
@@ -196,6 +219,6 @@ export class RepoManager {
   async resolveTokenForRepo(repoId: string): Promise<string | undefined> {
     const entry = this.pollers.get(repoId);
     if (!entry) return process.env.GITHUB_TOKEN;
-    return this.resolveToken(entry.connectionId);
+    return this.resolveToken(repoId, entry.connectionId);
   }
 }

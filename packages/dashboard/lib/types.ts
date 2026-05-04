@@ -337,6 +337,8 @@ export type Database = {
           concurrency_limit: number
           connection_id: string | null
           created_at: string
+          credential_error: string | null
+          credential_status: string
           deleted_at: string | null
           enabled: boolean
           github_status: string
@@ -354,6 +356,8 @@ export type Database = {
           concurrency_limit?: number
           connection_id?: string | null
           created_at?: string
+          credential_error?: string | null
+          credential_status?: string
           deleted_at?: string | null
           enabled?: boolean
           github_status?: string
@@ -371,6 +375,8 @@ export type Database = {
           concurrency_limit?: number
           connection_id?: string | null
           created_at?: string
+          credential_error?: string | null
+          credential_status?: string
           deleted_at?: string | null
           enabled?: boolean
           github_status?: string

@@ -85,6 +85,15 @@ export default async function ReposPage() {
                       <AlertTriangle className="h-3 w-3" />not found on GitHub
                     </Badge>
                   )}
+                  {repo.credential_status === 'error' && (
+                    <Badge
+                      variant="destructive"
+                      className="gap-1"
+                      title={repo.credential_error ?? 'Credential decryption failed'}
+                    >
+                      <AlertTriangle className="h-3 w-3" />credential error
+                    </Badge>
+                  )}
                   {!conn && !repo.connection_id && (
                     <span className="text-xs text-muted-foreground">manual</span>
                   )}

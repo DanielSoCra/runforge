@@ -264,21 +264,28 @@ describe('RepoManager', () => {
     mgr.stop();
   });
 
-  it('resolveToken logs warning and falls back to GITHUB_TOKEN when RPC fails', async () => {
+  it('marks credential error and skips poller when decrypt RPC fails (#445)', async () => {
     const onPoll = vi.fn();
     const originalEnv = process.env.GITHUB_TOKEN;
     process.env.GITHUB_TOKEN = 'fallback-token';
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const updateMock = vi.fn().mockReturnValue({
+      eq: vi.fn().mockResolvedValue({ error: null }),
+    });
 
     try {
       const supabase = {
-        from: vi.fn().mockReturnValue({
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          is: vi.fn().mockResolvedValue({
-            data: [{ id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: 'conn-1' }],
-            error: null,
-          }),
+        from: vi.fn().mockImplementation((table: string) => {
+          if (table !== 'repos') throw new Error(`unexpected table ${table}`);
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            is: vi.fn().mockResolvedValue({
+              data: [{ id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: 'conn-1' }],
+              error: null,
+            }),
+            update: updateMock,
+          };
         }),
         rpc: vi.fn().mockResolvedValue({ data: null, error: { message: 'RPC failed: missing row' } }),
       } as any;
@@ -286,12 +293,15 @@ describe('RepoManager', () => {
       const mgr = new RepoManager(supabase, 60_000, onPoll);
       await mgr.initialize();
 
-      // The poller should still be created (using fallback token)
-      expect(mgr.activePollerCount()).toBe(1);
-      // A warning should have been logged
+      expect(mgr.activePollerCount()).toBe(0);
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('decrypt_github_token RPC failed for connection conn-1'),
       );
+      expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
+        credential_status: 'error',
+        credential_error: 'RPC failed: missing row',
+        updated_at: expect.any(String),
+      }));
 
       mgr.stop();
     } finally {
@@ -300,20 +310,27 @@ describe('RepoManager', () => {
     }
   });
 
-  it('resolveToken logs warning when RPC returns null data without error', async () => {
+  it('marks credential error and skips poller when decrypt RPC returns null data (#445)', async () => {
     const onPoll = vi.fn();
     const originalEnv = process.env.GITHUB_TOKEN;
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const updateMock = vi.fn().mockReturnValue({
+      eq: vi.fn().mockResolvedValue({ error: null }),
+    });
 
     try {
       const supabase = {
-        from: vi.fn().mockReturnValue({
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          is: vi.fn().mockResolvedValue({
-            data: [{ id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: 'conn-2' }],
-            error: null,
-          }),
+        from: vi.fn().mockImplementation((table: string) => {
+          if (table !== 'repos') throw new Error(`unexpected table ${table}`);
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            is: vi.fn().mockResolvedValue({
+              data: [{ id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: 'conn-2' }],
+              error: null,
+            }),
+            update: updateMock,
+          };
         }),
         rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
       } as any;
@@ -321,10 +338,15 @@ describe('RepoManager', () => {
       const mgr = new RepoManager(supabase, 60_000, onPoll);
       await mgr.initialize();
 
-      expect(mgr.activePollerCount()).toBe(1);
+      expect(mgr.activePollerCount()).toBe(0);
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('decrypt_github_token returned null for connection conn-2'),
       );
+      expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
+        credential_status: 'error',
+        credential_error: 'decrypt_github_token returned null',
+        updated_at: expect.any(String),
+      }));
 
       mgr.stop();
     } finally {
@@ -337,19 +359,26 @@ describe('RepoManager', () => {
     const onPoll = vi.fn();
     const originalEnv = process.env.GITHUB_TOKEN;
     process.env.GITHUB_TOKEN = 'global-fallback';
+    const updateMock = vi.fn().mockReturnValue({
+      eq: vi.fn().mockResolvedValue({ error: null }),
+    });
 
     try {
       const supabase = {
-        from: vi.fn().mockReturnValue({
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          is: vi.fn().mockResolvedValue({
-            data: [
-              { id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: 'conn-abc' },
-              { id: 'r2', owner: 'acme', name: 'api', poll_interval_ms: null, connection_id: null },
-            ],
-            error: null,
-          }),
+        from: vi.fn().mockImplementation((table: string) => {
+          if (table !== 'repos') throw new Error(`unexpected table ${table}`);
+          return {
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            is: vi.fn().mockResolvedValue({
+              data: [
+                { id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: 'conn-abc' },
+                { id: 'r2', owner: 'acme', name: 'api', poll_interval_ms: null, connection_id: null },
+              ],
+              error: null,
+            }),
+            update: updateMock,
+          };
         }),
         rpc: vi.fn().mockResolvedValue({ data: 'decrypted-oauth-token', error: null }),
       } as any;
@@ -361,6 +390,10 @@ describe('RepoManager', () => {
       const token1 = await mgr.resolveTokenForRepo('r1');
       expect(token1).toBe('decrypted-oauth-token');
       expect(supabase.rpc).toHaveBeenCalledWith('decrypt_github_token', { p_connection_id: 'conn-abc' });
+      expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
+        credential_status: 'ok',
+        credential_error: null,
+      }));
 
       // Repo without connection_id should fall back to GITHUB_TOKEN
       supabase.rpc.mockClear();
