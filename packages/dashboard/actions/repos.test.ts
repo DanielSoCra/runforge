@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 
 // Mock Supabase client
 vi.mock('@/lib/supabase/server', () => ({
@@ -26,17 +26,43 @@ vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 vi.mock('next/navigation', () => ({ redirect: vi.fn() }));
 
 describe('repo actions', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    const { createClient } = await import('@/lib/supabase/server');
+    const client = await (createClient as any)();
+    const defaultTable = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
+      insert: vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnValue({
+          single: vi.fn().mockResolvedValue({ error: null, data: { id: 'test-id' } }),
+        }),
+      }),
+      update: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ error: null }),
+      }),
+    };
+    client.from.mockReset();
+    client.from.mockReturnValue(defaultTable);
+  });
+
+  function validRepoForm(overrides: Record<string, string> = {}) {
+    const formData = new FormData();
+    formData.append('owner', overrides.owner ?? 'acme');
+    formData.append('name', overrides.name ?? 'web');
+    formData.append('staging_branch', overrides.staging_branch ?? 'staging');
+    formData.append('production_branch', overrides.production_branch ?? 'main');
+    formData.append('budget_limit', overrides.budget_limit ?? '10');
+    formData.append('concurrency_limit', overrides.concurrency_limit ?? '1');
+    return formData;
+  }
+
   it('createRepo inserts with enabled=false', async () => {
     const { createClient } = await import('@/lib/supabase/server');
     const { createRepo } = await import('./repos');
 
-    const formData = new FormData();
-    formData.append('owner', 'acme');
-    formData.append('name', 'web');
-    formData.append('staging_branch', 'staging');
-    formData.append('production_branch', 'main');
-    formData.append('budget_limit', '10');
-    formData.append('concurrency_limit', '1');
+    const formData = validRepoForm();
 
     await createRepo(formData);
 
@@ -44,6 +70,46 @@ describe('repo actions', () => {
     expect(client.from().insert).toHaveBeenCalledWith(
       expect.objectContaining({ owner: 'acme', name: 'web', enabled: false })
     );
+  });
+
+  it('createRepo rejects non-numeric budget_limit before inserting', async () => {
+    const { createClient } = await import('@/lib/supabase/server');
+    const { createRepo } = await import('./repos');
+
+    const client = await (createClient as any)();
+    const insertMock = vi.fn();
+    client.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
+    }).mockReturnValueOnce({
+      insert: insertMock,
+    });
+
+    await expect(createRepo(validRepoForm({ budget_limit: 'abc' }))).rejects.toThrow(
+      'Budget limit must be a valid non-negative number'
+    );
+    expect(insertMock).not.toHaveBeenCalled();
+  });
+
+  it('createRepo rejects non-numeric concurrency_limit before inserting', async () => {
+    const { createClient } = await import('@/lib/supabase/server');
+    const { createRepo } = await import('./repos');
+
+    const client = await (createClient as any)();
+    const insertMock = vi.fn();
+    client.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
+    }).mockReturnValueOnce({
+      insert: insertMock,
+    });
+
+    await expect(createRepo(validRepoForm({ concurrency_limit: 'abc' }))).rejects.toThrow(
+      'Concurrency limit must be a positive integer'
+    );
+    expect(insertMock).not.toHaveBeenCalled();
   });
 
   it('enableRepo rejects when credentials are missing', async () => {
@@ -160,6 +226,46 @@ describe('repo actions', () => {
       })
     );
     expect(eqMock).toHaveBeenCalledWith('id', 'repo-1');
+  });
+
+  it('updateRepo rejects non-numeric budget_limit before updating', async () => {
+    const { createClient } = await import('@/lib/supabase/server');
+    const { updateRepo } = await import('./repos');
+
+    const client = await (createClient as any)();
+    const updateMock = vi.fn();
+    client.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
+    }).mockReturnValueOnce({
+      update: updateMock,
+    });
+
+    await expect(updateRepo('repo-1', validRepoForm({ budget_limit: 'abc' }))).rejects.toThrow(
+      'Budget limit must be a valid non-negative number'
+    );
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it('updateRepo rejects non-numeric concurrency_limit before updating', async () => {
+    const { createClient } = await import('@/lib/supabase/server');
+    const { updateRepo } = await import('./repos');
+
+    const client = await (createClient as any)();
+    const updateMock = vi.fn();
+    client.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
+    }).mockReturnValueOnce({
+      update: updateMock,
+    });
+
+    await expect(updateRepo('repo-1', validRepoForm({ concurrency_limit: 'abc' }))).rejects.toThrow(
+      'Concurrency limit must be a positive integer'
+    );
+    expect(updateMock).not.toHaveBeenCalled();
   });
 
   it('updateRepo defaults branches when not provided', async () => {

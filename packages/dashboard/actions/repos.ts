@@ -6,6 +6,28 @@ import { requireAdmin } from '@/lib/auth';
 
 const SAFE_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
+function parseBudgetLimit(raw: FormDataEntryValue | null) {
+  if (raw === null || (typeof raw === 'string' && raw.trim() === '')) return null;
+  if (typeof raw !== 'string') throw new Error('Budget limit must be a valid non-negative number');
+
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error('Budget limit must be a valid non-negative number');
+  }
+  return value;
+}
+
+function parseConcurrencyLimit(raw: FormDataEntryValue | null) {
+  if (raw === null || (typeof raw === 'string' && raw.trim() === '')) return undefined;
+  if (typeof raw !== 'string') throw new Error('Concurrency limit must be a positive integer');
+
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error('Concurrency limit must be a positive integer');
+  }
+  return value;
+}
+
 function notifyDaemonReload() {
   fetch(`${process.env.DAEMON_URL}/repos/reload`, {
     method: 'POST',
@@ -34,11 +56,8 @@ export async function createRepo(formData: FormData) {
     throw new Error('Name must contain only alphanumeric characters, dots, underscores, and hyphens');
   }
 
-  const budgetRaw = formData.get('budget_limit');
-  const budget_limit = budgetRaw === '' || budgetRaw === null ? null : Number(budgetRaw);
-
-  const concurrencyRaw = formData.get('concurrency_limit');
-  const concurrency_limit = concurrencyRaw === '' || concurrencyRaw === null ? undefined : Number(concurrencyRaw);
+  const budget_limit = parseBudgetLimit(formData.get('budget_limit'));
+  const concurrency_limit = parseConcurrencyLimit(formData.get('concurrency_limit'));
 
   const { error, data } = await supabase.from('repos').insert({
     owner: owner.trim(),
@@ -62,11 +81,8 @@ export async function updateRepo(id: string, formData: FormData) {
   const supabase = await createClient();
   await requireAdmin(supabase);
 
-  const budgetRaw = formData.get('budget_limit');
-  const budget_limit = budgetRaw === '' || budgetRaw === null ? null : Number(budgetRaw);
-
-  const concurrencyRaw = formData.get('concurrency_limit');
-  const concurrency_limit = concurrencyRaw === '' || concurrencyRaw === null ? undefined : Number(concurrencyRaw);
+  const budget_limit = parseBudgetLimit(formData.get('budget_limit'));
+  const concurrency_limit = parseConcurrencyLimit(formData.get('concurrency_limit'));
 
   const { error } = await supabase.from('repos').update({
     staging_branch: (formData.get('staging_branch') as string) || 'staging',
