@@ -8,6 +8,11 @@ import {
 import { createConciergeStateStores } from '../memory/state-stores.js';
 import { createDaemonStatusHttpClient, createDaemonStatusPoller } from './daemon-poll.js';
 import {
+  createGitRepoActivityClient,
+  createRepoActivityPoller,
+  type RepoActivityExecFile,
+} from './repo-activity.js';
+import {
   createConciergeObserverRuntime,
   type ConciergeObserverRuntime,
   type ObserverRuntimeScheduler,
@@ -22,6 +27,8 @@ export interface StartConciergeObserverProcessOptions {
   fetch?: typeof fetch;
   scheduler?: ObserverRuntimeScheduler;
   pollIntervalMs?: number;
+  repoPollIntervalMs?: number;
+  execFile?: RepoActivityExecFile;
   onSignal?: (signal: ProcessSignal, handler: () => void | Promise<void>) => void;
   logger?: Pick<Console, 'log' | 'error'>;
 }
@@ -43,8 +50,16 @@ export async function startConciergeObserverProcess(
         fetch: options.fetch,
       }),
     }),
+    repoActivityPoller: createRepoActivityPoller({
+      events: stores.events,
+      watchedRepos: config.watchedRepos,
+      client: createGitRepoActivityClient({
+        execFile: options.execFile,
+      }),
+    }),
     scheduler: options.scheduler,
     pollIntervalMs: options.pollIntervalMs,
+    repoPollIntervalMs: options.repoPollIntervalMs,
     logger,
   });
 

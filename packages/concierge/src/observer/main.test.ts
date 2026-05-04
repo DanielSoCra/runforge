@@ -43,10 +43,21 @@ describe('concierge observer process entrypoint', () => {
           headers: { 'content-type': 'application/json' },
         });
       },
+      execFile: async (file, args) => {
+        expect(file).toBe('git');
+        expect(args).toEqual([
+          '-C',
+          '/repo',
+          'for-each-ref',
+          '--format=%(refname:short)%00%(objectname)',
+          'refs/heads',
+        ]);
+        return { stdout: 'dev\u0000aaa111\n' };
+      },
       scheduler: {
         setInterval: (callback, delayMs) => {
           intervals.push({ callback, delayMs });
-          return { id: 'interval-1' };
+          return { id: `interval-${intervals.length}` };
         },
         clearInterval: (handle) => cleared.push(handle),
       },
@@ -56,11 +67,14 @@ describe('concierge observer process entrypoint', () => {
       logger: { log: vi.fn(), error: vi.fn() },
     });
 
-    expect(intervals).toEqual([{ callback: expect.any(Function), delayMs: 30_000 }]);
+    expect(intervals).toEqual([
+      { callback: expect.any(Function), delayMs: 30_000 },
+      { callback: expect.any(Function), delayMs: 30_000 },
+    ]);
     expect(Object.keys(signals).sort()).toEqual(['SIGINT', 'SIGTERM']);
 
     await signals.SIGTERM?.();
-    expect(cleared).toEqual([{ id: 'interval-1' }]);
+    expect(cleared).toEqual([{ id: 'interval-2' }, { id: 'interval-1' }]);
 
     const reopened = openConciergeStateDatabase(dbPath);
     expect(createConciergeStateStores(reopened).events.list()).toEqual([
