@@ -12,6 +12,7 @@ export * from './memory/sqlite.js';
 export * from './memory/vault.js';
 export * from './observer/filters.js';
 export * from './slack/adapter.js';
+export * from './slack/http-receiver.js';
 export * from './tools/ac.js';
 export * from './tools/args.js';
 export * from './tools/cal.js';
