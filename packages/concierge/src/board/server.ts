@@ -6,10 +6,21 @@ export interface BoardCardActionClient {
   invoke(request: BoardCardActionRequest): Promise<BoardCardActionResult>;
 }
 
+export interface BoardStreamScheduler {
+  setInterval(callback: () => void, delayMs?: number): unknown;
+  clearInterval(handle: unknown): void;
+}
+
+export interface BoardStreamOptions {
+  pollIntervalMs?: number;
+  scheduler?: BoardStreamScheduler;
+}
+
 export interface ConciergeBoardAppOptions {
   cards: ConciergeCardStore;
   events: ConciergeEventStore;
   actions: BoardCardActionClient;
+  stream?: BoardStreamOptions;
 }
 
 export interface CoreCardActionClientOptions {
@@ -18,6 +29,7 @@ export interface CoreCardActionClientOptions {
 }
 
 const DEFAULT_CORE_BASE_URL = 'http://127.0.0.1:3848';
+const DEFAULT_STREAM_POLL_INTERVAL_MS = 250;
 
 export function createConciergeBoardApp(options: ConciergeBoardAppOptions): Hono {
   const app = new Hono();
@@ -31,12 +43,7 @@ export function createConciergeBoardApp(options: ConciergeBoardAppOptions): Hono
   });
 
   app.get('/stream', () => {
-    return new Response(': connected\n\n', {
-      headers: {
-        'Cache-Control': 'no-cache',
-        'Content-Type': 'text/event-stream',
-      },
-    });
+    return createBoardSseResponse(options.cards, options.stream);
   });
 
   app.post('/cards/:id/:action', async (context) => {
@@ -88,12 +95,118 @@ interface BoardModel {
   inFlight: ConciergeCardRecord[];
 }
 
+type BoardSection = 'needs_you' | 'in_flight';
+
+interface CardSnapshot {
+  card: ConciergeCardRecord;
+  fingerprint: string;
+  section: BoardSection;
+}
+
+type BoardSseEvent =
+  | { event: 'card_created' | 'card_updated'; data: { id: string; section: BoardSection; html: string } }
+  | { event: 'card_removed'; data: { id: string } };
+
 function readBoard(cards: ConciergeCardStore): BoardModel {
   const visible = cards.list().filter((card) => !['dismissed', 'done', 'snoozed'].includes(card.status));
   return {
     needsYou: visible.filter((card) => ['needs_decision', 'needs_you', 'pending'].includes(card.status)),
     inFlight: visible.filter((card) => ['in_flight', 'running', 'active'].includes(card.status)),
   };
+}
+
+function createBoardSseResponse(
+  cards: ConciergeCardStore,
+  options: BoardStreamOptions = {},
+): Response {
+  const encoder = new TextEncoder();
+  const scheduler = options.scheduler ?? defaultStreamScheduler;
+  const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_STREAM_POLL_INTERVAL_MS;
+  let previous = readCardSnapshots(cards);
+  let interval: unknown;
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller): void {
+      controller.enqueue(encoder.encode(': connected\n\n'));
+      interval = scheduler.setInterval(() => {
+        const current = readCardSnapshots(cards);
+        for (const event of diffCardSnapshots(previous, current)) {
+          controller.enqueue(encoder.encode(formatSse(event)));
+        }
+        previous = current;
+      }, pollIntervalMs);
+    },
+
+    cancel(): void {
+      if (interval !== undefined) scheduler.clearInterval(interval);
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Content-Type': 'text/event-stream',
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}
+
+function readCardSnapshots(cards: ConciergeCardStore): Map<string, CardSnapshot> {
+  const snapshots = new Map<string, CardSnapshot>();
+  for (const card of cards.list()) {
+    const section = sectionForCard(card);
+    if (!section) continue;
+    snapshots.set(card.id, {
+      card,
+      fingerprint: `${card.status}:${card.title}:${card.body}:${card.updatedAt}`,
+      section,
+    });
+  }
+  return snapshots;
+}
+
+function diffCardSnapshots(
+  previous: Map<string, CardSnapshot>,
+  current: Map<string, CardSnapshot>,
+): BoardSseEvent[] {
+  const events: BoardSseEvent[] = [];
+  for (const [id, snapshot] of current) {
+    const before = previous.get(id);
+    if (!before) {
+      events.push(cardChangedEvent('card_created', snapshot));
+    } else if (before.fingerprint !== snapshot.fingerprint || before.section !== snapshot.section) {
+      events.push(cardChangedEvent('card_updated', snapshot));
+    }
+  }
+  for (const id of previous.keys()) {
+    if (!current.has(id)) events.push({ event: 'card_removed', data: { id } });
+  }
+  return events;
+}
+
+function cardChangedEvent(
+  event: 'card_created' | 'card_updated',
+  snapshot: CardSnapshot,
+): BoardSseEvent {
+  return {
+    event,
+    data: {
+      id: snapshot.card.id,
+      section: snapshot.section,
+      html: renderCard(snapshot.card),
+    },
+  };
+}
+
+function sectionForCard(card: ConciergeCardRecord): BoardSection | undefined {
+  if (['needs_decision', 'needs_you', 'pending'].includes(card.status)) return 'needs_you';
+  if (['in_flight', 'running', 'active'].includes(card.status)) return 'in_flight';
+  return undefined;
+}
+
+function formatSse(event: BoardSseEvent): string {
+  return `event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`;
 }
 
 function renderPage(model: BoardModel): string {
@@ -167,6 +280,11 @@ function responseError(body: string, status: number): string {
   }
   return body || `core card action failed with HTTP ${status}`;
 }
+
+const defaultStreamScheduler: BoardStreamScheduler = {
+  setInterval: (callback, delayMs) => setInterval(callback, delayMs),
+  clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
+};
 
 const BOARD_CSS = `
 :root {
