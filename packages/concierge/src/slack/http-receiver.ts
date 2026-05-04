@@ -38,6 +38,13 @@ export async function handleSlackHttpRequest(
   options: HandleSlackHttpRequestOptions,
 ): Promise<SlackHttpResponse> {
   const { request, handlers, signingSecret } = options;
+  const boardAction = parseBoardCardActionPath(request.path);
+  if (boardAction) {
+    if (request.method !== 'POST') return jsonResponse(405, { error: 'method not allowed' });
+    if (!handlers.boardCardAction) return jsonResponse(503, { error: 'board card actions unavailable' });
+    return boardCardActionResponse(await handlers.boardCardAction(boardAction));
+  }
+
   if (request.method !== 'POST') {
     return jsonResponse(405, { error: 'method not allowed' });
   }
@@ -91,7 +98,7 @@ export function createSlackHttpReceiver(options: SlackHttpReceiverOptions): Slac
       server = createHttpServer(async (request, response) => {
         const body = await readRequestBody(request);
         const requestPath = new URL(request.url ?? '/', `http://${host}`).pathname;
-        const result = requestPath === path
+        const result = requestPath === path || isBoardCardActionPath(requestPath)
           ? await handleSlackHttpRequest({
             request: {
               method: request.method ?? 'GET',
@@ -160,6 +167,19 @@ function readHeader(headers: Record<string, string | string[] | undefined>, name
   return value ?? '';
 }
 
+function isBoardCardActionPath(path: string): boolean {
+  return parseBoardCardActionPath(path) !== undefined;
+}
+
+function parseBoardCardActionPath(path: string): { cardId: string; action: string } | undefined {
+  const match = /^\/board\/cards\/([^/]+)\/([^/]+)$/.exec(path);
+  if (!match) return undefined;
+  return {
+    cardId: decodeURIComponent(match[1] ?? ''),
+    action: decodeURIComponent(match[2] ?? ''),
+  };
+}
+
 async function readRequestBody(request: NodeJS.ReadableStream): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
@@ -174,4 +194,9 @@ function jsonResponse(status: number, body: Record<string, unknown>): SlackHttpR
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   };
+}
+
+function boardCardActionResponse(result: Awaited<ReturnType<NonNullable<SlackRuntimeHandlers['boardCardAction']>>>): SlackHttpResponse {
+  if (result.status === 'completed') return jsonResponse(200, result);
+  return jsonResponse(422, result);
 }

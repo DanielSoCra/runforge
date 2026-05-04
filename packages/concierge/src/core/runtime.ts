@@ -19,6 +19,12 @@ import { createSecondBrainToolHandlers, type SecondBrainClient } from '../tools/
 import { createSlackToolHandlers, type SlackClient } from '../tools/slack.js';
 import { createWebToolHandlers } from '../tools/web.js';
 import { createAuditLog } from './audit-log.js';
+import {
+  createBoardCardActionService,
+  type BoardCardActionRequest,
+  type BoardCardActionResult,
+  type BoardCardActionService,
+} from './board-actions.js';
 import { createConciergeCore, type ConciergeCore, type ConciergePlanner } from './concierge.js';
 import type { ConciergeConfig } from './config.js';
 
@@ -48,6 +54,7 @@ export interface ConciergeRuntimeClients {
 export interface SlackRuntimeHandlers {
   message(message: NormalizedSlackMessage): Promise<void>;
   confirmation(action: ConfirmationAction): Promise<void>;
+  boardCardAction?(action: BoardCardActionRequest): Promise<BoardCardActionResult>;
 }
 
 export interface SlackRuntimeReceiver {
@@ -83,6 +90,7 @@ export interface ConciergeRuntime {
   stop(): Promise<void>;
   handleSlackMessage(message: NormalizedSlackMessage): Promise<void>;
   handleConfirmationAction(action: ConfirmationAction): Promise<void>;
+  handleBoardCardAction(action: BoardCardActionRequest): Promise<BoardCardActionResult>;
   expireConfirmations(): number;
 }
 
@@ -134,6 +142,9 @@ export function createConciergeRuntime(options: ConciergeRuntimeOptions): Concie
     auditLog,
     conversations: state?.conversations,
   });
+  const boardActions: BoardCardActionService | undefined = state
+    ? createBoardCardActionService({ cards: state.cards, router: core.router })
+    : undefined;
   const slackConversationIds = new Map<string, string>();
   let intervalHandle: unknown;
   let started = false;
@@ -154,6 +165,7 @@ export function createConciergeRuntime(options: ConciergeRuntimeOptions): Concie
         await options.slackReceiver.start({
           message: runtime.handleSlackMessage,
           confirmation: runtime.handleConfirmationAction,
+          boardCardAction: runtime.handleBoardCardAction,
         });
       }
       intervalHandle = scheduler.setInterval(runtime.expireConfirmations, CONFIRMATION_EXPIRY_INTERVAL_MS);
@@ -192,6 +204,13 @@ export function createConciergeRuntime(options: ConciergeRuntimeOptions): Concie
         channel: options.config.operatorSlackUserId,
         text: formatConfirmationResult(action, confirmation, result.status),
       });
+    },
+
+    async handleBoardCardAction(action): Promise<BoardCardActionResult> {
+      if (!boardActions) {
+        return { status: 'errored', error: 'concierge state is unavailable for board actions' };
+      }
+      return boardActions.invoke(action);
     },
 
     expireConfirmations(): number {

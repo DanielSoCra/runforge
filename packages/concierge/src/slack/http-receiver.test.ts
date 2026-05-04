@@ -113,6 +113,41 @@ describe('Slack HTTP receiver', () => {
       action: { confirmationId: 'conf-1', decision: 'approve' },
     }]);
   });
+
+  it('routes local board card actions without requiring a Slack signature', async () => {
+    const calls: unknown[] = [];
+    const response = await handleSlackHttpRequest({
+      request: {
+        method: 'POST',
+        path: '/board/cards/card-1/done',
+        headers: {},
+        body: '',
+      },
+      handlers: handlers(calls),
+      signingSecret,
+      now: () => timestamp,
+    });
+
+    expect(response).toEqual({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        status: 'completed',
+        card: {
+          id: 'card-1',
+          status: 'done',
+          title: 'Done',
+          body: 'Done',
+          createdAt: 1_000,
+          updatedAt: 2_000,
+        },
+      }),
+    });
+    expect(calls).toEqual([{
+      kind: 'boardCardAction',
+      action: { cardId: 'card-1', action: 'done' },
+    }]);
+  });
 });
 
 function signedRequest(
@@ -139,6 +174,20 @@ function handlers(calls: unknown[]): SlackRuntimeHandlers {
     },
     confirmation: async (action) => {
       calls.push({ kind: 'confirmation', action });
+    },
+    boardCardAction: async (action) => {
+      calls.push({ kind: 'boardCardAction', action });
+      return {
+        status: 'completed',
+        card: {
+          id: action.cardId,
+          status: action.action,
+          title: 'Done',
+          body: 'Done',
+          createdAt: 1_000,
+          updatedAt: 2_000,
+        },
+      };
     },
   };
 }

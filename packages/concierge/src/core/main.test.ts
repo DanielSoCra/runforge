@@ -120,6 +120,7 @@ function fakeRuntime(): ConciergeRuntime {
     stop: vi.fn(async () => undefined),
     handleSlackMessage: vi.fn(async () => undefined),
     handleConfirmationAction: vi.fn(async () => undefined),
+    handleBoardCardAction: vi.fn(async () => ({ status: 'errored' as const, error: 'not implemented' })),
     expireConfirmations: vi.fn(() => 0),
   };
 }
