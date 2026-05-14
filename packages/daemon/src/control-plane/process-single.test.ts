@@ -1,5 +1,87 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { processSingleIssue, resolveClaimAction, inferWorkType } from './process-single.js';
+
+const {
+  mockIssuesGet,
+  mockLoadConfig,
+  mockPreloadGovernanceContext,
+  mockStateInitialize,
+  mockProvisionLabels,
+} = vi.hoisted(() => ({
+  mockIssuesGet: vi.fn(),
+  mockLoadConfig: vi.fn(),
+  mockPreloadGovernanceContext: vi.fn(),
+  mockStateInitialize: vi.fn(),
+  mockProvisionLabels: vi.fn(),
+}));
+
+vi.mock('@octokit/rest', () => ({
+  Octokit: class {
+    issues = {
+      get: mockIssuesGet,
+    };
+  },
+}));
+
+vi.mock('../config.js', () => ({
+  loadConfig: (...args: unknown[]) => mockLoadConfig(...args),
+}));
+
+vi.mock('../session-runtime/governance-context.js', () => ({
+  preloadGovernanceContext: (...args: unknown[]) => mockPreloadGovernanceContext(...args),
+}));
+
+vi.mock('../session-runtime/cost.js', () => ({
+  CostTracker: class {},
+}));
+
+vi.mock('../session-runtime/runtime.js', () => ({
+  SessionRuntime: class {},
+}));
+
+vi.mock('../implementation/coordinator.js', () => ({
+  ImplementationCoordinator: class {},
+}));
+
+vi.mock('./state.js', () => ({
+  StateManager: class {
+    initialize = mockStateInitialize;
+    saveRunState = vi.fn().mockResolvedValue(undefined);
+  },
+}));
+
+vi.mock('./phase-labels.js', () => ({
+  createPhaseLabelMirror: () => ({
+    provisionLabels: mockProvisionLabels,
+  }),
+}));
+
+const originalGithubToken = process.env.GITHUB_TOKEN;
+
+function makeConfig() {
+  return {
+    dailyBudget: 10,
+    perRunBudget: 5,
+    repo: { owner: 'owner', name: 'repo' },
+    webhooks: [],
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mockLoadConfig.mockResolvedValue({ ok: false, error: new Error('config not found') });
+  mockPreloadGovernanceContext.mockResolvedValue(undefined);
+  mockStateInitialize.mockResolvedValue(undefined);
+  mockProvisionLabels.mockResolvedValue(undefined);
+});
+
+afterEach(() => {
+  if (originalGithubToken === undefined) {
+    delete process.env.GITHUB_TOKEN;
+  } else {
+    process.env.GITHUB_TOKEN = originalGithubToken;
+  }
+});
 
 describe('resolveClaimAction', () => {
   it('returns bug-fix for bug variant', () => {
@@ -121,5 +203,23 @@ describe('processSingleIssue', () => {
   it('returns error for missing config', async () => {
     const result = await processSingleIssue(999, '/nonexistent/config.json');
     expect(result.ok).toBe(false);
+  });
+
+  it('returns error when GitHub issue fetch fails (#568)', async () => {
+    process.env.GITHUB_TOKEN = 'test-token';
+    mockLoadConfig.mockResolvedValue({ ok: true, value: makeConfig() });
+    mockIssuesGet.mockRejectedValue(new Error('rate limited'));
+
+    const result = await processSingleIssue(568, 'config.json');
+
+    expect(mockIssuesGet).toHaveBeenCalledWith({
+      owner: 'owner',
+      repo: 'repo',
+      issue_number: 568,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.message).toBe('Failed to fetch issue #568: rate limited');
+    }
   });
 });
