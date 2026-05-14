@@ -2,8 +2,16 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/auth';
+import { daemonFetch } from '@/lib/daemon-fetch';
 
 const SAFE_PATTERN = /^[a-zA-Z0-9._-]+$/;
+
+function notifyDaemonReload() {
+  daemonFetch('/repos/reload', {
+    method: 'POST',
+    signal: AbortSignal.timeout(3000),
+  }).catch(() => {});
+}
 
 export async function removeConnection(connectionId: string) {
   const supabase = await createClient();
@@ -39,11 +47,7 @@ export async function removeConnection(connectionId: string) {
   }
 
   // Notify daemon to drop stale polling for disconnected repos
-  fetch(`${process.env.DAEMON_URL}/repos/reload`, {
-    method: 'POST',
-    headers: { 'X-Requested-By': 'dashboard' },
-    signal: AbortSignal.timeout(3000),
-  }).catch(() => {});
+  notifyDaemonReload();
 
   revalidatePath('/settings');
   revalidatePath('/repos');
@@ -92,11 +96,7 @@ export async function importRepos(
   }
 
   // Notify daemon best-effort
-  fetch(`${process.env.DAEMON_URL}/repos/reload`, {
-    method: 'POST',
-    headers: { 'X-Requested-By': 'dashboard' },
-    signal: AbortSignal.timeout(3000),
-  }).catch(() => {});
+  notifyDaemonReload();
 
   revalidatePath('/repos');
 }

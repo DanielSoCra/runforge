@@ -3,6 +3,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { requireAdmin } from '@/lib/auth';
+import { daemonFetch } from '@/lib/daemon-fetch';
 
 const SAFE_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
@@ -29,9 +30,8 @@ function parseConcurrencyLimit(raw: FormDataEntryValue | null) {
 }
 
 function notifyDaemonReload() {
-  fetch(`${process.env.DAEMON_URL}/repos/reload`, {
+  daemonFetch('/repos/reload', {
     method: 'POST',
-    headers: { 'X-Requested-By': 'dashboard' },
     signal: AbortSignal.timeout(3000),
   }).catch(() => {});
 }

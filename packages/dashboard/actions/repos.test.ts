@@ -1,4 +1,6 @@
-import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+
+const originalFetch = globalThis.fetch;
 
 // Mock Supabase client
 vi.mock('@/lib/supabase/server', () => ({
@@ -45,6 +47,11 @@ describe('repo actions', () => {
     };
     client.from.mockReset();
     client.from.mockReturnValue(defaultTable);
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    delete process.env.DAEMON_URL;
   });
 
   function validRepoForm(overrides: Record<string, string> = {}) {
@@ -221,6 +228,41 @@ describe('repo actions', () => {
     );
   });
 
+  it('enableRepo reloads daemon through normalized DAEMON_URL (#547)', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok'));
+    process.env.DAEMON_URL = 'http://localhost:7532/';
+    const { createClient } = await import('@/lib/supabase/server');
+    const { enableRepo } = await import('./repos');
+
+    const client = await (createClient as any)();
+    client.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
+    }).mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({
+          data: [
+            { key_type: 'source-control' },
+            { key_type: 'model-provider' },
+          ],
+          error: null,
+        }),
+      }),
+    }).mockReturnValueOnce({
+      update: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ error: null }),
+      }),
+    });
+
+    await enableRepo('repo-1');
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:7532/repos/reload',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
   it('enableRepo throws when Supabase update fails (#578)', async () => {
     const { createClient } = await import('@/lib/supabase/server');
     const { enableRepo } = await import('./repos');
@@ -381,6 +423,31 @@ describe('repo actions', () => {
       expect.objectContaining({ enabled: false, updated_at: expect.any(String) })
     );
     expect(eqMock).toHaveBeenCalledWith('id', 'repo-1');
+  });
+
+  it('disableRepo reloads daemon through normalized DAEMON_URL (#547)', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok'));
+    process.env.DAEMON_URL = 'http://localhost:7532/';
+    const { createClient } = await import('@/lib/supabase/server');
+    const { disableRepo } = await import('./repos');
+
+    const client = await (createClient as any)();
+    client.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
+    }).mockReturnValueOnce({
+      update: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ error: null }),
+      }),
+    });
+
+    await disableRepo('repo-1');
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:7532/repos/reload',
+      expect.objectContaining({ method: 'POST' }),
+    );
   });
 
   it('disableRepo throws on supabase error', async () => {

@@ -59,10 +59,10 @@ describe('removeConnection', () => {
     expect(updateArg).not.toHaveProperty('connection_id');
   });
 
-  it('fires POST to DAEMON_URL/repos/reload after removal (#179)', async () => {
+  it('fires POST to normalized DAEMON_URL/repos/reload after removal (#547)', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok'));
-    process.env.DAEMON_URL = 'http://localhost:7532';
+    process.env.DAEMON_URL = 'http://localhost:7532/';
     try {
       const { removeConnection } = await import('./github-connections.js');
       await removeConnection('conn-1');
@@ -251,8 +251,8 @@ describe('importRepos', () => {
       .rejects.toThrow('Failed to import repository');
   });
 
-  it('fires POST to DAEMON_URL/repos/reload after upserts (#166)', async () => {
-    process.env.DAEMON_URL = 'http://localhost:7532';
+  it('fires POST to normalized DAEMON_URL/repos/reload after upserts (#547)', async () => {
+    process.env.DAEMON_URL = 'http://localhost:7532/';
     setupImportMock();
     const { importRepos } = await import('./github-connections.js');
     await importRepos('conn-1', [{ owner: 'acme', name: 'repo' }]);
