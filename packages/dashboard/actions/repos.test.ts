@@ -112,6 +112,34 @@ describe('repo actions', () => {
     expect(insertMock).not.toHaveBeenCalled();
   });
 
+  it('createRepo throws when Supabase insert fails (#579)', async () => {
+    const { createClient } = await import('@/lib/supabase/server');
+    const { createRepo } = await import('./repos');
+
+    const client = await (createClient as any)();
+    const singleMock = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: 'insert failed' },
+    });
+    const selectMock = vi.fn().mockReturnValue({ single: singleMock });
+    const insertMock = vi.fn().mockReturnValue({ select: selectMock });
+    client.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
+    }).mockReturnValueOnce({
+      insert: insertMock,
+    });
+
+    await expect(createRepo(validRepoForm())).rejects.toThrow(
+      'Failed to create repository'
+    );
+    expect(insertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: 'acme', name: 'web', enabled: false })
+    );
+    expect(selectMock).toHaveBeenCalledWith('id');
+  });
+
   it('enableRepo rejects when credentials are missing', async () => {
     const { createClient } = await import('@/lib/supabase/server');
     const { enableRepo } = await import('./repos');
@@ -191,6 +219,40 @@ describe('repo actions', () => {
     expect(updateMock).toHaveBeenCalledWith(
       expect.objectContaining({ enabled: true })
     );
+  });
+
+  it('enableRepo throws when Supabase update fails (#578)', async () => {
+    const { createClient } = await import('@/lib/supabase/server');
+    const { enableRepo } = await import('./repos');
+
+    const client = await (createClient as any)();
+    const eqMock = vi.fn().mockResolvedValue({ error: { message: 'db error' } });
+    const updateMock = vi.fn().mockReturnValue({ eq: eqMock });
+    client.from.mockReturnValueOnce({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
+    }).mockReturnValueOnce({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({
+          data: [
+            { key_type: 'source-control' },
+            { key_type: 'model-provider' },
+          ],
+          error: null,
+        }),
+      }),
+    }).mockReturnValueOnce({
+      update: updateMock,
+    });
+
+    await expect(enableRepo('repo-1')).rejects.toThrow(
+      'Failed to enable repository'
+    );
+    expect(updateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: true })
+    );
+    expect(eqMock).toHaveBeenCalledWith('id', 'repo-1');
   });
 
   it('updateRepo updates settings for a repo', async () => {
