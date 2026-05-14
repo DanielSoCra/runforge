@@ -7,7 +7,7 @@ import type { ReleaseProposalResult } from './release.js';
 export interface ControlHandlers {
   getStatus: () => unknown;
   pause: () => void;
-  resume: () => void;
+  resume: () => void | Result<void> | Promise<void | Result<void>>;
   drain: () => void;
   cancelDrain: () => void;
   retry: (issueNumber: number) => Result<void>;
@@ -55,8 +55,16 @@ export function createControlServer(
       handlers.pause();
       json(res, 200, { paused: true });
     } else if (method === 'POST' && url.pathname === '/resume') {
-      handlers.resume();
-      json(res, 200, { paused: false });
+      Promise.resolve(handlers.resume()).then((result) => {
+        if (isResult(result) && !result.ok) {
+          json(res, 409, { paused: true, error: result.error.message });
+          return;
+        }
+        json(res, 200, { paused: false });
+      }).catch((e: unknown) => {
+        console.error('[control-plane] POST /resume failed:', e);
+        json(res, 500, { paused: true, error: 'resume failed' });
+      });
     } else if (method === 'POST' && url.pathname === '/drain') {
       handlers.drain();
       json(res, 200, { draining: true });
@@ -175,6 +183,10 @@ export function createControlServer(
         });
       }),
   };
+}
+
+function isResult(value: unknown): value is Result<void> {
+  return typeof value === 'object' && value !== null && 'ok' in value;
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {

@@ -151,6 +151,14 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     dailyBudget: 50,
     perRunBudget: 10,
     adapter: 'cli',
+    runtimeSource: {
+      enabled: true,
+      requireClean: true,
+      requireExpectedRef: true,
+      allowSelfRepair: false,
+      onUnhealthy: 'pause',
+      ignoredDirtyPaths: ['state/'],
+    },
     branches: { staging: 'staging', production: 'main' },
     webhooks: ['https://example.com/hook'],
     validation: {
@@ -376,6 +384,30 @@ describe('createPhaseHandlers', () => {
           'staging',
         ],
         '/custom/repo/root',
+      );
+    });
+
+    it('uses configured runtime source ref for new workspaces (#489)', async () => {
+      mockExistsSync.mockReturnValue(false);
+      mockGit.mockResolvedValueOnce({ ok: true, value: '' });
+      const { handlers } = createHandlers({
+        runtimeSource: {
+          ...makeConfig().runtimeSource,
+          expectedRef: 'origin/dev',
+        },
+      });
+      const result = await handlers.detect!(makeRun());
+      expect(result).toBe('success');
+      expect(mockGit).toHaveBeenCalledWith(
+        [
+          'worktree',
+          'add',
+          expect.stringContaining('workspaces/issue-42'),
+          '-b',
+          'feature/42',
+          'origin/dev',
+        ],
+        expect.any(String),
       );
     });
 

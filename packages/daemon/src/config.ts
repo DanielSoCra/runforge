@@ -38,6 +38,28 @@ const ProvidersConfigSchema = z.object({
   definitions: z.record(z.string(), ProviderDefinitionSchema),
 });
 
+const RuntimeSourceConfigSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    sourceRoot: z.string().min(1).optional(),
+    expectedRef: z.string().min(1).optional(),
+    requireClean: z.boolean().default(true),
+    requireExpectedRef: z.boolean().default(true),
+    allowSelfRepair: z.boolean().default(false),
+    onUnhealthy: z.enum(['warn', 'pause', 'fail']).default('pause'),
+    ignoredDirtyPaths: z
+      .array(z.string().min(1))
+      .default(['state/', 'workspaces/', '.claude/scheduled_tasks.lock']),
+  })
+  .default({
+    enabled: true,
+    requireClean: true,
+    requireExpectedRef: true,
+    allowSelfRepair: false,
+    onUnhealthy: 'pause',
+    ignoredDirtyPaths: ['state/', 'workspaces/', '.claude/scheduled_tasks.lock'],
+  });
+
 // zod v4 requires .default() on nested objects to include explicit values
 // matching the inner field defaults. Keep these in sync when changing defaults.
 export const ConfigSchema = z.object({
@@ -61,6 +83,7 @@ export const ConfigSchema = z.object({
   perRunBudget: z.number().positive().default(10),
   adapter: z.enum(['cli', 'sdk']).default('cli'),
   providers: ProvidersConfigSchema.optional(),
+  runtimeSource: RuntimeSourceConfigSchema,
   branches: z
     .object({
       staging: z.string().default('staging'),

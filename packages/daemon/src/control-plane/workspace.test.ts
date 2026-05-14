@@ -60,6 +60,21 @@ describe('reconcileWorkspace', () => {
     expect(existsSync(workspaceDir)).toBe(true);
   });
 
+  it('creates new worktree from explicit source ref when provided', async () => {
+    const workspaceDir = join(repo.repoRoot, 'workspaces', 'issue-source-ref');
+    const result = await reconcileWorkspace({
+      repoRoot: repo.repoRoot,
+      workspaceDir,
+      featureBranch: 'feature/source-ref',
+      stagingBranch: 'dev',
+      sourceRef: 'origin/dev',
+    });
+    expect(result.ok).toBe(true);
+    const branchResult = await git(['rev-parse', '--abbrev-ref', 'HEAD'], workspaceDir);
+    expect(branchResult.ok).toBe(true);
+    if (branchResult.ok) expect(branchResult.value.trim()).toBe('feature/source-ref');
+  });
+
   it('returns success when workspace already present', async () => {
     const workspaceDir = join(repo.repoRoot, 'workspaces', 'issue-3');
     await reconcileWorkspace({

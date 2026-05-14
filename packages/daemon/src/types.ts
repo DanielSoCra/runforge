@@ -130,6 +130,42 @@ export interface RepairQueueItem {
   status: 'queued' | 'running' | 'completed' | 'failed';
 }
 
+export type RuntimeSourceAction = 'warn' | 'pause' | 'fail';
+
+export type RuntimeSourceFailureKind =
+  | 'dirty-runtime-source'
+  | 'behind-expected-ref'
+  | 'missing-expected-ref'
+  | 'validation-unavailable'
+  | 'runtime-source-disabled';
+
+export interface RuntimeSourcePolicy {
+  enabled: boolean;
+  sourceRoot: string;
+  expectedRef?: string;
+  requireClean: boolean;
+  requireExpectedRef: boolean;
+  allowSelfRepair: boolean;
+  onUnhealthy: RuntimeSourceAction;
+  ignoredDirtyPaths: string[];
+}
+
+export interface RuntimeSourceStatus {
+  enabled: boolean;
+  healthy: boolean;
+  sourceRoot: string;
+  currentRef?: string;
+  head?: string;
+  expectedRef?: string;
+  clean: boolean;
+  dirtyPaths: string[];
+  synchronized: boolean | 'unknown';
+  checkedAt: string;
+  action: RuntimeSourceAction;
+  failureKind?: RuntimeSourceFailureKind;
+  message?: string;
+}
+
 // --- Session ---
 
 export type SessionType =

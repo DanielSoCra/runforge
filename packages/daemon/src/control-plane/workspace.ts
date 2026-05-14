@@ -8,6 +8,7 @@ export interface ReconcileOptions {
   workspaceDir: string;
   featureBranch: string;
   stagingBranch: string;
+  sourceRef?: string;
 }
 
 export interface ReconcileSuccess {
@@ -35,21 +36,22 @@ export async function reconcileWorkspace(
   opts: ReconcileOptions,
 ): Promise<Result<ReconcileSuccess>> {
   const { repoRoot, workspaceDir, featureBranch, stagingBranch } = opts;
+  const sourceRef = opts.sourceRef ?? stagingBranch;
 
   if (existsSync(workspaceDir)) {
     return ok({ path: workspaceDir });
   }
-  return createFresh(repoRoot, workspaceDir, featureBranch, stagingBranch);
+  return createFresh(repoRoot, workspaceDir, featureBranch, sourceRef);
 }
 
 async function createFresh(
   repoRoot: string,
   workspaceDir: string,
   featureBranch: string,
-  stagingBranch: string,
+  sourceRef: string,
 ): Promise<Result<ReconcileSuccess>> {
   const wtNew = await git(
-    ['worktree', 'add', workspaceDir, '-b', featureBranch, stagingBranch],
+    ['worktree', 'add', workspaceDir, '-b', featureBranch, sourceRef],
     repoRoot,
   );
   if (wtNew.ok) return ok({ path: workspaceDir });
@@ -68,7 +70,7 @@ async function createFresh(
   await git(['worktree', 'prune'], repoRoot);
 
   const wtRetryNew = await git(
-    ['worktree', 'add', workspaceDir, '-b', featureBranch, stagingBranch],
+    ['worktree', 'add', workspaceDir, '-b', featureBranch, sourceRef],
     repoRoot,
   );
   if (wtRetryNew.ok) return ok({ path: workspaceDir });

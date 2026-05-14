@@ -26,8 +26,12 @@ import { createPhaseLabelMirror } from './phase-labels.js';
 import { getPipeline, getStartPhase } from './fsm.js';
 import { selectVariant } from './variants.js';
 import { notify } from './notify.js';
-import type { RunState, WorkRequest } from '../types.js';
+import type { RunState, RuntimeSourceStatus, WorkRequest } from '../types.js';
 import { ok, err, type Result } from '../lib/result.js';
+import {
+  buildRuntimeSourcePolicy,
+  validateRuntimeSource,
+} from './runtime-source.js';
 import { RemoteControlManager } from './remote-control.js';
 import { getSupabaseClient } from '../supabase/client.js';
 import { SupabaseConfigReader } from '../supabase/config-reader.js';
@@ -75,7 +79,29 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     );
   }
 
-  // 0b. Validate prompt contracts — refuse to boot if any registered prompt has drifted
+  // 1. Load config
+  const configResult = await loadConfig(configPath);
+  if (!configResult.ok) return configResult;
+  const config = configResult.value;
+
+  // 1b. Validate runtime source before prompt cache prewarming, crash resumption,
+  // and work detection can consume a mutable or stale checkout.
+  const runtimeSourcePolicy = buildRuntimeSourcePolicy(config, process.cwd());
+  let runtimeSourceStatus = await validateRuntimeSource(runtimeSourcePolicy);
+  if (!runtimeSourceStatus.healthy) {
+    console.warn(
+      `[daemon] Runtime source unhealthy (${runtimeSourceStatus.failureKind ?? 'unknown'}): ${runtimeSourceStatus.message ?? 'no detail'}`,
+    );
+    if (runtimeSourceStatus.action === 'fail') {
+      return err(
+        new Error(
+          `Runtime source preflight failed: ${runtimeSourceStatus.message ?? runtimeSourceStatus.failureKind ?? 'unknown'}`,
+        ),
+      );
+    }
+  }
+
+  // 1c. Validate prompt contracts — refuse to boot if any registered prompt has drifted
   // from its declared contract. Production gate against drift introduced by prompt-optimizer
   // proposals or operator edits — neither of which CI can see.
   const promptsDirPath =
@@ -92,7 +118,12 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     `[daemon] Prompt contracts validated (${contractCheck.value.checked} prompts)`,
   );
 
-  // 0c. Pre-warm the prompt template cache while HEAD is still on the daemon's
+  // 1d. Pre-warm the prompt template cache after runtime source preflight.
+  // This keeps the cache tied to the validated source rather than whichever
+  // branch the process happens to be on after prior git operations.
+  // Keep the original startup-branch invariant for legacy deployments.
+  //
+  // Pre-warm the prompt template cache while HEAD is still on the daemon's
   // startup branch (typically `dev`). Pipeline phases like coordinator.implement
   // and integrateToStaging move HEAD in mainRepoRoot during normal operation,
   // and prompts/*.md is read from that working copy. Without pre-warming, the
@@ -102,11 +133,6 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   const { preloadPromptCache } = await import('../session-runtime/runtime.js');
   const preloaded = await preloadPromptCache();
   console.log(`[daemon] Prompt cache pre-warmed (${preloaded} prompts)`);
-
-  // 1. Load config
-  const configResult = await loadConfig(configPath);
-  if (!configResult.ok) return configResult;
-  const config = configResult.value;
 
   const { preloadGovernanceContext } =
     await import('../session-runtime/governance-context.js');
@@ -519,7 +545,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   }
 
   // 4. State tracking
-  let paused = false;
+  let paused = shouldPauseForRuntimeSource(runtimeSourceStatus);
   let draining = false;
   let activeRuns = 0;
   let shuttingDown = false;
@@ -541,6 +567,22 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       cfg.retryBackoffMaxMs,
     );
     return Date.now() - entry.lastStuckAt < backoff;
+  }
+
+  async function refreshRuntimeSourceForWork(
+    context: string,
+  ): Promise<Result<void>> {
+    const latest = await validateRuntimeSource(runtimeSourcePolicy);
+    runtimeSourceStatus = latest;
+    if (latest.healthy || latest.action === 'warn') return ok(undefined);
+
+    paused = true;
+    const message =
+      latest.message ?? latest.failureKind ?? 'unknown runtime source failure';
+    console.warn(
+      `[daemon] Runtime source preflight blocked ${context} (${latest.failureKind ?? 'unknown'}): ${message}`,
+    );
+    return err(new Error(`Runtime source preflight failed: ${message}`));
   }
 
   /** Shared handler for run outcomes — tracks stuck count and auto-pause. */
@@ -627,6 +669,8 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
             config.maxConcurrentRuns)
         )
           return;
+        const sourceReady = await refreshRuntimeSourceForWork('work detection');
+        if (!sourceReady.ok) return;
         costTracker.maybeResetDaily();
         const claimedIssues = new Set<number>();
         const workResult = await detector.detectReadyWork();
@@ -885,15 +929,19 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           draining,
           consecutiveStuckCount,
           uptime: process.uptime(),
+          runtimeSource: runtimeSourceStatus,
           ...safeState,
         };
       },
       pause: () => {
         paused = true;
       },
-      resume: () => {
+      resume: async () => {
+        const sourceReady = await refreshRuntimeSourceForWork('resume');
+        if (!sourceReady.ok) return sourceReady;
         paused = false;
         draining = false;
+        return ok(undefined);
       },
       drain: () => {
         enterDrainMode();
@@ -941,7 +989,14 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   );
 
   // 6b. Crash resumption — resume incomplete runs from prior crash
-  const incompleteRuns = await stateMgr.findIncompleteRuns();
+  if (shouldPauseForRuntimeSource(runtimeSourceStatus)) {
+    console.warn(
+      '[daemon] Runtime source policy paused the daemon; skipping crash resumption until source health is restored',
+    );
+  }
+  const incompleteRuns = shouldPauseForRuntimeSource(runtimeSourceStatus)
+    ? []
+    : await stateMgr.findIncompleteRuns();
   for (const run of incompleteRuns) {
     const runOwner = run.repoOwner ?? config.repo?.owner;
     const runRepoName = run.repoName ?? config.repo?.name;
@@ -1081,6 +1136,8 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   // 6d. resumeParkedRuns — check parked runs for l2-approved/l2-rejected label, re-enter pipeline
   async function resumeParkedRuns(): Promise<void> {
     if (paused || draining || shuttingDown) return;
+    const sourceReady = await refreshRuntimeSourceForWork('parked run resume');
+    if (!sourceReady.ok) return;
     const parkedRuns = await stateMgr.findParkedRuns();
     // Limit to 1 resume per cycle to avoid thundering-herd
     for (const run of parkedRuns.slice(0, 1)) {
@@ -1263,6 +1320,8 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
             config.maxConcurrentRuns)
         )
           return;
+        const sourceReady = await refreshRuntimeSourceForWork('work detection');
+        if (!sourceReady.ok) return;
         costTracker.maybeResetDaily();
         const claimedIssues = new Set<number>();
         const workResult = await detector.detectReadyWork();
@@ -1514,6 +1573,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   process.on('SIGINT', enterDrainMode);
 
   return ok(undefined);
+}
+
+function shouldPauseForRuntimeSource(status: RuntimeSourceStatus): boolean {
+  return !status.healthy && status.action === 'pause';
 }
 
 async function releaseClaim(

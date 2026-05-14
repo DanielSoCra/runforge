@@ -54,6 +54,29 @@ describe('ControlServer', () => {
     expect(body.paused).toBe(true);
   });
 
+  it('POST /resume can reject a blocked resume', async () => {
+    const { server, start } = createControlServer(PORT + 13, {
+      ...handlers,
+      resume: async () => err(new Error('runtime source unhealthy')),
+    });
+    const result = await start();
+    expect(result.ok).toBe(true);
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT + 13}/resume`, {
+        method: 'POST',
+        headers: { 'X-Requested-By': 'test' },
+      });
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body).toEqual({
+        paused: true,
+        error: 'runtime source unhealthy',
+      });
+    } finally {
+      server.close();
+    }
+  });
+
   it('POST /retry/42 succeeds', async () => {
     await startServer();
     const res = await fetch(`http://127.0.0.1:${PORT}/retry/42`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });

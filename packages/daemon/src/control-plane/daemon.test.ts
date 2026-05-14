@@ -29,6 +29,8 @@ const {
   mockSpawnSession,
   mockValidatePromptContracts,
   mockClassifyBatch,
+  mockBuildRuntimeSourcePolicy,
+  mockValidateRuntimeSource,
 } = vi.hoisted(() => ({
   mockStateMgr: {
     initialize: vi.fn().mockResolvedValue(undefined),
@@ -108,6 +110,8 @@ const {
   mockSpawnSession: vi.fn(),
   mockValidatePromptContracts: vi.fn(),
   mockClassifyBatch: vi.fn(),
+  mockBuildRuntimeSourcePolicy: vi.fn(),
+  mockValidateRuntimeSource: vi.fn(),
 }));
 
 // --- Module mocks (use classes for constructors to work with `new`) ---
@@ -206,6 +210,12 @@ vi.mock('./variants.js', () => ({
 }));
 vi.mock('./notify.js', () => ({
   notify: (...args: unknown[]) => mockNotify(...args),
+}));
+vi.mock('./runtime-source.js', () => ({
+  buildRuntimeSourcePolicy: (...args: unknown[]) =>
+    mockBuildRuntimeSourcePolicy(...args),
+  validateRuntimeSource: (...args: unknown[]) =>
+    mockValidateRuntimeSource(...args),
 }));
 vi.mock('../supabase/client.js', () => ({
   getSupabaseClient: () => null,
@@ -307,6 +317,14 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
   dailyBudget: 50,
   perRunBudget: 10,
   adapter: 'cli' as const,
+  runtimeSource: {
+    enabled: true,
+    requireClean: true,
+    requireExpectedRef: true,
+    allowSelfRepair: false,
+    onUnhealthy: 'pause',
+    ignoredDirtyPaths: ['state/', 'workspaces/', '.claude/scheduled_tasks.lock'],
+  },
   branches: { staging: 'staging', production: 'main' },
   webhooks: [],
   validation: {
@@ -474,6 +492,29 @@ describe('daemon', () => {
       start: vi.fn().mockReturnValue(vi.fn()),
     });
     mockValidatePromptContracts.mockResolvedValue(ok({ checked: 3 }));
+    mockBuildRuntimeSourcePolicy.mockReturnValue({
+      enabled: true,
+      sourceRoot: '/repo',
+      expectedRef: 'origin/staging',
+      requireClean: true,
+      requireExpectedRef: true,
+      allowSelfRepair: false,
+      onUnhealthy: 'pause',
+      ignoredDirtyPaths: ['state/'],
+    });
+    mockValidateRuntimeSource.mockResolvedValue({
+      enabled: true,
+      healthy: true,
+      sourceRoot: '/repo',
+      currentRef: 'staging',
+      head: 'abc123',
+      expectedRef: 'origin/staging',
+      clean: true,
+      dirtyPaths: [],
+      synchronized: true,
+      checkedAt: '2026-05-14T00:00:00.000Z',
+      action: 'pause',
+    });
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -521,6 +562,8 @@ describe('daemon', () => {
       mockCreateCoordinator,
       mockSpawnSession,
       mockValidatePromptContracts,
+      mockBuildRuntimeSourcePolicy,
+      mockValidateRuntimeSource,
     ]) {
       mock.mockClear();
     }
@@ -654,6 +697,97 @@ describe('daemon', () => {
       const result = await startDaemon('config.json');
 
       expect(result.ok).toBe(true);
+    });
+  });
+
+  describe('runtime source preflight (#489)', () => {
+    it('fails startup when runtime source policy requests fail on unhealthy source', async () => {
+      mockValidateRuntimeSource.mockResolvedValueOnce({
+        enabled: true,
+        healthy: false,
+        sourceRoot: '/repo',
+        expectedRef: 'origin/staging',
+        clean: false,
+        dirtyPaths: ['packages/daemon/src/control-plane/daemon.ts'],
+        synchronized: 'unknown',
+        checkedAt: '2026-05-14T00:00:00.000Z',
+        action: 'fail',
+        failureKind: 'dirty-runtime-source',
+        message: 'Runtime source has uncommitted changes',
+      });
+
+      const { startDaemon } = await loadDaemon();
+      const result = await startDaemon('config.json');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Runtime source preflight failed');
+      }
+      expect(mockStateMgr.initialize).not.toHaveBeenCalled();
+    });
+
+    it('starts paused and skips crash resumption when runtime source policy pauses', async () => {
+      mockValidateRuntimeSource.mockResolvedValueOnce({
+        enabled: true,
+        healthy: false,
+        sourceRoot: '/repo',
+        expectedRef: 'origin/staging',
+        clean: false,
+        dirtyPaths: ['packages/daemon/src/control-plane/daemon.ts'],
+        synchronized: false,
+        checkedAt: '2026-05-14T00:00:00.000Z',
+        action: 'pause',
+        failureKind: 'dirty-runtime-source',
+        message: 'Runtime source has uncommitted changes',
+      });
+
+      const { startDaemon } = await loadDaemon();
+      const { createControlServer } = await import('./server.js');
+      const result = await startDaemon('config.json');
+
+      expect(result.ok).toBe(true);
+      expect(mockStateMgr.findIncompleteRuns).not.toHaveBeenCalled();
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      const status = handlers.getStatus() as Record<string, unknown>;
+      expect(status['paused']).toBe(true);
+      expect(status['runtimeSource']).toMatchObject({
+        healthy: false,
+        failureKind: 'dirty-runtime-source',
+        action: 'pause',
+      });
+    });
+
+    it('rejects resume when runtime source revalidation is unhealthy', async () => {
+      const { startDaemon } = await loadDaemon();
+      const { createControlServer } = await import('./server.js');
+      const result = await startDaemon('config.json');
+      expect(result.ok).toBe(true);
+
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      handlers.pause();
+      mockValidateRuntimeSource.mockResolvedValueOnce({
+        enabled: true,
+        healthy: false,
+        sourceRoot: '/repo',
+        expectedRef: 'origin/staging',
+        clean: false,
+        dirtyPaths: ['packages/daemon/src/control-plane/daemon.ts'],
+        synchronized: false,
+        checkedAt: '2026-05-14T00:01:00.000Z',
+        action: 'pause',
+        failureKind: 'dirty-runtime-source',
+        message: 'Runtime source has uncommitted changes',
+      });
+
+      const resumeResult = await handlers.resume();
+
+      expect(resumeResult).toMatchObject({ ok: false });
+      const status = handlers.getStatus() as Record<string, unknown>;
+      expect(status['paused']).toBe(true);
+      expect(status['runtimeSource']).toMatchObject({
+        healthy: false,
+        failureKind: 'dirty-runtime-source',
+      });
     });
   });
 
@@ -978,6 +1112,37 @@ describe('daemon', () => {
       await vi.advanceTimersByTimeAsync(30000);
 
       expect(mockDetector.detectReadyWork).not.toHaveBeenCalled();
+    });
+
+    it('pauses before polling when runtime source becomes unhealthy', async () => {
+      const { startDaemon } = await loadDaemon();
+      const { createControlServer } = await import('./server.js');
+      await startDaemon('config.json');
+
+      mockValidateRuntimeSource.mockResolvedValueOnce({
+        enabled: true,
+        healthy: false,
+        sourceRoot: '/repo',
+        expectedRef: 'origin/staging',
+        clean: false,
+        dirtyPaths: ['packages/daemon/src/control-plane/daemon.ts'],
+        synchronized: false,
+        checkedAt: '2026-05-14T00:02:00.000Z',
+        action: 'pause',
+        failureKind: 'dirty-runtime-source',
+        message: 'Runtime source has uncommitted changes',
+      });
+
+      await vi.advanceTimersByTimeAsync(30000);
+
+      expect(mockDetector.detectReadyWork).not.toHaveBeenCalled();
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+      const status = handlers.getStatus() as Record<string, unknown>;
+      expect(status['paused']).toBe(true);
+      expect(status['runtimeSource']).toMatchObject({
+        healthy: false,
+        failureKind: 'dirty-runtime-source',
+      });
     });
 
     it('claims and processes work when detected', async () => {
@@ -1599,7 +1764,7 @@ describe('daemon', () => {
       expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(
         true,
       );
-      handlers.resume();
+      await handlers.resume();
       expect((handlers.getStatus() as Record<string, unknown>)['paused']).toBe(
         false,
       );

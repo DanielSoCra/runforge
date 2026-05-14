@@ -43,6 +43,36 @@ describe('ConfigSchema', () => {
         maxPrLinesChanged: 2000,
       });
       expect(result.data.agentScopes).toEqual({});
+      expect(result.data.runtimeSource).toEqual({
+        enabled: true,
+        requireClean: true,
+        requireExpectedRef: true,
+        allowSelfRepair: false,
+        onUnhealthy: 'pause',
+        ignoredDirtyPaths: ['state/', 'workspaces/', '.claude/scheduled_tasks.lock'],
+      });
+    }
+  });
+
+  it('accepts runtime source policy overrides', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      runtimeSource: {
+        enabled: true,
+        sourceRoot: '/srv/auto-claude/runtime',
+        expectedRef: 'origin/dev',
+        requireClean: false,
+        requireExpectedRef: true,
+        allowSelfRepair: true,
+        onUnhealthy: 'warn',
+        ignoredDirtyPaths: ['state/', 'logs/'],
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.runtimeSource.expectedRef).toBe('origin/dev');
+      expect(result.data.runtimeSource.onUnhealthy).toBe('warn');
     }
   });
 

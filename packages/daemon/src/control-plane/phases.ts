@@ -137,6 +137,7 @@ export function createPhaseHandlers(
           workspaceDir,
           featureBranch,
           stagingBranch: config.branches.staging,
+          sourceRef: config.runtimeSource.expectedRef,
         });
         if (!reconciled.ok) {
           console.error(

@@ -11,12 +11,18 @@ code_paths:
   - packages/daemon/src/config.ts
   - packages/daemon/src/main.ts
   - packages/daemon/src/control-plane/daemon.ts
+  - packages/daemon/src/control-plane/phases.ts
+  - packages/daemon/src/control-plane/runtime-source.ts
+  - packages/daemon/src/control-plane/server.ts
   - packages/daemon/src/control-plane/workspace.ts
   - packages/daemon/src/implementation/worktree.ts
   - packages/daemon/src/types.ts
 test_paths:
   - packages/daemon/src/config.test.ts
   - packages/daemon/src/control-plane/daemon.test.ts
+  - packages/daemon/src/control-plane/phases.test.ts
+  - packages/daemon/src/control-plane/runtime-source.test.ts
+  - packages/daemon/src/control-plane/server.test.ts
   - packages/daemon/src/control-plane/workspace.test.ts
   - packages/daemon/src/implementation/worktree.test.ts
 ---
