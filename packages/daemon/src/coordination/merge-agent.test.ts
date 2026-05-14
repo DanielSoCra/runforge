@@ -753,6 +753,24 @@ describe('merge-agent', () => {
       expect(queue.updateStatus).toHaveBeenCalledWith('entry-2', 'failed', 'recovered after crash in reverted phase');
     });
 
+    it('updatePhase failure after validating recovery failure skips status update and continues (#560)', async () => {
+      const entry1 = makeEntry({ id: 'entry-1', mergePhase: 'validating', mergeCommit: 'abc123' });
+      const entry2 = makeEntry({ id: 'entry-2', mergePhase: 'reverted' });
+      const deps = makeDeps();
+      const queue = deps.queue as any;
+      queue.list.mockResolvedValue([entry1, entry2]);
+
+      (deps.validate as ReturnType<typeof vi.fn>).mockResolvedValue(err(new Error('tests failed')));
+      queue.updatePhase.mockResolvedValueOnce(err(new Error('write failed')));
+
+      const agent = createMergeAgent(deps, defaultConfig);
+      await agent.recoverStuckEntries();
+
+      expect(queue.updatePhase).toHaveBeenCalledWith('entry-1', 'reverted');
+      expect(queue.updateStatus).not.toHaveBeenCalledWith('entry-1', 'failed', 'tests failed');
+      expect(queue.updateStatus).toHaveBeenCalledWith('entry-2', 'failed', 'recovered after crash in reverted phase');
+    });
+
     it('updatePhase failure during queued reset → skips entry', async () => {
       const entry1 = makeEntry({ id: 'entry-1', mergePhase: 'rebasing', mergeCommit: null });
       const entry2 = makeEntry({ id: 'entry-2', mergePhase: 'reverted' });
