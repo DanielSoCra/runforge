@@ -47,7 +47,7 @@ describe('StatsCards', () => {
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith('/api/daemon/pause', { method: 'POST' });
     });
-    expect(screen.getByText('paused')).toBeInTheDocument();
+    expect(await screen.findByText('paused')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /resume daemon/i })).toBeInTheDocument();
   });
 
@@ -70,7 +70,7 @@ describe('StatsCards', () => {
     await waitFor(() => {
       expect(fetch).toHaveBeenCalledWith('/api/daemon/resume', { method: 'POST' });
     });
-    expect(screen.getByText('running')).toBeInTheDocument();
+    expect(await screen.findByText('running')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /pause daemon/i })).toBeInTheDocument();
   });
 });
