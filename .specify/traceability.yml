@@ -189,7 +189,7 @@ ARCH-AC-CONTAINMENT:
 
 ARCH-AC-SESSION-PROVIDERS:
   parent: FUNC-AC-SAFETY
-  children: []
+  children: [STACK-AC-SESSION-PROVIDERS]
   status: draft
 
 ARCH-AC-GOVERNANCE:
@@ -372,6 +372,14 @@ STACK-AC-SESSION-RUNTIME:
     - packages/daemon/src/session-runtime/generate-containment-script.test.ts
     - packages/daemon/src/session-runtime/rate-limiter.test.ts
     - packages/daemon/src/session-runtime/audit.test.ts
+  status: draft
+
+STACK-AC-SESSION-PROVIDERS:
+  parent: ARCH-AC-SESSION-PROVIDERS
+  children: []
+  # Code/test paths are planned by the L3 spec and added when implementation creates them.
+  code_paths: []
+  test_paths: []
   status: draft
 
 STACK-AC-OPERATIONAL-SAFETY:
