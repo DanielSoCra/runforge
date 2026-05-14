@@ -93,6 +93,66 @@ describe('ConfigSchema', () => {
     }
   });
 
+  it('accepts multi-provider session runtime config (#480)', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      providers: {
+        defaultProvider: 'claude-default',
+        fallbackChain: ['codex-planner'],
+        definitions: {
+          'claude-default': {
+            name: 'claude-default',
+            adapterClass: 'process-based',
+            providerKind: 'claude-cli',
+            supportedModelTiers: [
+              'standard-capability',
+              'higher-capability',
+            ],
+            cliTool: 'claude',
+          },
+          'codex-planner': {
+            name: 'codex-planner',
+            adapterClass: 'process-based',
+            providerKind: 'codex-cli',
+            supportedModelTiers: ['higher-capability'],
+            cliTool: 'codex',
+            model: 'gpt-5.5',
+            executionFlags: ['exec'],
+            required: false,
+          },
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.providers?.defaultProvider).toBe('claude-default');
+      expect(result.data.providers?.definitions['codex-planner']?.model).toBe(
+        'gpt-5.5',
+      );
+    }
+  });
+
+  it('rejects provider fallback entries that are not registered (#480)', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      providers: {
+        defaultProvider: 'claude-default',
+        fallbackChain: ['missing-provider'],
+        definitions: {
+          'claude-default': {
+            name: 'claude-default',
+            adapterClass: 'process-based',
+            providerKind: 'claude-cli',
+            supportedModelTiers: ['standard-capability'],
+          },
+        },
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it('rejects invalid classifier batch size', () => {
     expect(
       ConfigSchema.safeParse({ ...validConfig, classifierBatchSize: 0 })

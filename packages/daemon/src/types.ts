@@ -95,12 +95,41 @@ export type ExitStatus =
   | 'failed'
   | 'timed-out';
 
+export type ModelTier = 'standard-capability' | 'higher-capability';
+
+export type ProviderAdapterClass =
+  | 'process-based'
+  | 'programmatic-api';
+
+export type ProviderKind = 'claude-cli' | 'codex-cli' | 'pi-cli';
+
+export interface ProviderDefinition {
+  name: string;
+  adapterClass: ProviderAdapterClass;
+  providerKind: ProviderKind;
+  supportedModelTiers: ModelTier[];
+  required?: boolean;
+  cliTool?: string;
+  binaryPath?: string;
+  model?: string;
+  executionFlags?: string[];
+  env?: Record<string, string>;
+}
+
+export interface ProviderBinding {
+  preferred?: string;
+  fallback?: string[];
+}
+
 export interface AgentDefinition {
   name: string;
   description: string;
   systemPrompt: string;
   allowedTools: string[];
   modelOverride?: string;
+  modelTier?: ModelTier;
+  provider?: string;
+  providerBinding?: ProviderBinding;
   maxTurns: number;
   timeoutMs: number;
   budgetCap: number;

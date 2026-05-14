@@ -8,13 +8,18 @@ import type {
   SessionContext,
   SessionResult,
   ViolationRecord,
+  ModelTier,
 } from '../types.js';
 import type { Result } from '../lib/result.js';
 import { ok, err } from '../lib/result.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
 import { CostTracker } from './cost.js';
 import { RateLimiter } from './rate-limiter.js';
-import { createAdapter, type ProviderAdapter } from './adapters/index.js';
+import {
+  createAdapter,
+  createProviderAdapter,
+  type ProviderAdapter,
+} from './adapters/index.js';
 import { buildCompositeContext, type McpConfig } from './plugin-injection.js';
 import { readPluginsForContext } from './plugin-loader.js';
 import { loadGovernanceContext } from './governance-context.js';
@@ -35,12 +40,18 @@ import {
   type ScopeRegistry,
 } from './scope-registry.js';
 import { auditScope, captureScopeBaseCommit } from './scope-audit.js';
+import {
+  classifyProviderFailure,
+  ProviderRegistry,
+} from './providers/registry.js';
 
 export interface SpawnSessionOptions {
   jsonSchema?: string | object;
   agentDef?: AgentDefinition;
   costAttributionIssueNumbers?: number[];
 }
+
+type AdapterSpawnOptions = Parameters<ProviderAdapter['spawn']>[2];
 
 /** Resolve the prompts/ directory at the repo root. */
 function promptsDir(): string {
@@ -351,18 +362,22 @@ export class SessionRuntime {
   private staggerMs: number;
   private config: Config;
   private scopeRegistry: ScopeRegistry;
+  private providerRegistry: ProviderRegistry;
+  private useProviderRegistry: boolean;
 
   constructor(
     config: Config,
     costTracker: CostTracker,
     rateLimiter?: RateLimiter,
   ) {
-    this.adapter = createAdapter(config.adapter);
+    this.adapter = createAdapter(config.providers ? 'cli' : config.adapter);
     this.costTracker = costTracker;
     this.rateLimiter = rateLimiter ?? new RateLimiter();
     this.staggerMs = 2000; // 2 second stagger between session starts
     this.config = config;
     this.scopeRegistry = buildScopeRegistry(config.agentScopes ?? {});
+    this.providerRegistry = ProviderRegistry.fromConfig(config);
+    this.useProviderRegistry = config.providers !== undefined;
   }
 
   async spawnSession(
@@ -391,10 +406,14 @@ export class SessionRuntime {
       }
     }
 
-    // 3. Check rate limit (ARCH-AC-SESSION-RUNTIME step 3)
-    const rateCheck = this.rateLimiter.checkRateLimit();
-    if (!rateCheck.clear) {
-      return err(SessionError.rateLimited(0, rateCheck.remainingMs));
+    // 3. Check legacy global rate limit (ARCH-AC-SESSION-RUNTIME step 3).
+    // Multi-provider mode uses provider-local cooldowns in ProviderRegistry
+    // so one rate-limited provider does not block healthy fallbacks.
+    if (!this.useProviderRegistry) {
+      const rateCheck = this.rateLimiter.checkRateLimit();
+      if (!rateCheck.clear) {
+        return err(SessionError.rateLimited(0, rateCheck.remainingMs));
+      }
     }
 
     // 4. Stagger delay
@@ -430,40 +449,36 @@ export class SessionRuntime {
     const scopeBaseCommit = context.workspacePath
       ? await this.tryCaptureScopeBaseCommit(context.workspacePath)
       : undefined;
-    const result = await this.adapter.spawn(def, assembled.prompt, {
+    const adapterOptions = {
       cwd: context.workspacePath,
       jsonSchema,
       containmentPolicy: DEFAULT_POLICY,
       mcpConfigs: assembled.mcpConfigs,
       directoryScope,
-    });
+    };
+    const result = this.useProviderRegistry
+      ? await this.spawnWithProviderFallback(
+          def,
+          assembled.prompt,
+          adapterOptions,
+          type,
+          costAttributionIssueNumbers,
+          runWriter,
+          runId,
+        )
+      : await this.spawnWithLegacyAdapter(
+          def,
+          assembled.prompt,
+          adapterOptions,
+          type,
+          costAttributionIssueNumbers,
+          runWriter,
+          runId,
+        );
 
-    // 7. Record cost — always, even on failure (ARCH-AC-SESSION-RUNTIME step 10)
-    const cost = result.ok
-      ? result.value.cost
-      : result.error instanceof SessionError
-        ? result.error.cost
-        : 0;
-    if (cost > 0) {
-      const allocatedCost = cost / costAttributionIssueNumbers.length;
-      for (const costIssueNumber of costAttributionIssueNumbers) {
-        this.costTracker.recordCost(costIssueNumber, allocatedCost);
-      }
-      if (runWriter && runId) {
-        void runWriter.writeCostEvent(runId, type, cost);
-      }
-    }
+    if (!result.ok) return result;
 
-    // 8. Detect rate limit in adapter response (ARCH-AC-SESSION-RUNTIME rate limit detection flow)
-    if (
-      !result.ok &&
-      result.error instanceof SessionError &&
-      result.error.rateLimited
-    ) {
-      this.rateLimiter.reportRateLimit();
-    }
-
-    if (result.ok && context.workspacePath) {
+    if (context.workspacePath) {
       const scopeAudit = await auditScope({
         workspacePath: context.workspacePath,
         baseCommit: scopeBaseCommit,
@@ -493,22 +508,144 @@ export class SessionRuntime {
     // — see audit.ts comments). If new violation classes are added that
     // genuinely warrant terminal handling, split the result by violation
     // class here rather than blanket-downgrading everything.
-    if (result.ok) {
-      const audit = auditSessionOutput(result.value.output, DEFAULT_POLICY);
-      if (!audit.clean) {
-        console.warn(
-          `[audit] Post-session output mentions blocked commands (advisory, not terminal): ${audit.violations.join('; ')}`,
-        );
-        result.value.auditWarnings = audit.violations;
-      }
+    const audit = auditSessionOutput(result.value.output, DEFAULT_POLICY);
+    if (!audit.clean) {
+      console.warn(
+        `[audit] Post-session output mentions blocked commands (advisory, not terminal): ${audit.violations.join('; ')}`,
+      );
+      result.value.auditWarnings = audit.violations;
     }
 
     // 10. Attach plugin gates to result for downstream validation (ARCH-AC-PLUGINS Flow 4 step 3)
-    if (result.ok && assembled.gates.length > 0) {
+    if (assembled.gates.length > 0) {
       result.value.pluginGates = assembled.gates;
     }
 
     return result;
+  }
+
+  private async spawnWithLegacyAdapter(
+    def: AgentDefinition,
+    prompt: string,
+    adapterOptions: AdapterSpawnOptions,
+    type: SessionType,
+    costAttributionIssueNumbers: number[],
+    runWriter?: SupabaseRunWriter,
+    runId?: string,
+  ): Promise<Result<SessionResult>> {
+    const result = await this.adapter.spawn(def, prompt, adapterOptions);
+    this.recordResultCost(
+      result,
+      type,
+      costAttributionIssueNumbers,
+      runWriter,
+      runId,
+    );
+
+    if (
+      !result.ok &&
+      result.error instanceof SessionError &&
+      result.error.rateLimited
+    ) {
+      this.rateLimiter.reportRateLimit();
+    }
+
+    return result;
+  }
+
+  private async spawnWithProviderFallback(
+    def: AgentDefinition,
+    prompt: string,
+    adapterOptions: AdapterSpawnOptions,
+    type: SessionType,
+    costAttributionIssueNumbers: number[],
+    runWriter?: SupabaseRunWriter,
+    runId?: string,
+  ): Promise<Result<SessionResult>> {
+    const attempted = new Set<string>();
+    let lastError: Error | undefined;
+    const tier = resolveModelTier(def);
+    const binding = def.providerBinding ?? (def.provider ? { preferred: def.provider } : undefined);
+
+    while (true) {
+      const resolution = this.providerRegistry.resolve(binding, tier, {
+        exclude: attempted,
+      });
+      if (!resolution.ok) {
+        if (lastError) return err(lastError);
+        return err(
+          new SessionError(
+            `Provider resolution failed (${resolution.kind}): ${resolution.message}`,
+            0,
+            resolution.kind === 'provider-unavailable',
+          ),
+        );
+      }
+
+      const provider = resolution.provider;
+      attempted.add(provider.name);
+      const adapter = createProviderAdapter(provider);
+      const result = await adapter.spawn(def, prompt, {
+        ...adapterOptions,
+        provider,
+      });
+      this.recordResultCost(
+        result,
+        type,
+        costAttributionIssueNumbers,
+        runWriter,
+        runId,
+      );
+
+      if (result.ok) {
+        this.providerRegistry.reportSuccess(provider.name);
+        return result;
+      }
+
+      lastError = result.error;
+      this.providerRegistry.reportFailure(
+        provider.name,
+        classifyProviderFailure(result.error),
+        {
+          rateLimited:
+            result.error instanceof SessionError && result.error.rateLimited,
+        },
+      );
+
+      const budgetError = this.findBudgetError(costAttributionIssueNumbers);
+      if (budgetError) return err(budgetError);
+    }
+  }
+
+  private recordResultCost(
+    result: Result<SessionResult>,
+    type: SessionType,
+    costAttributionIssueNumbers: number[],
+    runWriter?: SupabaseRunWriter,
+    runId?: string,
+  ): void {
+    const cost = result.ok
+      ? result.value.cost
+      : result.error instanceof SessionError
+        ? result.error.cost
+        : 0;
+    if (cost > 0) {
+      const allocatedCost = cost / costAttributionIssueNumbers.length;
+      for (const costIssueNumber of costAttributionIssueNumbers) {
+        this.costTracker.recordCost(costIssueNumber, allocatedCost);
+      }
+      if (runWriter && runId) {
+        void runWriter.writeCostEvent(runId, type, cost);
+      }
+    }
+  }
+
+  private findBudgetError(issueNumbers: number[]): SessionError | undefined {
+    for (const issueNumber of issueNumbers) {
+      const budget = this.costTracker.checkBudget(issueNumber);
+      if (!budget.available) return SessionError.budgetExceeded(budget.reason);
+    }
+    return undefined;
   }
 
   private async tryCaptureScopeBaseCommit(
@@ -585,4 +722,20 @@ function normalizeCostAttributionIssueNumbers(
   );
   const unique = [...new Set(normalized)];
   return unique.length > 0 ? unique : [fallbackIssueNumber];
+}
+
+function resolveModelTier(def: AgentDefinition): ModelTier {
+  if (def.modelTier) return def.modelTier;
+  const model = def.modelOverride?.toLowerCase() ?? '';
+  if (model.includes('haiku')) return 'standard-capability';
+  if (
+    model.includes('sonnet') ||
+    model.includes('opus') ||
+    model.includes('gpt-') ||
+    model.includes('o3') ||
+    model.includes('o4')
+  ) {
+    return 'higher-capability';
+  }
+  return 'standard-capability';
 }

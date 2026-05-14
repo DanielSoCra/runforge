@@ -10,6 +10,34 @@ const DirectoryScopeSchema = z.object({
   denyPaths: z.array(z.string()).default([]),
 });
 
+const ModelTierSchema = z.enum([
+  'standard-capability',
+  'higher-capability',
+]);
+
+const ProviderDefinitionSchema = z.object({
+  name: z.string().min(1),
+  adapterClass: z.enum(['process-based', 'programmatic-api']),
+  providerKind: z.enum([
+    'claude-cli',
+    'codex-cli',
+    'pi-cli',
+  ]),
+  supportedModelTiers: z.array(ModelTierSchema).min(1),
+  required: z.boolean().default(false),
+  cliTool: z.string().min(1).optional(),
+  binaryPath: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  executionFlags: z.array(z.string()).default([]),
+  env: z.record(z.string(), z.string()).default({}),
+});
+
+const ProvidersConfigSchema = z.object({
+  defaultProvider: z.string().min(1),
+  fallbackChain: z.array(z.string().min(1)).default([]),
+  definitions: z.record(z.string(), ProviderDefinitionSchema),
+});
+
 // zod v4 requires .default() on nested objects to include explicit values
 // matching the inner field defaults. Keep these in sync when changing defaults.
 export const ConfigSchema = z.object({
@@ -32,6 +60,7 @@ export const ConfigSchema = z.object({
   dailyBudget: z.number().positive().default(50),
   perRunBudget: z.number().positive().default(10),
   adapter: z.enum(['cli', 'sdk']).default('cli'),
+  providers: ProvidersConfigSchema.optional(),
   branches: z
     .object({
       staging: z.string().default('staging'),
@@ -260,6 +289,38 @@ export const ConfigSchema = z.object({
       techLeadMaxEntriesPerSection: 50,
       maxConsecutiveTickErrors: 5,
     }),
+}).superRefine((config, ctx) => {
+  const providers = config.providers;
+  if (!providers) return;
+
+  const names = new Set(Object.keys(providers.definitions));
+  if (!names.has(providers.defaultProvider)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['providers', 'defaultProvider'],
+      message: `defaultProvider must reference a registered provider: ${providers.defaultProvider}`,
+    });
+  }
+
+  for (const [name, definition] of Object.entries(providers.definitions)) {
+    if (definition.name !== name) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['providers', 'definitions', name, 'name'],
+        message: `provider definition name must match registry key: ${name}`,
+      });
+    }
+  }
+
+  providers.fallbackChain.forEach((name, index) => {
+    if (!names.has(name)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['providers', 'fallbackChain', index],
+        message: `fallback provider must reference a registered provider: ${name}`,
+      });
+    }
+  });
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

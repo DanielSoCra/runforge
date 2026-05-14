@@ -6,6 +6,7 @@ import { RateLimiter } from './rate-limiter.js';
 import type { Config } from '../config.js';
 import { buildCompositeContext } from './plugin-injection.js';
 import { SessionError } from './session-error.js';
+import { err, ok } from '../lib/result.js';
 import { mkdtemp, writeFile, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -36,13 +37,15 @@ vi.mock('./plugin-loader.js', () => ({
   ]),
 }));
 
-const mockSpawn = vi
-  .fn()
-  .mockResolvedValue({ ok: true, value: { output: '', cost: 0.05 } });
+const mockSpawn = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ ok: true, value: { output: '', cost: 0.05 } }),
+);
+const mockCreateProviderAdapter = vi.hoisted(() => vi.fn());
 vi.mock('./adapters/index.js', () => ({
   createAdapter: vi.fn(() => ({
     spawn: mockSpawn,
   })),
+  createProviderAdapter: mockCreateProviderAdapter,
 }));
 
 vi.mock('./scope-audit.js', () => ({
@@ -86,6 +89,7 @@ describe('SessionRuntime', () => {
     );
     __clearGovernanceCacheForTests();
     mockSpawn.mockClear();
+    mockCreateProviderAdapter.mockReset();
     mockCaptureScopeBaseCommit.mockClear();
     mockCaptureScopeBaseCommit.mockResolvedValue('base-sha');
     mockAuditScope.mockClear();
@@ -593,6 +597,164 @@ describe('SessionRuntime', () => {
 
     const check = rateLimiter.checkRateLimit();
     expect(check.clear).toBe(true);
+  });
+
+  it('falls back from preferred provider to secondary provider and records both costs (#480)', async () => {
+    const codexSpawn = vi
+      .fn()
+      .mockResolvedValue(err(new SessionError('Rate limited by upstream', 0.2, true)));
+    const claudeSpawn = vi.fn().mockResolvedValue(
+      ok({
+        output: 'fallback completed',
+        structuredData: {},
+        cost: 0.3,
+        pitfallMarkers: [],
+        exitStatus: 'completed' as const,
+      }),
+    );
+    mockCreateProviderAdapter.mockImplementation((provider) => ({
+      spawn:
+        provider.name === 'codex-planner'
+          ? codexSpawn
+          : claudeSpawn,
+    }));
+    const providerRuntime = new SessionRuntime(
+      {
+        ...testConfig,
+        providers: {
+          defaultProvider: 'claude-default',
+          fallbackChain: ['claude-default'],
+          definitions: {
+            'codex-planner': {
+              name: 'codex-planner',
+              adapterClass: 'process-based',
+              providerKind: 'codex-cli',
+              supportedModelTiers: ['higher-capability'],
+              required: false,
+              cliTool: 'codex',
+              model: 'gpt-5.5',
+              executionFlags: [],
+              env: {},
+            },
+            'claude-default': {
+              name: 'claude-default',
+              adapterClass: 'process-based',
+              providerKind: 'claude-cli',
+              supportedModelTiers: [
+                'standard-capability',
+                'higher-capability',
+              ],
+              required: false,
+              cliTool: 'claude',
+              executionFlags: [],
+              env: {},
+            },
+          },
+        },
+      } as Config,
+      costTracker,
+    );
+
+    const result = await providerRuntime.spawnSession(
+      'classifier',
+      { variables: { workRequest: '', specRefs: 'none', scope: '' } },
+      480,
+      {
+        agentDef: {
+          name: 'classifier',
+          description: 'mixed provider classifier',
+          systemPrompt: '',
+          allowedTools: ['Read', 'Grep'],
+          modelTier: 'higher-capability',
+          providerBinding: {
+            preferred: 'codex-planner',
+            fallback: ['claude-default'],
+          },
+          maxTurns: 1,
+          timeoutMs: 30_000,
+          budgetCap: 1,
+        },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(codexSpawn).toHaveBeenCalledTimes(1);
+    expect(claudeSpawn).toHaveBeenCalledTimes(1);
+    expect(costTracker.getRunCost(480)).toBeCloseTo(0.5);
+    expect(providerRuntime.getRateLimiter().checkRateLimit().clear).toBe(true);
+  });
+
+  it('uses AgentDefinition.provider shorthand for provider selection (#480)', async () => {
+    const codexSpawn = vi.fn().mockResolvedValue(
+      ok({
+        output: 'codex completed',
+        structuredData: {},
+        cost: 0.1,
+        pitfallMarkers: [],
+        exitStatus: 'completed' as const,
+      }),
+    );
+    mockCreateProviderAdapter.mockImplementation(() => ({
+      spawn: codexSpawn,
+    }));
+    const providerRuntime = new SessionRuntime(
+      {
+        ...testConfig,
+        providers: {
+          defaultProvider: 'claude-default',
+          fallbackChain: [],
+          definitions: {
+            'codex-planner': {
+              name: 'codex-planner',
+              adapterClass: 'process-based',
+              providerKind: 'codex-cli',
+              supportedModelTiers: ['higher-capability'],
+              required: false,
+              cliTool: 'codex',
+              model: 'gpt-5.5',
+              executionFlags: [],
+              env: {},
+            },
+            'claude-default': {
+              name: 'claude-default',
+              adapterClass: 'process-based',
+              providerKind: 'claude-cli',
+              supportedModelTiers: [
+                'standard-capability',
+                'higher-capability',
+              ],
+              required: false,
+              cliTool: 'claude',
+              executionFlags: [],
+              env: {},
+            },
+          },
+        },
+      } as Config,
+      costTracker,
+    );
+
+    const result = await providerRuntime.spawnSession(
+      'classifier',
+      { variables: { workRequest: '', specRefs: 'none', scope: '' } },
+      480,
+      {
+        agentDef: {
+          name: 'classifier',
+          description: 'mixed provider classifier',
+          systemPrompt: '',
+          allowedTools: ['Read', 'Grep'],
+          modelTier: 'higher-capability',
+          provider: 'codex-planner',
+          maxTurns: 1,
+          timeoutMs: 30_000,
+          budgetCap: 1,
+        },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(codexSpawn).toHaveBeenCalledTimes(1);
   });
 
   it('does not flag path references in output after path scanning removal (#222)', async () => {
