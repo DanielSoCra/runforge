@@ -394,6 +394,44 @@ describe('createReviewerGate', () => {
     expect(runtime.spawnSession).toHaveBeenCalledTimes(2);
   });
 
+  it('parses valid JSON code block from result text when structured_output is null (#559)', async () => {
+    const runtime = {
+      spawnSession: vi.fn().mockResolvedValueOnce({
+        ok: true,
+        value: {
+          structuredData: {
+            structured_output: null,
+            result: [
+              'Review complete.',
+              '```json',
+              JSON.stringify({
+                findings: [
+                  { severity: 'minor', location: 'src/reviewer.ts', description: 'non-blocking note' },
+                ],
+                summary: 'Approved from fallback JSON.',
+                approved: true,
+              }),
+              '```',
+            ].join('\n'),
+          },
+          output: 'ignored plain output',
+          cost: 0.05,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        },
+      }),
+      getCostTracker: vi.fn(),
+    } as unknown as SessionRuntime;
+
+    const gate = createReviewerGate('quality', 'reviewer-quality', 'Check quality', runtime, 42);
+    const result = await gate.execute('/workspace');
+
+    expect(result.passed).toBe(true);
+    expect(result.findings).toHaveLength(1);
+    expect(result.findings[0]?.description).toBe('non-blocking note');
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(1);
+  });
+
   it('does not retry on SessionError.rateLimited — propagates immediately (#267)', async () => {
     const runtime = {
       spawnSession: vi.fn()
