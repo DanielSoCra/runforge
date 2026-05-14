@@ -119,6 +119,31 @@ describe('POAgent', () => {
     stop();
   });
 
+  it('submitIdea propagates saveIdeas rejection without scheduling evaluation (#577)', async () => {
+    const saveIdeasError = new Error('write failed');
+    const deps = makeDeps({
+      saveIdeas: vi.fn().mockRejectedValue(saveIdeasError),
+    });
+    const config = makeConfig({ intervalMs: 60000, debounceMs: 500 });
+    const agent = createPOAgent(deps, config);
+
+    await expect(agent.submitIdea('operator', 'Add queue visibility')).rejects.toThrow(
+      'write failed'
+    );
+
+    expect(deps.saveIdeas).toHaveBeenCalledWith([
+      expect.objectContaining({
+        submittedBy: 'operator',
+        description: 'Add queue visibility',
+        status: 'pending',
+        proposalId: null,
+      }),
+    ]);
+
+    await vi.advanceTimersByTimeAsync(600);
+    expect(deps.spawnPOSession).not.toHaveBeenCalled();
+  });
+
   it('debounces multiple ideas within debounce window', async () => {
     const deps = makeDeps();
     const config = makeConfig({ intervalMs: 60000, debounceMs: 500 });
