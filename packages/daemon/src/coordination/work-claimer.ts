@@ -27,6 +27,7 @@ export function createWorkClaimer(stateDir: string): WorkClaimer {
    *  concurrent async callers (e.g. coordinator tick + legacy daemon poller)
    *  cannot both read the same empty state and both succeed for the same issue. */
   let mutex: Promise<void> = Promise.resolve();
+  let claimsCache: WorkerClaim[] | null = null;
 
   async function withMutex<T>(fn: () => Promise<T>): Promise<T> {
     let release!: () => void;
@@ -46,12 +47,14 @@ export function createWorkClaimer(stateDir: string): WorkClaimer {
   }
 
   async function readAllClaims(): Promise<WorkerClaim[]> {
+    if (claimsCache) return claimsCache;
     await ensureDir();
     let files: string[];
     try {
       files = await readdir(claimsDir);
     } catch {
-      return [];
+      claimsCache = [];
+      return claimsCache;
     }
     const claims: WorkerClaim[] = [];
     for (const file of files) {
@@ -64,11 +67,31 @@ export function createWorkClaimer(stateDir: string): WorkClaimer {
         }
       }
     }
-    return claims;
+    claimsCache = claims.map(cloneClaim);
+    return claimsCache;
   }
 
   function claimFileName(issueNumber: number, attempt: number): string {
     return `${issueNumber}-${attempt}.json`;
+  }
+
+  function cloneClaim(claim: WorkerClaim): WorkerClaim {
+    return { ...claim };
+  }
+
+  function cloneClaims(claims: WorkerClaim[]): WorkerClaim[] {
+    return claims.map(cloneClaim);
+  }
+
+  function upsertCachedClaim(claim: WorkerClaim): void {
+    if (!claimsCache) return;
+    const cached = cloneClaim(claim);
+    const index = claimsCache.findIndex((c) => c.id === cached.id);
+    if (index >= 0) {
+      claimsCache[index] = cached;
+    } else {
+      claimsCache.push(cached);
+    }
   }
 
   return {
@@ -106,14 +129,16 @@ export function createWorkClaimer(stateDir: string): WorkClaimer {
 
         const filePath = join(claimsDir, claimFileName(issueNumber, attempt));
         await writeJsonSafe(filePath, claim);
+        upsertCachedClaim(claim);
 
-        return ok(claim);
+        return ok(cloneClaim(claim));
       });
     },
 
     async findActiveClaim(issueNumber) {
       const allClaims = await readAllClaims();
-      return allClaims.find((c) => c.issueNumber === issueNumber && isActiveClaimStatus(c.status)) ?? null;
+      const claim = allClaims.find((c) => c.issueNumber === issueNumber && isActiveClaimStatus(c.status));
+      return claim ? cloneClaim(claim) : null;
     },
 
     async updateStatus(claimId, status, failureReason?) {
@@ -133,6 +158,7 @@ export function createWorkClaimer(stateDir: string): WorkClaimer {
 
         const filePath = join(claimsDir, claimFileName(claim.issueNumber, claim.attempt));
         await writeJsonSafe(filePath, updated);
+        upsertCachedClaim(updated);
 
         return ok(undefined);
       });
@@ -140,11 +166,11 @@ export function createWorkClaimer(stateDir: string): WorkClaimer {
 
     async listActive() {
       const allClaims = await readAllClaims();
-      return allClaims.filter((c) => isActiveClaimStatus(c.status));
+      return cloneClaims(allClaims.filter((c) => isActiveClaimStatus(c.status)));
     },
 
     async listAll() {
-      return readAllClaims();
+      return cloneClaims(await readAllClaims());
     },
   };
 }
