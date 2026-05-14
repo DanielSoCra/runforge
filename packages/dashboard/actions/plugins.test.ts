@@ -28,8 +28,7 @@ describe('togglePlugin', () => {
   it('rejects unauthenticated callers', async () => {
     vi.mocked(requireAdmin).mockRejectedValue(new Error('Unauthorized'));
     vi.mocked(createClient).mockResolvedValue({} as never);
-    const result = await togglePlugin('repo-id', 'web-stack', true);
-    expect(result.error).toContain('Unauthorized');
+    await expect(togglePlugin('repo-id', 'web-stack', true)).rejects.toThrow('Unauthorized');
     expect(vi.mocked(loadDashboardRegistry)).not.toHaveBeenCalled();
   });
 
@@ -61,9 +60,7 @@ describe('enableAllSuggested', () => {
     vi.mocked(requireAdmin).mockRejectedValue(new Error('Unauthorized'));
     const fromSpy = vi.fn();
     vi.mocked(createClient).mockResolvedValue({ from: fromSpy } as never);
-    const result = await enableAllSuggested('repo-id');
-    expect(result.failed.length).toBe(0);
-    expect(result.succeeded.length).toBe(0);
+    await expect(enableAllSuggested('repo-id')).rejects.toThrow('Unauthorized');
     expect(fromSpy).not.toHaveBeenCalled();
   });
 
@@ -208,8 +205,7 @@ describe('triggerRecommendation', () => {
   it('returns early without calling Anthropic when unauthenticated', async () => {
     vi.mocked(requireAdmin).mockRejectedValue(new Error('Unauthorized'));
     vi.mocked(createClient).mockResolvedValue({} as never);
-    // Should return without throwing
-    await expect(triggerRecommendation('repo-id', 'owner', 'repo')).resolves.toBeUndefined();
+    await expect(triggerRecommendation('repo-id', 'owner', 'repo')).rejects.toThrow('Unauthorized');
     expect(vi.mocked(loadDashboardRegistry)).not.toHaveBeenCalled();
     expect(vi.mocked(Anthropic)).not.toHaveBeenCalled();
   });
@@ -397,8 +393,7 @@ describe('exportPlugin', () => {
   it('rejects unauthenticated callers', async () => {
     vi.mocked(requireAdmin).mockRejectedValue(new Error('Unauthorized'));
     vi.mocked(createClient).mockResolvedValue({} as never);
-    const result = await exportPlugin('repo-id', 'web-stack', '/some/path');
-    expect(result.error).toContain('Unauthorized');
+    await expect(exportPlugin('repo-id', 'web-stack', '/some/path')).rejects.toThrow('Unauthorized');
   });
 
   it('rejects plugin ids with unsafe characters', async () => {

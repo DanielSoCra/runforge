@@ -19,7 +19,7 @@ export async function togglePlugin(
 ): Promise<{ ok?: true; error?: string }> {
   const supabase = await createClient();
   // Plugin toggle is admin-only (viewers have read-only access)
-  try { await requireAdmin(supabase); } catch { return { error: 'Unauthorized' }; }
+  await requireAdmin(supabase);
   const registry = await loadDashboardRegistry();
   if (!registry.plugins.find(p => p.id === pluginId)) {
     return { error: `Unknown plugin: ${pluginId}` };
@@ -46,7 +46,7 @@ export async function enableAllSuggested(
 ): Promise<{ succeeded: string[]; failed: string[]; error?: string }> {
   const supabase = await createClient();
   // Admin-only — same enforcement as togglePlugin
-  try { await requireAdmin(supabase); } catch { return { succeeded: [], failed: [], error: 'Unauthorized' }; }
+  await requireAdmin(supabase);
 
   const { data: suggested, error: selectError } = await supabase
     .from('repo_plugins')
@@ -102,7 +102,7 @@ export async function enableAllSuggested(
 export async function triggerRecommendation(repoId: string, repoOwner: string, repoName: string): Promise<void> {
   const supabase = await createClient();
   // Admin-only — same enforcement as togglePlugin
-  try { await requireAdmin(supabase); } catch { return; }
+  await requireAdmin(supabase);
 
   // Validate before interpolating into LLM prompt
   if (!SAFE_PATTERN.test(repoOwner) || !SAFE_PATTERN.test(repoName)) {
@@ -166,7 +166,7 @@ export async function exportPlugin(
   targetRepoPath: string,
 ): Promise<{ ok?: true; error?: string }> {
   const supabase = await createClient();
-  try { await requireAdmin(supabase); } catch { return { error: 'Unauthorized' }; }
+  await requireAdmin(supabase);
 
   // Validate pluginId against SAFE_PATTERN before using in filesystem paths
   if (!SAFE_PATTERN.test(pluginId)) {
