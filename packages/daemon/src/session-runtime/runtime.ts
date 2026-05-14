@@ -13,7 +13,7 @@ import type {
 import type { Result } from '../lib/result.js';
 import { ok, err } from '../lib/result.js';
 import type { SupabaseRunWriter } from '../supabase/run-writer.js';
-import { CostTracker } from './cost.js';
+import { CostTracker, type CostReservation } from './cost.js';
 import { RateLimiter } from './rate-limiter.js';
 import {
   createAdapter,
@@ -394,134 +394,145 @@ export class SessionRuntime {
       return err(new Error(`No agent definition for session type: ${type}`));
     }
 
-    // 2. Check budget — fail-safe guard clause (STACK-AC-OPERATIONAL-SAFETY)
+    // 2. Reserve budget — fail-safe guard clause (STACK-AC-OPERATIONAL-SAFETY)
     const costAttributionIssueNumbers = normalizeCostAttributionIssueNumbers(
       options?.costAttributionIssueNumbers,
       issueNumber,
     );
-    for (const budgetIssueNumber of costAttributionIssueNumbers) {
-      const budget = this.costTracker.checkBudget(budgetIssueNumber);
-      if (!budget.available) {
-        return err(SessionError.budgetExceeded(budget.reason));
-      }
+    const budgetReservation = this.costTracker.reserveCost(
+      costAttributionIssueNumbers,
+      def.budgetCap,
+    );
+    if (!budgetReservation.reserved) {
+      return err(SessionError.budgetExceeded(budgetReservation.reason));
     }
 
-    // 3. Check legacy global rate limit (ARCH-AC-SESSION-RUNTIME step 3).
-    // Multi-provider mode uses provider-local cooldowns in ProviderRegistry
-    // so one rate-limited provider does not block healthy fallbacks.
-    if (!this.useProviderRegistry) {
-      const rateCheck = this.rateLimiter.checkRateLimit();
-      if (!rateCheck.clear) {
-        return err(SessionError.rateLimited(0, rateCheck.remainingMs));
-      }
-    }
-
-    // 4. Stagger delay
-    const now = Date.now();
-    const elapsed = now - this.lastSpawnTime;
-    if (elapsed < this.staggerMs) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, this.staggerMs - elapsed),
-      );
-    }
-    this.lastSpawnTime = Date.now();
-
-    // 5. Assemble prompt and extract plugin artifacts (ARCH-AC-PLUGINS Flow 4 step 3)
-    let assembled: { prompt: string; mcpConfigs: McpConfig[]; gates: string[] };
     try {
-      assembled = await this.assemblePrompt(def, context);
-    } catch (e) {
-      return err(e instanceof Error ? e : new Error(String(e)));
-    }
+      // 3. Check legacy global rate limit (ARCH-AC-SESSION-RUNTIME step 3).
+      // Multi-provider mode uses provider-local cooldowns in ProviderRegistry
+      // so one rate-limited provider does not block healthy fallbacks.
+      if (!this.useProviderRegistry) {
+        const rateCheck = this.rateLimiter.checkRateLimit();
+        if (!rateCheck.clear) {
+          return err(SessionError.rateLimited(0, rateCheck.remainingMs));
+        }
+      }
 
-    // 6. Delegate to adapter — with containment policy and plugin MCP configs.
-    // jsonSchema may be passed as object (callers like l3-compliance use the
-    // exported schema constant directly) or a pre-stringified string. Adapter
-    // expects string for the CLI --json-schema arg, so serialize here.
-    const jsonSchema =
-      typeof options?.jsonSchema === 'object' && options.jsonSchema !== null
-        ? JSON.stringify(options.jsonSchema)
-        : options?.jsonSchema;
-    const directoryScope =
-      options?.agentDef?.directoryScope ??
-      def.directoryScope ??
-      resolveDirectoryScope(type, this.scopeRegistry, DEFAULT_POLICY);
-    const scopeBaseCommit = context.workspacePath
-      ? await this.tryCaptureScopeBaseCommit(context.workspacePath)
-      : undefined;
-    const adapterOptions = {
-      cwd: context.workspacePath,
-      jsonSchema,
-      containmentPolicy: DEFAULT_POLICY,
-      mcpConfigs: assembled.mcpConfigs,
-      directoryScope,
-    };
-    const result = this.useProviderRegistry
-      ? await this.spawnWithProviderFallback(
-          def,
-          assembled.prompt,
-          adapterOptions,
-          type,
-          costAttributionIssueNumbers,
-          runWriter,
-          runId,
-        )
-      : await this.spawnWithLegacyAdapter(
-          def,
-          assembled.prompt,
-          adapterOptions,
-          type,
-          costAttributionIssueNumbers,
-          runWriter,
-          runId,
-        );
-
-    if (!result.ok) return result;
-
-    if (context.workspacePath) {
-      const scopeAudit = await auditScope({
-        workspacePath: context.workspacePath,
-        baseCommit: scopeBaseCommit,
-        sessionId: `${type}-${issueNumber}`,
-        agentType: type,
-        scope: directoryScope,
-      });
-      if (!scopeAudit.ok) {
-        return err(
-          SessionError.scopeViolated(
-            formatScopeViolations(scopeAudit.error),
-            result.value.cost,
-          ),
+      // 4. Stagger delay
+      const now = Date.now();
+      const elapsed = now - this.lastSpawnTime;
+      if (elapsed < this.staggerMs) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, this.staggerMs - elapsed),
         );
       }
-    }
+      this.lastSpawnTime = Date.now();
 
-    // 9. Post-session audit — containment layer 6 (detective, advisory).
-    // Output-text scanning has high false-positive risk: model prose mentioning
-    // command names (git, bash, python3) trips the regex even when no command
-    // was executed. Preventive containment via Bash hooks (containment-hooks.ts)
-    // is still terminal — that layer audits real tool invocations.
-    // Issue #489 acceptance criteria 5–6.
-    //
-    // NOTE: this downgrade assumes auditSessionOutput only produces blocked-
-    // command evidence violations (path-reference scanning was already removed
-    // — see audit.ts comments). If new violation classes are added that
-    // genuinely warrant terminal handling, split the result by violation
-    // class here rather than blanket-downgrading everything.
-    const audit = auditSessionOutput(result.value.output, DEFAULT_POLICY);
-    if (!audit.clean) {
-      console.warn(
-        `[audit] Post-session output mentions blocked commands (advisory, not terminal): ${audit.violations.join('; ')}`,
-      );
-      result.value.auditWarnings = audit.violations;
-    }
+      // 5. Assemble prompt and extract plugin artifacts (ARCH-AC-PLUGINS Flow 4 step 3)
+      let assembled: {
+        prompt: string;
+        mcpConfigs: McpConfig[];
+        gates: string[];
+      };
+      try {
+        assembled = await this.assemblePrompt(def, context);
+      } catch (e) {
+        return err(e instanceof Error ? e : new Error(String(e)));
+      }
 
-    // 10. Attach plugin gates to result for downstream validation (ARCH-AC-PLUGINS Flow 4 step 3)
-    if (assembled.gates.length > 0) {
-      result.value.pluginGates = assembled.gates;
-    }
+      // 6. Delegate to adapter — with containment policy and plugin MCP configs.
+      // jsonSchema may be passed as object (callers like l3-compliance use the
+      // exported schema constant directly) or a pre-stringified string. Adapter
+      // expects string for the CLI --json-schema arg, so serialize here.
+      const jsonSchema =
+        typeof options?.jsonSchema === 'object' && options.jsonSchema !== null
+          ? JSON.stringify(options.jsonSchema)
+          : options?.jsonSchema;
+      const directoryScope =
+        options?.agentDef?.directoryScope ??
+        def.directoryScope ??
+        resolveDirectoryScope(type, this.scopeRegistry, DEFAULT_POLICY);
+      const scopeBaseCommit = context.workspacePath
+        ? await this.tryCaptureScopeBaseCommit(context.workspacePath)
+        : undefined;
+      const adapterOptions = {
+        cwd: context.workspacePath,
+        jsonSchema,
+        containmentPolicy: DEFAULT_POLICY,
+        mcpConfigs: assembled.mcpConfigs,
+        directoryScope,
+      };
+      const result = this.useProviderRegistry
+        ? await this.spawnWithProviderFallback(
+            def,
+            assembled.prompt,
+            adapterOptions,
+            type,
+            costAttributionIssueNumbers,
+            budgetReservation.reservation,
+            runWriter,
+            runId,
+          )
+        : await this.spawnWithLegacyAdapter(
+            def,
+            assembled.prompt,
+            adapterOptions,
+            type,
+            costAttributionIssueNumbers,
+            budgetReservation.reservation,
+            runWriter,
+            runId,
+          );
 
-    return result;
+      if (!result.ok) return result;
+
+      if (context.workspacePath) {
+        const scopeAudit = await auditScope({
+          workspacePath: context.workspacePath,
+          baseCommit: scopeBaseCommit,
+          sessionId: `${type}-${issueNumber}`,
+          agentType: type,
+          scope: directoryScope,
+        });
+        if (!scopeAudit.ok) {
+          return err(
+            SessionError.scopeViolated(
+              formatScopeViolations(scopeAudit.error),
+              result.value.cost,
+            ),
+          );
+        }
+      }
+
+      // 9. Post-session audit — containment layer 6 (detective, advisory).
+      // Output-text scanning has high false-positive risk: model prose mentioning
+      // command names (git, bash, python3) trips the regex even when no command
+      // was executed. Preventive containment via Bash hooks (containment-hooks.ts)
+      // is still terminal — that layer audits real tool invocations.
+      // Issue #489 acceptance criteria 5–6.
+      //
+      // NOTE: this downgrade assumes auditSessionOutput only produces blocked-
+      // command evidence violations (path-reference scanning was already removed
+      // — see audit.ts comments). If new violation classes are added that
+      // genuinely warrant terminal handling, split the result by violation
+      // class here rather than blanket-downgrading everything.
+      const audit = auditSessionOutput(result.value.output, DEFAULT_POLICY);
+      if (!audit.clean) {
+        console.warn(
+          `[audit] Post-session output mentions blocked commands (advisory, not terminal): ${audit.violations.join('; ')}`,
+        );
+        result.value.auditWarnings = audit.violations;
+      }
+
+      // 10. Attach plugin gates to result for downstream validation (ARCH-AC-PLUGINS Flow 4 step 3)
+      if (assembled.gates.length > 0) {
+        result.value.pluginGates = assembled.gates;
+      }
+
+      return result;
+    } finally {
+      this.costTracker.releaseCostReservation(budgetReservation.reservation);
+    }
   }
 
   private async spawnWithLegacyAdapter(
@@ -530,6 +541,7 @@ export class SessionRuntime {
     adapterOptions: AdapterSpawnOptions,
     type: SessionType,
     costAttributionIssueNumbers: number[],
+    costReservation: CostReservation,
     runWriter?: SupabaseRunWriter,
     runId?: string,
   ): Promise<Result<SessionResult>> {
@@ -538,6 +550,7 @@ export class SessionRuntime {
       result,
       type,
       costAttributionIssueNumbers,
+      costReservation,
       runWriter,
       runId,
     );
@@ -559,13 +572,16 @@ export class SessionRuntime {
     adapterOptions: AdapterSpawnOptions,
     type: SessionType,
     costAttributionIssueNumbers: number[],
+    costReservation: CostReservation,
     runWriter?: SupabaseRunWriter,
     runId?: string,
   ): Promise<Result<SessionResult>> {
     const attempted = new Set<string>();
     let lastError: Error | undefined;
     const tier = resolveModelTier(def);
-    const binding = def.providerBinding ?? (def.provider ? { preferred: def.provider } : undefined);
+    const binding =
+      def.providerBinding ??
+      (def.provider ? { preferred: def.provider } : undefined);
 
     while (true) {
       const resolution = this.providerRegistry.resolve(binding, tier, {
@@ -593,6 +609,7 @@ export class SessionRuntime {
         result,
         type,
         costAttributionIssueNumbers,
+        costReservation,
         runWriter,
         runId,
       );
@@ -612,7 +629,10 @@ export class SessionRuntime {
         },
       );
 
-      const budgetError = this.findBudgetError(costAttributionIssueNumbers);
+      const budgetError = this.findBudgetError(
+        costAttributionIssueNumbers,
+        costReservation,
+      );
       if (budgetError) return err(budgetError);
     }
   }
@@ -621,6 +641,7 @@ export class SessionRuntime {
     result: Result<SessionResult>,
     type: SessionType,
     costAttributionIssueNumbers: number[],
+    costReservation: CostReservation,
     runWriter?: SupabaseRunWriter,
     runId?: string,
   ): void {
@@ -630,19 +651,21 @@ export class SessionRuntime {
         ? result.error.cost
         : 0;
     if (cost > 0) {
-      const allocatedCost = cost / costAttributionIssueNumbers.length;
-      for (const costIssueNumber of costAttributionIssueNumbers) {
-        this.costTracker.recordCost(costIssueNumber, allocatedCost);
-      }
+      this.costTracker.recordReservedCost(costReservation, cost);
       if (runWriter && runId) {
         void runWriter.writeCostEvent(runId, type, cost);
       }
     }
   }
 
-  private findBudgetError(issueNumbers: number[]): SessionError | undefined {
+  private findBudgetError(
+    issueNumbers: number[],
+    costReservation: CostReservation,
+  ): SessionError | undefined {
     for (const issueNumber of issueNumbers) {
-      const budget = this.costTracker.checkBudget(issueNumber);
+      const budget = this.costTracker.checkBudget(issueNumber, undefined, {
+        excludeReservation: costReservation,
+      });
       if (!budget.available) return SessionError.budgetExceeded(budget.reason);
     }
     return undefined;

@@ -209,6 +209,47 @@ describe('SessionRuntime', () => {
     }
   });
 
+  it('reserves budget before awaited spawn work so concurrent sessions cannot overspend (#550)', async () => {
+    costTracker.recordCost(999, 48);
+    const agentDef = {
+      name: 'budget-test-agent',
+      description: 'budget reservation test agent',
+      systemPrompt: 'Do the work.',
+      allowedTools: [],
+      maxTurns: 1,
+      timeoutMs: 1000,
+      budgetCap: 2,
+    };
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        output: 'done',
+        structuredData: {},
+        cost: 2,
+        pitfallMarkers: [],
+        exitStatus: 'completed',
+      },
+    });
+
+    const first = runtime.spawnSession('worker', { variables: {} }, 1, {
+      agentDef,
+    });
+    const second = await runtime.spawnSession('worker', { variables: {} }, 2, {
+      agentDef,
+    });
+
+    expect(second.ok).toBe(false);
+    if (!second.ok) {
+      expect(second.error).toBeInstanceOf(SessionError);
+      expect(second.error.message).toContain('daily-budget-exceeded');
+    }
+
+    const firstResult = await first;
+    expect(firstResult.ok).toBe(true);
+    expect(mockSpawn).toHaveBeenCalledTimes(1);
+    expect(costTracker.getDailyCost()).toBe(50);
+  });
+
   it('assembles prompt with context variables', async () => {
     // Access private method via any for testing
     const result = await (runtime as any).assemblePrompt(
@@ -602,7 +643,9 @@ describe('SessionRuntime', () => {
   it('falls back from preferred provider to secondary provider and records both costs (#480)', async () => {
     const codexSpawn = vi
       .fn()
-      .mockResolvedValue(err(new SessionError('Rate limited by upstream', 0.2, true)));
+      .mockResolvedValue(
+        err(new SessionError('Rate limited by upstream', 0.2, true)),
+      );
     const claudeSpawn = vi.fn().mockResolvedValue(
       ok({
         output: 'fallback completed',
@@ -613,10 +656,7 @@ describe('SessionRuntime', () => {
       }),
     );
     mockCreateProviderAdapter.mockImplementation((provider) => ({
-      spawn:
-        provider.name === 'codex-planner'
-          ? codexSpawn
-          : claudeSpawn,
+      spawn: provider.name === 'codex-planner' ? codexSpawn : claudeSpawn,
     }));
     const providerRuntime = new SessionRuntime(
       {
@@ -640,10 +680,7 @@ describe('SessionRuntime', () => {
               name: 'claude-default',
               adapterClass: 'process-based',
               providerKind: 'claude-cli',
-              supportedModelTiers: [
-                'standard-capability',
-                'higher-capability',
-              ],
+              supportedModelTiers: ['standard-capability', 'higher-capability'],
               required: false,
               cliTool: 'claude',
               executionFlags: [],
@@ -719,10 +756,7 @@ describe('SessionRuntime', () => {
               name: 'claude-default',
               adapterClass: 'process-based',
               providerKind: 'claude-cli',
-              supportedModelTiers: [
-                'standard-capability',
-                'higher-capability',
-              ],
+              supportedModelTiers: ['standard-capability', 'higher-capability'],
               required: false,
               cliTool: 'claude',
               executionFlags: [],
