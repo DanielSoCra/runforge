@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { readFile, readdir, stat } from 'fs/promises';
 import { join, relative } from 'path';
 import { execFile } from 'child_process';
+import { DependencyRiskEntrySchema } from './schemas.js';
 import type {
   CycleTrigger,
   SignalDigest,
@@ -201,38 +202,89 @@ async function walkDir(
 // --- Dependency audit ---
 
 export async function runDependencyAudit(workspacePath: string): Promise<DependencyRiskEntry[]> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+
+    const resolveOnce = (risks: DependencyRiskEntry[]) => {
+      if (settled) return;
+      settled = true;
+      resolve(risks);
+    };
+
+    const rejectOnce = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+
     const child = execFile(
       'npm',
       ['audit', '--json', '--omit=dev'],
       { cwd: workspacePath, timeout: NPM_AUDIT_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
       (error, stdout, _stderr) => {
         // npm audit returns non-zero when vulnerabilities found — that's expected
+        if (stdout.trim().length === 0) {
+          rejectOnce(error ?? new Error('npm audit produced no JSON output'));
+          return;
+        }
+
         try {
           const parsed = JSON.parse(stdout);
-          const risks: DependencyRiskEntry[] = [];
-          const vulns = parsed.vulnerabilities ?? {};
-          for (const [pkg, info] of Object.entries(vulns)) {
-            const v = info as { severity?: string; via?: Array<{ url?: string }> };
-            const severity = normalizeSeverity(v.severity);
-            if (severity) {
-              risks.push({
-                packageName: pkg,
-                currentVersion: 'unknown',
-                severity,
-                advisory: v.via?.[0]?.url ?? 'No advisory URL',
-              });
-            }
-          }
-          resolve(risks);
-        } catch {
-          resolve([]);
+          resolveOnce(parseDependencyRisks(parsed));
+        } catch (e) {
+          rejectOnce(e instanceof Error ? e : new Error('npm audit produced malformed JSON'));
         }
       },
     );
-    // Handle SIGTERM
-    child.on('error', () => resolve([]));
+    child.on('error', (error) => rejectOnce(error));
   });
+}
+
+function parseDependencyRisks(parsed: unknown): DependencyRiskEntry[] {
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+
+  const vulnerabilities = (parsed as { vulnerabilities?: unknown }).vulnerabilities;
+  if (
+    vulnerabilities === null ||
+    typeof vulnerabilities !== 'object' ||
+    Array.isArray(vulnerabilities)
+  ) {
+    return [];
+  }
+
+  const risks: DependencyRiskEntry[] = [];
+  for (const [pkg, info] of Object.entries(vulnerabilities)) {
+    if (info === null || typeof info !== 'object' || Array.isArray(info)) continue;
+
+    const vulnerability = info as { severity?: unknown; via?: unknown };
+    const severity =
+      typeof vulnerability.severity === 'string'
+        ? normalizeSeverity(vulnerability.severity)
+        : null;
+    if (!severity) continue;
+
+    const risk = DependencyRiskEntrySchema.safeParse({
+      packageName: pkg,
+      currentVersion: 'unknown',
+      severity,
+      advisory: firstAdvisoryUrl(vulnerability.via),
+    });
+    if (risk.success) risks.push(risk.data);
+  }
+
+  return risks;
+}
+
+function firstAdvisoryUrl(via: unknown): string {
+  if (!Array.isArray(via)) return 'No advisory URL';
+
+  for (const entry of via) {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const url = (entry as { url?: unknown }).url;
+    if (typeof url === 'string' && url.length > 0) return url;
+  }
+
+  return 'No advisory URL';
 }
 
 function normalizeSeverity(s?: string): DependencyRiskEntry['severity'] | null {
