@@ -5,6 +5,7 @@ describe('toDbOutcome', () => {
   it('maps complete → complete', () => expect(toDbOutcome('complete')).toBe('complete'));
   it('maps stuck → stuck',       () => expect(toDbOutcome('stuck')).toBe('stuck'));
   it('maps paused → in-progress', () => expect(toDbOutcome('paused')).toBe('in-progress'));
+  it('maps parked → in-progress (#562)', () => expect(toDbOutcome('parked')).toBe('in-progress'));
   it('maps error → failed',       () => expect(toDbOutcome('error')).toBe('failed'));
   it('maps failed → failed',      () => expect(toDbOutcome('failed')).toBe('failed'));
 });
