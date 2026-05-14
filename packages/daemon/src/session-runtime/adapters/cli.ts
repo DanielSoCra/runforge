@@ -4,7 +4,7 @@ import { writeFileSync, mkdirSync, mkdtempSync, unlinkSync, existsSync, readFile
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { ok, err, type Result } from '../../lib/result.js';
-import type { AgentDefinition, SessionContext, SessionResult, ExitStatus, PitfallMarker, DirectoryScope } from '../../types.js';
+import type { AgentDefinition, SessionContext, SessionResult, ExitStatus, PitfallMarker, DirectoryScope, ProviderDefinition } from '../../types.js';
 import type { ContainmentPolicy } from '../containment-hooks.js';
 import type { ProviderAdapter } from './types.js';
 import type { McpConfig } from '../plugin-injection.js';
@@ -14,14 +14,20 @@ import { SessionError } from '../session-error.js';
 import { generateScopeHookScript, makeCliPermissionDenyEntries } from '../scope-enforcement.js';
 
 export class CliAdapter implements ProviderAdapter {
-  buildArgs(def: AgentDefinition, prompt: string, jsonSchema?: string): string[] {
+  buildArgs(
+    def: AgentDefinition,
+    prompt: string,
+    jsonSchema?: string,
+    provider?: ProviderDefinition,
+  ): string[] {
     const args = [
       '-p', prompt,
       '--output-format', 'json',
       '--max-turns', String(def.maxTurns),
     ];
-    if (def.modelOverride) {
-      args.push('--model', def.modelOverride);
+    const model = provider?.model ?? def.modelOverride;
+    if (model) {
+      args.push('--model', model);
     }
     if (def.allowedTools.length > 0) {
       args.push('--allowedTools', def.allowedTools.join(','));
@@ -32,7 +38,7 @@ export class CliAdapter implements ProviderAdapter {
     return args;
   }
 
-  buildEnv(extra?: Record<string, string>): Record<string, string> {
+  buildEnv(extra?: Record<string, string>, provider?: ProviderDefinition): Record<string, string> {
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? '/usr/bin:/bin',
       HOME: process.env.HOME ?? '/tmp',
@@ -53,6 +59,7 @@ export class CliAdapter implements ProviderAdapter {
     for (const key of passthrough) {
       if (process.env[key]) env[key] = process.env[key];
     }
+    if (provider?.env) Object.assign(env, provider.env);
     if (extra) Object.assign(env, extra);
     return env;
   }
@@ -256,15 +263,21 @@ export class CliAdapter implements ProviderAdapter {
       containmentPolicy?: ContainmentPolicy;
       mcpConfigs?: McpConfig[];
       directoryScope?: DirectoryScope;
+      provider?: ProviderDefinition;
     },
   ): Promise<Result<SessionResult>> {
-    const args = this.buildArgs(def, prompt, options?.jsonSchema);
+    const args = this.buildArgs(
+      def,
+      prompt,
+      options?.jsonSchema,
+      options?.provider,
+    );
     const sessionStartTime = Date.now();
     const extraEnv: Record<string, string> = {
       SESSION_START_TIME: String(sessionStartTime),
       SESSION_TIMEOUT_MS: String(def.timeoutMs),
     };
-    const env = this.buildEnv(extraEnv);
+    const env = this.buildEnv(extraEnv, options?.provider);
 
     // Set up hooks for EVERY session — timeout hooks are always needed,
     // containment hooks only when a policy is provided.
@@ -293,10 +306,14 @@ export class CliAdapter implements ProviderAdapter {
       const chunks: Buffer[] = [];
       const errChunks: Buffer[] = [];
 
-      const proc = spawn('claude', args, {
+      const proc = spawn(
+        options?.provider?.binaryPath ?? options?.provider?.cliTool ?? 'claude',
+        args,
+        {
         cwd: effectiveCwd,
         env,
-      });
+        },
+      );
 
       let timedOut = false;
       let killTimer: ReturnType<typeof setTimeout> | undefined;

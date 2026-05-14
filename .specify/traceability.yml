@@ -377,9 +377,21 @@ STACK-AC-SESSION-RUNTIME:
 STACK-AC-SESSION-PROVIDERS:
   parent: ARCH-AC-SESSION-PROVIDERS
   children: []
-  # Code/test paths are planned by the L3 spec and added when implementation creates them.
-  code_paths: []
-  test_paths: []
+  code_paths:
+    - packages/daemon/src/types.ts
+    - packages/daemon/src/config.ts
+    - packages/daemon/src/session-runtime/runtime.ts
+    - packages/daemon/src/session-runtime/providers/registry.ts
+    - packages/daemon/src/session-runtime/adapters/types.ts
+    - packages/daemon/src/session-runtime/adapters/index.ts
+    - packages/daemon/src/session-runtime/adapters/cli.ts
+    - packages/daemon/src/session-runtime/adapters/codex-cli.ts
+  test_paths:
+    - packages/daemon/src/config.test.ts
+    - packages/daemon/src/session-runtime/runtime.test.ts
+    - packages/daemon/src/session-runtime/providers/registry.test.ts
+    - packages/daemon/src/session-runtime/adapters/index.test.ts
+    - packages/daemon/src/session-runtime/adapters/codex-cli.test.ts
   status: draft
 
 STACK-AC-OPERATIONAL-SAFETY:

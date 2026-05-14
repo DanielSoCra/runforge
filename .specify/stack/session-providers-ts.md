@@ -7,8 +7,21 @@ version: 1
 layer: 3
 stack: typescript
 references: ARCH-AC-SESSION-PROVIDERS
-code_paths: [] # planned: packages/daemon/src/session-runtime/providers/, packages/daemon/src/session-runtime/adapters/codex-cli.ts
-test_paths: [] # planned: packages/daemon/src/session-runtime/providers/**/*.test.ts, packages/daemon/src/session-runtime/adapters/codex-cli.test.ts
+code_paths:
+  - packages/daemon/src/types.ts
+  - packages/daemon/src/config.ts
+  - packages/daemon/src/session-runtime/runtime.ts
+  - packages/daemon/src/session-runtime/providers/registry.ts
+  - packages/daemon/src/session-runtime/adapters/types.ts
+  - packages/daemon/src/session-runtime/adapters/index.ts
+  - packages/daemon/src/session-runtime/adapters/cli.ts
+  - packages/daemon/src/session-runtime/adapters/codex-cli.ts
+test_paths:
+  - packages/daemon/src/config.test.ts
+  - packages/daemon/src/session-runtime/runtime.test.ts
+  - packages/daemon/src/session-runtime/providers/registry.test.ts
+  - packages/daemon/src/session-runtime/adapters/index.test.ts
+  - packages/daemon/src/session-runtime/adapters/codex-cli.test.ts
 ---
 
 # STACK-AC-SESSION-PROVIDERS — Multi-Provider Session Execution (TypeScript)
@@ -27,12 +40,13 @@ test_paths: [] # planned: packages/daemon/src/session-runtime/providers/**/*.tes
 
 ## Key Decisions
 
-**Provider definitions live in daemon config.** Add a `providers` object to config with named definitions, a `defaultProvider`, and a `fallbackChain`. Each definition declares `adapterClass`, supported model tiers, required/optional startup behavior, and adapter-specific settings.
+**Provider definitions live in daemon config.** Add a `providers` object to config with named definitions, a `defaultProvider`, and a `fallbackChain`. Each definition declares `adapterClass`, `providerKind`, supported model tiers, required/optional startup behavior, and adapter-specific settings.
 
 ```typescript
 type ProviderDefinition = {
   name: string;
   adapterClass: 'process-based' | 'programmatic-api';
+  providerKind: 'claude-cli' | 'codex-cli' | 'pi-cli';
   supportedModelTiers: ModelTier[];
   required?: boolean;
 };
@@ -110,7 +124,7 @@ const proc = spawn(
 - `CodexCliAdapter` must not assume Claude-style JSON output. Exit status drives success/failure, and stdout is wrapped as text unless a future Codex mode provides structured output.
 - Liveness probes check reachability, not full session correctness. A binary being present does not prove credentials are valid; auth failures still degrade the provider on first real spawn.
 - Cost from all provider attempts in one logical session accumulates against the same run and daily budgets. Fallback must never reset cost.
-- This L3 intentionally keeps implementation paths planned until the implementation PR creates those files; traceability should add concrete code paths only when the files exist.
+- Traceability must include every new provider registry and adapter file as soon as the implementation creates it.
 
 ## Concerns This Spec Does Not Cover
 
