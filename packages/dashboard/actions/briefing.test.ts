@@ -540,6 +540,38 @@ describe('getUpNext', () => {
     expect(result).toHaveLength(1);
   });
 
+  it('deduplicates token decrypts for repos sharing a connection', async () => {
+    setupReposQuery([
+      { id: 'r1', owner: 'acme', name: 'web', connection_id: 'conn-1' },
+      { id: 'r2', owner: 'acme', name: 'api', connection_id: 'conn-1' },
+    ]);
+    setupActiveRunsQuery([]);
+    mockServiceRpc.mockResolvedValue({ data: 'shared-token', error: null });
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { number: 20, title: 'Ready web', html_url: 'https://github.com/acme/web/issues/20', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }] },
+        ],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [
+          { number: 30, title: 'Ready api', html_url: 'https://github.com/acme/api/issues/30', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }] },
+        ],
+      } as Response);
+
+    const { getUpNext } = await import('./briefing');
+    const result = await getUpNext();
+
+    expect(mockServiceRpc).toHaveBeenCalledTimes(1);
+    expect(mockServiceRpc).toHaveBeenCalledWith('decrypt_github_token', {
+      p_connection_id: 'conn-1',
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(result.map((item) => `${item.repoName}#${item.issueNumber}`)).toEqual(['web#20', 'api#30']);
+  });
+
   it('excludes issues that have in-progress runs', async () => {
     setupReposQuery([{ id: 'r1', owner: 'acme', name: 'web', connection_id: null }]);
     setupActiveRunsQuery([{ issue_number: 20, repo_owner: 'acme', repo_name: 'web' }]);

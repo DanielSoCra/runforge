@@ -222,6 +222,21 @@ export async function getUpNext(): Promise<UpNextItem[]> {
   }>;
   if (repos.length === 0) return [];
 
+  const connectionIds = [...new Set(
+    repos
+      .map((repo) => repo.connection_id)
+      .filter((connectionId): connectionId is string => Boolean(connectionId)),
+  )];
+  const tokensByConnectionId = new Map<string, string | undefined>();
+  await Promise.all(
+    connectionIds.map(async (connectionId) => {
+      const { data } = await getService().rpc('decrypt_github_token', {
+        p_connection_id: connectionId,
+      });
+      tokensByConnectionId.set(connectionId, (data as string | null) ?? process.env.GITHUB_TOKEN);
+    }),
+  );
+
   // Build set of in-progress run keys for exclusion
   const activeRunKeys = new Set(
     (runsResult.data ?? []).map(
@@ -233,15 +248,9 @@ export async function getUpNext(): Promise<UpNextItem[]> {
   // Resolve tokens and fetch issues per repo (first 100 per repo — sufficient for pipeline queues)
   const perRepoItems = await Promise.all(
     repos.map(async (repo): Promise<UpNextItem[]> => {
-      let token: string | undefined;
-      if (repo.connection_id) {
-        const { data } = await getService().rpc('decrypt_github_token', {
-          p_connection_id: repo.connection_id,
-        });
-        token = (data as string | null) ?? process.env.GITHUB_TOKEN;
-      } else {
-        token = process.env.GITHUB_TOKEN;
-      }
+      const token = repo.connection_id
+        ? tokensByConnectionId.get(repo.connection_id)
+        : process.env.GITHUB_TOKEN;
       if (!token) return [];
 
       try {
