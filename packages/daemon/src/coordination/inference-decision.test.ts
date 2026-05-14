@@ -225,6 +225,44 @@ describe('InferenceEngine', () => {
       expect(recent.length).toBe(5);
       expect(recent[0]!.rationale).toBe('entry-5');
     });
+
+    it('returns decision when loadLog rejects (#575)', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const deps = makeDeps({
+        loadLog: vi.fn().mockRejectedValue(new Error('read failed')),
+      });
+      const engine = createInferenceEngine(deps, makeConfig());
+
+      const result = await engine.decide(makeContext());
+
+      expect(result.chosenAction).toBe('stuck');
+      expect(result.degraded).toBe(false);
+      expect(deps.saveLog).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[inference-decision] failed to persist inference log:',
+        'read failed',
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('returns decision when saveLog rejects (#558)', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const deps = makeDeps({
+        saveLog: vi.fn().mockRejectedValue(new Error('write failed')),
+      });
+      const engine = createInferenceEngine(deps, makeConfig());
+
+      const result = await engine.decide(makeContext());
+
+      expect(result.chosenAction).toBe('stuck');
+      expect(result.degraded).toBe(false);
+      expect(deps.saveLog).toHaveBeenCalledWith([expect.objectContaining({ chosenAction: 'stuck' })]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[inference-decision] failed to persist inference log:',
+        'write failed',
+      );
+      warnSpy.mockRestore();
+    });
   });
 
   describe('per-tick inference budget', () => {
