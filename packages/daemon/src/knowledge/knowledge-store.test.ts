@@ -243,6 +243,44 @@ describe('KnowledgeStore', () => {
       expect(second[0]!.hitCount).toBe(3);
     });
 
+    it('reuses cached latest records for repeated match calls (#545)', async () => {
+      await store.storeRecord(
+        [makeMarker({ description: 'Cached pitfall' })],
+        'issue-1',
+        'autonomous',
+        'technical_pitfall',
+      );
+      const first = await store.matchRecords(['src/foo.ts'], 'implementation');
+      expect(first).toHaveLength(1);
+      expect(first[0]!.hitCount).toBe(2);
+
+      // Simulate the expensive JSONL source becoming unavailable after the first load.
+      // A reload would now return no records; the cache should still serve the latest set.
+      await writeFile(storePath, '');
+      const second = await store.matchRecords(['src/foo.ts'], 'implementation');
+
+      expect(second).toHaveLength(1);
+      expect(second[0]!.description).toBe('Cached pitfall');
+      expect(second[0]!.hitCount).toBe(3);
+    });
+
+    it('returns cloned matches so callers cannot mutate the cache', async () => {
+      await store.storeRecord(
+        [makeMarker({ description: 'Immutable pitfall' })],
+        'issue-1',
+        'autonomous',
+        'technical_pitfall',
+      );
+      const first = await store.matchRecords(['src/foo.ts'], 'implementation');
+      first[0]!.description = 'mutated by caller';
+      first[0]!.artifactPatterns.push('other/**/*.ts');
+
+      const second = await store.matchRecords(['src/foo.ts'], 'implementation');
+
+      expect(second[0]!.description).toBe('Immutable pitfall');
+      expect(second[0]!.artifactPatterns).toEqual(['src/**/*.ts']);
+    });
+
     it('sorts elevated before normal, then by hitCount descending', async () => {
       await store.storeRecord(
         [makeMarker({ description: 'Normal hit' })],

@@ -2,7 +2,7 @@
 import { appendJsonl, readJsonl, writeTextSafe } from '../lib/json-store.js';
 import { minimatch } from 'minimatch';
 import { randomUUID } from 'crypto';
-import { rename, access } from 'fs/promises';
+import { rename, access, appendFile } from 'fs/promises';
 import { KnowledgeRecordSchema, type KnowledgeRecord, type RecordType, type OriginType } from './record-types.js';
 import type { PolicyRegistry } from './policy-registry.js';
 import { tokenize, jaccardSimilarity } from './gotcha-store.js';
@@ -18,6 +18,8 @@ export class KnowledgeStore {
   private mutex: Promise<void> = Promise.resolve();
   private archivePath: string;
   private migrated = false;
+  private recordsCache: KnowledgeRecord[] | null = null;
+  private logEntryCount: number | null = null;
 
   constructor(
     private path: string,
@@ -40,6 +42,43 @@ export class KnowledgeStore {
     }
   }
 
+  private cloneRecord(record: KnowledgeRecord): KnowledgeRecord {
+    return {
+      ...record,
+      artifactPatterns: [...record.artifactPatterns],
+    };
+  }
+
+  private cloneRecords(records: KnowledgeRecord[]): KnowledgeRecord[] {
+    return records.map(r => this.cloneRecord(r));
+  }
+
+  private async appendLatestRecords(records: KnowledgeRecord[]): Promise<void> {
+    if (records.length === 0) return;
+    if (records.length === 1) {
+      await appendJsonl(this.path, records[0]!);
+    } else {
+      await appendFile(this.path, records.map(r => JSON.stringify(r)).join('\n') + '\n');
+    }
+
+    this.logEntryCount = (this.logEntryCount ?? 0) + records.length;
+    if (!this.recordsCache) return;
+
+    for (const record of records) {
+      const latest = this.cloneRecord(record);
+      const index = this.recordsCache.findIndex(r => r.id === latest.id);
+      if (index >= 0) {
+        this.recordsCache[index] = latest;
+      } else {
+        this.recordsCache.push(latest);
+      }
+    }
+  }
+
+  private async appendLatestRecord(record: KnowledgeRecord): Promise<void> {
+    await this.appendLatestRecords([record]);
+  }
+
   async storeRecord(
     markers: RecordMarker[],
     sourceId: string,
@@ -59,12 +98,15 @@ export class KnowledgeStore {
           jaccardSimilarity(tokenize(r.description), markerTokens) > 0.7,
         );
         if (duplicate) {
-          duplicate.hitCount++;
+          let updated: KnowledgeRecord = { ...duplicate, hitCount: duplicate.hitCount + 1 };
           if (originType === 'operator' && duplicate.originType !== 'operator') {
-            duplicate.originType = 'operator';
-            duplicate.priorityTier = 'elevated';
+            updated = {
+              ...updated,
+              originType: 'operator',
+              priorityTier: 'elevated',
+            };
           }
-          await appendJsonl(this.path, duplicate);
+          await this.appendLatestRecord(updated);
         } else {
           const lifecycleStatus = (originType === 'retrospective-tech-lead' || originType === 'retrospective-po')
             ? 'candidate' as const
@@ -85,8 +127,7 @@ export class KnowledgeStore {
             rootCauseTag: marker.rootCauseTag,
             reasoning: marker.reasoning,
           };
-          await appendJsonl(this.path, record);
-          existing.push(record);
+          await this.appendLatestRecord(record);
           stored++;
         }
       }
@@ -118,14 +159,15 @@ export class KnowledgeStore {
           artifactPaths.some(path => minimatch(path, pattern, { dot: true })),
         ));
 
-      // Increment hit counts
-      for (const record of matched) {
-        record.hitCount++;
-        await appendJsonl(this.path, record);
-      }
+      // Increment hit counts in one append batch instead of one filesystem write per match.
+      const updatedMatched = matched.map(record => ({
+        ...record,
+        hitCount: record.hitCount + 1,
+      }));
+      await this.appendLatestRecords(updatedMatched);
 
       // Sort per each type's sortOrder policy, with elevated always first
-      matched.sort((a, b) => {
+      updatedMatched.sort((a, b) => {
         // Elevated always comes first regardless of type
         const tierOrder = (t: string) => t === 'elevated' ? 1 : 0;
         const tierDiff = tierOrder(b.priorityTier) - tierOrder(a.priorityTier);
@@ -147,7 +189,7 @@ export class KnowledgeStore {
       });
 
       await this.compactIfNeeded();
-      return matched;
+      return this.cloneRecords(updatedMatched);
     });
   }
 
@@ -166,11 +208,11 @@ export class KnowledgeStore {
             `Cannot transition record ${id}: expected status '${expectedCurrentStatus}' but found '${record.lifecycleStatus}'`,
           );
         }
-        record.lifecycleStatus = newStatus;
+        const updated: KnowledgeRecord = { ...record, lifecycleStatus: newStatus };
         if (newStatus === 'archived') {
-          record.reviewedAt = new Date().toISOString();
+          updated.reviewedAt = new Date().toISOString();
         }
-        await appendJsonl(this.path, record);
+        await this.appendLatestRecord(updated);
         await this.compactIfNeeded();
       }
     });
@@ -180,14 +222,14 @@ export class KnowledgeStore {
     return this.withMutex(async () => {
       await this.migrateIfNeeded();
       const all = await this.loadAllInternal();
-      return all.filter(r => r.rootCauseTag === tag);
+      return this.cloneRecords(all.filter(r => r.rootCauseTag === tag));
     });
   }
 
   async loadAll(): Promise<KnowledgeRecord[]> {
     return this.withMutex(async () => {
       await this.migrateIfNeeded();
-      return this.loadAllInternal();
+      return this.cloneRecords(await this.loadAllInternal());
     });
   }
 
@@ -196,7 +238,7 @@ export class KnowledgeStore {
       await this.migrateIfNeeded();
       const all = await this.loadAllInternal();
       const now = Date.now();
-      return all.filter(r => {
+      return this.cloneRecords(all.filter(r => {
         if (r.lifecycleStatus !== 'active') return false;
         const policy = this.policies[r.recordType];
         const age = (now - new Date(r.createdAt).getTime()) / (1000 * 60 * 60 * 24);
@@ -206,7 +248,7 @@ export class KnowledgeStore {
           if (new Date(r.reviewedAt).getTime() + cooldownMs > now) return false;
         }
         return r.hitCount >= policy.promotionThreshold;
-      });
+      }));
     });
   }
 
@@ -216,6 +258,7 @@ export class KnowledgeStore {
       const all = await this.loadAllInternal();
       const now = Date.now();
       const toArchive: string[] = [];
+      const archivedRecords: KnowledgeRecord[] = [];
       for (const r of all) {
         if (r.lifecycleStatus !== 'active') continue;
         // Operator-origin records are exempt from automatic archival (ARCH-AC-KNOWLEDGE)
@@ -224,11 +267,11 @@ export class KnowledgeStore {
         if (policy.archivalMaxAgeDays === Infinity) continue;
         const age = (now - new Date(r.createdAt).getTime()) / (1000 * 60 * 60 * 24);
         if (age > policy.archivalMaxAgeDays && r.hitCount < policy.archivalMinHitCount) {
-          r.lifecycleStatus = 'archived';
-          await appendJsonl(this.path, r);
+          archivedRecords.push({ ...r, lifecycleStatus: 'archived' });
           toArchive.push(r.id);
         }
       }
+      await this.appendLatestRecords(archivedRecords);
       if (toArchive.length > 0) await this.compactIfNeeded();
       return toArchive;
     });
@@ -246,17 +289,20 @@ export class KnowledgeStore {
       await appendJsonl(this.archivePath, r);
     }
     await writeTextSafe(this.path, active.map(r => JSON.stringify(r)).join('\n') + '\n');
+    this.recordsCache = this.cloneRecords(active);
+    this.logEntryCount = active.length;
   }
 
   private async compactIfNeeded(): Promise<void> {
-    const entries = await readJsonl<KnowledgeRecord>(this.path);
-    const unique = new Set(entries.map(e => e.id)).size;
-    if (entries.length >= 50 && entries.length >= unique * 2) {
+    const all = await this.loadAllInternal();
+    const entries = this.logEntryCount ?? all.length;
+    if (entries >= 50 && entries >= all.length * 2) {
       await this.doCompact();
     }
   }
 
   private async loadAllInternal(): Promise<KnowledgeRecord[]> {
+    if (this.recordsCache) return this.recordsCache;
     const entries = await readJsonl<Record<string, unknown>>(this.path);
     const latest = new Map<string, KnowledgeRecord>();
     for (const entry of entries) {
@@ -264,7 +310,9 @@ export class KnowledgeStore {
       if (!result.success) continue; // skip malformed/corrupt entries
       latest.set(result.data.id, result.data);
     }
-    return [...latest.values()];
+    this.recordsCache = [...latest.values()];
+    this.logEntryCount = entries.length;
+    return this.recordsCache;
   }
 
   private patternsMatch(a: string[], b: string[]): boolean {
