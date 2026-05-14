@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint --suppressions-location .eslint-suppressions.json",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

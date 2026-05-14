@@ -29,4 +29,17 @@ describe('pnpm version consistency', () => {
     expect(cloudInit).not.toMatch(/pnpm@latest/);
     expect(cloudInit).toContain(`pnpm@${pinnedVersion}`);
   });
+
+  it('CI runs the workspace lint gate before typecheck and tests', () => {
+    const pkg = JSON.parse(readFile('package.json')) as {
+      scripts?: Record<string, string>;
+    };
+    expect(pkg.scripts?.lint).toBe('pnpm -r --if-present lint');
+
+    const ciWorkflow = readFile('.github/workflows/ci.yml');
+    expect(ciWorkflow).toContain('name: Lint');
+    expect(ciWorkflow).toContain('run: pnpm lint');
+    expect(ciWorkflow.indexOf('name: Lint')).toBeLessThan(ciWorkflow.indexOf('name: Typecheck'));
+    expect(ciWorkflow.indexOf('name: Lint')).toBeLessThan(ciWorkflow.indexOf('name: Test'));
+  });
 });

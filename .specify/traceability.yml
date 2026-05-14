@@ -278,11 +278,19 @@ STACK-AC-CONVENTIONS:
   parent: L0-AC-VISION
   children: []
   code_paths:
+    - .github/workflows/ci.yml
+    - package.json
+    - packages/daemon/package.json
+    - packages/daemon/eslint.config.js
+    - packages/daemon/.eslint-suppressions.json
     - packages/daemon/src/types.ts
     - packages/daemon/src/main.ts
     - packages/daemon/src/config.ts
     - packages/daemon/src/lib/
     - packages/daemon/src/lib/structured-output.ts
+    - packages/dashboard/package.json
+    - packages/dashboard/eslint.config.mjs
+    - packages/dashboard/.eslint-suppressions.json
   test_paths:
     - packages/daemon/src/**/*.test.ts
     - packages/daemon/src/lib/structured-output.test.ts

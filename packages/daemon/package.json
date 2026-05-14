@@ -7,7 +7,7 @@
     "start": "tsx src/main.ts start",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint src/",
+    "lint": "eslint src/ --suppressions-location .eslint-suppressions.json",
     "typecheck": "tsc --noEmit",
     "format:check": "prettier --check src/"
   },
