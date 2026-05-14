@@ -123,7 +123,13 @@ async function readDeliverySummary(stateDir: string): Promise<SignalSnapshot['de
 
 async function readRunStates(stateDir: string): Promise<RunState[]> {
   const runsDir = join(stateDir, 'runs');
-  const files = await readdir(runsDir).catch(() => [] as string[]);
+  let files: string[];
+  try {
+    files = await readdir(runsDir);
+  } catch (e) {
+    console.warn('[po-snapshot] failed to read run states:', e);
+    return [];
+  }
   const runs: RunState[] = [];
   for (const file of files) {
     if (!file.endsWith('.json')) continue;
