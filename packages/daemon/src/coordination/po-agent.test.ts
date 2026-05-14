@@ -144,6 +144,25 @@ describe('POAgent', () => {
     expect(deps.spawnPOSession).not.toHaveBeenCalled();
   });
 
+  it('submitIdea propagates loadIdeas rejection without saving or scheduling evaluation (#561)', async () => {
+    const loadIdeasError = new Error('read failed');
+    const deps = makeDeps({
+      loadIdeas: vi.fn().mockRejectedValue(loadIdeasError),
+    });
+    const config = makeConfig({ intervalMs: 60000, debounceMs: 500 });
+    const agent = createPOAgent(deps, config);
+
+    await expect(agent.submitIdea('operator', 'Add queue visibility')).rejects.toThrow(
+      'read failed'
+    );
+
+    expect(deps.loadIdeas).toHaveBeenCalledTimes(1);
+    expect(deps.saveIdeas).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(600);
+    expect(deps.spawnPOSession).not.toHaveBeenCalled();
+  });
+
   it('debounces multiple ideas within debounce window', async () => {
     const deps = makeDeps();
     const config = makeConfig({ intervalMs: 60000, debounceMs: 500 });
