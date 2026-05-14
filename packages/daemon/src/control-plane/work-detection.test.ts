@@ -411,6 +411,14 @@ describe('WorkDetector', () => {
   });
 
   describe('detectFeaturePipelineWork', () => {
+    function deferred<T>() {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((res) => {
+        resolve = res;
+      });
+      return { promise, resolve };
+    }
+
     function mockOctokitForTiers(tierResults: Record<string, any[]>) {
       const octokit = mockOctokit();
       octokit.issues.listForRepo = vi.fn().mockImplementation(({ labels }: { labels: string }) => {
@@ -575,6 +583,70 @@ describe('WorkDetector', () => {
       });
       const detector = createWorkDetector(octokit, 'owner', 'repo');
       const result = await detector.detectFeaturePipelineWork();
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value!.issueNumber).toBe(100);
+        expect(result.value!.workType).toBe('implementation');
+      }
+    });
+
+    it('queries all feature-pipeline tiers in parallel', async () => {
+      const octokit = mockOctokit();
+      const tierLabels = [
+        'feature-pipeline,ready-to-implement',
+        'feature-pipeline,l2-approved',
+        'feature-pipeline,l2-in-progress',
+        'feature-pipeline,l1-approved',
+      ];
+      const tierRequests = new Map(
+        tierLabels.map((label) => [label, deferred<{ data: any[] }>()]),
+      );
+      octokit.issues.listForRepo = vi.fn().mockImplementation(({ labels }: { labels: string }) => {
+        return tierRequests.get(labels)!.promise;
+      });
+      const detector = createWorkDetector(octokit, 'owner', 'repo');
+
+      const resultPromise = detector.detectFeaturePipelineWork();
+
+      expect(octokit.issues.listForRepo).toHaveBeenCalledTimes(4);
+      for (const request of tierRequests.values()) request.resolve({ data: [] });
+      const result = await resultPromise;
+      expect(result).toEqual({ ok: true, value: null });
+    });
+
+    it('preserves tier priority when lower tiers resolve first', async () => {
+      const octokit = mockOctokit();
+      const readyToImplement = deferred<{ data: any[] }>();
+      const l2Approved = deferred<{ data: any[] }>();
+      const l2InProgress = deferred<{ data: any[] }>();
+      const l1Approved = deferred<{ data: any[] }>();
+      const tierRequests = new Map([
+        ['feature-pipeline,ready-to-implement', readyToImplement],
+        ['feature-pipeline,l2-approved', l2Approved],
+        ['feature-pipeline,l2-in-progress', l2InProgress],
+        ['feature-pipeline,l1-approved', l1Approved],
+      ]);
+      octokit.issues.listForRepo = vi.fn().mockImplementation(({ labels }: { labels: string }) => {
+        return tierRequests.get(labels)!.promise;
+      });
+      const detector = createWorkDetector(octokit, 'owner', 'repo');
+
+      const resultPromise = detector.detectFeaturePipelineWork();
+
+      l1Approved.resolve({
+        data: [
+          { number: 400, title: 'Tier 4', body: 'FUNC ref', labels: [{ name: 'feature-pipeline' }, { name: 'l1-approved' }] },
+        ],
+      });
+      l2InProgress.resolve({ data: [] });
+      l2Approved.resolve({ data: [] });
+      readyToImplement.resolve({
+        data: [
+          { number: 100, title: 'Tier 1', body: 'FUNC ref', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }] },
+        ],
+      });
+
+      const result = await resultPromise;
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value!.issueNumber).toBe(100);

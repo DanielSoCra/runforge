@@ -85,11 +85,14 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
           { labels: 'feature-pipeline,l1-approved', exclude: ['l2-in-progress', 'blocked', 'stuck', 'awaiting-l2-review'], workType: 'l2-brainstorm' },
         ];
 
-        for (const tier of tiers) {
+        const tierResults = await Promise.all(tiers.map(async (tier) => {
           const { data } = await octokit.issues.listForRepo({
             owner, repo, labels: tier.labels, state: 'open', per_page: 100,
           });
+          return { tier, data };
+        }));
 
+        for (const { tier, data } of tierResults) {
           const candidates = data
             .filter((issue) => !('pull_request' in issue && issue.pull_request))
             .filter((issue) => {
