@@ -160,7 +160,7 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
 
     async claimWork(issueNumber: number): Promise<Result<void>> {
       try {
-        await octokit.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: 'ready' }).catch(() => {});
+        await octokit.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: 'ready' });
         await octokit.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: ['in-progress'] });
         return ok(undefined);
       } catch (e) {

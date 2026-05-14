@@ -127,6 +127,20 @@ describe('WorkDetector', () => {
         expect.objectContaining({ labels: ['in-progress'] }),
       );
     });
+
+    it('does not add in-progress when removing ready fails (#569)', async () => {
+      const octokit = mockOctokit();
+      octokit.issues.removeLabel = vi.fn().mockRejectedValue(new Error('remove failed'));
+      const detector = createWorkDetector(octokit, 'owner', 'repo');
+
+      const result = await detector.claimWork(42);
+
+      expect(result.ok).toBe(false);
+      expect(octokit.issues.removeLabel).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'ready' }),
+      );
+      expect(octokit.issues.addLabels).not.toHaveBeenCalled();
+    });
   });
 
   describe('completeWork', () => {
