@@ -37,6 +37,11 @@ import { reconcileWorkspace } from './workspace.js';
 import { extractStructuredOutput } from '../lib/structured-output.js';
 import { complianceReportJsonSchema } from '../diagnosis/schema.js';
 import { createFailureRecord } from './failure-routing.js';
+import {
+  deliverPhaseArtifact,
+  DeliveryError,
+  type DeliverableSpecPhase,
+} from './spec-pipeline/delivery.js';
 
 // Serializes git operations on the shared repoRoot across concurrent pipeline runs.
 // Currently protects detect (which modifies checkout state via git checkout).
@@ -112,6 +117,45 @@ export function createPhaseHandlers(
       }
     }
     workspaceRestored = true;
+  };
+
+  const packageSpecArtifact = async (
+    run: RunState,
+    phase: DeliverableSpecPhase,
+    cwd: string,
+  ): Promise<PhaseEvent> => {
+    const delivery = await deliverPhaseArtifact({
+      owner,
+      repo,
+      issueNumber: workRequest.issueNumber,
+      issueTitle: workRequest.title,
+      phase,
+      workspacePath: cwd,
+      baseBranch: config.branches.staging,
+      octokit,
+    });
+    if (!delivery.ok) {
+      console.error(`[${phase}] Artifact delivery failed:`, delivery.error.message);
+      const kind =
+        delivery.error instanceof DeliveryError
+          ? delivery.error.kind
+          : 'delivery-repair-needed';
+      run.lastFailure = createFailureRecord({
+        kind,
+        phase,
+        message: delivery.error.message,
+        severity: 'blocking',
+        retryable: true,
+        repairAction:
+          kind === 'agent-output-invalid' ? 'retry-session' : 'reconcile-artifact',
+      });
+      return 'failure';
+    }
+    run.phaseArtifacts = {
+      ...(run.phaseArtifacts ?? {}),
+      [phase]: delivery.value.artifact,
+    };
+    return 'success';
   };
 
   return {
@@ -216,7 +260,7 @@ export function createPhaseHandlers(
       } catch (e) {
         console.warn(`[l2-design] Failed to refresh spec refs:`, e);
       }
-      return 'success';
+      return packageSpecArtifact(run, 'l2-design', cwd);
     },
 
     'l2-gate': async (run: RunState): Promise<PhaseEvent> => {
@@ -303,11 +347,16 @@ export function createPhaseHandlers(
             issue_number: workRequest.issueNumber,
             labels: ['awaiting-l2-review'],
           });
+          const artifactUrl = run.phaseArtifacts?.['l2-design']?.pullRequestUrl;
+          const deliverable =
+            artifactUrl !== undefined && artifactUrl.length > 0
+              ? `\n\nReview proposal: ${artifactUrl}`
+              : '';
           await octokit.issues.createComment({
             owner,
             repo,
             issue_number: workRequest.issueNumber,
-            body: `## Awaiting L2 Review\n\nThe L2 architecture spec is ready for review. Add the \`l2-approved\` label to continue, or \`l2-rejected\` to send back for revision.`,
+            body: `## Awaiting L2 Review\n\nThe L2 architecture spec is ready for review.${deliverable}\n\nAdd the \`l2-approved\` label to continue, or \`l2-rejected\` to send back for revision.`,
           });
         } catch (e) {
           console.error(`[l2-gate] Failed to notify:`, e);
@@ -421,7 +470,7 @@ export function createPhaseHandlers(
           e,
         );
       }
-      return 'success';
+      return packageSpecArtifact(run, 'l3-generate', cwd);
     },
 
     'l3-compliance': async (run: RunState): Promise<PhaseEvent> => {

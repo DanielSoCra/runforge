@@ -59,6 +59,22 @@ vi.mock('../infra/spec-loader.js', () => ({
   resolveCurrentSpecRefs: vi.fn(),
 }));
 
+vi.mock('./spec-pipeline/delivery.js', () => {
+  class DeliveryError extends Error {
+    kind: string;
+
+    constructor(kind: string, message: string) {
+      super(message);
+      this.name = 'DeliveryError';
+      this.kind = kind;
+    }
+  }
+  return {
+    DeliveryError,
+    deliverPhaseArtifact: vi.fn(),
+  };
+});
+
 vi.mock('./classifier.js', () => ({
   classify: vi.fn(),
 }));
@@ -111,6 +127,10 @@ import {
   loadImplementationContent,
   resolveCurrentSpecRefs,
 } from '../infra/spec-loader.js';
+import {
+  deliverPhaseArtifact,
+  DeliveryError,
+} from './spec-pipeline/delivery.js';
 import { classify as runClassify } from './classifier.js';
 import { runHoldout } from '../validation/holdout.js';
 import { integrateToStaging } from './integration.js';
@@ -136,6 +156,7 @@ const mockCreateWorkDetector = vi.mocked(createWorkDetector);
 const mockLoadSpecContent = vi.mocked(loadSpecContent);
 const mockLoadImplementationContent = vi.mocked(loadImplementationContent);
 const mockResolveCurrentSpecRefs = vi.mocked(resolveCurrentSpecRefs);
+const mockDeliverPhaseArtifact = vi.mocked(deliverPhaseArtifact);
 const mockRunHoldout = vi.mocked(runHoldout);
 const mockIntegrateToStaging = vi.mocked(integrateToStaging);
 const mockRunDeploy = vi.mocked(runDeploy);
@@ -313,6 +334,28 @@ describe('createPhaseHandlers', () => {
     mockLoadImplementationContent.mockResolvedValue('');
     // Default: resolveCurrentSpecRefs returns the input refs
     mockResolveCurrentSpecRefs.mockImplementation(async (_root, refs) => refs);
+    mockDeliverPhaseArtifact.mockImplementation(async (request) => ({
+      ok: true,
+      value: {
+        artifact: {
+          issueNumber: request.issueNumber,
+          phase: request.phase,
+          artifactKind: 'pull_request',
+          proposalKey: `owner/repo#${request.issueNumber}:${request.phase}:staging`,
+          artifactPaths: ['.specify/traceability.yml'],
+          headBranch:
+            request.phase === 'l2-design' ? 'spec/l2/42' : 'spec/l3/42',
+          baseBranch: 'staging',
+          pullRequestNumber: 12,
+          pullRequestUrl: 'https://github.example/pull/12',
+          status: 'awaiting-review',
+          createdAt: '2026-05-14T00:00:00Z',
+          updatedAt: '2026-05-14T00:00:00Z',
+        },
+        changedPaths: ['.specify/traceability.yml'],
+        reusedProposal: false,
+      },
+    }));
     // Reset issues.get mock
     mockOctokit.issues.get.mockClear();
     mockOctokit.issues.listComments.mockClear();
@@ -2044,6 +2087,17 @@ describe('createPhaseHandlers', () => {
         undefined,
         undefined,
       );
+      expect(mockDeliverPhaseArtifact).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: 'l2-design',
+          issueNumber: 42,
+          baseBranch: 'staging',
+        }),
+      );
+      expect(run.phaseArtifacts?.['l2-design']).toMatchObject({
+        phase: 'l2-design',
+        pullRequestNumber: 12,
+      });
     });
 
     it('returns failure when session fails', async () => {
@@ -2054,6 +2108,36 @@ describe('createPhaseHandlers', () => {
       const { handlers } = createHandlers();
       const result = await handlers['l2-design']!(makeRun());
       expect(result).toBe('failure');
+    });
+
+    it('returns failure and records typed metadata when L2 delivery fails', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: 'done',
+          structuredData: {},
+          cost: 0.5,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        },
+      });
+      mockDeliverPhaseArtifact.mockResolvedValueOnce({
+        ok: false,
+        error: new DeliveryError(
+          'delivery-repair-needed',
+          'proposal host unavailable',
+        ),
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers['l2-design']!(run);
+
+      expect(result).toBe('failure');
+      expect(run.lastFailure).toMatchObject({
+        kind: 'delivery-repair-needed',
+        phase: 'l2-design',
+        repairAction: 'reconcile-artifact',
+      });
     });
 
     it('refreshes specRefs on the run after session', async () => {
@@ -2319,6 +2403,17 @@ describe('createPhaseHandlers', () => {
         undefined,
         undefined,
       );
+      expect(mockDeliverPhaseArtifact).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: 'l3-generate',
+          issueNumber: 42,
+          baseBranch: 'staging',
+        }),
+      );
+      expect(run.phaseArtifacts?.['l3-generate']).toMatchObject({
+        phase: 'l3-generate',
+        pullRequestNumber: 12,
+      });
     });
 
     it('returns failure when session fails', async () => {
@@ -2329,6 +2424,36 @@ describe('createPhaseHandlers', () => {
       const { handlers } = createHandlers();
       const result = await handlers['l3-generate']!(makeRun());
       expect(result).toBe('failure');
+    });
+
+    it('returns failure and records retry-session metadata when L3 delivery has no artifacts', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: 'done',
+          structuredData: {},
+          cost: 0.5,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        },
+      });
+      mockDeliverPhaseArtifact.mockResolvedValueOnce({
+        ok: false,
+        error: new DeliveryError(
+          'agent-output-invalid',
+          'No changed artifacts found for l3-generate',
+        ),
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers['l3-generate']!(run);
+
+      expect(result).toBe('failure');
+      expect(run.lastFailure).toMatchObject({
+        kind: 'agent-output-invalid',
+        phase: 'l3-generate',
+        repairAction: 'retry-session',
+      });
     });
 
     it('refreshes specRefs before and after session', async () => {

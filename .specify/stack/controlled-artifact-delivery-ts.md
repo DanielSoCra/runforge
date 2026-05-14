@@ -11,11 +11,13 @@ code_paths:
   - prompts/l2-designer.md
   - prompts/l3-generator.md
   - packages/daemon/src/control-plane/phases.ts
+  - packages/daemon/src/control-plane/spec-pipeline/delivery.ts
   - packages/daemon/src/control-plane/spec-pipeline/park.ts
   - packages/daemon/src/control-plane/spec-pipeline/spec-chain.ts
   - packages/daemon/src/types.ts
 test_paths:
   - packages/daemon/src/control-plane/phases.test.ts
+  - packages/daemon/src/control-plane/spec-pipeline/delivery.test.ts
   - packages/daemon/src/control-plane/spec-pipeline/**/*.test.ts
 ---
 

@@ -130,6 +130,31 @@ export interface RepairQueueItem {
   status: 'queued' | 'running' | 'completed' | 'failed';
 }
 
+export type PhaseArtifactStatus =
+  | 'prepared'
+  | 'proposed'
+  | 'awaiting-review'
+  | 'merged'
+  | 'rejected'
+  | 'superseded'
+  | 'delivery-failed';
+
+export interface PhaseArtifact {
+  issueNumber: number;
+  phase: Phase;
+  artifactKind: 'pull_request';
+  proposalKey: string;
+  artifactPaths: string[];
+  headBranch: string;
+  baseBranch: string;
+  pullRequestNumber?: number;
+  pullRequestUrl?: string;
+  status: PhaseArtifactStatus;
+  createdAt: string;
+  updatedAt: string;
+  mergeIdentifier?: string;
+}
+
 export type RuntimeSourceAction = 'warn' | 'pause' | 'fail';
 
 export type RuntimeSourceFailureKind =
@@ -345,6 +370,7 @@ export interface RunState {
   workflowFallbackReason?: string;
   lastFailure?: FailureRecord;
   repairHistory?: RepairHistoryEntry[];
+  phaseArtifacts?: Partial<Record<Phase, PhaseArtifact>>;
 }
 
 export type WorkflowNodeRunStatus =
