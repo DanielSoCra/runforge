@@ -12,21 +12,21 @@ references: FUNC-CONCIERGE-CORE
 
 ## Overview
 
-The concierge runtime is a single Node process (`concierge-core`) on the Mac mini that owns the LLM loop, tool router, conversation memory, and Slack adapter. Two sibling processes (`observer`, `board-server`) share the same SQLite file and run under their own launchd plists. This spec defines the runtime's process layout, schema, tool-router contract, and inter-process boundaries.
+The concierge runtime is a single runtime process (`concierge-core`) on the local host that owns the LLM loop, tool router, conversation memory, and Slack adapter. Two sibling processes (`observer`, `board-server`) share the same local relational data file and run under their own supervisor definitions. This spec defines the runtime's process layout, schema, tool-router contract, and inter-process boundaries.
 
 ## Process layout
 
 | Process | Owner |
 |---|---|
-| `concierge-core` (Node) | LLM loop, tool registry, tool router, slack-adapter (in-process), conversation memory, schema migrations |
-| `observer` (Node) | filesystem & daemon polling, event emission to event-bus |
-| `board-server` (Hono) | reads `cards`/`messages`/`tool_calls`; serves HTMX UI; SSE fan-out |
+| `concierge-core` | LLM loop, tool registry, tool router, slack-adapter (in-process), conversation memory, schema migrations |
+| `observer` | filesystem & daemon polling, event emission to event-bus |
+| `board-server` | reads `cards`/`messages`/`tool_calls`; serves board UI; SSE fan-out |
 | `cloudflared` | tunnel for Slack webhook + board URL |
 | (existing) `com.autoclaude.daemon` | unchanged, polled by observer |
 
 ## Storage
 
-Single SQLite file at `~/Library/Application Support/concierge/state.db`, opened in WAL mode by all three processes.
+Single local relational data file at `~/Library/Application Support/concierge/state.db`, opened in concurrent-reader mode by all three processes.
 
 ### Tables and write boundaries
 
@@ -39,7 +39,7 @@ Single SQLite file at `~/Library/Application Support/concierge/state.db`, opened
 | `cards` | concierge-core | concierge-core, board-server |
 | `schema_migrations` | concierge-core | concierge-core |
 
-`board-server` is read-only on every table except cards: it writes a card-action result by calling concierge-core's tool router via local HTTP (not by direct SQLite update).
+`board-server` is read-only on every table except cards: it writes a card-action result by calling concierge-core's tool router via local HTTP (not by direct store update).
 
 ### Migrations
 
@@ -138,10 +138,10 @@ Cloudflare Access policy: Google SSO restricted to `operator@example.com`, appli
 
 ## Failure modes
 
-- **SQLite contention** — handled by WAL mode + retry on busy timeout (50 ms backoff, 5 retries).
+- **Storage contention** — handled by concurrent-reader mode + retry on busy timeout (50 ms backoff, 5 retries).
 - **Tool handler throws** — router returns `{error}` to LLM; no retry loop.
 - **LLM API outage** — concierge-core retries with exponential backoff (3 attempts); on full failure, posts a one-line "I'm offline, retry in 5 min" reply.
-- **Slack API outage** — outbound queue in SQLite drains on recovery.
+- **Slack API outage** — outbound queue in the local store drains on recovery.
 - **Cloudflare Tunnel down** — Slack webhook fails (Slack auto-retries up to 3x, then drops); the operator sees missed messages on tunnel reconnect via Slack's own thread.
 
 ## Boundaries

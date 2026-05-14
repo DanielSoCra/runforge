@@ -12,7 +12,7 @@ references: FUNC-CONCIERGE-AWARENESS
 
 ## Overview
 
-The event-bus is a thin SQLite-backed in-process queue that decouples the observer's event emission from the concierge's classification + reaction logic. Events flow: observer (writer) → `events` table → classifier (rule-based; deterministic) → outcome (`surface_card`, `slack_dm`, `silent_log`). The board-server tails the same table via SSE for real-time card updates.
+The event-bus is a thin local relational queue that decouples the observer's event emission from the concierge's classification + reaction logic. Events flow: observer (writer) → `events` table → classifier (rule-based; deterministic) → outcome (`surface_card`, `slack_dm`, `silent_log`). The board-server tails the same table via SSE for real-time card updates.
 
 ## Schema
 
@@ -34,7 +34,7 @@ CREATE INDEX idx_events_type ON events (type, created_at);
 
 ## Classification rules
 
-Deterministic, rule-based. Implemented as TypeScript code in `packages/concierge/src/event-bus/classifier.ts`. NOT an LLM call. Rules can be added/changed over time as the operator marks events as noise.
+Deterministic, rule-based. Implemented as a reviewed rule table, not an LLM call. Rules can be added or changed over time as the operator marks events as noise.
 
 | Event type | Outcome | Reason |
 |---|---|---|
@@ -58,7 +58,7 @@ The classifier is pure: same event → same outcome. Re-classification is forbid
 
 ## SSE fan-out
 
-`board-server` opens a long-lived SQLite hook that polls `events` and `cards` for new rows since the last seen id. New rows fan out to all connected SSE clients. Polling interval: 250 ms (good enough for human-perceptible "live"; cheap on local SQLite).
+`board-server` opens a long-lived local-store reader that polls `events` and `cards` for new rows since the last seen id. New rows fan out to all connected SSE clients. Polling interval: 250 ms (good enough for human-perceptible "live"; cheap on a local store).
 
 ## Retention
 
@@ -67,8 +67,8 @@ The classifier is pure: same event → same outcome. Re-classification is forbid
 ## Boundaries
 
 - Classification is deterministic. The "classifier could be an LLM" idea is **out of scope** for v1; revisit only if rule explosion exceeds 50 cases.
-- The event-bus does not implement retries, dead-letter queues, or partition keys. It is a single-writer-multi-reader SQLite queue.
-- The bus does not do cross-process pubsub. Other processes see events via SQLite read-after-write within ~250 ms.
+- The event-bus does not implement retries, dead-letter queues, or partition keys. It is a single-writer-multi-reader queue.
+- The bus does not do cross-process pubsub. Other processes see events via local-store read-after-write within ~250 ms.
 
 ## Failure modes
 

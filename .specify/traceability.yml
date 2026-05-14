@@ -52,7 +52,7 @@ ARCH-SDD-SPEC-LIFECYCLE:
 # --- Auto-Claude L0 spec (vision — root of all Auto-Claude specs) ---
 
 L0-AC-VISION:
-  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, FUNC-AC-PLUGINS, FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, FUNC-AC-AGENT-DISCIPLINE, STACK-AC-CONVENTIONS]
+  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, FUNC-AC-PLUGINS, FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, FUNC-AC-AGENT-DISCIPLINE, FUNC-AC-CONTROLLED-ARTIFACT-DELIVERY, FUNC-AC-RECOVERABLE-FAILURE-ROUTING, FUNC-AC-RUNTIME-SOURCE-ISOLATION, STACK-AC-CONVENTIONS]
   status: draft
 
 # --- Auto-Claude L1 specs ---
@@ -111,6 +111,18 @@ FUNC-AC-TECH-LEAD:
 
 FUNC-AC-AGENT-DISCIPLINE:
   children: [ARCH-AC-AGENT-DISCIPLINE]
+  status: draft
+
+FUNC-AC-CONTROLLED-ARTIFACT-DELIVERY:
+  children: [ARCH-AC-CONTROLLED-ARTIFACT-DELIVERY]
+  status: draft
+
+FUNC-AC-RECOVERABLE-FAILURE-ROUTING:
+  children: [ARCH-AC-RECOVERABLE-FAILURE-ROUTING]
+  status: draft
+
+FUNC-AC-RUNTIME-SOURCE-ISOLATION:
+  children: [ARCH-AC-RUNTIME-SOURCE-ISOLATION]
   status: draft
 
 # --- Auto-Claude Plugins L2 spec ---
@@ -242,6 +254,21 @@ ARCH-AC-AGENT-DISCIPLINE:
   children: [STACK-AC-AGENT-DISCIPLINE-PROMPTS, STACK-AC-AGENT-DISCIPLINE-REVIEW]
   status: draft
 
+ARCH-AC-CONTROLLED-ARTIFACT-DELIVERY:
+  parent: FUNC-AC-CONTROLLED-ARTIFACT-DELIVERY
+  children: [STACK-AC-CONTROLLED-ARTIFACT-DELIVERY]
+  status: draft
+
+ARCH-AC-RECOVERABLE-FAILURE-ROUTING:
+  parent: FUNC-AC-RECOVERABLE-FAILURE-ROUTING
+  children: [STACK-AC-RECOVERABLE-FAILURE-ROUTING]
+  status: draft
+
+ARCH-AC-RUNTIME-SOURCE-ISOLATION:
+  parent: FUNC-AC-RUNTIME-SOURCE-ISOLATION
+  children: [STACK-AC-RUNTIME-SOURCE-ISOLATION]
+  status: draft
+
 # --- Auto-Claude L3 specs (stack-specific) ---
 
 # STACK-AC-CONVENTIONS is a cross-cutting spec — it references L0 directly
@@ -357,6 +384,57 @@ STACK-AC-AGENT-DISCIPLINE-REVIEW:
     - packages/daemon/src/validation/review.test.ts
     - packages/daemon/src/validation/reviewer-session.test.ts
     - packages/daemon/src/validation/knowledge-injector.test.ts
+  status: draft
+
+STACK-AC-CONTROLLED-ARTIFACT-DELIVERY:
+  parent: ARCH-AC-CONTROLLED-ARTIFACT-DELIVERY
+  children: []
+  code_paths:
+    - prompts/l2-designer.md
+    - prompts/l3-generator.md
+    - packages/daemon/src/control-plane/phases.ts
+    - packages/daemon/src/control-plane/spec-pipeline/park.ts
+    - packages/daemon/src/control-plane/spec-pipeline/spec-chain.ts
+    - packages/daemon/src/types.ts
+  test_paths:
+    - packages/daemon/src/control-plane/phases.test.ts
+    - packages/daemon/src/control-plane/spec-pipeline/**/*.test.ts
+  status: draft
+
+STACK-AC-RECOVERABLE-FAILURE-ROUTING:
+  parent: ARCH-AC-RECOVERABLE-FAILURE-ROUTING
+  children: []
+  code_paths:
+    - packages/daemon/src/types.ts
+    - packages/daemon/src/control-plane/pipeline.ts
+    - packages/daemon/src/control-plane/fsm.ts
+    - packages/daemon/src/control-plane/phases.ts
+    - packages/daemon/src/control-plane/workspace.ts
+    - packages/daemon/src/control-plane/work-detection.ts
+    - packages/daemon/src/control-plane/daemon.ts
+  test_paths:
+    - packages/daemon/src/control-plane/pipeline.test.ts
+    - packages/daemon/src/control-plane/phases.test.ts
+    - packages/daemon/src/control-plane/workspace.test.ts
+    - packages/daemon/src/control-plane/work-detection.test.ts
+    - packages/daemon/src/control-plane/daemon.test.ts
+  status: draft
+
+STACK-AC-RUNTIME-SOURCE-ISOLATION:
+  parent: ARCH-AC-RUNTIME-SOURCE-ISOLATION
+  children: []
+  code_paths:
+    - packages/daemon/src/config.ts
+    - packages/daemon/src/main.ts
+    - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/control-plane/workspace.ts
+    - packages/daemon/src/implementation/worktree.ts
+    - packages/daemon/src/types.ts
+  test_paths:
+    - packages/daemon/src/config.test.ts
+    - packages/daemon/src/control-plane/daemon.test.ts
+    - packages/daemon/src/control-plane/workspace.test.ts
+    - packages/daemon/src/implementation/worktree.test.ts
   status: draft
 
 STACK-AC-SESSION-RUNTIME:
