@@ -1,6 +1,6 @@
 // src/control-plane/state.test.ts
-import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtemp, writeFile } from 'fs/promises';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { StateManager } from './state.js';
@@ -60,6 +60,23 @@ describe('StateManager', () => {
     const incomplete = await mgr.findIncompleteRuns();
     expect(incomplete).toHaveLength(2);
     expect(incomplete.map((r) => r.issueNumber).sort()).toEqual([1, 2]);
+  });
+
+  it('warns when incomplete run scan fails (#567)', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await rm(join(dir, 'runs'), { recursive: true, force: true });
+
+      const incomplete = await mgr.findIncompleteRuns();
+
+      expect(incomplete).toEqual([]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[state] failed to scan incomplete runs:',
+        expect.any(Error),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('cleans up .tmp files on initialize', async () => {
