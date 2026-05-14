@@ -1,7 +1,12 @@
 // src/coordination/concurrency.test.ts
 import { describe, it, expect } from 'vitest';
-import { evaluatePool, type EvalContext, type SpawnDecision, type DispatchQueueItem } from './concurrency.js';
-import { AgentTypeSchema } from './types.js';
+import {
+  evaluatePool,
+  type EvalContext,
+  type SpawnDecision,
+  type DispatchQueueItem,
+} from './concurrency.js';
+import { AgentTypeSchema, WorkerClaimSchema } from './types.js';
 import type { WorkerClaim, Batch, AgentType, ClaimStatus } from './types.js';
 
 function makeClaim(
@@ -66,20 +71,24 @@ describe('evaluatePool', () => {
       makeClaim({ agentType: 'worker', issueNumber: 3 }),
     ];
     const queue: DispatchQueueItem[] = [{ issueNumber: 99 }];
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      dispatchQueue: queue,
-      maxAgents: 3,
-    }));
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        dispatchQueue: queue,
+        maxAgents: 3,
+      }),
+    );
     expect(result).toEqual([]);
   });
 
   it('returns empty when disk space is low', () => {
     const queue: DispatchQueueItem[] = [{ issueNumber: 1 }];
-    const result = evaluatePool(makeCtx({
-      dispatchQueue: queue,
-      diskSpaceOk: false,
-    }));
+    const result = evaluatePool(
+      makeCtx({
+        dispatchQueue: queue,
+        diskSpaceOk: false,
+      }),
+    );
     expect(result).toEqual([]);
   });
 
@@ -89,12 +98,14 @@ describe('evaluatePool', () => {
       makeClaim({ agentType: 'worker', issueNumber: 1 }),
       makeClaim({ agentType: 'reviewer', issueNumber: 2 }),
     ];
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      maxAgents: 10,
-    }));
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        maxAgents: 10,
+      }),
+    );
     // Should spawn po to meet minimum of 1
-    const poDecisions = result.filter(d => d.agentType === 'po');
+    const poDecisions = result.filter((d) => d.agentType === 'po');
     expect(poDecisions).toHaveLength(1);
     expect(poDecisions[0]!.issueNumber).toBe(0); // sentinel for minimum-spawned agents
     expect(poDecisions[0]!.batchItemId).toBeNull();
@@ -105,17 +116,19 @@ describe('evaluatePool', () => {
       makeClaim({ agentType: 'worker', issueNumber: 1 }),
       makeClaim({ agentType: 'po', issueNumber: 2 }),
     ];
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      maxAgents: 10,
-    }));
-    const reviewerDecisions = result.filter(d => d.agentType === 'reviewer');
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        maxAgents: 10,
+      }),
+    );
+    const reviewerDecisions = result.filter((d) => d.agentType === 'reviewer');
     expect(reviewerDecisions).toHaveLength(1);
   });
 
   it('does not spawn planner for minimums (planner minimum is 0)', () => {
     const result = evaluatePool(makeCtx({ maxAgents: 10 }));
-    const plannerDecisions = result.filter(d => d.agentType === 'planner');
+    const plannerDecisions = result.filter((d) => d.agentType === 'planner');
     expect(plannerDecisions).toHaveLength(0);
   });
 
@@ -123,7 +136,7 @@ describe('evaluatePool', () => {
     // Even with no workers, workers are not spawned via minimums —
     // they come from the dispatch queue or batch
     const result = evaluatePool(makeCtx({ maxAgents: 10 }));
-    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    const workerDecisions = result.filter((d) => d.agentType === 'worker');
     expect(workerDecisions).toHaveLength(0);
   });
 
@@ -138,14 +151,16 @@ describe('evaluatePool', () => {
       { issueNumber: 2 },
       { issueNumber: 3 },
     ];
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      dispatchQueue: queue,
-      maxAgents: 10,
-    }));
-    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        dispatchQueue: queue,
+        maxAgents: 10,
+      }),
+    );
+    const workerDecisions = result.filter((d) => d.agentType === 'worker');
     expect(workerDecisions).toHaveLength(3);
-    expect(workerDecisions.map(d => d.issueNumber)).toEqual([1, 2, 3]);
+    expect(workerDecisions.map((d) => d.issueNumber)).toEqual([1, 2, 3]);
   });
 
   it('respects FIFO order from dispatch queue', () => {
@@ -158,13 +173,15 @@ describe('evaluatePool', () => {
       makeClaim({ agentType: 'po', issueNumber: 100 }),
       makeClaim({ agentType: 'reviewer', issueNumber: 101 }),
     ];
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      dispatchQueue: queue,
-      maxAgents: 4, // 2 active + room for 2 from queue
-    }));
-    const workerDecisions = result.filter(d => d.agentType === 'worker');
-    expect(workerDecisions.map(d => d.issueNumber)).toEqual([10, 20]);
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        dispatchQueue: queue,
+        maxAgents: 4, // 2 active + room for 2 from queue
+      }),
+    );
+    const workerDecisions = result.filter((d) => d.agentType === 'worker');
+    expect(workerDecisions.map((d) => d.issueNumber)).toEqual([10, 20]);
   });
 
   it('fills from batch ready set after dispatch queue', () => {
@@ -185,12 +202,14 @@ describe('evaluatePool', () => {
       dependencies: [],
     };
     const batch = makeBatch([itemA, itemB]);
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      activeBatch: batch,
-      maxAgents: 10,
-    }));
-    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        activeBatch: batch,
+        maxAgents: 10,
+      }),
+    );
+    const workerDecisions = result.filter((d) => d.agentType === 'worker');
     expect(workerDecisions).toHaveLength(2);
     expect(workerDecisions[0]!.batchItemId).toBe(itemA.id);
     expect(workerDecisions[1]!.batchItemId).toBe(itemB.id);
@@ -215,12 +234,14 @@ describe('evaluatePool', () => {
       makeClaim({ agentType: 'po', issueNumber: 100 }),
       makeClaim({ agentType: 'reviewer', issueNumber: 101 }),
     ];
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      activeBatch: batch,
-      maxAgents: 10,
-    }));
-    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        activeBatch: batch,
+        maxAgents: 10,
+      }),
+    );
+    const workerDecisions = result.filter((d) => d.agentType === 'worker');
     // Only itemA should be spawned (itemB has unmet dependency)
     expect(workerDecisions).toHaveLength(1);
     expect(workerDecisions[0]!.batchItemId).toBe(depId);
@@ -245,26 +266,28 @@ describe('evaluatePool', () => {
       makeClaim({ agentType: 'po', issueNumber: 100 }),
       makeClaim({ agentType: 'reviewer', issueNumber: 101 }),
     ];
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      activeBatch: batch,
-      maxAgents: 10,
-    }));
-    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        activeBatch: batch,
+        maxAgents: 10,
+      }),
+    );
+    const workerDecisions = result.filter((d) => d.agentType === 'worker');
     // itemA is completed so not spawned, itemB is ready
     expect(workerDecisions).toHaveLength(1);
     expect(workerDecisions[0]!.batchItemId).toBe(itemB.id);
   });
 
   it('per-type maximums — only 1 po allowed', () => {
-    const claims = [
-      makeClaim({ agentType: 'reviewer', issueNumber: 101 }),
-    ];
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      maxAgents: 10,
-    }));
-    const poDecisions = result.filter(d => d.agentType === 'po');
+    const claims = [makeClaim({ agentType: 'reviewer', issueNumber: 101 })];
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        maxAgents: 10,
+      }),
+    );
+    const poDecisions = result.filter((d) => d.agentType === 'po');
     // Minimum spawns 1 po, but never more than 1
     expect(poDecisions).toHaveLength(1);
   });
@@ -274,11 +297,13 @@ describe('evaluatePool', () => {
       makeClaim({ agentType: 'po', issueNumber: 100 }),
       makeClaim({ agentType: 'reviewer', issueNumber: 101 }),
     ];
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      maxAgents: 10,
-    }));
-    const poDecisions = result.filter(d => d.agentType === 'po');
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        maxAgents: 10,
+      }),
+    );
+    const poDecisions = result.filter((d) => d.agentType === 'po');
     expect(poDecisions).toHaveLength(0);
   });
 
@@ -287,11 +312,13 @@ describe('evaluatePool', () => {
       makeClaim({ agentType: 'reviewer', issueNumber: 101 }),
       makeClaim({ agentType: 'po', issueNumber: 100 }),
     ];
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      maxAgents: 10,
-    }));
-    const reviewerDecisions = result.filter(d => d.agentType === 'reviewer');
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        maxAgents: 10,
+      }),
+    );
+    const reviewerDecisions = result.filter((d) => d.agentType === 'reviewer');
     expect(reviewerDecisions).toHaveLength(0);
   });
 
@@ -309,18 +336,20 @@ describe('evaluatePool', () => {
       { issueNumber: 3, repoKey: 'org/repo-a' },
       { issueNumber: 4, repoKey: 'org/repo-b' },
     ];
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      activeClaimRepoKeys,
-      dispatchQueue: queue,
-      maxAgents: 10,
-      perRepoLimits: { 'org/repo-a': 2, 'org/repo-b': 5 },
-    }));
-    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        activeClaimRepoKeys,
+        dispatchQueue: queue,
+        maxAgents: 10,
+        perRepoLimits: { 'org/repo-a': 2, 'org/repo-b': 5 },
+      }),
+    );
+    const workerDecisions = result.filter((d) => d.agentType === 'worker');
     // repo-a: 1 existing + limit 2 = room for 1 more (issue 2 only, not 3)
     // repo-b: 0 existing + limit 5 = issue 4 is fine
     expect(workerDecisions).toHaveLength(2);
-    expect(workerDecisions.map(d => d.issueNumber)).toEqual([2, 4]);
+    expect(workerDecisions.map((d) => d.issueNumber)).toEqual([2, 4]);
   });
 
   it('priority order: minimums > dispatch queue > batch ready set', () => {
@@ -333,19 +362,28 @@ describe('evaluatePool', () => {
     };
     const batch = makeBatch([batchItem]);
     // maxAgents = 4: need 2 for minimums (po + reviewer), 1 for queue, 1 for batch
-    const result = evaluatePool(makeCtx({
-      dispatchQueue: queue,
-      activeBatch: batch,
-      maxAgents: 4,
-    }));
+    const result = evaluatePool(
+      makeCtx({
+        dispatchQueue: queue,
+        activeBatch: batch,
+        maxAgents: 4,
+      }),
+    );
     expect(result).toHaveLength(4);
     // First two should be minimums (po and reviewer)
-    const minimumTypes = result.filter(d => d.issueNumber === 0).map(d => d.agentType).sort();
+    const minimumTypes = result
+      .filter((d) => d.issueNumber === 0)
+      .map((d) => d.agentType)
+      .sort();
     expect(minimumTypes).toEqual(['po', 'reviewer']);
     // Then dispatch queue
-    expect(result.find(d => d.issueNumber === 1 && d.agentType === 'worker')).toBeTruthy();
+    expect(
+      result.find((d) => d.issueNumber === 1 && d.agentType === 'worker'),
+    ).toBeTruthy();
     // Then batch
-    expect(result.find(d => d.issueNumber === 2 && d.batchItemId === batchItem.id)).toBeTruthy();
+    expect(
+      result.find((d) => d.issueNumber === 2 && d.batchItemId === batchItem.id),
+    ).toBeTruthy();
   });
 
   it('does not count terminal claims as active', () => {
@@ -353,13 +391,15 @@ describe('evaluatePool', () => {
       makeClaim({ agentType: 'po', issueNumber: 100, status: 'completed' }),
       makeClaim({ agentType: 'reviewer', issueNumber: 101, status: 'failed' }),
     ];
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      maxAgents: 10,
-    }));
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        maxAgents: 10,
+      }),
+    );
     // Both completed/failed are terminal, so minimums should still spawn po + reviewer
-    const poDecisions = result.filter(d => d.agentType === 'po');
-    const reviewerDecisions = result.filter(d => d.agentType === 'reviewer');
+    const poDecisions = result.filter((d) => d.agentType === 'po');
+    const reviewerDecisions = result.filter((d) => d.agentType === 'reviewer');
     expect(poDecisions).toHaveLength(1);
     expect(reviewerDecisions).toHaveLength(1);
   });
@@ -376,21 +416,20 @@ describe('evaluatePool', () => {
       dependencies: [],
     };
     const batch = makeBatch([item]);
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      activeBatch: batch,
-      maxAgents: 10,
-    }));
-    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        activeBatch: batch,
+        maxAgents: 10,
+      }),
+    );
+    const workerDecisions = result.filter((d) => d.agentType === 'worker');
     expect(workerDecisions).toHaveLength(0);
   });
 
   it('capacity is shared across minimums, queue, and batch', () => {
     // maxAgents = 3, need po + reviewer (2 minimum slots), leaving 1 for queue
-    const queue: DispatchQueueItem[] = [
-      { issueNumber: 1 },
-      { issueNumber: 2 },
-    ];
+    const queue: DispatchQueueItem[] = [{ issueNumber: 1 }, { issueNumber: 2 }];
     const batchItem = {
       id: crypto.randomUUID(),
       issueNumber: 3,
@@ -398,14 +437,16 @@ describe('evaluatePool', () => {
       dependencies: [],
     };
     const batch = makeBatch([batchItem]);
-    const result = evaluatePool(makeCtx({
-      dispatchQueue: queue,
-      activeBatch: batch,
-      maxAgents: 3,
-    }));
+    const result = evaluatePool(
+      makeCtx({
+        dispatchQueue: queue,
+        activeBatch: batch,
+        maxAgents: 3,
+      }),
+    );
     // 2 minimums + 1 from queue = 3 total, no room for batch
     expect(result).toHaveLength(3);
-    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    const workerDecisions = result.filter((d) => d.agentType === 'worker');
     expect(workerDecisions).toHaveLength(1);
     expect(workerDecisions[0]!.issueNumber).toBe(1);
   });
@@ -425,13 +466,15 @@ describe('evaluatePool', () => {
       dependencies: [],
     }));
     const batch = makeBatch(batchItems);
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      activeBatch: batch,
-      maxAgents: 20,
-      perRepoLimits: { 'org/mono-repo': 2 },
-    }));
-    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        activeBatch: batch,
+        maxAgents: 20,
+        perRepoLimits: { 'org/mono-repo': 2 },
+      }),
+    );
+    const workerDecisions = result.filter((d) => d.agentType === 'worker');
     // Only 2 should be spawned despite 8 ready items — per-repo limit is 2
     expect(workerDecisions).toHaveLength(2);
   });
@@ -453,14 +496,16 @@ describe('evaluatePool', () => {
       dependencies: [],
     }));
     const batch = makeBatch(batchItems);
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      activeClaimRepoKeys,
-      activeBatch: batch,
-      maxAgents: 20,
-      perRepoLimits: { 'org/mono-repo': 2 },
-    }));
-    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        activeClaimRepoKeys,
+        activeBatch: batch,
+        maxAgents: 20,
+        perRepoLimits: { 'org/mono-repo': 2 },
+      }),
+    );
+    const workerDecisions = result.filter((d) => d.agentType === 'worker');
     // 1 existing + limit 2 = room for only 1 more from batch
     expect(workerDecisions).toHaveLength(1);
   });
@@ -484,56 +529,71 @@ describe('evaluatePool', () => {
       dependencies: [],
     }));
     const batch = makeBatch(batchItems);
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      dispatchQueue: queue,
-      activeBatch: batch,
-      maxAgents: 20,
-      perRepoLimits: { 'org/repo-a': 3 },
-    }));
-    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        dispatchQueue: queue,
+        activeBatch: batch,
+        maxAgents: 20,
+        perRepoLimits: { 'org/repo-a': 3 },
+      }),
+    );
+    const workerDecisions = result.filter((d) => d.agentType === 'worker');
     // Queue takes 2 slots, batch gets only 1 more (3 - 2 = 1)
     expect(workerDecisions).toHaveLength(3);
-    expect(workerDecisions.map(d => d.issueNumber)).toEqual([1, 2, 10]);
+    expect(workerDecisions.map((d) => d.issueNumber)).toEqual([1, 2, 10]);
   });
 
-  it('AgentTypeSchema accepts tech_lead (BUG-21 regression)', () => {
-    // Regression: tech_lead was not in the Zod enum, requiring an unsafe cast
-    expect(AgentTypeSchema.safeParse('tech_lead').success).toBe(true);
+  it('AgentTypeSchema accepts canonical tech-lead (#553)', () => {
+    expect(AgentTypeSchema.parse('tech-lead')).toBe('tech-lead');
   });
 
-  it('tech_lead is a valid agent type with min 0 and max 1 (BUG-21 regression)', () => {
+  it('AgentTypeSchema normalizes legacy tech_lead claims (#553)', () => {
+    expect(AgentTypeSchema.parse('tech_lead')).toBe('tech-lead');
+
+    const parsedClaim = WorkerClaimSchema.parse({
+      ...makeClaim({ agentType: 'tech-lead', issueNumber: 0 }),
+      agentType: 'tech_lead',
+    });
+    expect(parsedClaim.agentType).toBe('tech-lead');
+  });
+
+  it('tech-lead is a valid agent type with min 0 and max 1 (BUG-21 regression)', () => {
     // Regression: tech_lead was in the iteration array but not in AgentTypeSchema,
     // TYPE_MINIMUMS, TYPE_MAXIMUMS, or activeCounts. The `as AgentType[]` cast
     // silenced TypeScript, causing NaN in the needed calculation and preventing
-    // tech_lead from ever being managed by the pool.
+    // the Tech Lead agent from ever being managed by the pool.
     const claims = [
       makeClaim({ agentType: 'po', issueNumber: 100 }),
       makeClaim({ agentType: 'reviewer', issueNumber: 101 }),
     ];
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      maxAgents: 10,
-    }));
-    // tech_lead has min 0, so it should NOT be spawned for minimums
-    const tlDecisions = result.filter(d => d.agentType === 'tech_lead');
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        maxAgents: 10,
+      }),
+    );
+    // tech-lead has min 0, so it should NOT be spawned for minimums
+    const tlDecisions = result.filter((d) => d.agentType === 'tech-lead');
     expect(tlDecisions).toHaveLength(0);
   });
 
-  it('tech_lead counts toward totalActive and respects max 1 (BUG-21 regression)', () => {
-    // An active tech_lead claim should be counted toward total active agents
+  it('tech-lead counts toward totalActive and respects max 1 (BUG-21 regression)', () => {
+    // An active tech-lead claim should be counted toward total active agents
     const claims = [
       makeClaim({ agentType: 'po', issueNumber: 100 }),
       makeClaim({ agentType: 'reviewer', issueNumber: 101 }),
-      makeClaim({ agentType: 'tech_lead', issueNumber: 0 }),
+      makeClaim({ agentType: 'tech-lead', issueNumber: 0 }),
     ];
-    // maxAgents = 3 means no room left (po + reviewer + tech_lead = 3)
+    // maxAgents = 3 means no room left (po + reviewer + tech-lead = 3)
     const queue: DispatchQueueItem[] = [{ issueNumber: 1 }];
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      dispatchQueue: queue,
-      maxAgents: 3,
-    }));
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        dispatchQueue: queue,
+        maxAgents: 3,
+      }),
+    );
     expect(result).toEqual([]);
   });
 
@@ -550,13 +610,15 @@ describe('evaluatePool', () => {
       dependencies: [],
     }));
     const batch = makeBatch(batchItems);
-    const result = evaluatePool(makeCtx({
-      activeClaims: claims,
-      activeBatch: batch,
-      maxAgents: 20,
-      perRepoLimits: { 'org/some-repo': 2 },
-    }));
-    const workerDecisions = result.filter(d => d.agentType === 'worker');
+    const result = evaluatePool(
+      makeCtx({
+        activeClaims: claims,
+        activeBatch: batch,
+        maxAgents: 20,
+        perRepoLimits: { 'org/some-repo': 2 },
+      }),
+    );
+    const workerDecisions = result.filter((d) => d.agentType === 'worker');
     // All 4 should spawn — no repoKey means no repo-based limiting
     expect(workerDecisions).toHaveLength(4);
   });
