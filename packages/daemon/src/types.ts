@@ -357,6 +357,7 @@ export interface RunState {
   workerClaimId?: string;
   pausedAtPhase?: Phase;
   l2GateNotified?: boolean;
+  l2MergeBlockedNotified?: boolean;
   l2Feedback?: string;
   /** Compliance findings from the most recent l3-compliance failure, fed back into l3-generate. */
   l3Feedback?: string;

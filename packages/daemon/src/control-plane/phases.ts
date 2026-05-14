@@ -40,6 +40,9 @@ import { createFailureRecord } from './failure-routing.js';
 import {
   deliverPhaseArtifact,
   DeliveryError,
+  mergePhaseArtifact,
+  reconcilePhaseArtifact,
+  type ArtifactReconcileStatus,
   type DeliverableSpecPhase,
 } from './spec-pipeline/delivery.js';
 
@@ -48,6 +51,10 @@ import {
 // Review uses explicit branch refs (#178) so it no longer depends on checkout state.
 // Single-process cooperative async — boolean suffices (same as integrationLock).
 let repoGitLock = false;
+
+type PhaseArtifactReconcileOutcome =
+  | { kind: 'event'; event: PhaseEvent }
+  | { kind: 'status'; status: ArtifactReconcileStatus };
 
 export function acquireRepoGitLock(): boolean {
   if (repoGitLock) return false;
@@ -119,6 +126,198 @@ export function createPhaseHandlers(
     workspaceRestored = true;
   };
 
+  const recordDeliveryFailure = (
+    run: RunState,
+    phase: DeliverableSpecPhase,
+    error: Error,
+  ): PhaseEvent => {
+    const kind =
+      error instanceof DeliveryError
+        ? error.kind
+        : 'delivery-repair-needed';
+    run.lastFailure = createFailureRecord({
+      kind,
+      phase,
+      message: error.message,
+      severity: 'blocking',
+      retryable: true,
+      repairAction:
+        kind === 'agent-output-invalid' ? 'retry-session' : 'reconcile-artifact',
+    });
+    return 'failure';
+  };
+
+  const recreateWorkspaceFromRef = async (
+    run: RunState,
+    phase: DeliverableSpecPhase,
+    sourceRef: string,
+  ): Promise<PhaseEvent | undefined> => {
+    const removed = await git(
+      ['worktree', 'remove', '--force', workspaceDir],
+      mainRepoRoot,
+    );
+    if (!removed.ok) {
+      await git(['worktree', 'prune'], mainRepoRoot);
+    }
+
+    const created = await git(
+      ['worktree', 'add', '-B', featureBranch, workspaceDir, sourceRef],
+      mainRepoRoot,
+    );
+    if (!created.ok) {
+      run.lastFailure = createFailureRecord({
+        kind: 'workspace-repair-needed',
+        phase,
+        message: `Failed to recreate workspace from ${sourceRef}: ${created.error.message}`,
+        severity: 'blocking',
+        retryable: true,
+        repairAction: 'recreate-workspace',
+      });
+      return 'failure';
+    }
+
+    workspaceCwd = workspaceDir;
+    workspaceRestored = true;
+    run.workspacePath = workspaceDir;
+    return undefined;
+  };
+
+  const refreshSpecRefsAfterArtifact = async (run: RunState) => {
+    try {
+      run.specRefs = await resolveCurrentSpecRefs(workspaceCwd, workRequest.specRefs);
+    } catch (e) {
+      console.warn(`[artifact] Failed to refresh spec refs after reconciliation:`, e);
+    }
+  };
+
+  const reconcileDeliveredArtifact = async (
+    run: RunState,
+    phase: DeliverableSpecPhase,
+  ): Promise<PhaseArtifactReconcileOutcome> => {
+    const reconciled = await reconcilePhaseArtifact({
+      owner,
+      repo,
+      phase,
+      artifact: run.phaseArtifacts?.[phase],
+      repoRoot: mainRepoRoot,
+      octokit,
+    });
+    if (!reconciled.ok) {
+      console.error(
+        `[${phase}] Artifact reconciliation failed:`,
+        reconciled.error.message,
+      );
+      return {
+        kind: 'event',
+        event: recordDeliveryFailure(run, phase, reconciled.error),
+      };
+    }
+
+    run.phaseArtifacts = {
+      ...(run.phaseArtifacts ?? {}),
+      [phase]: reconciled.value.artifact,
+    };
+    if (reconciled.value.status !== 'merged') {
+      return { kind: 'status', status: reconciled.value.status };
+    }
+
+    const resumeRef = reconciled.value.resumeRef;
+    if (resumeRef === undefined || resumeRef.length === 0) {
+      return {
+        kind: 'event',
+        event: recordDeliveryFailure(
+          run,
+          phase,
+          new DeliveryError(
+            'delivery-repair-needed',
+            `Merged ${phase} artifact did not provide a resume ref`,
+          ),
+        ),
+      };
+    }
+
+    const refreshed = await recreateWorkspaceFromRef(run, phase, resumeRef);
+    if (refreshed !== undefined) return { kind: 'event', event: refreshed };
+    await refreshSpecRefsAfterArtifact(run);
+    return { kind: 'status', status: 'merged' };
+  };
+
+  const mergeDeliveredArtifact = async (
+    run: RunState,
+    phase: DeliverableSpecPhase,
+  ): Promise<PhaseArtifactReconcileOutcome> => {
+    const merged = await mergePhaseArtifact({
+      owner,
+      repo,
+      phase,
+      artifact: run.phaseArtifacts?.[phase],
+      repoRoot: mainRepoRoot,
+      octokit,
+      commitTitle: `${phase === 'l2-design' ? 'L2' : 'L3'} spec artifacts for #${workRequest.issueNumber}`,
+      commitMessage: `Daemon-owned ${phase} artifact delivery for #${workRequest.issueNumber}.`,
+    });
+    if (!merged.ok) {
+      console.error(`[${phase}] Artifact merge failed:`, merged.error.message);
+      return {
+        kind: 'event',
+        event: recordDeliveryFailure(run, phase, merged.error),
+      };
+    }
+
+    run.phaseArtifacts = {
+      ...(run.phaseArtifacts ?? {}),
+      [phase]: merged.value.artifact,
+    };
+    if (merged.value.status !== 'merged') {
+      return { kind: 'status', status: merged.value.status };
+    }
+
+    const resumeRef = merged.value.resumeRef;
+    if (resumeRef === undefined || resumeRef.length === 0) {
+      return {
+        kind: 'event',
+        event: recordDeliveryFailure(
+          run,
+          phase,
+          new DeliveryError(
+            'delivery-repair-needed',
+            `Merged ${phase} artifact did not provide a resume ref`,
+          ),
+        ),
+      };
+    }
+
+    const refreshed = await recreateWorkspaceFromRef(run, phase, resumeRef);
+    if (refreshed !== undefined) return { kind: 'event', event: refreshed };
+    await refreshSpecRefsAfterArtifact(run);
+    return { kind: 'status', status: 'merged' };
+  };
+
+  const mergeL3ArtifactIfPresent = async (
+    run: RunState,
+  ): Promise<PhaseEvent> => {
+    if (run.phaseArtifacts?.['l3-generate'] === undefined) {
+      console.warn(
+        `[l3-compliance] No recorded L3 artifact found — continuing without daemon merge`,
+      );
+      return 'success';
+    }
+
+    const merged = await mergeDeliveredArtifact(run, 'l3-generate');
+    if (merged.kind === 'event') return merged.event;
+    if (merged.status !== 'merged') {
+      return recordDeliveryFailure(
+        run,
+        'l3-generate',
+        new DeliveryError(
+          'delivery-repair-needed',
+          `L3 artifact proposal status is ${merged.status}; expected merged before implementation`,
+        ),
+      );
+    }
+    return 'success';
+  };
+
   const packageSpecArtifact = async (
     run: RunState,
     phase: DeliverableSpecPhase,
@@ -136,20 +335,7 @@ export function createPhaseHandlers(
     });
     if (!delivery.ok) {
       console.error(`[${phase}] Artifact delivery failed:`, delivery.error.message);
-      const kind =
-        delivery.error instanceof DeliveryError
-          ? delivery.error.kind
-          : 'delivery-repair-needed';
-      run.lastFailure = createFailureRecord({
-        kind,
-        phase,
-        message: delivery.error.message,
-        severity: 'blocking',
-        retryable: true,
-        repairAction:
-          kind === 'agent-output-invalid' ? 'retry-session' : 'reconcile-artifact',
-      });
-      return 'failure';
+      return recordDeliveryFailure(run, phase, delivery.error);
     }
     run.phaseArtifacts = {
       ...(run.phaseArtifacts ?? {}),
@@ -285,6 +471,36 @@ export function createPhaseHandlers(
 
       if (labels.includes('l2-approved')) {
         console.log(`[l2-gate] L2 approved for #${workRequest.issueNumber}`);
+        const reconciled = await reconcileDeliveredArtifact(run, 'l2-design');
+        if (reconciled.kind === 'event') return reconciled.event;
+        if (reconciled.status !== 'merged') {
+          run.pausedAtPhase = 'l2-gate';
+          if (run.l2MergeBlockedNotified !== true) {
+            const artifactUrl =
+              run.phaseArtifacts?.['l2-design']?.pullRequestUrl;
+            const proposalLine =
+              artifactUrl !== undefined && artifactUrl.length > 0
+                ? `\n\nProposal: ${artifactUrl}`
+                : '';
+            try {
+              await octokit.issues.createComment({
+                owner,
+                repo,
+                issue_number: workRequest.issueNumber,
+                body:
+                  `## L2 Proposal Not Merged\n\nThe \`l2-approved\` label is present, ` +
+                  `but L3 generation starts only after the recorded L2 proposal is merged into ` +
+                  `\`${config.branches.staging}\`.${proposalLine}`,
+              });
+            } catch (e) {
+              console.warn(`[l2-gate] Failed to notify merge block:`, e);
+            }
+            run.l2MergeBlockedNotified = true;
+          }
+          return 'success';
+        }
+        run.pausedAtPhase = undefined;
+        run.l2MergeBlockedNotified = undefined;
         return 'success';
       }
       if (labels.includes('l2-rejected')) {
@@ -331,6 +547,7 @@ export function createPhaseHandlers(
           console.warn(`[l2-gate] Failed to remove l2-rejected label:`, e);
         }
         run.l2GateNotified = false;
+        run.l2MergeBlockedNotified = undefined;
         return 'feedback';
       }
       // Neither approved nor rejected — park the run
@@ -499,7 +716,7 @@ export function createPhaseHandlers(
           );
           run.l3ComplianceAttempts = undefined;
           run.l3Feedback = undefined;
-          return 'success';
+          return mergeL3ArtifactIfPresent(run);
         }
       } catch (e) {
         console.warn(
@@ -652,7 +869,7 @@ export function createPhaseHandlers(
       // Success path — clear counter and any stale feedback so the next round starts fresh.
       run.l3ComplianceAttempts = undefined;
       run.l3Feedback = undefined;
-      return 'success';
+      return mergeL3ArtifactIfPresent(run);
     },
 
     decompose: async (_run: RunState): Promise<PhaseEvent> => {

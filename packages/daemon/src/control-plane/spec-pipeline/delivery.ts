@@ -7,7 +7,6 @@ import { err, ok, type Result } from '../../lib/result.js';
 import type {
   Phase,
   PhaseArtifact,
-  PhaseArtifactStatus,
   PipelineFailureKind,
 } from '../../types.js';
 
@@ -28,6 +27,32 @@ export interface DeliveryResult {
   artifact: PhaseArtifact;
   changedPaths: string[];
   reusedProposal: boolean;
+}
+
+export type ArtifactReconcileStatus =
+  | 'proposed'
+  | 'awaiting-review'
+  | 'merged'
+  | 'rejected';
+
+export interface ArtifactReconcileRequest {
+  owner: string;
+  repo: string;
+  phase: DeliverableSpecPhase;
+  artifact?: PhaseArtifact;
+  repoRoot: string;
+  octokit: Octokit;
+}
+
+export interface ArtifactMergeRequest extends ArtifactReconcileRequest {
+  commitTitle: string;
+  commitMessage?: string;
+}
+
+export interface ArtifactReconcileResult {
+  artifact: PhaseArtifact;
+  status: ArtifactReconcileStatus;
+  resumeRef?: string;
 }
 
 export class DeliveryError extends Error {
@@ -120,6 +145,72 @@ export async function deliverPhaseArtifact(
     changedPaths,
     reusedProposal: existing.value !== undefined,
   });
+}
+
+export async function reconcilePhaseArtifact(
+  request: ArtifactReconcileRequest,
+): Promise<Result<ArtifactReconcileResult>> {
+  const proposal = await loadProposalByArtifact(request);
+  if (!proposal.ok) return proposal;
+  return reconcileProposalRecord(request, proposal.value);
+}
+
+export async function mergePhaseArtifact(
+  request: ArtifactMergeRequest,
+): Promise<Result<ArtifactReconcileResult>> {
+  const proposal = await loadProposalByArtifact(request);
+  if (!proposal.ok) return proposal;
+
+  const currentStatus = proposalStatus(proposal.value);
+  if (currentStatus === 'merged') {
+    return reconcileProposalRecord(request, proposal.value);
+  }
+  if (currentStatus !== 'awaiting-review') {
+    return ok({
+      artifact: updateArtifactFromProposal(request.artifact, proposal.value),
+      status: currentStatus,
+    });
+  }
+
+  const pullNumber = request.artifact?.pullRequestNumber;
+  if (pullNumber === undefined) {
+    return err(
+      new DeliveryError(
+        'delivery-repair-needed',
+        `Recorded ${request.phase} artifact has no pull request number`,
+      ),
+    );
+  }
+
+  try {
+    const response = await request.octokit.pulls.merge({
+      owner: request.owner,
+      repo: request.repo,
+      pull_number: pullNumber,
+      merge_method: 'squash',
+      commit_title: request.commitTitle,
+      commit_message: request.commitMessage,
+    });
+    const data = response.data as { sha?: string };
+    const mergeSha = data.sha;
+    return reconcileProposalRecord(request, {
+      ...proposal.value,
+      state: 'closed',
+      merged: true,
+      merged_at: new Date().toISOString(),
+      merge_commit_sha:
+        mergeSha !== undefined && mergeSha.length > 0
+          ? mergeSha
+          : proposal.value.merge_commit_sha,
+    });
+  } catch (e) {
+    return err(
+      new DeliveryError(
+        'delivery-repair-needed',
+        `Failed to merge ${request.phase} proposal #${pullNumber}: ${e instanceof Error ? e.message : String(e)}`,
+      ),
+    );
+  }
 }
 
 export function buildProposalKey(request: {
@@ -220,6 +311,98 @@ async function prepareDeliveryCommit(
   return ok(undefined);
 }
 
+async function loadProposalByArtifact(
+  request: ArtifactReconcileRequest,
+): Promise<Result<PullRequestRecord>> {
+  const artifact = request.artifact;
+  if (artifact === undefined) {
+    return err(
+      new DeliveryError(
+        'delivery-repair-needed',
+        `No recorded ${request.phase} artifact found for reconciliation`,
+      ),
+    );
+  }
+  if (artifact.pullRequestNumber === undefined) {
+    return err(
+      new DeliveryError(
+        'delivery-repair-needed',
+        `Recorded ${request.phase} artifact has no pull request number`,
+      ),
+    );
+  }
+  try {
+    const response = await request.octokit.pulls.get({
+      owner: request.owner,
+      repo: request.repo,
+      pull_number: artifact.pullRequestNumber,
+    });
+    return ok(response.data as PullRequestRecord);
+  } catch (e) {
+    return err(
+      new DeliveryError(
+        'delivery-repair-needed',
+        `Failed to load ${request.phase} proposal #${artifact.pullRequestNumber}: ${e instanceof Error ? e.message : String(e)}`,
+      ),
+    );
+  }
+}
+
+async function reconcileProposalRecord(
+  request: ArtifactReconcileRequest,
+  proposal: PullRequestRecord,
+): Promise<Result<ArtifactReconcileResult>> {
+  const artifact = updateArtifactFromProposal(request.artifact, proposal);
+  const status = proposalStatus(proposal);
+  if (status !== 'merged') {
+    return ok({ artifact, status });
+  }
+
+  const verified = await verifyMergedOnBase(request.repoRoot, artifact);
+  if (!verified.ok) return err(verified.error);
+  return ok({ artifact, status, resumeRef: verified.value });
+}
+
+async function verifyMergedOnBase(
+  repoRoot: string,
+  artifact: PhaseArtifact,
+): Promise<Result<string>> {
+  const mergeIdentifier = artifact.mergeIdentifier;
+  if (mergeIdentifier === undefined || mergeIdentifier.length === 0) {
+    return err(
+      new DeliveryError(
+        'delivery-repair-needed',
+        `Merged ${artifact.phase} artifact is missing a merge identifier`,
+      ),
+    );
+  }
+
+  const fetch = await git(['fetch', 'origin', artifact.baseBranch], repoRoot);
+  if (!fetch.ok) {
+    return err(
+      new DeliveryError(
+        'delivery-repair-needed',
+        `Failed to fetch ${artifact.baseBranch} before artifact reconciliation: ${fetch.error.message}`,
+      ),
+    );
+  }
+
+  const resumeRef = `origin/${artifact.baseBranch}`;
+  const verified = await git(
+    ['merge-base', '--is-ancestor', mergeIdentifier, resumeRef],
+    repoRoot,
+  );
+  if (!verified.ok) {
+    return err(
+      new DeliveryError(
+        'delivery-repair-needed',
+        `Merged ${artifact.phase} artifact ${mergeIdentifier} is not present on ${resumeRef}: ${verified.error.message}`,
+      ),
+    );
+  }
+  return ok(resumeRef);
+}
+
 async function createProposal(
   request: DeliveryRequest,
   proposalKey: string,
@@ -308,7 +491,31 @@ function toArtifact(
   };
 }
 
-function proposalStatus(proposal: PullRequestRecord): PhaseArtifactStatus {
+function updateArtifactFromProposal(
+  artifact: PhaseArtifact | undefined,
+  proposal: PullRequestRecord,
+): PhaseArtifact {
+  if (artifact === undefined) {
+    throw new DeliveryError(
+      'delivery-repair-needed',
+      'Cannot update missing phase artifact from proposal',
+    );
+  }
+  const now = new Date().toISOString();
+  return {
+    ...artifact,
+    headBranch: proposal.head?.ref ?? artifact.headBranch,
+    baseBranch: proposal.base?.ref ?? artifact.baseBranch,
+    pullRequestNumber: proposal.number ?? artifact.pullRequestNumber,
+    pullRequestUrl: proposal.html_url ?? artifact.pullRequestUrl,
+    status: proposalStatus(proposal),
+    createdAt: proposal.created_at ?? artifact.createdAt,
+    updatedAt: proposal.updated_at ?? now,
+    mergeIdentifier: proposal.merge_commit_sha ?? artifact.mergeIdentifier,
+  };
+}
+
+function proposalStatus(proposal: PullRequestRecord): ArtifactReconcileStatus {
   const mergedAt = proposal.merged_at;
   if (
     proposal.merged === true ||

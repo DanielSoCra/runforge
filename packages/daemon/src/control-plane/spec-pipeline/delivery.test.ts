@@ -8,14 +8,19 @@ import {
   buildProposalKey,
   deliverPhaseArtifact,
   DeliveryError,
+  mergePhaseArtifact,
+  reconcilePhaseArtifact,
   type DeliveryRequest,
 } from './delivery.js';
+import type { PhaseArtifact } from '../../types.js';
 
 type TestOctokit = {
   pulls: {
     list: ReturnType<typeof vi.fn>;
+    get: ReturnType<typeof vi.fn>;
     create: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
+    merge: ReturnType<typeof vi.fn>;
   };
 };
 
@@ -48,9 +53,20 @@ async function makeRepo(): Promise<{
 }
 
 function makeOctokit(existing: unknown[] = []): TestOctokit {
+  const defaultProposal = {
+    number: 12,
+    html_url: 'https://github.example/pull/12',
+    state: 'open',
+    merged: false,
+    head: { ref: 'spec/l2/42' },
+    base: { ref: 'staging' },
+    created_at: '2026-05-14T00:00:00Z',
+    updated_at: '2026-05-14T00:00:00Z',
+  };
   return {
     pulls: {
       list: vi.fn().mockResolvedValue({ data: existing }),
+      get: vi.fn().mockResolvedValue({ data: existing[0] ?? defaultProposal }),
       create: vi.fn().mockResolvedValue({
         data: {
           number: 12,
@@ -75,6 +91,7 @@ function makeOctokit(existing: unknown[] = []): TestOctokit {
           updated_at: '2026-05-14T00:01:00Z',
         },
       }),
+      merge: vi.fn().mockResolvedValue({ data: { sha: 'merge-sha' } }),
     },
   };
 }
@@ -93,6 +110,24 @@ function makeRequest(
     workspacePath: repoRoot,
     baseBranch: 'staging',
     octokit: octokit as unknown as DeliveryRequest['octokit'],
+    ...overrides,
+  };
+}
+
+function makeArtifact(overrides: Partial<PhaseArtifact> = {}): PhaseArtifact {
+  return {
+    issueNumber: 42,
+    phase: 'l2-design',
+    artifactKind: 'pull_request',
+    proposalKey: 'owner/repo#42:l2-design:staging',
+    artifactPaths: ['.specify/architecture/new-arch.md'],
+    headBranch: 'spec/l2/42',
+    baseBranch: 'staging',
+    pullRequestNumber: 12,
+    pullRequestUrl: 'https://github.example/pull/12',
+    status: 'awaiting-review',
+    createdAt: '2026-05-14T00:00:00Z',
+    updatedAt: '2026-05-14T00:00:00Z',
     ...overrides,
   };
 }
@@ -238,5 +273,138 @@ describe('deliverPhaseArtifact', () => {
   it('uses phase-specific source branches', () => {
     expect(buildHeadBranch('l2-design', 42)).toBe('spec/l2/42');
     expect(buildHeadBranch('l3-generate', 42)).toBe('spec/l3/42');
+  });
+});
+
+describe('reconcilePhaseArtifact', () => {
+  let cleanup: (() => Promise<void>) | undefined;
+
+  afterEach(async () => {
+    if (cleanup) await cleanup();
+    cleanup = undefined;
+  });
+
+  it('returns awaiting-review when the recorded proposal is still open', async () => {
+    const repo = await makeRepo();
+    cleanup = repo.cleanup;
+    const octokit = makeOctokit();
+
+    const result = await reconcilePhaseArtifact({
+      owner: 'owner',
+      repo: 'repo',
+      phase: 'l2-design',
+      artifact: makeArtifact(),
+      repoRoot: repo.repoRoot,
+      octokit: octokit as unknown as DeliveryRequest['octokit'],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.ok ? result.value.status : undefined).toBe('awaiting-review');
+    expect(octokit.pulls.get).toHaveBeenCalledWith(
+      expect.objectContaining({ pull_number: 12 }),
+    );
+  });
+
+  it('verifies a merged proposal is present on the target branch', async () => {
+    const repo = await makeRepo();
+    cleanup = repo.cleanup;
+    await writeFile(
+      join(repo.repoRoot, '.specify', 'architecture', 'merged.md'),
+      'merged\n',
+    );
+    await git(['add', '.specify/architecture/merged.md'], repo.repoRoot);
+    await git(['commit', '-q', '-m', 'merge l2'], repo.repoRoot);
+    const sha = await git(['rev-parse', 'HEAD'], repo.repoRoot);
+    expect(sha.ok).toBe(true);
+    if (!sha.ok) return;
+    await git(['push', '-q', 'origin', 'staging'], repo.repoRoot);
+    const octokit = makeOctokit([
+      {
+        number: 12,
+        html_url: 'https://github.example/pull/12',
+        state: 'closed',
+        merged: true,
+        merged_at: '2026-05-14T00:05:00Z',
+        merge_commit_sha: sha.value.trim(),
+        head: { ref: 'spec/l2/42' },
+        base: { ref: 'staging' },
+      },
+    ]);
+
+    const result = await reconcilePhaseArtifact({
+      owner: 'owner',
+      repo: 'repo',
+      phase: 'l2-design',
+      artifact: makeArtifact(),
+      repoRoot: repo.repoRoot,
+      octokit: octokit as unknown as DeliveryRequest['octokit'],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.status).toBe('merged');
+    expect(result.value.resumeRef).toBe('origin/staging');
+    expect(result.value.artifact.mergeIdentifier).toBe(sha.value.trim());
+  });
+});
+
+describe('mergePhaseArtifact', () => {
+  let cleanup: (() => Promise<void>) | undefined;
+
+  afterEach(async () => {
+    if (cleanup) await cleanup();
+    cleanup = undefined;
+  });
+
+  it('merges an open proposal and returns a verified resume ref', async () => {
+    const repo = await makeRepo();
+    cleanup = repo.cleanup;
+    await writeFile(join(repo.repoRoot, '.specify', 'stack', 'merged.md'), 'merged\n');
+    await git(['add', '.specify/stack/merged.md'], repo.repoRoot);
+    await git(['commit', '-q', '-m', 'merge l3'], repo.repoRoot);
+    const sha = await git(['rev-parse', 'HEAD'], repo.repoRoot);
+    expect(sha.ok).toBe(true);
+    if (!sha.ok) return;
+    await git(['push', '-q', 'origin', 'staging'], repo.repoRoot);
+    const octokit = makeOctokit([
+      {
+        number: 12,
+        html_url: 'https://github.example/pull/12',
+        state: 'open',
+        merged: false,
+        head: { ref: 'spec/l3/42' },
+        base: { ref: 'staging' },
+      },
+    ]);
+    octokit.pulls.merge.mockResolvedValueOnce({
+      data: { sha: sha.value.trim() },
+    });
+
+    const result = await mergePhaseArtifact({
+      owner: 'owner',
+      repo: 'repo',
+      phase: 'l3-generate',
+      artifact: makeArtifact({
+        phase: 'l3-generate',
+        proposalKey: 'owner/repo#42:l3-generate:staging',
+        artifactPaths: ['.specify/stack/merged.md'],
+        headBranch: 'spec/l3/42',
+      }),
+      repoRoot: repo.repoRoot,
+      octokit: octokit as unknown as DeliveryRequest['octokit'],
+      commitTitle: 'L3 spec artifacts for #42',
+      commitMessage: 'merge',
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(octokit.pulls.merge).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pull_number: 12,
+        merge_method: 'squash',
+      }),
+    );
+    expect(result.value.status).toBe('merged');
+    expect(result.value.resumeRef).toBe('origin/staging');
   });
 });

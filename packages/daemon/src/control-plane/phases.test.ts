@@ -1,6 +1,6 @@
 // src/control-plane/phases.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { RunState, WorkRequest } from '../types.js';
+import type { PhaseArtifact, RunState, WorkRequest } from '../types.js';
 import type { Config } from '../config.js';
 import type { PhaseLabelMirror } from './phase-labels.js';
 
@@ -72,6 +72,8 @@ vi.mock('./spec-pipeline/delivery.js', () => {
   return {
     DeliveryError,
     deliverPhaseArtifact: vi.fn(),
+    reconcilePhaseArtifact: vi.fn(),
+    mergePhaseArtifact: vi.fn(),
   };
 });
 
@@ -130,6 +132,8 @@ import {
 import {
   deliverPhaseArtifact,
   DeliveryError,
+  mergePhaseArtifact,
+  reconcilePhaseArtifact,
 } from './spec-pipeline/delivery.js';
 import { classify as runClassify } from './classifier.js';
 import { runHoldout } from '../validation/holdout.js';
@@ -157,6 +161,8 @@ const mockLoadSpecContent = vi.mocked(loadSpecContent);
 const mockLoadImplementationContent = vi.mocked(loadImplementationContent);
 const mockResolveCurrentSpecRefs = vi.mocked(resolveCurrentSpecRefs);
 const mockDeliverPhaseArtifact = vi.mocked(deliverPhaseArtifact);
+const mockReconcilePhaseArtifact = vi.mocked(reconcilePhaseArtifact);
+const mockMergePhaseArtifact = vi.mocked(mergePhaseArtifact);
 const mockRunHoldout = vi.mocked(runHoldout);
 const mockIntegrateToStaging = vi.mocked(integrateToStaging);
 const mockRunDeploy = vi.mocked(runDeploy);
@@ -230,6 +236,27 @@ function makeRun(overrides: Partial<RunState> = {}): RunState {
     errorHashes: {},
     startedAt: '2026-03-21T00:00:00Z',
     updatedAt: '2026-03-21T00:00:00Z',
+    ...overrides,
+  };
+}
+
+function makePhaseArtifact(
+  phase: 'l2-design' | 'l3-generate',
+  overrides: Partial<PhaseArtifact> = {},
+): PhaseArtifact {
+  return {
+    issueNumber: 42,
+    phase,
+    artifactKind: 'pull_request',
+    proposalKey: `owner/repo#42:${phase}:staging`,
+    artifactPaths: ['.specify/traceability.yml'],
+    headBranch: phase === 'l2-design' ? 'spec/l2/42' : 'spec/l3/42',
+    baseBranch: 'staging',
+    pullRequestNumber: 12,
+    pullRequestUrl: 'https://github.example/pull/12',
+    status: 'awaiting-review',
+    createdAt: '2026-05-14T00:00:00Z',
+    updatedAt: '2026-05-14T00:00:00Z',
     ...overrides,
   };
 }
@@ -338,22 +365,35 @@ describe('createPhaseHandlers', () => {
       ok: true,
       value: {
         artifact: {
+          ...makePhaseArtifact(request.phase),
           issueNumber: request.issueNumber,
-          phase: request.phase,
-          artifactKind: 'pull_request',
-          proposalKey: `owner/repo#${request.issueNumber}:${request.phase}:staging`,
-          artifactPaths: ['.specify/traceability.yml'],
-          headBranch:
-            request.phase === 'l2-design' ? 'spec/l2/42' : 'spec/l3/42',
-          baseBranch: 'staging',
-          pullRequestNumber: 12,
-          pullRequestUrl: 'https://github.example/pull/12',
-          status: 'awaiting-review',
-          createdAt: '2026-05-14T00:00:00Z',
-          updatedAt: '2026-05-14T00:00:00Z',
         },
         changedPaths: ['.specify/traceability.yml'],
         reusedProposal: false,
+      },
+    }));
+    mockReconcilePhaseArtifact.mockImplementation(async (request) => ({
+      ok: true,
+      value: {
+        artifact: {
+          ...(request.artifact ?? makePhaseArtifact(request.phase)),
+          status: 'merged',
+          mergeIdentifier: 'merge-sha',
+        },
+        status: 'merged',
+        resumeRef: 'origin/staging',
+      },
+    }));
+    mockMergePhaseArtifact.mockImplementation(async (request) => ({
+      ok: true,
+      value: {
+        artifact: {
+          ...(request.artifact ?? makePhaseArtifact(request.phase)),
+          status: 'merged',
+          mergeIdentifier: 'merge-sha',
+        },
+        status: 'merged',
+        resumeRef: 'origin/staging',
       },
     }));
     // Reset issues.get mock
@@ -2251,10 +2291,92 @@ describe('createPhaseHandlers', () => {
         data: { labels: [{ name: 'l2-approved' }] },
       });
       const { handlers } = createHandlers();
-      const run = makeRun();
+      const run = makeRun({
+        phaseArtifacts: {
+          'l2-design': makePhaseArtifact('l2-design'),
+        },
+      });
       const result = await handlers['l2-gate']!(run);
       expect(result).toBe('success');
       expect(run.pausedAtPhase).toBeUndefined();
+      expect(mockReconcilePhaseArtifact).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: 'l2-design',
+          repoRoot: expect.any(String),
+        }),
+      );
+      expect(mockGit).toHaveBeenCalledWith(
+        [
+          'worktree',
+          'add',
+          '-B',
+          'feature/42',
+          expect.stringContaining('workspaces/issue-42'),
+          'origin/staging',
+        ],
+        expect.any(String),
+      );
+      expect(run.workspacePath).toContain('workspaces/issue-42');
+    });
+
+    it('parks when l2-approved is present before the L2 proposal is merged', async () => {
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'l2-approved' }] },
+      });
+      mockReconcilePhaseArtifact.mockResolvedValueOnce({
+        ok: true,
+        value: {
+          artifact: makePhaseArtifact('l2-design'),
+          status: 'awaiting-review',
+        },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun({
+        phaseArtifacts: {
+          'l2-design': makePhaseArtifact('l2-design'),
+        },
+      });
+      const result = await handlers['l2-gate']!(run);
+
+      expect(result).toBe('success');
+      expect(run.pausedAtPhase).toBe('l2-gate');
+      expect(run.l2MergeBlockedNotified).toBe(true);
+      expect(mockOctokit.issues.createComment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.stringContaining('L2 Proposal Not Merged'),
+        }),
+      );
+      expect(mockGit).not.toHaveBeenCalledWith(
+        expect.arrayContaining(['worktree', 'add']),
+        expect.any(String),
+      );
+    });
+
+    it('returns failure when L2 approval cannot reconcile the proposal', async () => {
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'l2-approved' }] },
+      });
+      mockReconcilePhaseArtifact.mockResolvedValueOnce({
+        ok: false,
+        error: new DeliveryError(
+          'delivery-repair-needed',
+          'proposal disappeared',
+        ),
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun({
+        phaseArtifacts: {
+          'l2-design': makePhaseArtifact('l2-design'),
+        },
+      });
+      const result = await handlers['l2-gate']!(run);
+
+      expect(result).toBe('failure');
+      expect(run.lastFailure).toMatchObject({
+        kind: 'delivery-repair-needed',
+        phase: 'l2-design',
+        repairAction: 'reconcile-artifact',
+      });
     });
 
     it('returns feedback, removes the label, and resets l2GateNotified when no rejection comment is found', async () => {
@@ -2775,6 +2897,85 @@ describe('createPhaseHandlers', () => {
       const result = await handlers['l3-compliance']!(run);
       expect(result).toBe('success');
       expect(run.l3ComplianceAttempts).toBeUndefined();
+    });
+
+    it('merges the recorded L3 artifact before implementation when compliant', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: 'done',
+          structuredData: {
+            result: 'r',
+            cost_usd: 0,
+            structured_output: { compliant: true, findings: [], summary: 'ok' },
+          },
+          cost: 0.5,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun({
+        phaseArtifacts: {
+          'l3-generate': makePhaseArtifact('l3-generate'),
+        },
+      });
+      const result = await handlers['l3-compliance']!(run);
+
+      expect(result).toBe('success');
+      expect(mockMergePhaseArtifact).toHaveBeenCalledWith(
+        expect.objectContaining({
+          phase: 'l3-generate',
+          commitTitle: 'L3 spec artifacts for #42',
+        }),
+      );
+      expect(mockGit).toHaveBeenCalledWith(
+        [
+          'worktree',
+          'add',
+          '-B',
+          'feature/42',
+          expect.stringContaining('workspaces/issue-42'),
+          'origin/staging',
+        ],
+        expect.any(String),
+      );
+      expect(run.workspacePath).toContain('workspaces/issue-42');
+    });
+
+    it('returns failure when the recorded L3 artifact cannot be merged', async () => {
+      mockRuntime.spawnSession.mockResolvedValue({
+        ok: true,
+        value: {
+          output: 'done',
+          structuredData: {
+            result: 'r',
+            cost_usd: 0,
+            structured_output: { compliant: true, findings: [], summary: 'ok' },
+          },
+          cost: 0.5,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        },
+      });
+      mockMergePhaseArtifact.mockResolvedValueOnce({
+        ok: false,
+        error: new DeliveryError('delivery-repair-needed', 'merge failed'),
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun({
+        phaseArtifacts: {
+          'l3-generate': makePhaseArtifact('l3-generate'),
+        },
+      });
+      const result = await handlers['l3-compliance']!(run);
+
+      expect(result).toBe('failure');
+      expect(run.lastFailure).toMatchObject({
+        kind: 'delivery-repair-needed',
+        phase: 'l3-generate',
+        repairAction: 'reconcile-artifact',
+      });
     });
 
     it('parses compliant=false from result text fallback when structured_output is null (Codex deep review)', async () => {
