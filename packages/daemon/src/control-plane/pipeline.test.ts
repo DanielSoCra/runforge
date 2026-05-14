@@ -6,6 +6,7 @@ import { StateManager } from './state.js';
 import { CostTracker } from '../session-runtime/cost.js';
 import type { RunState, PhaseEvent } from '../types.js';
 import type { PhaseLabelMirror } from './phase-labels.js';
+import { createFailureRecord } from './failure-routing.js';
 import { mkdtemp } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -377,6 +378,84 @@ describe('runPipeline', () => {
     const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
     expect(result.outcome).toBe('stuck');
     expect(run.phase).toBe('stuck');
+  });
+
+  it('records typed containment failures as human-required (#489)', async () => {
+    const handlers: PhaseHandlerMap = {
+      ...featureSimpleAllSuccess,
+      implement: async () => 'containment-breach' as PhaseEvent,
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('stuck');
+    expect(result.error).toContain('Confirmed containment violation');
+    expect(run.lastFailure?.kind).toBe('containment-violation');
+    expect(run.lastFailure?.humanActionRequired).toBe(true);
+    expect(run.repairHistory).toHaveLength(1);
+    expect(run.repairHistory?.[0]?.outcome).toBe('human-required');
+  });
+
+  it('retries repairable failures that would otherwise transition directly to stuck (#489)', async () => {
+    let detectCalls = 0;
+    const handlers: PhaseHandlerMap = {
+      ...featureSimpleAllSuccess,
+      detect: async (targetRun) => {
+        detectCalls++;
+        if (detectCalls === 1) {
+          targetRun.lastFailure = createFailureRecord({
+            kind: 'workspace-repair-needed',
+            phase: 'detect',
+            message: 'worktree registration is stale',
+            severity: 'blocking',
+            retryable: true,
+            repairAction: 'recreate-workspace',
+          });
+          return 'failure' as PhaseEvent;
+        }
+        return 'success' as PhaseEvent;
+      },
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('complete');
+    expect(detectCalls).toBe(2);
+    expect(run.lastFailure?.kind).toBe('workspace-repair-needed');
+    expect(run.repairHistory).toHaveLength(1);
+    expect(run.repairHistory?.[0]?.outcome).toBe('retrying');
+  });
+
+  it('escalates repairable failures after their bounded attempts are exhausted (#489)', async () => {
+    let detectCalls = 0;
+    const handlers: PhaseHandlerMap = {
+      ...featureSimpleAllSuccess,
+      detect: async (targetRun) => {
+        detectCalls++;
+        targetRun.lastFailure = createFailureRecord({
+          kind: 'workspace-repair-needed',
+          phase: 'detect',
+          message: 'worktree registration is stale',
+          severity: 'blocking',
+          retryable: true,
+          repairAction: 'recreate-workspace',
+        });
+        return 'failure' as PhaseEvent;
+      },
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker, {
+      maxAttempts: { detect: 2 },
+    });
+    expect(result.outcome).toBe('stuck');
+    expect(detectCalls).toBe(2);
+    expect(run.lastFailure?.kind).toBe('workspace-repair-needed');
+    expect(run.lastFailure?.attempt).toBe(2);
+    expect(run.repairHistory?.map((entry) => entry.outcome)).toEqual([
+      'retrying',
+      'terminal-stuck',
+    ]);
   });
 
   describe('handler existence validation', () => {

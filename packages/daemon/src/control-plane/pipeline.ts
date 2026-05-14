@@ -12,6 +12,11 @@ import {
   markWorkflowNodeRunning,
   migrateRunStateToWorkflow,
 } from './run-state-migration.js';
+import {
+  classifyPhaseFailure,
+  recordFailureHistory,
+  shouldRetryFailure,
+} from './failure-routing.js';
 
 export type PhaseHandler = (run: RunState) => Promise<PhaseEvent>;
 
@@ -176,6 +181,21 @@ export async function runPipeline(
     // types: diagnose, implement, review).
     run.cost = costTracker.getRunCost(run.issueNumber);
 
+    const failureRecord =
+      event === 'failure' || event === 'containment-breach'
+        ? classifyPhaseFailure({
+            run,
+            phase: executingPhase,
+            event,
+            message:
+              currentError ??
+              (run.lastFailure?.phase === executingPhase
+                ? run.lastFailure.message
+                : undefined),
+            maxAttempts: maxAttempts[executingPhase] ?? 3,
+          })
+        : undefined;
+
     // Check if handler requested parking (e.g., l2-gate awaiting approval)
     if (run.pausedAtPhase) {
       run.phase = 'paused';
@@ -189,14 +209,26 @@ export async function runPipeline(
     if (globalNext) {
       if (workflow) markWorkflowNodeCompleted(run, workflow, executingPhase, event);
       run.phase = globalNext;
-      if (globalNext === 'stuck') phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
+      if (globalNext === 'stuck') {
+        if (failureRecord) {
+          recordFailureHistory(
+            run,
+            failureRecord,
+            failureRecord.humanActionRequired ? 'human-required' : 'terminal-stuck',
+          );
+          lastError = failureRecord.message;
+        }
+        phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
+      }
       await stateMgr.saveRunState(run);
       void runWriter?.upsertRun(run.id, {
         current_phase: run.phase,
         phases: buildPhaseRecords(run),
       });
       const globalOutcome = globalNext === 'stuck' ? 'stuck' : 'paused';
-      return { outcome: globalOutcome, run };
+      return globalOutcome === 'stuck' && lastError
+        ? { outcome: globalOutcome, run, error: lastError }
+        : { outcome: globalOutcome, run };
     }
 
     // Check for completion
@@ -222,6 +254,9 @@ export async function runPipeline(
         console.log(`[pipeline] Circular error detected in ${run.phase} (hash ${errHash}), transitioning to stuck`);
         if (workflow) markWorkflowNodeCompleted(run, workflow, executingPhase, event);
         run.phase = 'stuck';
+        if (failureRecord) {
+          recordFailureHistory(run, failureRecord, 'terminal-stuck', 'Circular error detected');
+        }
         phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
         await stateMgr.saveRunState(run);
         void runWriter?.upsertRun(run.id, {
@@ -232,12 +267,32 @@ export async function runPipeline(
       }
     }
 
+    if (event === 'failure' && failureRecord) {
+      const failureTransition = transition(table, run.phase, event);
+      if (failureTransition?.next === 'stuck' && shouldRetryFailure(failureRecord)) {
+        console.log(
+          `[pipeline] Repairable failure in ${run.phase} (${failureRecord.kind}) attempt ${failureRecord.attempt}/${failureRecord.maxAttempts}; retrying phase`,
+        );
+        if (workflow) markWorkflowNodeCompleted(run, workflow, executingPhase, event);
+        recordFailureHistory(run, failureRecord, 'retrying');
+        await stateMgr.saveRunState(run);
+        void runWriter?.upsertRun(run.id, {
+          current_phase: run.phase,
+          phases: buildPhaseRecords(run),
+        });
+        continue;
+      }
+    }
+
     // Advance the FSM
     const currentPhase = run.phase;
     const advanced = advancePhase(run, table, event, maxAttempts, retryCounts);
     if (!advanced) {
       if (workflow) markWorkflowNodeCompleted(run, workflow, executingPhase, 'failure');
       run.phase = 'stuck';
+      if (failureRecord) {
+        recordFailureHistory(run, failureRecord, 'terminal-stuck', `No transition for ${currentPhase}:${event}`);
+      }
       phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
       await stateMgr.saveRunState(run);
       void runWriter?.upsertRun(run.id, {
@@ -250,6 +305,13 @@ export async function runPipeline(
     // Save state after each phase transition
     if (run.phase === 'stuck') {
       if (workflow) markWorkflowNodeCompleted(run, workflow, executingPhase, event);
+      if (failureRecord) {
+        recordFailureHistory(
+          run,
+          failureRecord,
+          failureRecord.humanActionRequired ? 'human-required' : 'terminal-stuck',
+        );
+      }
       phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
     } else {
       if (workflow) markWorkflowNodeCompleted(run, workflow, executingPhase, event);

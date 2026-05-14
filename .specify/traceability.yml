@@ -407,6 +407,7 @@ STACK-AC-RECOVERABLE-FAILURE-ROUTING:
   code_paths:
     - packages/daemon/src/types.ts
     - packages/daemon/src/control-plane/pipeline.ts
+    - packages/daemon/src/control-plane/failure-routing.ts
     - packages/daemon/src/control-plane/fsm.ts
     - packages/daemon/src/control-plane/phases.ts
     - packages/daemon/src/control-plane/workspace.ts

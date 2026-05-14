@@ -36,6 +36,7 @@ import { runPostDeployTests } from '../validation/post-deploy-test.js';
 import { reconcileWorkspace } from './workspace.js';
 import { extractStructuredOutput } from '../lib/structured-output.js';
 import { complianceReportJsonSchema } from '../diagnosis/schema.js';
+import { createFailureRecord } from './failure-routing.js';
 
 // Serializes git operations on the shared repoRoot across concurrent pipeline runs.
 // Currently protects detect (which modifies checkout state via git checkout).
@@ -117,6 +118,14 @@ export function createPhaseHandlers(
     detect: async (run: RunState): Promise<PhaseEvent> => {
       if (!acquireRepoGitLock()) {
         console.error(`[detect] Lock held by another run — aborting`);
+        run.lastFailure = createFailureRecord({
+          kind: 'workspace-repair-needed',
+          phase: 'detect',
+          message: 'Repository git lock is held by another run',
+          severity: 'warning',
+          retryable: true,
+          repairAction: 'recreate-workspace',
+        });
         return 'failure';
       }
       try {
@@ -134,6 +143,14 @@ export function createPhaseHandlers(
             `[detect] Workspace reconcile failed:`,
             reconciled.error.message,
           );
+          run.lastFailure = createFailureRecord({
+            kind: 'workspace-repair-needed',
+            phase: 'detect',
+            message: reconciled.error.message,
+            severity: 'blocking',
+            retryable: true,
+            repairAction: 'recreate-workspace',
+          });
           return 'failure';
         }
         workspaceCwd = reconciled.value.path;

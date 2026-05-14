@@ -69,6 +69,67 @@ export type PipelineVariant =
 
 export type Outcome = 'complete' | 'stuck' | 'escalated';
 
+export type PipelineFailureKind =
+  | 'workspace-repair-needed'
+  | 'delivery-repair-needed'
+  | 'agent-output-invalid'
+  | 'provider-temporarily-unavailable'
+  | 'budget-unavailable'
+  | 'containment-violation'
+  | 'containment-audit-suspect'
+  | 'spec-contradiction'
+  | 'human-required';
+
+export type FailureSeverity = 'info' | 'warning' | 'blocking' | 'critical';
+
+export type RepairAction =
+  | 'recreate-workspace'
+  | 'reconcile-artifact'
+  | 'retry-session'
+  | 'wait-for-provider'
+  | 'clear-contradictory-labels'
+  | 'request-human'
+  | 'none';
+
+export interface FailureRecord {
+  kind: PipelineFailureKind;
+  phase: Phase;
+  message: string;
+  normalizedErrorHash: string;
+  severity: FailureSeverity;
+  retryable: boolean;
+  repairAction: RepairAction;
+  attempt: number;
+  maxAttempts: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  relatedArtifactRef?: string;
+  humanActionRequired?: boolean;
+}
+
+export type RepairHistoryOutcome =
+  | 'retrying'
+  | 'human-required'
+  | 'terminal-stuck'
+  | 'repair-failed';
+
+export interface RepairHistoryEntry {
+  at: string;
+  failure: FailureRecord;
+  outcome: RepairHistoryOutcome;
+  message?: string;
+}
+
+export interface RepairQueueItem {
+  id: string;
+  runId: string;
+  issueNumber: number;
+  failure: FailureRecord;
+  scheduledAt: string;
+  attemptCount: number;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+}
+
 // --- Session ---
 
 export type SessionType =
@@ -246,6 +307,8 @@ export interface RunState {
   currentNodeId?: string;
   activeNodeIds?: string[];
   workflowFallbackReason?: string;
+  lastFailure?: FailureRecord;
+  repairHistory?: RepairHistoryEntry[];
 }
 
 export type WorkflowNodeRunStatus =
