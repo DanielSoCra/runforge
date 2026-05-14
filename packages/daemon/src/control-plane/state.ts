@@ -48,7 +48,8 @@ export class StateManager {
         }
       }
       return runs;
-    } catch {
+    } catch (e) {
+      console.warn('[state] failed to scan incomplete runs:', e);
       return [];
     }
   }
