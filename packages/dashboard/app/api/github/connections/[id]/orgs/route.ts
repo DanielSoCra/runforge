@@ -6,8 +6,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const supabase = await createClient();
   try {
     await requireAdmin(supabase);
-  } catch {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : 'Forbidden';
+    const status = message === 'Unauthorized' ? 401 : 403;
+    return NextResponse.json({ error: message }, { status });
   }
 
   const { id } = await params;

@@ -104,13 +104,13 @@ const paramsPromise = (id = 'conn-1') => Promise.resolve({ id });
 // ---------- tests ----------
 
 describe('GET /api/github/connections/[id]/repos', () => {
-  it('returns 403 when user is not authenticated', async () => {
+  it('returns 401 when user is not authenticated (#549)', async () => {
     const createClient = await getCreateClient();
     createClient.mockResolvedValueOnce(mockSupabaseUnauthenticated());
     const { GET } = await import('./route.js');
 
     const res = await GET(makeRequest('my-org'), { params: paramsPromise() });
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
   });
 
   it('returns 403 when user is not admin', async () => {
