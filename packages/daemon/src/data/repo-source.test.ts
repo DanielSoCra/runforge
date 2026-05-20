@@ -114,4 +114,55 @@ describe('SupabaseRepoDataSource', () => {
       expect(result.error.message).toBe('upsertRepo returned null data');
     }
   });
+
+  it('reads connection tokens through the app-owned credential store', async () => {
+    const update = vi.fn().mockReturnValue({
+      eq: vi.fn().mockResolvedValue({ error: null }),
+    });
+    const supabase = {
+      from: vi.fn().mockReturnValue({ update }),
+    };
+    const credentials = {
+      readConnectionCredential: vi.fn().mockResolvedValue({
+        ok: true,
+        value: 'connection-token',
+      }),
+    };
+    const source = new SupabaseRepoDataSource(
+      supabase as never,
+      credentials as never,
+    );
+
+    await expect(
+      source.resolveConnectionToken('repo-1', 'conn-1'),
+    ).resolves.toBe('connection-token');
+    expect(credentials.readConnectionCredential).toHaveBeenCalledWith('conn-1');
+    expect(update).toHaveBeenCalledWith({
+      credential_status: 'ok',
+      credential_error: null,
+      updated_at: expect.any(String),
+    });
+  });
+
+  it('marks credential errors when no app-owned credential store is configured', async () => {
+    const update = vi.fn().mockReturnValue({
+      eq: vi.fn().mockResolvedValue({ error: null }),
+    });
+    const supabase = {
+      from: vi.fn().mockReturnValue({ update }),
+    };
+    const source = new SupabaseRepoDataSource(supabase as never);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(
+      source.resolveConnectionToken('repo-1', 'conn-1'),
+    ).resolves.toBeUndefined();
+    expect(update).toHaveBeenCalledWith({
+      credential_status: 'error',
+      credential_error: 'app-owned credential store is not configured',
+      updated_at: expect.any(String),
+    });
+
+    warn.mockRestore();
+  });
 });
