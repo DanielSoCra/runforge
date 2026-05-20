@@ -166,13 +166,39 @@ STACK-AC-KNOWLEDGE:
     expect(rendered).toContain('"Make the PO useful"');
   });
 
-  it('warns when run-state scan fails while assembling signal_snapshot (#566)', async () => {
+  it('treats a missing run-state directory as an empty delivery summary', async () => {
     const root = await mkdtemp(join(tmpdir(), 'po-wiring-'));
     const repoRoot = join(root, 'repo');
     const stateDir = join(root, 'state');
     await mkdir(join(repoRoot, '.specify'), { recursive: true });
     await mkdir(stateDir, { recursive: true });
     await writeFile(join(repoRoot, '.specify', 'traceability.yml'), '');
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const variables = await buildProductOwnerSessionVariables({
+        repoRoot,
+        stateDir,
+        loadProposals: async () => [],
+        loadIdeas: async () => [],
+      });
+
+      const snapshot = JSON.parse(variables['signal_snapshot']!);
+      expect(snapshot.deliverySummary).toEqual([]);
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('warns when run-state scan fails for reasons other than a missing directory (#566)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'po-wiring-'));
+    const repoRoot = join(root, 'repo');
+    const stateDir = join(root, 'state');
+    await mkdir(join(repoRoot, '.specify'), { recursive: true });
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(join(repoRoot, '.specify', 'traceability.yml'), '');
+    await writeFile(join(stateDir, 'runs'), 'not a directory');
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
