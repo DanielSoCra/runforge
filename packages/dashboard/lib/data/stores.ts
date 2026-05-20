@@ -1,4 +1,4 @@
-import { eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
@@ -7,6 +7,7 @@ import {
   githubConnections,
   githubOrgs,
   globalSettings,
+  repos,
   type GlobalSettings,
 } from '../../../db/src/schema';
 
@@ -16,8 +17,13 @@ type StoreUnavailable = {
   message: string;
 };
 type StoreNotFound = { ok: false; error: 'not-found'; message: string };
+type StoreConflict = { ok: false; error: 'conflict'; message: string };
 type StoreOk<T = void> = { ok: true; value: T };
-type StoreResult<T = void> = StoreOk<T> | StoreUnavailable | StoreNotFound;
+type StoreResult<T = void> =
+  | StoreOk<T>
+  | StoreUnavailable
+  | StoreNotFound
+  | StoreConflict;
 
 interface DashboardSettingsAccess {
   readGlobalSettings(): Promise<StoreResult<GlobalSettings>>;
@@ -44,12 +50,25 @@ export interface DashboardGitHubOrg {
   isSelected: boolean;
 }
 
+export interface DashboardRepositoryImport {
+  owner: string;
+  name: string;
+}
+
 interface DashboardGitHubConnectionAccess {
   listConnections(): Promise<StoreResult<DashboardGitHubConnection[]>>;
   listOwnerOptions(): Promise<StoreResult<string[]>>;
   listOrganizations(
     connectionId: string,
   ): Promise<StoreResult<DashboardGitHubOrg[]>>;
+  removeConnection(
+    connectionId: string,
+  ): Promise<StoreResult<{ disableError?: string }>>;
+  importRepositories(
+    connectionId: string,
+    repositories: DashboardRepositoryImport[],
+  ): Promise<StoreResult>;
+  removeRepository(repoId: string, connectionId: string): Promise<StoreResult>;
 }
 
 export interface DashboardStores {
@@ -196,12 +215,101 @@ class DashboardGitHubConnectionStore
       return ok(orgs);
     });
   }
+
+  async removeConnection(connectionId: string) {
+    return unavailableOnThrow(async () => {
+      const linkedRepos = await this.db
+        .select({ id: repos.id })
+        .from(repos)
+        .where(eq(repos.connectionId, connectionId));
+
+      await this.db
+        .delete(githubConnections)
+        .where(eq(githubConnections.id, connectionId));
+
+      let disableError: string | undefined;
+      if (linkedRepos.length > 0) {
+        try {
+          await this.db
+            .update(repos)
+            .set({ enabled: false, updatedAt: new Date() })
+            .where(
+              inArray(
+                repos.id,
+                linkedRepos.map((repo) => repo.id),
+              ),
+            );
+        } catch (error) {
+          disableError = errorMessage(error);
+        }
+      }
+
+      return ok({ disableError });
+    });
+  }
+
+  async importRepositories(
+    connectionId: string,
+    repositories: DashboardRepositoryImport[],
+  ) {
+    return unavailableOnThrow(async () => {
+      for (const repository of repositories) {
+        await this.db
+          .insert(repos)
+          .values({
+            owner: repository.owner,
+            name: repository.name,
+            connectionId,
+            deletedAt: null,
+            enabled: false,
+          })
+          .onConflictDoNothing({ target: [repos.owner, repos.name] });
+
+        await this.db
+          .update(repos)
+          .set({
+            connectionId,
+            deletedAt: null,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(repos.owner, repository.owner),
+              eq(repos.name, repository.name),
+            ),
+          );
+      }
+
+      return ok(undefined);
+    });
+  }
+
+  async removeRepository(repoId: string, connectionId: string) {
+    return unavailableOnThrow(async () => {
+      const [repo] = await this.db
+        .select({ enabled: repos.enabled })
+        .from(repos)
+        .where(and(eq(repos.id, repoId), eq(repos.connectionId, connectionId)))
+        .limit(1);
+      if (!repo) return notFound('repository was not found');
+      if (repo.enabled) {
+        return conflict('enabled repositories must be disabled before removal');
+      }
+
+      await this.db
+        .update(repos)
+        .set({ deletedAt: new Date(), enabled: false, updatedAt: new Date() })
+        .where(and(eq(repos.id, repoId), eq(repos.connectionId, connectionId)));
+
+      return ok(undefined);
+    });
+  }
 }
 
 function createDashboardDbClient() {
   const sql = postgres(readDatabaseUrl(), { max: 14 });
   const db = drizzle(sql, {
-    schema: { githubConnections, githubOrgs, globalSettings },
+    schema: { githubConnections, githubOrgs, globalSettings, repos },
   });
   return { db, sql };
 }
@@ -229,6 +337,10 @@ function ok<T>(value: T): StoreResult<T> {
 
 function notFound(message: string): StoreResult<never> {
   return { ok: false, error: 'not-found', message };
+}
+
+function conflict(message: string): StoreResult<never> {
+  return { ok: false, error: 'conflict', message };
 }
 
 function unavailable(message: string): StoreResult<never> {
