@@ -36,8 +36,20 @@ export interface DashboardGitHubConnection {
   organizations: Array<{ login: string }>;
 }
 
+export interface DashboardGitHubOrg {
+  id: string;
+  login: string;
+  name: string | null;
+  avatarUrl: string | null;
+  isSelected: boolean;
+}
+
 interface DashboardGitHubConnectionAccess {
   listConnections(): Promise<StoreResult<DashboardGitHubConnection[]>>;
+  listOwnerOptions(): Promise<StoreResult<string[]>>;
+  listOrganizations(
+    connectionId: string,
+  ): Promise<StoreResult<DashboardGitHubOrg[]>>;
 }
 
 export interface DashboardStores {
@@ -143,6 +155,45 @@ class DashboardGitHubConnectionStore
           organizations: orgsByConnection.get(connection.id) ?? [],
         })),
       );
+    });
+  }
+
+  async listOwnerOptions() {
+    return unavailableOnThrow(async () => {
+      const [connections, orgs] = await Promise.all([
+        this.db
+          .select({ login: githubConnections.githubLogin })
+          .from(githubConnections)
+          .where(eq(githubConnections.status, 'active')),
+        this.db.select({ login: githubOrgs.login }).from(githubOrgs),
+      ]);
+
+      return ok(
+        Array.from(
+          new Set([
+            ...connections.map((connection) => connection.login),
+            ...orgs.map((org) => org.login),
+          ]),
+        ).sort(),
+      );
+    });
+  }
+
+  async listOrganizations(connectionId: string) {
+    return unavailableOnThrow(async () => {
+      const orgs = await this.db
+        .select({
+          id: githubOrgs.id,
+          login: githubOrgs.login,
+          name: githubOrgs.name,
+          avatarUrl: githubOrgs.avatarUrl,
+          isSelected: githubOrgs.isSelected,
+        })
+        .from(githubOrgs)
+        .where(eq(githubOrgs.connectionId, connectionId))
+        .orderBy(githubOrgs.login);
+
+      return ok(orgs);
     });
   }
 }

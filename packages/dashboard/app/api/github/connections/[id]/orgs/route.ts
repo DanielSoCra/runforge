@@ -1,27 +1,37 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { requireAdmin } from '@/lib/auth';
+import {
+  getDashboardAuthError,
+  requireDashboardAdmin,
+} from '@/lib/auth/require-session';
+import { getDashboardStores } from '@/lib/data/stores';
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const supabase = await createClient();
   try {
-    await requireAdmin(supabase);
+    await requireDashboardAdmin();
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Forbidden';
-    const status = message === 'Unauthorized' ? 401 : 403;
-    return NextResponse.json({ error: message }, { status });
+    const authError = getDashboardAuthError(e);
+    return NextResponse.json(
+      { error: authError.message },
+      { status: authError.status },
+    );
   }
 
   const { id } = await params;
-  const { data: orgs, error } = await supabase
-    .from('github_orgs')
-    .select('id, login, name, avatar_url, is_selected')
-    .eq('connection_id', id)
-    .order('login');
+  const orgs = await getDashboardStores().githubConnections.listOrganizations(
+    id,
+  );
 
-  if (error) {
-    console.error('[orgs] Failed to fetch orgs for connection:', error);
+  if (!orgs.ok) {
+    console.error('[orgs] Failed to fetch orgs for connection:', orgs.message);
     return NextResponse.json({ error: 'Failed to fetch organizations' }, { status: 500 });
   }
-  return NextResponse.json(orgs ?? []);
+  return NextResponse.json(
+    orgs.value.map((org) => ({
+      id: org.id,
+      login: org.login,
+      name: org.name,
+      avatar_url: org.avatarUrl,
+      is_selected: org.isSelected,
+    })),
+  );
 }

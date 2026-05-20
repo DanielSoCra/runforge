@@ -1,18 +1,19 @@
-import { createClient } from '@/lib/supabase/server';
+import { PageError } from '@/components/page-error';
+import { getDashboardStores } from '@/lib/data/stores';
 import { NewProjectWizard } from './new-project-wizard';
 
+export const dynamic = 'force-dynamic';
+
 export default async function NewProjectPage() {
-  const supabase = await createClient();
+  const ownerOptions =
+    await getDashboardStores().githubConnections.listOwnerOptions();
+  if (!ownerOptions.ok) {
+    console.error(
+      '[new-project] failed to load GitHub owner options:',
+      ownerOptions.message,
+    );
+    return <PageError />;
+  }
 
-  const [{ data: connections }, { data: orgs }] = await Promise.all([
-    supabase.from('github_connections').select('github_login').eq('status', 'active'),
-    supabase.from('github_orgs').select('login'),
-  ]);
-
-  const orgOptions = Array.from(new Set([
-    ...(connections ?? []).map((c) => c.github_login as string),
-    ...(orgs ?? []).map((o) => o.login as string),
-  ])).sort();
-
-  return <NewProjectWizard orgOptions={orgOptions} />;
+  return <NewProjectWizard orgOptions={ownerOptions.value} />;
 }

@@ -1,64 +1,33 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-function mockSupabaseUnauthenticated() {
-  return {
-    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null } }) },
-    from: vi.fn(),
-  };
-}
-
-function mockSupabaseNonAdmin() {
-  return {
-    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-2' } } }) },
-    from: vi.fn().mockReturnValue({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({ data: { role: 'viewer' }, error: null }),
-    }),
-  };
-}
-
-function mockSupabaseAdminWithOrgs(result: {
-  data: Array<{ id: string; login: string; name: string | null; avatar_url: string | null; is_selected: boolean }> | null;
-  error: { message: string } | null;
-}) {
-  const orgsOrder = vi.fn().mockResolvedValue(result);
-  const orgsEq = vi.fn().mockReturnValue({ order: orgsOrder });
-  const orgsSelect = vi.fn().mockReturnValue({ eq: orgsEq });
-  const from = vi.fn((table: string) => {
-    if (table === 'team_members') {
-      return {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({ data: { role: 'admin' }, error: null }),
-      };
-    }
-    if (table === 'github_orgs') {
-      return {
-        select: orgsSelect,
-      };
-    }
-    throw new Error(`Unexpected table ${table}`);
-  });
-
-  return {
-    client: {
-      auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-1' } } }) },
-      from,
-    },
-    orgsEq,
-    orgsOrder,
-    orgsSelect,
-  };
-}
-
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: vi.fn(),
+const mocks = vi.hoisted(() => ({
+  listOrganizations: vi.fn(),
+  requireDashboardAdmin: vi.fn(),
 }));
 
-async function getCreateClient() {
-  const { createClient } = await import('@/lib/supabase/server');
-  return createClient as ReturnType<typeof vi.fn>;
+vi.mock('@/lib/auth/require-session', () => ({
+  requireDashboardAdmin: mocks.requireDashboardAdmin,
+  getDashboardAuthError: (error: unknown) => {
+    const message = error instanceof Error ? error.message : 'Forbidden';
+    const status =
+      'status' in Object(error)
+        ? (error as { status: 401 | 403 }).status
+        : message === 'Unauthorized'
+          ? 401
+          : 403;
+    return { message, status };
+  },
+}));
+vi.mock('@/lib/data/stores', () => ({
+  getDashboardStores: () => ({
+    githubConnections: {
+      listOrganizations: mocks.listOrganizations,
+    },
+  }),
+}));
+
+function authError(message: string, status: 401 | 403) {
+  return Object.assign(new Error(message), { status });
 }
 
 const paramsPromise = (id = 'conn-1') => Promise.resolve({ id });
@@ -67,49 +36,93 @@ describe('GET /api/github/connections/[id]/orgs', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    mocks.requireDashboardAdmin.mockResolvedValue({
+      user: { id: 'admin-1', role: 'admin' },
+    });
+    mocks.listOrganizations.mockResolvedValue({ ok: true, value: [] });
   });
 
   it('returns 401 when user is not authenticated (#549)', async () => {
-    const createClient = await getCreateClient();
-    createClient.mockResolvedValueOnce(mockSupabaseUnauthenticated());
+    mocks.requireDashboardAdmin.mockRejectedValueOnce(
+      authError('Unauthorized', 401),
+    );
     const { GET } = await import('./route.js');
 
-    const res = await GET(new Request('http://localhost') as any, { params: paramsPromise() });
+    const res = await GET(new Request('http://localhost') as never, {
+      params: paramsPromise(),
+    });
 
     expect(res.status).toBe(401);
+    expect(mocks.listOrganizations).not.toHaveBeenCalled();
   });
 
   it('returns 403 when user is not admin', async () => {
-    const createClient = await getCreateClient();
-    createClient.mockResolvedValueOnce(mockSupabaseNonAdmin());
+    mocks.requireDashboardAdmin.mockRejectedValueOnce(
+      authError('Admin access required', 403),
+    );
     const { GET } = await import('./route.js');
 
-    const res = await GET(new Request('http://localhost') as any, { params: paramsPromise() });
+    const res = await GET(new Request('http://localhost') as never, {
+      params: paramsPromise(),
+    });
 
     expect(res.status).toBe(403);
+    expect(mocks.listOrganizations).not.toHaveBeenCalled();
   });
 
   it('returns 500 when org lookup fails (#576)', async () => {
-    const createClient = await getCreateClient();
-    const supabase = mockSupabaseAdminWithOrgs({
-      data: null,
-      error: { message: 'db unavailable' },
+    mocks.listOrganizations.mockResolvedValueOnce({
+      ok: false,
+      error: 'unavailable',
+      message: 'db unavailable',
     });
-    createClient.mockResolvedValueOnce(supabase.client);
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const { GET } = await import('./route.js');
 
-    const res = await GET(new Request('http://localhost') as any, {
+    const res = await GET(new Request('http://localhost') as never, {
       params: paramsPromise('conn-500'),
     });
 
     expect(res.status).toBe(500);
-    await expect(res.json()).resolves.toEqual({ error: 'Failed to fetch organizations' });
-    expect(supabase.orgsEq).toHaveBeenCalledWith('connection_id', 'conn-500');
-    expect(supabase.orgsOrder).toHaveBeenCalledWith('login');
+    await expect(res.json()).resolves.toEqual({
+      error: 'Failed to fetch organizations',
+    });
+    expect(mocks.listOrganizations).toHaveBeenCalledWith('conn-500');
+    expect(consoleSpy).toHaveBeenCalledWith(
+      '[orgs] Failed to fetch orgs for connection:',
+      'db unavailable',
+    );
+    consoleSpy.mockRestore();
   });
 
   it('returns selected organizations for the requested connection (#576)', async () => {
-    const orgs = [
+    mocks.listOrganizations.mockResolvedValueOnce({
+      ok: true,
+      value: [
+        {
+          id: 'org-1',
+          login: 'acme',
+          name: 'Acme',
+          avatarUrl: 'https://example.com/acme.png',
+          isSelected: true,
+        },
+        {
+          id: 'org-2',
+          login: 'tools',
+          name: null,
+          avatarUrl: null,
+          isSelected: false,
+        },
+      ],
+    });
+    const { GET } = await import('./route.js');
+
+    const res = await GET(new Request('http://localhost') as never, {
+      params: paramsPromise('conn-200'),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual([
       {
         id: 'org-1',
         login: 'acme',
@@ -124,20 +137,7 @@ describe('GET /api/github/connections/[id]/orgs', () => {
         avatar_url: null,
         is_selected: false,
       },
-    ];
-    const createClient = await getCreateClient();
-    const supabase = mockSupabaseAdminWithOrgs({ data: orgs, error: null });
-    createClient.mockResolvedValueOnce(supabase.client);
-    const { GET } = await import('./route.js');
-
-    const res = await GET(new Request('http://localhost') as any, {
-      params: paramsPromise('conn-200'),
-    });
-
-    expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toEqual(orgs);
-    expect(supabase.orgsSelect).toHaveBeenCalledWith('id, login, name, avatar_url, is_selected');
-    expect(supabase.orgsEq).toHaveBeenCalledWith('connection_id', 'conn-200');
-    expect(supabase.orgsOrder).toHaveBeenCalledWith('login');
+    ]);
+    expect(mocks.listOrganizations).toHaveBeenCalledWith('conn-200');
   });
 });
