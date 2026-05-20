@@ -3,6 +3,43 @@ networks:
     driver: bridge
 
 services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in the selected env file}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in the selected env file}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the selected env file}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    ports:
+      - "${POSTGRES_PORT:-127.0.0.1:5432:5432}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - app
+
+  migrate:
+    build:
+      context: .
+      dockerfile: packages/db/Dockerfile
+    restart: "no"
+    environment:
+      AUTO_CLAUDE_DATABASE_URL: ${AUTO_CLAUDE_DOCKER_DATABASE_URL:?set AUTO_CLAUDE_DOCKER_DATABASE_URL in the selected env file}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
@@ -24,13 +61,19 @@ services:
       args:
         - NEXT_PUBLIC_SUPABASE_URL
         - NEXT_PUBLIC_SUPABASE_ANON_KEY
+        - NEXT_PUBLIC_SITE_URL
     restart: unless-stopped
     env_file: ${ENV_FILE:-.env.prod}
     environment:
+      AUTO_CLAUDE_DATABASE_URL: ${AUTO_CLAUDE_DOCKER_DATABASE_URL:?set AUTO_CLAUDE_DOCKER_DATABASE_URL in the selected env file}
       NODE_ENV: production
       PLUGINS_DIR: /app/plugins
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in the selected env file}
     ports:
       - "${DASHBOARD_PORT:-127.0.0.1:3000:3000}"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     volumes:
       - ./plugins:/app/plugins:ro
     networks:
@@ -48,9 +91,15 @@ services:
     profiles: ["containerized-daemon"]
     env_file: ${ENV_FILE:-.env.prod}
     environment:
+      AUTO_CLAUDE_DATABASE_URL: ${AUTO_CLAUDE_DOCKER_DATABASE_URL:?set AUTO_CLAUDE_DOCKER_DATABASE_URL in the selected env file}
       DAEMON_HOST: "0.0.0.0"
+      DAEMON_DATA_BACKEND: ${DAEMON_DATA_BACKEND:-supabase}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in the selected env file}
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     ports: []
     command: >
       sh -c "
@@ -74,8 +123,13 @@ services:
     restart: unless-stopped
     env_file: ${ENV_FILE:-.env.prod}
     environment:
+      AUTO_CLAUDE_DATABASE_URL: ${AUTO_CLAUDE_DOCKER_DATABASE_URL:?set AUTO_CLAUDE_DOCKER_DATABASE_URL in the selected env file}
+      BRIEFING_DATA_BACKEND: ${BRIEFING_DATA_BACKEND:-supabase}
       NODE_ENV: production
       GIT_REPO_PATH: /repo
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     volumes:
       - .:/repo:ro
     networks:
@@ -87,3 +141,4 @@ volumes:
   caddy_data:
   caddy_config:
   daemon-state:
+  postgres-data:

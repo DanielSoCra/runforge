@@ -11,6 +11,7 @@ RUN apk add --no-cache git curl
 
 # Copy package files
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY packages/db/package.json packages/db/
 COPY packages/briefing-summarizer/package.json packages/briefing-summarizer/
 # Sibling package.json files needed for pnpm workspace lockfile validation (#243)
 COPY packages/daemon/package.json packages/daemon/
@@ -20,6 +21,7 @@ COPY packages/dashboard/package.json packages/dashboard/
 RUN pnpm install --frozen-lockfile --filter @auto-claude/briefing-summarizer
 
 # Copy source
+COPY packages/db/ packages/db/
 COPY packages/briefing-summarizer/ packages/briefing-summarizer/
 
 WORKDIR /app/packages/briefing-summarizer

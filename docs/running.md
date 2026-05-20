@@ -2,12 +2,14 @@
 
 ## Architecture
 
-Auto-Claude consists of two packages:
+Auto-Claude consists of these runtime components:
 
 - **daemon** (`packages/daemon`) — polls GitHub for issues, spawns Claude workers, manages state
-- **dashboard** (`packages/dashboard`) — Next.js web UI backed by Supabase
+- **dashboard** (`packages/dashboard`) — Next.js web UI
+- **postgres** — project-owned operational store used during the Supabase parity migration
+- **migrate** — one-shot job that applies app-owned database migrations before consumers start
 
-Both share a Supabase database. The daemon writes run state; the dashboard reads and displays it.
+During the #626 migration, Supabase can still be the parity source of truth for dashboard/run data, but app-owned Postgres is required for credential storage and the replacement store layer.
 
 ## Prerequisites
 
@@ -34,11 +36,19 @@ cp .env.prod.example .env.prod
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase `anon` key (public) |
 | `SUPABASE_URL` | Yes | Same as above (daemon-side) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Supabase `service_role` key (server-only) |
+| `POSTGRES_DB` | Yes | Compose-managed Postgres database name |
+| `POSTGRES_USER` | Yes | Compose-managed Postgres user |
+| `POSTGRES_PASSWORD` | Yes | Compose-managed Postgres password |
+| `POSTGRES_PORT` | No | Host bind for native tools/daemon; defaults to `127.0.0.1:5432:5432` |
+| `AUTO_CLAUDE_DOCKER_DATABASE_URL` | Yes | Database URL used inside Docker services; host must be `postgres` |
+| `AUTO_CLAUDE_DATABASE_URL` | Mac native daemon only | Database URL used by a daemon running outside Docker; host is usually `127.0.0.1` |
+| `DAEMON_DATA_BACKEND` | No | `supabase` during parity, `postgres` after daemon cutover |
+| `BRIEFING_DATA_BACKEND` | No | `supabase` during parity, `postgres` after briefing cutover |
 | `NEXT_PUBLIC_SITE_URL` | Yes | Full URL of the dashboard (for OAuth redirects) |
 | `DAEMON_URL` | Yes | Internal URL to reach the daemon (`http://daemon:3847` in Docker) |
 | `ENCRYPTION_KEY` | Yes | 32+ character secret for encrypting stored credentials |
-| `GITHUB_REPO_OAUTH_APP_CLIENT_ID` | Yes | GitHub OAuth App client ID |
-| `GITHUB_REPO_OAUTH_APP_CLIENT_SECRET` | Yes | GitHub OAuth App client secret |
+| `GITHUB_OAUTH_CLIENT_ID` | Yes | GitHub OAuth App client ID for repository connections |
+| `GITHUB_OAUTH_CLIENT_SECRET` | Yes | GitHub OAuth App client secret for repository connections |
 
 ### Daemon config
 
@@ -94,10 +104,12 @@ See [hetzner-setup.md](./hetzner-setup.md) for full server provisioning. Once co
 docker compose --env-file .env.prod --profile public up --build -d
 ```
 
-Three containers start:
+Core containers start:
 
 | Container | Role |
 |-----------|------|
+| `postgres` | Self-hosted operational database |
+| `migrate` | One-shot Drizzle migration runner |
 | `daemon` | Claude worker orchestrator |
 | `dashboard` | Next.js web UI |
 | `caddy` | Reverse proxy + automatic TLS |
@@ -112,15 +124,19 @@ The Mac Mini uses a **hybrid deployment**: dashboard and briefing-summarizer run
 # 1. Start the daemon natively (if not already running via launchd)
 cd packages/daemon && pnpm start &
 
-# 2. Start dashboard + briefing-summarizer in Docker
+# 2. Start Postgres, migrations, dashboard, and briefing-summarizer in Docker
 ENV_FILE=.env.mac docker compose --env-file .env.mac up --build -d
 ```
 
 Dashboard is available at `http://localhost:3000` on the local network. Auth is disabled. The dashboard connects to the native daemon via `host.docker.internal:3847`.
 
-## Supabase Migrations
+## Database Migrations
 
-Apply migrations from `packages/daemon/migrations/` to your Supabase project before first run. Run them in order via the Supabase SQL editor or:
+The Compose stack starts a `migrate` job that applies app-owned Postgres migrations from `packages/db/drizzle/` before dashboard, daemon, or briefing-summarizer start.
+
+During Supabase parity, existing Supabase migrations still need to be present in the hosted project for hosted-backed data paths. App-owned Postgres is the credential/store migration path and becomes the sole operational store after cutover.
+
+Apply migrations from `supabase/migrations/` to your Supabase project before first run. Run them in order via the Supabase SQL editor or:
 
 ```bash
 # Via Supabase CLI (if configured)
@@ -174,7 +190,7 @@ launchctl list | grep autoclaude
 ./scripts/uninstall-daemon.sh
 ```
 
-The install script reads `.env.mac` for `GITHUB_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and Supabase public keys, then substitutes them into the plist template at `scripts/com.autoclaude.daemon.plist`.
+The install script reads `.env.mac` for `GITHUB_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, Supabase public keys, `AUTO_CLAUDE_DATABASE_URL`, `DAEMON_DATA_BACKEND`, and `ENCRYPTION_KEY`, then substitutes them into the plist template at `scripts/com.autoclaude.daemon.plist`.
 
 The daemon writes a heartbeat file to `~/logs/claude-daemon.heartbeat` on each poll interval. Check it with:
 
