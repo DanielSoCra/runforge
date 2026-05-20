@@ -10,6 +10,7 @@ RUN npm install -g @anthropic-ai/claude-code@2.1.81
 # Install phase — build context is repo root so pnpm-lock.yaml is accessible
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY packages/db/package.json ./packages/db/package.json
 COPY packages/daemon/package.json ./packages/daemon/package.json
 # Dashboard package.json needed for pnpm workspace lockfile validation,
 # but --filter ensures only daemon dependencies are actually installed (#189)
@@ -17,6 +18,7 @@ COPY packages/dashboard/package.json ./packages/dashboard/package.json
 RUN pnpm install --frozen-lockfile --filter @auto-claude/daemon...
 
 # Copy daemon source only
+COPY packages/db/ ./packages/db/
 COPY packages/daemon/src/ ./packages/daemon/src/
 COPY packages/daemon/tsconfig.json ./packages/daemon/
 

@@ -5,22 +5,32 @@ RUN corepack enable
 FROM base AS deps
 WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY packages/auth/package.json ./packages/auth/package.json
+COPY packages/db/package.json ./packages/db/package.json
 COPY packages/daemon/package.json ./packages/daemon/package.json
 COPY packages/dashboard/package.json ./packages/dashboard/package.json
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --filter @auto-claude/dashboard...
 
 FROM base AS builder
 WORKDIR /app
 # NEXT_PUBLIC_* vars must be inlined at build time (not available at runtime in client bundles)
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ARG NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
+ENV AUTO_CLAUDE_DATABASE_URL=postgres://autoclaude:autoclaude@postgres:5432/autoclaude
+ENV ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
 # Workspace root files required: pnpm must see workspace context to resolve
 # node_modules from /app/node_modules during next build
 COPY package.json pnpm-workspace.yaml ./
+COPY packages/auth/package.json ./packages/auth/package.json
+COPY packages/db/package.json ./packages/db/package.json
 COPY packages/daemon/package.json ./packages/daemon/package.json
 COPY --from=deps /app/node_modules ./node_modules
+COPY packages/auth/ ./packages/auth/
+COPY packages/db/ ./packages/db/
 COPY packages/dashboard/ ./packages/dashboard/
 # Per-package node_modules must come AFTER copying source (not to be overwritten)
 COPY --from=deps /app/packages/dashboard/node_modules ./packages/dashboard/node_modules

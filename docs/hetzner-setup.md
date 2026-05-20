@@ -1,6 +1,6 @@
 # Hetzner Deployment Guide
 
-Auto-Claude runs on Hetzner via Docker Compose. Three containers — **daemon**, **dashboard**, and **Caddy** — communicate over a private Docker network. Caddy handles TLS termination and proxies HTTPS traffic to the dashboard.
+Auto-Claude runs on Hetzner via Docker Compose. The stack includes **Postgres**, a one-shot **migration** job, **daemon**, **dashboard**, **briefing-summarizer**, and **Caddy** on a private Docker network. Caddy handles TLS termination and proxies HTTPS traffic to the dashboard.
 
 ## Prerequisites
 
@@ -67,11 +67,17 @@ Fill in all values:
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase project → Settings → API → `anon` key |
 | `SUPABASE_URL` | Same as `NEXT_PUBLIC_SUPABASE_URL` |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase project → Settings → API → `service_role` key |
+| `POSTGRES_DB` | Use `autoclaude` unless you need a different local database name |
+| `POSTGRES_USER` | Use `autoclaude` unless you need a different local database user |
+| `POSTGRES_PASSWORD` | Generate a strong database password |
+| `AUTO_CLAUDE_DOCKER_DATABASE_URL` | `postgres://autoclaude:<url-encoded-password>@postgres:5432/autoclaude` |
+| `DAEMON_DATA_BACKEND` | `supabase` during parity; switch to `postgres` only after daemon cutover |
+| `BRIEFING_DATA_BACKEND` | `supabase` during parity; switch to `postgres` only after briefing cutover |
 | `NEXT_PUBLIC_SITE_URL` | `https://app.example.com` (your domain) |
 | `DAEMON_URL` | `http://daemon:3847` (Docker service name — do not change) |
 | `ENCRYPTION_KEY` | Any 32+ character random string |
-| `GITHUB_REPO_OAUTH_APP_CLIENT_ID` | GitHub OAuth App client ID |
-| `GITHUB_REPO_OAUTH_APP_CLIENT_SECRET` | GitHub OAuth App client secret |
+| `GITHUB_OAUTH_CLIENT_ID` | GitHub OAuth App client ID for repository connections |
+| `GITHUB_OAUTH_CLIENT_SECRET` | GitHub OAuth App client secret for repository connections |
 
 ## 6. Configure the Daemon
 
@@ -103,9 +109,11 @@ app.example.com {
 
 Change the domain if needed before first deploy.
 
-## 8. Apply Supabase Migrations
+## 8. Apply Migrations
 
-Migrations live in `packages/daemon/migrations/`. Run them in the Supabase SQL editor or via the Supabase CLI before starting the stack.
+The Compose stack runs the app-owned Postgres migrations automatically through the `migrate` service before consumers start.
+
+During Supabase parity, hosted-backed paths still require the existing Supabase migrations in the Supabase project. Run them in the Supabase SQL editor or via the Supabase CLI before starting the stack.
 
 ## 9. Deploy
 
@@ -114,7 +122,7 @@ cd /home/autoclaude/auto-claude
 docker compose --env-file .env.prod --profile public up --build -d
 ```
 
-Verify all three containers are running:
+Verify the runtime containers are healthy and the migration job completed:
 
 ```bash
 docker compose --env-file .env.prod --profile public ps
