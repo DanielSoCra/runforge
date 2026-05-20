@@ -124,6 +124,7 @@ export interface PluginStore {
 }
 
 export interface BriefingStore {
+  readLatestBriefing(): Promise<StoreResult<Briefing>>;
   appendBriefing(
     briefing: Omit<Briefing, 'id' | 'generatedAt'>,
   ): Promise<StoreResult<Briefing>>;
@@ -131,6 +132,7 @@ export interface BriefingStore {
     events: Omit<ActivityEvent, 'id'>[],
   ): Promise<StoreResult<ActivityEvent[]>>;
   listRunsForSignals(since: Date): Promise<StoreResult<Run[]>>;
+  countNotificationChannels(): Promise<StoreResult<number>>;
 }
 
 export interface SettingsAccess {

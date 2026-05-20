@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, eq, gte, isNull } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull } from 'drizzle-orm';
 
 import type { AutoClaudeDb } from './client.js';
 import {
@@ -17,6 +17,7 @@ import {
   githubConnections,
   githubOrgs,
   globalSettings,
+  notificationChannelConfigs,
   pluginGlobalSettings,
   repoPlugins,
   repos,
@@ -532,6 +533,17 @@ export class PostgresPluginStore implements PluginStore {
 export class PostgresBriefingStore implements BriefingStore {
   constructor(private readonly db: AutoClaudeDb) {}
 
+  async readLatestBriefing() {
+    return unavailableOnThrow(async () => {
+      const [row] = await this.db
+        .select()
+        .from(briefings)
+        .orderBy(desc(briefings.generatedAt))
+        .limit(1);
+      return row ? ok(row) : notFound('latest briefing was not found');
+    });
+  }
+
   async appendBriefing(
     briefing: Omit<typeof briefings.$inferSelect, 'id' | 'generatedAt'>,
   ) {
@@ -566,6 +578,15 @@ export class PostgresBriefingStore implements BriefingStore {
         .where(gte(runs.updatedAt, since))
         .orderBy(runs.updatedAt);
       return ok(rows);
+    });
+  }
+
+  async countNotificationChannels() {
+    return unavailableOnThrow(async () => {
+      const rows = await this.db
+        .select({ id: notificationChannelConfigs.id })
+        .from(notificationChannelConfigs);
+      return ok(rows.length);
     });
   }
 }
