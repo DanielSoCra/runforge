@@ -1,16 +1,16 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { requireAdmin } from '@/lib/auth';
+import {
+  getDashboardAuthError,
+  requireDashboardAdmin,
+} from '@/lib/auth/require-session';
 import { daemonFetch, DaemonConfigError } from '@/lib/daemon-fetch';
 
 export async function POST() {
   try {
-    const supabase = await createClient();
-    await requireAdmin(supabase);
+    await requireDashboardAdmin();
   } catch (e) {
-    const message = e instanceof Error ? e.message : 'Forbidden';
-    const status = message === 'Unauthorized' ? 401 : 403;
-    return NextResponse.json({ error: message }, { status });
+    const error = getDashboardAuthError(e);
+    return NextResponse.json({ error: error.message }, { status: error.status });
   }
 
   try {
