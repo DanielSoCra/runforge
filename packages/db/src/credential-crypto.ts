@@ -13,7 +13,9 @@ export interface CredentialEnv {
   ENCRYPTION_KEY?: string;
 }
 
-export function readCredentialKey(env: CredentialEnv = process.env): Buffer {
+export function readCredentialKey(
+  env: CredentialEnv = process.env as CredentialEnv,
+): Buffer {
   const encoded = env.ENCRYPTION_KEY;
   if (!encoded) {
     throw new Error('ENCRYPTION_KEY is required for credential encryption');

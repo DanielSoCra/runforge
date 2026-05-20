@@ -10,14 +10,14 @@ export interface BetterAuthEnv {
 }
 
 export function resolveBetterAuthBaseUrl(
-  env: BetterAuthEnv = process.env,
+  env: BetterAuthEnv = process.env as BetterAuthEnv,
 ): string | undefined {
   if (env.BETTER_AUTH_URL) return env.BETTER_AUTH_URL;
   return skipsValidationForBuild(env) ? 'http://localhost:3000' : undefined;
 }
 
 export function resolveBetterAuthSecret(
-  env: BetterAuthEnv = process.env,
+  env: BetterAuthEnv = process.env as BetterAuthEnv,
 ): string | undefined {
   if (env.BETTER_AUTH_SECRET) return env.BETTER_AUTH_SECRET;
   if (!skipsEnvValidation(env)) return undefined;
