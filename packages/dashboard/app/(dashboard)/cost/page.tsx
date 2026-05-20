@@ -1,11 +1,13 @@
-import { createClient } from '@/lib/supabase/server';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CostChart } from '@/components/cost-chart';
 import { PageError } from '@/components/page-error';
+import { getDashboardStores } from '@/lib/data/stores';
 import Link from 'next/link';
 
 const RANGE_OPTIONS = [7, 30, 90] as const;
 type RangeDays = typeof RANGE_OPTIONS[number];
+
+export const dynamic = 'force-dynamic';
 
 function isValidRange(value: string): value is `${RangeDays}` {
   return RANGE_OPTIONS.map(String).includes(value);
@@ -17,27 +19,24 @@ export default async function CostPage({
   searchParams: Promise<{ range?: string }>;
 }) {
   const { range: rawRange } = await searchParams;
-  const rangeDays = rawRange && isValidRange(rawRange) ? Number(rawRange) as RangeDays : 30;
-
-  const supabase = await createClient();
+  const rangeDays =
+    rawRange && isValidRange(rawRange) ? (Number(rawRange) as RangeDays) : 30;
 
   const since = new Date();
   since.setDate(since.getDate() - rangeDays);
 
-  const { data: events, error: eventsError } = await supabase
-    .from('cost_events')
-    .select('cost, recorded_at, session_type, runs(repo_owner, repo_name)')
-    .gte('recorded_at', since.toISOString())
-    .order('recorded_at');
-  if (eventsError) {
-    console.error('[cost] failed to load cost events:', eventsError);
+  const eventsResult =
+    await getDashboardStores().costs.listCostEventsSince(since);
+  if (!eventsResult.ok) {
+    console.error('[cost] failed to load cost events:', eventsResult.message);
     return <PageError />;
   }
+  const events = eventsResult.value;
 
   // Aggregate by day
   const byDay: Record<string, number> = {};
-  events?.forEach((e) => {
-    const day = e.recorded_at.slice(0, 10);
+  events.forEach((e) => {
+    const day = e.recordedAt.toISOString().slice(0, 10);
     byDay[day] = (byDay[day] ?? 0) + Number(e.cost);
   });
 
@@ -48,20 +47,20 @@ export default async function CostPage({
       cost,
     }));
 
-  const totalCost = events?.reduce((s, e) => s + Number(e.cost), 0) ?? 0;
+  const totalCost = events.reduce((s, e) => s + Number(e.cost), 0);
 
   // By repository
   const byRepo: Record<string, number> = {};
-  events?.forEach((e) => {
-    const run = e.runs as { repo_owner: string; repo_name: string } | null;
-    const repoKey = run ? `${run.repo_owner}/${run.repo_name}` : 'unknown';
+  events.forEach((e) => {
+    const repoKey =
+      e.repoOwner && e.repoName ? `${e.repoOwner}/${e.repoName}` : 'unknown';
     byRepo[repoKey] = (byRepo[repoKey] ?? 0) + Number(e.cost);
   });
 
   // By session type
   const byType: Record<string, number> = {};
-  events?.forEach((e) => {
-    byType[e.session_type] = (byType[e.session_type] ?? 0) + Number(e.cost);
+  events.forEach((e) => {
+    byType[e.sessionType] = (byType[e.sessionType] ?? 0) + Number(e.cost);
   });
 
   return (

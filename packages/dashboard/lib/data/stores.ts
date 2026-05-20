@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
@@ -13,10 +13,12 @@ import {
 import { readDatabaseUrl } from '../../../db/src/env';
 import {
   apiKeys,
+  costEvents,
   githubConnections,
   githubOrgs,
   globalSettings,
   repos,
+  runs,
   type GlobalSettings,
 } from '../../../db/src/schema';
 
@@ -54,6 +56,20 @@ interface DashboardCredentialAccess {
     kind: DashboardRepoCredentialKind,
     plaintext: string,
   ): Promise<StoreResult>;
+}
+
+export interface DashboardCostEvent {
+  cost: number;
+  recordedAt: Date;
+  sessionType: string;
+  repoOwner: string | null;
+  repoName: string | null;
+}
+
+interface DashboardCostAccess {
+  listCostEventsSince(
+    since: Date,
+  ): Promise<StoreResult<DashboardCostEvent[]>>;
 }
 
 export interface DashboardGitHubConnection {
@@ -126,6 +142,7 @@ interface DashboardGitHubConnectionAccess {
 
 export interface DashboardStores {
   settings: DashboardSettingsAccess;
+  costs: DashboardCostAccess;
   credentials: DashboardCredentialAccess;
   githubConnections: DashboardGitHubConnectionAccess;
 }
@@ -139,6 +156,7 @@ export function getDashboardStores(): DashboardStores {
     const db = getDashboardDbClient().db;
     dashboardStores = {
       settings: new DashboardSettingsStore(db),
+      costs: new DashboardCostStore(db),
       credentials: new DashboardCredentialStore(db),
       githubConnections: new DashboardGitHubConnectionStore(db),
     };
@@ -177,6 +195,29 @@ class DashboardSettingsStore implements DashboardSettingsAccess {
       return row
         ? ok(row)
         : unavailable('global settings update returned no row');
+    });
+  }
+}
+
+class DashboardCostStore implements DashboardCostAccess {
+  constructor(private readonly db: DashboardDb) {}
+
+  async listCostEventsSince(since: Date) {
+    return unavailableOnThrow(async () => {
+      const rows = await this.db
+        .select({
+          cost: costEvents.cost,
+          recordedAt: costEvents.recordedAt,
+          sessionType: costEvents.sessionType,
+          repoOwner: runs.repoOwner,
+          repoName: runs.repoName,
+        })
+        .from(costEvents)
+        .leftJoin(runs, eq(costEvents.runId, runs.id))
+        .where(gte(costEvents.recordedAt, since))
+        .orderBy(costEvents.recordedAt);
+
+      return ok(rows);
     });
   }
 }
@@ -483,7 +524,15 @@ class DashboardGitHubConnectionStore
 function createDashboardDbClient() {
   const sql = postgres(readDatabaseUrl(), { max: 14 });
   const db = drizzle(sql, {
-    schema: { apiKeys, githubConnections, githubOrgs, globalSettings, repos },
+    schema: {
+      apiKeys,
+      costEvents,
+      githubConnections,
+      githubOrgs,
+      globalSettings,
+      repos,
+      runs,
+    },
   });
   return { db, sql };
 }
