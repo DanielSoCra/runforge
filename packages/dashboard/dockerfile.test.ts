@@ -13,4 +13,24 @@ describe('Dashboard Dockerfile', () => {
     expect(DOCKERFILE).toMatch(/--timeout=\d+s/);
     expect(DOCKERFILE).toMatch(/--start-period=\d+s/);
   });
+
+  it('should copy shared workspace packages required by server imports (#626)', () => {
+    expect(DOCKERFILE).toContain(
+      'COPY packages/auth/package.json ./packages/auth/package.json',
+    );
+    expect(DOCKERFILE).toContain(
+      'COPY packages/db/package.json ./packages/db/package.json',
+    );
+    expect(DOCKERFILE).toContain('COPY packages/auth/ ./packages/auth/');
+    expect(DOCKERFILE).toContain('COPY packages/db/ ./packages/db/');
+  });
+
+  it('should use build-only placeholders for server-only database secrets (#626)', () => {
+    expect(DOCKERFILE).toContain(
+      'ENV AUTO_CLAUDE_DATABASE_URL=postgres://autoclaude:autoclaude@postgres:5432/autoclaude',
+    );
+    expect(DOCKERFILE).toContain(
+      'ENV ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000',
+    );
+  });
 });

@@ -11,6 +11,7 @@ describe('Briefing-summarizer Dockerfile', () => {
   it('should copy sibling package.json files for lockfile validation (#243)', () => {
     // pnpm --frozen-lockfile requires all workspace importers' package.json
     // files to be present, even if only one package is being installed.
+    expect(DOCKERFILE).toContain('COPY packages/db/package.json packages/db/');
     expect(DOCKERFILE).toContain(
       'COPY packages/daemon/package.json packages/daemon/',
     );
@@ -22,6 +23,10 @@ describe('Briefing-summarizer Dockerfile', () => {
   it('should NOT use pnpm@latest — must use corepack enable to read pinned version (#244)', () => {
     expect(DOCKERFILE).not.toContain('pnpm@latest');
     expect(DOCKERFILE).toContain('corepack enable');
+  });
+
+  it('should copy the shared db workspace package for postgres backend imports (#626)', () => {
+    expect(DOCKERFILE).toContain('COPY packages/db/ packages/db/');
   });
 
   it('should scope pnpm install to briefing-summarizer package only', () => {
