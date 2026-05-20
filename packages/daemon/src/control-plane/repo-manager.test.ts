@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { RepoManager } from './repo-manager.js';
+import { SupabaseRepoDataSource } from '../data/repo-source.js';
 
 describe('RepoManager', () => {
   it('starts pollers for all enabled repos on initialize', async () => {
@@ -264,7 +265,7 @@ describe('RepoManager', () => {
     mgr.stop();
   });
 
-  it('marks credential error and skips poller when decrypt RPC fails (#445)', async () => {
+  it('marks credential error and skips poller when app-owned credential read fails (#445)', async () => {
     const onPoll = vi.fn();
     const originalEnv = process.env.GITHUB_TOKEN;
     process.env.GITHUB_TOKEN = 'fallback-token';
@@ -272,6 +273,13 @@ describe('RepoManager', () => {
     const updateMock = vi.fn().mockReturnValue({
       eq: vi.fn().mockResolvedValue({ error: null }),
     });
+    const credentials = {
+      readConnectionCredential: vi.fn().mockResolvedValue({
+        ok: false,
+        error: 'denied',
+        message: 'credential read failed',
+      }),
+    };
 
     try {
       const supabase = {
@@ -287,19 +295,23 @@ describe('RepoManager', () => {
             update: updateMock,
           };
         }),
-        rpc: vi.fn().mockResolvedValue({ data: null, error: { message: 'RPC failed: missing row' } }),
       } as any;
 
-      const mgr = new RepoManager(supabase, 60_000, onPoll);
+      const mgr = new RepoManager(
+        new SupabaseRepoDataSource(supabase, credentials as never),
+        60_000,
+        onPoll,
+      );
       await mgr.initialize();
 
       expect(mgr.activePollerCount()).toBe(0);
+      expect(credentials.readConnectionCredential).toHaveBeenCalledWith('conn-1');
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('decrypt_github_token RPC failed for connection conn-1'),
+        expect.stringContaining('read GitHub connection credential failed for connection conn-1'),
       );
       expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
         credential_status: 'error',
-        credential_error: 'RPC failed: missing row',
+        credential_error: 'credential read failed',
         updated_at: expect.any(String),
       }));
 
@@ -310,13 +322,19 @@ describe('RepoManager', () => {
     }
   });
 
-  it('marks credential error and skips poller when decrypt RPC returns null data (#445)', async () => {
+  it('marks credential error and skips poller when app-owned credential is empty (#445)', async () => {
     const onPoll = vi.fn();
     const originalEnv = process.env.GITHUB_TOKEN;
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const updateMock = vi.fn().mockReturnValue({
       eq: vi.fn().mockResolvedValue({ error: null }),
     });
+    const credentials = {
+      readConnectionCredential: vi.fn().mockResolvedValue({
+        ok: true,
+        value: '',
+      }),
+    };
 
     try {
       const supabase = {
@@ -332,19 +350,22 @@ describe('RepoManager', () => {
             update: updateMock,
           };
         }),
-        rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
       } as any;
 
-      const mgr = new RepoManager(supabase, 60_000, onPoll);
+      const mgr = new RepoManager(
+        new SupabaseRepoDataSource(supabase, credentials as never),
+        60_000,
+        onPoll,
+      );
       await mgr.initialize();
 
       expect(mgr.activePollerCount()).toBe(0);
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('decrypt_github_token returned null for connection conn-2'),
+        expect.stringContaining('GitHub connection credential returned empty for connection conn-2'),
       );
       expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
         credential_status: 'error',
-        credential_error: 'decrypt_github_token returned null',
+        credential_error: 'GitHub connection credential returned empty',
         updated_at: expect.any(String),
       }));
 
@@ -362,6 +383,12 @@ describe('RepoManager', () => {
     const updateMock = vi.fn().mockReturnValue({
       eq: vi.fn().mockResolvedValue({ error: null }),
     });
+    const credentials = {
+      readConnectionCredential: vi.fn().mockResolvedValue({
+        ok: true,
+        value: 'decrypted-oauth-token',
+      }),
+    };
 
     try {
       const supabase = {
@@ -380,25 +407,29 @@ describe('RepoManager', () => {
             update: updateMock,
           };
         }),
-        rpc: vi.fn().mockResolvedValue({ data: 'decrypted-oauth-token', error: null }),
       } as any;
 
-      const mgr = new RepoManager(supabase, 60_000, onPoll);
+      const mgr = new RepoManager(
+        new SupabaseRepoDataSource(supabase, credentials as never),
+        60_000,
+        onPoll,
+      );
       await mgr.initialize();
 
       // Repo with connection_id should resolve per-connection token
       const token1 = await mgr.resolveTokenForRepo('r1');
       expect(token1).toBe('decrypted-oauth-token');
-      expect(supabase.rpc).toHaveBeenCalledWith('decrypt_github_token', { p_connection_id: 'conn-abc' });
+      expect(credentials.readConnectionCredential).toHaveBeenCalledWith('conn-abc');
       expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
         credential_status: 'ok',
         credential_error: null,
       }));
 
       // Repo without connection_id should fall back to GITHUB_TOKEN
-      supabase.rpc.mockClear();
+      credentials.readConnectionCredential.mockClear();
       const token2 = await mgr.resolveTokenForRepo('r2');
       expect(token2).toBe('global-fallback');
+      expect(credentials.readConnectionCredential).not.toHaveBeenCalled();
 
       // Unknown repo should fall back to GITHUB_TOKEN
       const token3 = await mgr.resolveTokenForRepo('nonexistent');

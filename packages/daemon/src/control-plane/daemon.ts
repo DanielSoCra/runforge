@@ -221,7 +221,19 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     configReader = new SupabaseConfigReader(supabase);
     await configReader.start(); // throws if unreachable — prevents silent misconfiguration
     runWriter = new SupabaseRunWriter(supabase);
-    repoSource = new SupabaseRepoDataSource(supabase);
+    // During parity, Supabase may still own repo config/run history, but
+    // GitHub connection credentials are app-owned and never read via hosted RPC.
+    try {
+      postgresClient = createDbClient({ maxConnections: 4 });
+      const stores = createPostgresStores(postgresClient.db, {
+        credentialKey: readCredentialKey(),
+      });
+      repoSource = new SupabaseRepoDataSource(supabase, stores.credentials);
+    } catch (e) {
+      configReader.stop();
+      await postgresClient?.sql.end();
+      return err(e instanceof Error ? e : new Error(String(e)));
+    }
     const history = new SupabaseRunHistory(supabase);
     runHistory = history;
     runMaintenance = history;

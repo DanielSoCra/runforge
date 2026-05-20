@@ -21,7 +21,13 @@ export interface RepoDataSource {
 }
 
 export class SupabaseRepoDataSource implements RepoDataSource {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(
+    private readonly supabase: SupabaseClient,
+    private readonly credentials?: Pick<
+      CredentialStore,
+      'readConnectionCredential'
+    >,
+  ) {}
 
   async listEnabledRepos(): Promise<Result<DataRepoRecord[]>> {
     const { data, error } = await this.supabase
@@ -53,25 +59,33 @@ export class SupabaseRepoDataSource implements RepoDataSource {
     repoId: string,
     connectionId: string,
   ): Promise<string | undefined> {
-    const { data, error } = await this.supabase.rpc('decrypt_github_token', {
-      p_connection_id: connectionId,
-    } as never);
-    if (error) {
+    if (!this.credentials) {
+      const message = 'app-owned credential store is not configured';
       console.warn(
-        `[repo-manager] decrypt_github_token RPC failed for connection ${connectionId}: ${error.message}`,
+        `[repo-manager] ${message} for connection ${connectionId}`,
       );
-      await this.markCredentialStatus(repoId, 'error', error.message);
+      await this.markCredentialStatus(repoId, 'error', message);
       return undefined;
     }
-    const token = data as string | null | undefined;
-    if (token === null || token === undefined || token === '') {
-      const message = 'decrypt_github_token returned null';
+
+    const result =
+      await this.credentials.readConnectionCredential(connectionId);
+    if (!result.ok) {
+      console.warn(
+        `[repo-manager] read GitHub connection credential failed for connection ${connectionId}: ${result.message}`,
+      );
+      await this.markCredentialStatus(repoId, 'error', result.message);
+      return undefined;
+    }
+
+    if (result.value.trim() === '') {
+      const message = 'GitHub connection credential returned empty';
       console.warn(`[repo-manager] ${message} for connection ${connectionId}`);
       await this.markCredentialStatus(repoId, 'error', message);
       return undefined;
     }
     await this.markCredentialStatus(repoId, 'ok', null);
-    return token;
+    return result.value;
   }
 
   private async markCredentialStatus(
