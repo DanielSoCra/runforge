@@ -1,36 +1,62 @@
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: vi.fn(),
+const storeMocks = vi.hoisted(() => ({
+  listCostEventsSince: vi.fn(),
+}));
+
+vi.mock('@/lib/data/stores', () => ({
+  getDashboardStores: () => ({
+    costs: { listCostEventsSince: storeMocks.listCostEventsSince },
+  }),
 }));
 
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import CostPage from './page';
-import { createClient } from '@/lib/supabase/server';
 
-function mockSupabase(events: Record<string, unknown>[]) {
-  const gteFn = vi.fn().mockReturnValue({
-    order: vi.fn().mockResolvedValue({ data: events, error: null }),
-  });
-  vi.mocked(createClient).mockResolvedValue({
-    from: vi.fn().mockReturnValue({
-      select: vi.fn().mockReturnValue({
-        gte: gteFn,
-      }),
-    }),
-  } as never);
-  return { gteFn };
+function mockCostEvents(events: CostEventFixture[]) {
+  storeMocks.listCostEventsSince.mockResolvedValue({ ok: true, value: events });
 }
 
 function searchParams(params: Record<string, string> = {}) {
   return { searchParams: Promise.resolve(params) };
 }
 
+type CostEventFixture = {
+  cost: number;
+  recordedAt: Date;
+  sessionType: string;
+  repoOwner: string | null;
+  repoName: string | null;
+};
+
 describe('CostPage', () => {
+  beforeEach(() => {
+    storeMocks.listCostEventsSince.mockReset();
+    mockCostEvents([]);
+  });
+
   it('displays per-repository cost breakdown (#83)', async () => {
-    mockSupabase([
-      { cost: 1.5, recorded_at: '2026-03-20T10:00:00Z', session_type: 'implementation', runs: { repo_owner: 'acme', repo_name: 'web-app' } },
-      { cost: 2.0, recorded_at: '2026-03-20T11:00:00Z', session_type: 'validation', runs: { repo_owner: 'acme', repo_name: 'web-app' } },
-      { cost: 0.5, recorded_at: '2026-03-20T12:00:00Z', session_type: 'planning', runs: { repo_owner: 'acme', repo_name: 'api-server' } },
+    mockCostEvents([
+      {
+        cost: 1.5,
+        recordedAt: new Date('2026-03-20T10:00:00Z'),
+        sessionType: 'implementation',
+        repoOwner: 'acme',
+        repoName: 'web-app',
+      },
+      {
+        cost: 2.0,
+        recordedAt: new Date('2026-03-20T11:00:00Z'),
+        sessionType: 'validation',
+        repoOwner: 'acme',
+        repoName: 'web-app',
+      },
+      {
+        cost: 0.5,
+        recordedAt: new Date('2026-03-20T12:00:00Z'),
+        sessionType: 'planning',
+        repoOwner: 'acme',
+        repoName: 'api-server',
+      },
     ]);
 
     const jsx = await CostPage(searchParams());
@@ -46,8 +72,14 @@ describe('CostPage', () => {
   });
 
   it('handles events with no linked run gracefully (#83)', async () => {
-    mockSupabase([
-      { cost: 1.0, recorded_at: '2026-03-20T10:00:00Z', session_type: 'planning', runs: null },
+    mockCostEvents([
+      {
+        cost: 1.0,
+        recordedAt: new Date('2026-03-20T10:00:00Z'),
+        sessionType: 'planning',
+        repoOwner: null,
+        repoName: null,
+      },
     ]);
 
     const jsx = await CostPage(searchParams());
@@ -58,9 +90,21 @@ describe('CostPage', () => {
   });
 
   it('sorts repositories by cost descending (#83)', async () => {
-    mockSupabase([
-      { cost: 1.0, recorded_at: '2026-03-20T10:00:00Z', session_type: 'planning', runs: { repo_owner: 'acme', repo_name: 'small-repo' } },
-      { cost: 5.0, recorded_at: '2026-03-20T11:00:00Z', session_type: 'implementation', runs: { repo_owner: 'acme', repo_name: 'big-repo' } },
+    mockCostEvents([
+      {
+        cost: 1.0,
+        recordedAt: new Date('2026-03-20T10:00:00Z'),
+        sessionType: 'planning',
+        repoOwner: 'acme',
+        repoName: 'small-repo',
+      },
+      {
+        cost: 5.0,
+        recordedAt: new Date('2026-03-20T11:00:00Z'),
+        sessionType: 'implementation',
+        repoOwner: 'acme',
+        repoName: 'big-repo',
+      },
     ]);
 
     const jsx = await CostPage(searchParams());
@@ -74,17 +118,24 @@ describe('CostPage', () => {
   });
 
   it('uses selected time range from searchParams (#87)', async () => {
-    const { gteFn } = mockSupabase([
-      { cost: 1.0, recorded_at: '2026-03-20T10:00:00Z', session_type: 'planning', runs: { repo_owner: 'acme', repo_name: 'repo-a' } },
+    mockCostEvents([
+      {
+        cost: 1.0,
+        recordedAt: new Date('2026-03-20T10:00:00Z'),
+        sessionType: 'planning',
+        repoOwner: 'acme',
+        repoName: 'repo-a',
+      },
     ]);
 
     const jsx = await CostPage(searchParams({ range: '7' }));
     render(jsx);
 
-    // Verify the query uses ~7-day window (gte arg should be ~7 days ago)
-    expect(gteFn).toHaveBeenCalledWith('recorded_at', expect.any(String));
-    const isoDate = gteFn.mock.calls[0][1] as string;
-    const queryDate = new Date(isoDate);
+    // Verify the store query uses ~7-day window.
+    expect(storeMocks.listCostEventsSince).toHaveBeenCalledWith(
+      expect.any(Date),
+    );
+    const queryDate = storeMocks.listCostEventsSince.mock.calls[0][0] as Date;
     const now = new Date();
     const diffDays = (now.getTime() - queryDate.getTime()) / (1000 * 60 * 60 * 24);
     expect(diffDays).toBeGreaterThan(6.9);
@@ -95,7 +146,7 @@ describe('CostPage', () => {
   });
 
   it('renders range selector with active state (#87)', async () => {
-    mockSupabase([]);
+    mockCostEvents([]);
 
     const jsx = await CostPage(searchParams({ range: '90' }));
     const { container } = render(jsx);
@@ -116,9 +167,21 @@ describe('CostPage', () => {
   });
 
   it('separates costs for same-name repos from different owners (#290)', async () => {
-    mockSupabase([
-      { cost: 3.0, recorded_at: '2026-03-20T10:00:00Z', session_type: 'implementation', runs: { repo_owner: 'org-a', repo_name: 'api' } },
-      { cost: 7.0, recorded_at: '2026-03-20T11:00:00Z', session_type: 'implementation', runs: { repo_owner: 'org-b', repo_name: 'api' } },
+    mockCostEvents([
+      {
+        cost: 3.0,
+        recordedAt: new Date('2026-03-20T10:00:00Z'),
+        sessionType: 'implementation',
+        repoOwner: 'org-a',
+        repoName: 'api',
+      },
+      {
+        cost: 7.0,
+        recordedAt: new Date('2026-03-20T11:00:00Z'),
+        sessionType: 'implementation',
+        repoOwner: 'org-b',
+        repoName: 'api',
+      },
     ]);
 
     const jsx = await CostPage(searchParams());
@@ -131,19 +194,33 @@ describe('CostPage', () => {
   });
 
   it('defaults to 30 days when range param is invalid (#87)', async () => {
-    const { gteFn } = mockSupabase([]);
+    mockCostEvents([]);
 
     const jsx = await CostPage(searchParams({ range: '999' }));
     render(jsx);
 
-    expect(gteFn).toHaveBeenCalledWith('recorded_at', expect.any(String));
-    const isoDate = gteFn.mock.calls[0][1] as string;
-    const queryDate = new Date(isoDate);
+    expect(storeMocks.listCostEventsSince).toHaveBeenCalledWith(
+      expect.any(Date),
+    );
+    const queryDate = storeMocks.listCostEventsSince.mock.calls[0][0] as Date;
     const now = new Date();
     const diffDays = (now.getTime() - queryDate.getTime()) / (1000 * 60 * 60 * 24);
     expect(diffDays).toBeGreaterThan(29.9);
     expect(diffDays).toBeLessThan(30.1);
 
     expect(screen.getByText(/Last 30 days/)).toBeInTheDocument();
+  });
+
+  it('shows the page error when the app-owned cost store is unavailable', async () => {
+    storeMocks.listCostEventsSince.mockResolvedValueOnce({
+      ok: false,
+      error: 'unavailable',
+      message: 'database offline',
+    });
+
+    const jsx = await CostPage(searchParams());
+    render(jsx);
+
+    expect(screen.getByText(/Failed to load data/)).toBeInTheDocument();
   });
 });
