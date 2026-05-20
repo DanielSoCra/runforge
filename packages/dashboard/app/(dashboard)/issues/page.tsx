@@ -1,18 +1,11 @@
 // packages/dashboard/app/(dashboard)/issues/page.tsx
-import { createClient } from '@/lib/supabase/server';
-import { requireUser } from '@/lib/auth';
+import { requireDashboardUser } from '@/lib/auth/require-session';
 import { getDashboardStores } from '@/lib/data/stores';
 import { classifyIssues, type RunRecord, type GitHubIssue } from '@/lib/classify-issues';
 import { IssuesBoard } from '@/components/issues-board';
+import { PageError } from '@/components/page-error';
 
 export const dynamic = 'force-dynamic';
-
-interface RepoRow {
-  id: string;
-  owner: string;
-  name: string;
-  connection_id: string | null;
-}
 
 async function fetchIssuesForRepo(
   owner: string,
@@ -38,16 +31,25 @@ async function fetchIssuesForRepo(
 }
 
 export default async function IssuesPage() {
-  const supabase = await createClient();
-  await requireUser(supabase);
+  await requireDashboardUser();
 
-  const [{ data: repos }, { data: runs }] = await Promise.all([
-    supabase.from('repos').select('id, owner, name, connection_id').eq('enabled', true).is('deleted_at', null),
-    supabase.from('runs').select('issue_number, repo_owner, repo_name, issue_title, outcome, current_phase').order('started_at', { ascending: false }),
-  ]);
+  const stores = getDashboardStores();
+  const boardInputs = await stores.issues.listBoardInputs();
+  if (!boardInputs.ok) {
+    console.error('[issues] failed to load board inputs:', boardInputs.message);
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold mb-1">Issues</h1>
+          <p className="text-muted-foreground text-sm">Open issues across enabled repos</p>
+        </div>
+        <PageError />
+      </div>
+    );
+  }
 
-  const repoList = (repos ?? []) as RepoRow[];
-  const runList = (runs ?? []) as RunRecord[];
+  const repoList = boardInputs.value.repos;
+  const runList = boardInputs.value.runs as RunRecord[];
 
   // Spec: "If no enabled repos have a GitHub token, the board shows an empty-state prompt pointing to Settings."
   if (repoList.length === 0) {
@@ -71,13 +73,11 @@ export default async function IssuesPage() {
   }
 
   // Fetch token + issues per repo in parallel, tracking whether each repo has a token
-  let stores: ReturnType<typeof getDashboardStores> | undefined;
   const repoIssueResults = await Promise.all(
     repoList.map(async (repo) => {
       let token: string | undefined = process.env.GITHUB_TOKEN;
-      if (repo.connection_id) {
-        stores ??= getDashboardStores();
-        const credential = await stores.githubConnections.readCredential(repo.connection_id);
+      if (repo.connectionId) {
+        const credential = await stores.githubConnections.readCredential(repo.connectionId);
         if (credential.ok) token = credential.value.token;
       }
       const hasToken = !!token;

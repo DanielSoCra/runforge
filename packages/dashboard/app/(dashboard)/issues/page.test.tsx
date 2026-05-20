@@ -1,65 +1,64 @@
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: vi.fn(),
-}));
-vi.mock('@/lib/auth', () => ({
-  requireUser: vi.fn(),
-}));
 const storeMocks = vi.hoisted(() => ({
-  getDashboardStores: vi.fn(),
+  listBoardInputs: vi.fn(),
   readCredential: vi.fn(),
+  requireDashboardUser: vi.fn(),
+}));
+vi.mock('@/lib/auth/require-session', () => ({
+  requireDashboardUser: storeMocks.requireDashboardUser,
 }));
 vi.mock('@/lib/data/stores', () => ({
-  getDashboardStores: storeMocks.getDashboardStores,
+  getDashboardStores: () => ({
+    issues: { listBoardInputs: storeMocks.listBoardInputs },
+    githubConnections: { readCredential: storeMocks.readCredential },
+  }),
 }));
 
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import IssuesPage from './page';
-import { createClient } from '@/lib/supabase/server';
-import { requireUser } from '@/lib/auth';
 
-function mockSupabase(repos: Record<string, unknown>[] = [], runs: Record<string, unknown>[] = []) {
-  const runsResolved = { data: runs, error: null };
-  function runsChainable(): Record<string, ReturnType<typeof vi.fn>> {
-    const obj: Record<string, ReturnType<typeof vi.fn>> = {};
-    for (const method of ['order', 'limit', 'eq']) {
-      obj[method] = vi.fn().mockImplementation(() => runsChainable());
-    }
-    obj.then = vi.fn().mockImplementation((resolve: (v: unknown) => void) => resolve(runsResolved));
-    return obj;
-  }
+const originalGitHubToken = process.env.GITHUB_TOKEN;
+const originalFetch = global.fetch;
 
-  const repoSelectFn = vi.fn().mockReturnValue({
-    eq: vi.fn().mockReturnValue({
-      is: vi.fn().mockResolvedValue({ data: repos, error: null }),
-    }),
+function mockBoardInputs(
+  repos: Record<string, unknown>[] = [],
+  runs: Record<string, unknown>[] = [],
+) {
+  storeMocks.listBoardInputs.mockResolvedValue({
+    ok: true,
+    value: { repos, runs },
   });
-
-  const fromFn = vi.fn((table: string) => {
-    if (table === 'repos') return { select: repoSelectFn };
-    if (table === 'runs') return { select: vi.fn().mockReturnValue(runsChainable()) };
-    return { select: vi.fn() };
-  });
-
-  vi.mocked(createClient).mockResolvedValue({ from: fromFn } as never);
 }
 
 describe('IssuesPage', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    storeMocks.listBoardInputs.mockReset();
+    storeMocks.readCredential.mockReset();
+    storeMocks.requireDashboardUser.mockReset();
+    storeMocks.requireDashboardUser.mockResolvedValue({
+      user: { id: 'viewer-1', role: 'viewer' },
+      session: {},
+    });
     delete process.env.GITHUB_TOKEN;
     storeMocks.readCredential.mockResolvedValue({
       ok: false,
       error: 'not-found',
       message: 'missing connection',
     });
-    storeMocks.getDashboardStores.mockReturnValue({
-      githubConnections: { readCredential: storeMocks.readCredential },
-    });
+    mockBoardInputs();
+  });
+
+  afterEach(() => {
+    if (originalGitHubToken === undefined) {
+      delete process.env.GITHUB_TOKEN;
+    } else {
+      process.env.GITHUB_TOKEN = originalGitHubToken;
+    }
+    global.fetch = originalFetch;
   });
 
   it('shows empty-state when no enabled repos exist (#129)', async () => {
-    mockSupabase([], []);
+    mockBoardInputs([], []);
 
     const jsx = await IssuesPage();
     render(jsx);
@@ -72,78 +71,82 @@ describe('IssuesPage', () => {
 
   it('shows empty-state when all repos lack GitHub tokens (#129)', async () => {
     const repos = [
-      { id: '1', owner: 'acme', name: 'app', connection_id: null },
-      { id: '2', owner: 'acme', name: 'lib', connection_id: null },
+      { id: '1', owner: 'acme', name: 'app', connectionId: null },
+      { id: '2', owner: 'acme', name: 'lib', connectionId: null },
     ];
-    mockSupabase(repos, []);
+    mockBoardInputs(repos, []);
 
     const jsx = await IssuesPage();
     render(jsx);
 
     expect(screen.getByText(/None of your enabled repos have a GitHub token/)).toBeInTheDocument();
     expect(screen.getByText('Go to Settings')).toBeInTheDocument();
-    expect(storeMocks.getDashboardStores).not.toHaveBeenCalled();
+    expect(storeMocks.readCredential).not.toHaveBeenCalled();
   });
 
   it('reads connection credentials through the app-owned store', async () => {
     const repos = [
-      { id: '1', owner: 'acme', name: 'app', connection_id: 'conn-1' },
+      { id: '1', owner: 'acme', name: 'app', connectionId: 'conn-1' },
     ];
-    mockSupabase(repos, []);
+    mockBoardInputs(repos, []);
     storeMocks.readCredential.mockResolvedValue({
       ok: true,
       value: { githubLogin: 'acme', token: 'ghp_faketoken123' },
     });
 
-    const originalFetch = global.fetch;
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve([]),
     }) as unknown as typeof fetch;
 
-    try {
-      await IssuesPage();
+    await IssuesPage();
 
-      expect(storeMocks.readCredential).toHaveBeenCalledWith('conn-1');
-    } finally {
-      global.fetch = originalFetch;
-    }
+    expect(storeMocks.readCredential).toHaveBeenCalledWith('conn-1');
   });
 
   it('rejects unauthenticated users before decrypting tokens (#367)', async () => {
-    mockSupabase([], []);
-    vi.mocked(requireUser).mockRejectedValueOnce(new Error('Unauthorized'));
+    mockBoardInputs([], []);
+    storeMocks.requireDashboardUser.mockRejectedValueOnce(new Error('Unauthorized'));
 
     await expect(IssuesPage()).rejects.toThrow('Unauthorized');
+    expect(storeMocks.listBoardInputs).not.toHaveBeenCalled();
     expect(storeMocks.readCredential).not.toHaveBeenCalled();
   });
 
   it('shows board when at least one repo has a GitHub token (#129)', async () => {
     const repos = [
-      { id: '1', owner: 'acme', name: 'app', connection_id: 'conn-1' },
+      { id: '1', owner: 'acme', name: 'app', connectionId: 'conn-1' },
     ];
-    mockSupabase(repos, []);
+    mockBoardInputs(repos, []);
     storeMocks.readCredential.mockResolvedValue({
       ok: true,
       value: { githubLogin: 'acme', token: 'ghp_faketoken123' },
     });
 
     // Mock fetch for GitHub API
-    const originalFetch = global.fetch;
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve([]),
     }) as unknown as typeof fetch;
 
-    try {
-      const jsx = await IssuesPage();
-      render(jsx);
+    const jsx = await IssuesPage();
+    render(jsx);
 
-      // Should show the board header, not the empty state
-      expect(screen.getByText(/Open issues across 1 enabled repo/)).toBeInTheDocument();
-      expect(screen.queryByText('Go to Settings')).not.toBeInTheDocument();
-    } finally {
-      global.fetch = originalFetch;
-    }
+    // Should show the board header, not the empty state
+    expect(screen.getByText(/Open issues across 1 enabled repo/)).toBeInTheDocument();
+    expect(screen.queryByText('Go to Settings')).not.toBeInTheDocument();
+  });
+
+  it('shows a page error when the app-owned issue store is unavailable', async () => {
+    storeMocks.listBoardInputs.mockResolvedValueOnce({
+      ok: false,
+      error: 'unavailable',
+      message: 'database offline',
+    });
+
+    const jsx = await IssuesPage();
+    render(jsx);
+
+    expect(screen.getByText(/Failed to load data/)).toBeInTheDocument();
   });
 });
