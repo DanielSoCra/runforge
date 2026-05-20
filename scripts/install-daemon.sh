@@ -12,6 +12,15 @@ CURRENT_PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
+require_env() {
+  local name="$1"
+  local value="${!name:-}"
+  if [ -z "$value" ]; then
+    echo "ERROR: $name must be set in $ENV_FILE for DAEMON_DATA_BACKEND=$DAEMON_DATA_BACKEND_VALUE." >&2
+    exit 1
+  fi
+}
+
 # 1. Unload old plists
 log "Unloading legacy plists..."
 for label in com.autoclaude.pipeline com.autoclaude.developer com.autoclaude.reviewer; do
@@ -39,6 +48,45 @@ set -a
 source "$ENV_FILE"
 set +a
 
+DAEMON_DATA_BACKEND_VALUE="${DAEMON_DATA_BACKEND:-auto}"
+AUTO_CLAUDE_DATABASE_URL_VALUE="${AUTO_CLAUDE_DATABASE_URL:-}"
+SUPABASE_URL_VALUE="${SUPABASE_URL:-}"
+SUPABASE_SERVICE_ROLE_KEY_VALUE="${SUPABASE_SERVICE_ROLE_KEY:-}"
+NEXT_PUBLIC_SUPABASE_URL_VALUE="${NEXT_PUBLIC_SUPABASE_URL:-}"
+NEXT_PUBLIC_SUPABASE_ANON_KEY_VALUE="${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}"
+ENCRYPTION_KEY_VALUE="${ENCRYPTION_KEY:-}"
+
+case "$DAEMON_DATA_BACKEND_VALUE" in
+  auto|legacy|supabase|postgres) ;;
+  *)
+    echo "ERROR: DAEMON_DATA_BACKEND must be one of: auto, legacy, supabase, postgres." >&2
+    exit 1
+    ;;
+esac
+
+require_env GITHUB_TOKEN
+
+if [ "$DAEMON_DATA_BACKEND_VALUE" = "postgres" ]; then
+  require_env AUTO_CLAUDE_DATABASE_URL
+  require_env ENCRYPTION_KEY
+fi
+
+if [ "$DAEMON_DATA_BACKEND_VALUE" = "supabase" ]; then
+  require_env SUPABASE_URL
+  require_env SUPABASE_SERVICE_ROLE_KEY
+  require_env AUTO_CLAUDE_DATABASE_URL
+  require_env ENCRYPTION_KEY
+fi
+
+if [ "$DAEMON_DATA_BACKEND_VALUE" = "auto" ] && {
+  [ -n "$SUPABASE_URL_VALUE" ] || [ -n "$SUPABASE_SERVICE_ROLE_KEY_VALUE" ];
+}; then
+  require_env SUPABASE_URL
+  require_env SUPABASE_SERVICE_ROLE_KEY
+  require_env AUTO_CLAUDE_DATABASE_URL
+  require_env ENCRYPTION_KEY
+fi
+
 log "Installing daemon plist..."
 log "  npx: $NPX_PATH"
 log "  repo: $REPO_ROOT"
@@ -50,13 +98,13 @@ sed \
   -e "s|__HOME__|${HOME}|g" \
   -e "s|__PATH__|${CURRENT_PATH}|g" \
   -e "s|__GITHUB_TOKEN__|${GITHUB_TOKEN}|g" \
-  -e "s|__SUPABASE_URL__|${SUPABASE_URL}|g" \
-  -e "s|__SUPABASE_SERVICE_ROLE_KEY__|${SUPABASE_SERVICE_ROLE_KEY}|g" \
-  -e "s|__NEXT_PUBLIC_SUPABASE_URL__|${NEXT_PUBLIC_SUPABASE_URL}|g" \
-  -e "s|__NEXT_PUBLIC_SUPABASE_ANON_KEY__|${NEXT_PUBLIC_SUPABASE_ANON_KEY}|g" \
-  -e "s|__AUTO_CLAUDE_DATABASE_URL__|${AUTO_CLAUDE_DATABASE_URL}|g" \
-  -e "s|__DAEMON_DATA_BACKEND__|${DAEMON_DATA_BACKEND:-supabase}|g" \
-  -e "s|__ENCRYPTION_KEY__|${ENCRYPTION_KEY}|g" \
+  -e "s|__SUPABASE_URL__|${SUPABASE_URL_VALUE}|g" \
+  -e "s|__SUPABASE_SERVICE_ROLE_KEY__|${SUPABASE_SERVICE_ROLE_KEY_VALUE}|g" \
+  -e "s|__NEXT_PUBLIC_SUPABASE_URL__|${NEXT_PUBLIC_SUPABASE_URL_VALUE}|g" \
+  -e "s|__NEXT_PUBLIC_SUPABASE_ANON_KEY__|${NEXT_PUBLIC_SUPABASE_ANON_KEY_VALUE}|g" \
+  -e "s|__AUTO_CLAUDE_DATABASE_URL__|${AUTO_CLAUDE_DATABASE_URL_VALUE}|g" \
+  -e "s|__DAEMON_DATA_BACKEND__|${DAEMON_DATA_BACKEND_VALUE}|g" \
+  -e "s|__ENCRYPTION_KEY__|${ENCRYPTION_KEY_VALUE}|g" \
   "$PLIST_SRC" > "$PLIST_TMP"
 mv "$PLIST_TMP" "$PLIST_DST"
 
