@@ -16,6 +16,36 @@ describe('docker-compose.yml daemon env vars', () => {
   });
 });
 
+describe('docker-compose self-hosted Postgres runtime (#626)', () => {
+  const raw = readFileSync(resolve(REPO_ROOT, 'docker-compose.yml'), 'utf-8');
+
+  it('starts Postgres 18 with a healthcheck and persistent volume', () => {
+    expect(raw).toContain('postgres:');
+    expect(raw).toContain('image: postgres:18-alpine');
+    expect(raw).toContain('pg_isready');
+    expect(raw).toContain('postgres-data:/var/lib/postgresql/data');
+  });
+
+  it('runs app-owned migrations after Postgres is healthy', () => {
+    expect(raw).toContain('migrate:');
+    expect(raw).toContain('dockerfile: packages/db/Dockerfile');
+    expect(raw).toContain('AUTO_CLAUDE_DATABASE_URL: ${AUTO_CLAUDE_DOCKER_DATABASE_URL:');
+    expect(raw).toMatch(/postgres:\n\s+condition: service_healthy/);
+  });
+
+  it('gates runtime consumers on successful migrations', () => {
+    const completed = raw.match(/condition: service_completed_successfully/g) ?? [];
+    expect(completed.length).toBeGreaterThanOrEqual(3);
+    expect(raw).toContain('DAEMON_DATA_BACKEND: ${DAEMON_DATA_BACKEND:-supabase}');
+    expect(raw).toContain('BRIEFING_DATA_BACKEND: ${BRIEFING_DATA_BACKEND:-supabase}');
+  });
+
+  it('does not pass the full application env file to postgres or migrate', () => {
+    expect(serviceBlock(raw, 'postgres')).not.toContain('env_file');
+    expect(serviceBlock(raw, 'migrate')).not.toContain('env_file');
+  });
+});
+
 describe('.dockerignore excludes secret files (#183)', () => {
   const dockerignore = readFileSync(resolve(REPO_ROOT, '.dockerignore'), 'utf-8');
 
@@ -71,3 +101,10 @@ describe('docker-compose git config', () => {
     });
   }
 });
+
+function serviceBlock(raw: string, serviceName: string): string {
+  const match = raw.match(
+    new RegExp(`\\n  ${serviceName}:\\n[\\s\\S]*?(?=\\n  [a-zA-Z0-9_-]+:\\n|\\nvolumes:\\n|$)`),
+  );
+  return match?.[0] ?? '';
+}

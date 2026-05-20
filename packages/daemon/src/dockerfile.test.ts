@@ -20,6 +20,13 @@ describe('Daemon Dockerfile', () => {
     expect(DOCKERFILE).toMatch(/pnpm install.*--filter.*@auto-claude\/daemon/);
   });
 
+  it('should copy the shared db workspace package for runtime imports (#626)', () => {
+    expect(DOCKERFILE).toContain(
+      'COPY packages/db/package.json ./packages/db/package.json',
+    );
+    expect(DOCKERFILE).toContain('COPY packages/db/ ./packages/db/');
+  });
+
   it('should NOT install claude-code without a version pin', () => {
     // Ensure there's no unpinned install line
     const lines = DOCKERFILE.split('\n');
