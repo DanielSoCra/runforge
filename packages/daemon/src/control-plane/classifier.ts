@@ -1,6 +1,6 @@
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { WorkRequest } from '../types.js';
-import type { SupabaseRunWriter } from '../supabase/run-writer.js';
+import type { RunWriter } from '../data/run-writer.js';
 import { SessionError } from '../session-runtime/session-error.js';
 import { extractStructuredOutput } from '../lib/structured-output.js';
 import { formatUserIssueContent } from '../lib/prompt-boundary.js';
@@ -27,7 +27,7 @@ export interface ClassifyResult {
 export async function classify(
   runtime: SessionRuntime,
   workRequest: WorkRequest,
-  runWriter?: SupabaseRunWriter,
+  runWriter?: RunWriter,
   runId?: string,
   workspacePath?: string,
   activePlugins?: Array<{ id: string; activatedAt: string }>,

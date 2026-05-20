@@ -11,7 +11,16 @@ function wrapCli(payload: unknown): unknown {
 
 function makeRuntime(structuredData: unknown, ok = true): SessionRuntime {
   const result = ok
-    ? { ok: true as const, value: { output: '', structuredData: wrapCli(structuredData), cost: 0.1, pitfallMarkers: [], exitStatus: 'completed' as const } }
+    ? {
+        ok: true as const,
+        value: {
+          output: '',
+          structuredData: wrapCli(structuredData),
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed' as const,
+        },
+      }
     : { ok: false as const, error: new Error('session failed') };
   return {
     spawnSession: vi.fn().mockResolvedValue(result),
@@ -22,7 +31,13 @@ describe('runProactiveReview', () => {
   it('returns findings from a successful session', async () => {
     const structuredData = {
       findings: [
-        { title: 'Dead code in utils', severity: 'minor', location: 'src/utils.ts:42', description: 'Unused function', evidence: 'grep shows no callers' },
+        {
+          title: 'Dead code in utils',
+          severity: 'minor',
+          location: 'src/utils.ts:42',
+          description: 'Unused function',
+          evidence: 'grep shows no callers',
+        },
       ],
     };
     const runtime = makeRuntime(structuredData);
@@ -90,7 +105,8 @@ describe('runProactiveReview', () => {
     });
 
     const call = vi.mocked(runtime.spawnSession).mock.calls[0]!;
-    const variables = (call[1] as { variables: Record<string, string> }).variables;
+    const variables = (call[1] as { variables: Record<string, string> })
+      .variables;
     expect(variables.rubric).toContain('Spec-code drift');
     expect(variables.rubric).toContain('Dead code');
     expect(variables.rubric).toContain('Security regression');
@@ -110,7 +126,8 @@ describe('runProactiveReview', () => {
     });
 
     const call = vi.mocked(runtime.spawnSession).mock.calls[0]!;
-    const variables = (call[1] as { variables: Record<string, string> }).variables;
+    const variables = (call[1] as { variables: Record<string, string> })
+      .variables;
 
     // Template-required variables (fixes #339 — these must match codebase-reviewer.md placeholders)
     expect(variables.category).toBe('src/validation');
@@ -137,7 +154,12 @@ describe('runProactiveReview', () => {
     // findings would be silently discarded. This test verifies that title is required.
     const structuredData = {
       findings: [
-        { severity: 'important', location: 'src/foo.ts:10', description: 'Missing check', evidence: 'Line 10 shows...' },
+        {
+          severity: 'important',
+          location: 'src/foo.ts:10',
+          description: 'Missing check',
+          evidence: 'Line 10 shows...',
+        },
       ],
     };
     const runtime = makeRuntime(structuredData);
@@ -160,7 +182,13 @@ describe('runProactiveReview', () => {
     // makeRuntime now wraps in the CLI shape, so this exercises the primary unwrap path.
     const runtime = makeRuntime({
       findings: [
-        { title: 'BUG-30 test', severity: 'minor', location: 'src/foo.ts:1', description: 'test', evidence: 'test' },
+        {
+          title: 'BUG-30 test',
+          severity: 'minor',
+          location: 'src/foo.ts:1',
+          description: 'test',
+          evidence: 'test',
+        },
       ],
     });
     const result = await runProactiveReview(runtime, {
@@ -180,12 +208,24 @@ describe('runProactiveReview', () => {
   it('falls back to markdown code block in result text when structured_output is null', async () => {
     // Build a CLI wrapper where structured_output is null and the payload is in result text.
     const fallbackWrapper = {
-      result: '```json\n{"findings":[{"title":"fallback","severity":"minor","location":"src/x.ts:1","description":"d","evidence":"e"}]}\n```',
+      result:
+        '```json\n{"findings":[{"title":"fallback","severity":"minor","location":"src/x.ts:1","description":"d","evidence":"e"}]}\n```',
       cost_usd: 0.01,
       structured_output: null,
     };
-    const resultObj = { ok: true as const, value: { output: '', structuredData: fallbackWrapper, cost: 0.1, pitfallMarkers: [], exitStatus: 'completed' as const } };
-    const runtime = { spawnSession: vi.fn().mockResolvedValue(resultObj) } as unknown as import('../session-runtime/runtime.js').SessionRuntime;
+    const resultObj = {
+      ok: true as const,
+      value: {
+        output: '',
+        structuredData: fallbackWrapper,
+        cost: 0.1,
+        pitfallMarkers: [],
+        exitStatus: 'completed' as const,
+      },
+    };
+    const runtime = {
+      spawnSession: vi.fn().mockResolvedValue(resultObj),
+    } as unknown as import('../session-runtime/runtime.js').SessionRuntime;
     const result = await runProactiveReview(runtime, {
       area: 'src/x',
       cwd: '/workspace',
@@ -204,9 +244,27 @@ describe('runProactiveReview', () => {
     // Without normalization, safeParse fails and all findings are discarded.
     const runtime = makeRuntime({
       findings: [
-        { title: 'High sev', severity: 'high', location: 'src/a.ts:1', description: 'd', evidence: 'e' },
-        { title: 'Moderate sev', severity: 'moderate', location: 'src/b.ts:1', description: 'd', evidence: 'e' },
-        { title: 'Low sev', severity: 'low', location: 'src/c.ts:1', description: 'd', evidence: 'e' },
+        {
+          title: 'High sev',
+          severity: 'high',
+          location: 'src/a.ts:1',
+          description: 'd',
+          evidence: 'e',
+        },
+        {
+          title: 'Moderate sev',
+          severity: 'moderate',
+          location: 'src/b.ts:1',
+          description: 'd',
+          evidence: 'e',
+        },
+        {
+          title: 'Low sev',
+          severity: 'low',
+          location: 'src/c.ts:1',
+          description: 'd',
+          evidence: 'e',
+        },
       ],
     });
     const result = await runProactiveReview(runtime, {
@@ -226,7 +284,9 @@ describe('runProactiveReview', () => {
 
   it('forwards runWriter and runId to spawnSession when provided', async () => {
     const runtime = makeRuntime({ findings: [] });
-    const fakeRunWriter = { write: vi.fn() } as unknown as import('../supabase/run-writer.js').SupabaseRunWriter;
+    const fakeRunWriter = {
+      write: vi.fn(),
+    } as unknown as import('../data/run-writer.js').RunWriter;
     const fakeRunId = 'run-abc-123';
 
     const result = await runProactiveReview(runtime, {

@@ -4,7 +4,7 @@ import type { PhaseLabelMirror } from './phase-labels.js';
 import type { RunState, PhaseEvent, WorkRequest } from '../types.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { ImplementationCoordinator } from '../implementation/coordinator.js';
-import type { SupabaseRunWriter } from '../supabase/run-writer.js';
+import type { RunWriter } from '../data/run-writer.js';
 import type { Config } from '../config.js';
 import { createGate1, selectGates, type Gate } from '../validation/gates.js';
 import { createReviewerGate } from '../validation/reviewer-session.js';
@@ -84,7 +84,7 @@ export function createPhaseHandlers(
   octokit: Octokit,
   workRequest: WorkRequest,
   stateDir: string,
-  runWriter?: SupabaseRunWriter,
+  runWriter?: RunWriter,
   runId?: string,
   repoRoot?: string,
   activePlugins?: Array<{ id: string; activatedAt: string }>,
@@ -132,9 +132,7 @@ export function createPhaseHandlers(
     error: Error,
   ): PhaseEvent => {
     const kind =
-      error instanceof DeliveryError
-        ? error.kind
-        : 'delivery-repair-needed';
+      error instanceof DeliveryError ? error.kind : 'delivery-repair-needed';
     run.lastFailure = createFailureRecord({
       kind,
       phase,
@@ -142,7 +140,9 @@ export function createPhaseHandlers(
       severity: 'blocking',
       retryable: true,
       repairAction:
-        kind === 'agent-output-invalid' ? 'retry-session' : 'reconcile-artifact',
+        kind === 'agent-output-invalid'
+          ? 'retry-session'
+          : 'reconcile-artifact',
     });
     return 'failure';
   };
@@ -184,9 +184,15 @@ export function createPhaseHandlers(
 
   const refreshSpecRefsAfterArtifact = async (run: RunState) => {
     try {
-      run.specRefs = await resolveCurrentSpecRefs(workspaceCwd, workRequest.specRefs);
+      run.specRefs = await resolveCurrentSpecRefs(
+        workspaceCwd,
+        workRequest.specRefs,
+      );
     } catch (e) {
-      console.warn(`[artifact] Failed to refresh spec refs after reconciliation:`, e);
+      console.warn(
+        `[artifact] Failed to refresh spec refs after reconciliation:`,
+        e,
+      );
     }
   };
 
@@ -334,7 +340,10 @@ export function createPhaseHandlers(
       octokit,
     });
     if (!delivery.ok) {
-      console.error(`[${phase}] Artifact delivery failed:`, delivery.error.message);
+      console.error(
+        `[${phase}] Artifact delivery failed:`,
+        delivery.error.message,
+      );
       return recordDeliveryFailure(run, phase, delivery.error);
     }
     run.phaseArtifacts = {

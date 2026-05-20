@@ -12,7 +12,7 @@ import type {
 } from '../types.js';
 import type { Result } from '../lib/result.js';
 import { ok, err } from '../lib/result.js';
-import type { SupabaseRunWriter } from '../supabase/run-writer.js';
+import type { RunWriter } from '../data/run-writer.js';
 import { CostTracker, type CostReservation } from './cost.js';
 import { RateLimiter } from './rate-limiter.js';
 import {
@@ -385,7 +385,7 @@ export class SessionRuntime {
     context: SessionContext,
     issueNumber: number,
     options?: SpawnSessionOptions,
-    runWriter?: SupabaseRunWriter,
+    runWriter?: RunWriter,
     runId?: string,
   ): Promise<Result<SessionResult>> {
     // 1. Look up agent definition
@@ -542,7 +542,7 @@ export class SessionRuntime {
     type: SessionType,
     costAttributionIssueNumbers: number[],
     costReservation: CostReservation,
-    runWriter?: SupabaseRunWriter,
+    runWriter?: RunWriter,
     runId?: string,
   ): Promise<Result<SessionResult>> {
     const result = await this.adapter.spawn(def, prompt, adapterOptions);
@@ -573,7 +573,7 @@ export class SessionRuntime {
     type: SessionType,
     costAttributionIssueNumbers: number[],
     costReservation: CostReservation,
-    runWriter?: SupabaseRunWriter,
+    runWriter?: RunWriter,
     runId?: string,
   ): Promise<Result<SessionResult>> {
     const attempted = new Set<string>();
@@ -642,7 +642,7 @@ export class SessionRuntime {
     type: SessionType,
     costAttributionIssueNumbers: number[],
     costReservation: CostReservation,
-    runWriter?: SupabaseRunWriter,
+    runWriter?: RunWriter,
     runId?: string,
   ): void {
     const cost = result.ok

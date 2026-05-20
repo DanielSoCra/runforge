@@ -1,6 +1,6 @@
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { BugDiagnosis, SessionResult } from '../types.js';
-import type { SupabaseRunWriter } from '../supabase/run-writer.js';
+import type { RunWriter } from '../data/run-writer.js';
 import { BugDiagnosisSchema, bugDiagnosisJsonSchema } from './schema.js';
 import { ok, err, type Result } from '../lib/result.js';
 import { extractStructuredOutput as unwrapStructuredOutput } from '../lib/structured-output.js';
@@ -18,10 +18,19 @@ function extractStructuredOutput(session: SessionResult): unknown {
   if (so !== session.structuredData) return so;
   // Fallback: model used markdown code block instead of structured output
   const rd = session.structuredData as Record<string, unknown> | null;
-  const resultText = typeof rd?.['result'] === 'string' ? (rd['result'] as string) : session.output;
-  const jsonMatch = resultText.match(/```json\s*([\s\S]*?)```/s) ?? resultText.match(/(\{[\s\S]*\})/s);
+  const resultText =
+    typeof rd?.['result'] === 'string'
+      ? (rd['result'] as string)
+      : session.output;
+  const jsonMatch =
+    resultText.match(/```json\s*([\s\S]*?)```/s) ??
+    resultText.match(/(\{[\s\S]*\})/s);
   if (jsonMatch?.[1]) {
-    try { return JSON.parse(jsonMatch[1]); } catch { /* fall through */ }
+    try {
+      return JSON.parse(jsonMatch[1]);
+    } catch {
+      /* fall through */
+    }
   }
   return session.structuredData;
 }
@@ -32,7 +41,7 @@ export async function diagnose(
   bugReport: string,
   implementationContent: string,
   specContent: string,
-  runWriter?: SupabaseRunWriter,
+  runWriter?: RunWriter,
   runId?: string,
   workspacePath?: string,
   activePlugins?: Array<{ id: string; activatedAt: string }>,
@@ -48,24 +57,46 @@ export async function diagnose(
   };
 
   // First attempt
-  const result = await runtime.spawnSession('diagnostician', context, issueNumber, {
-    jsonSchema: bugDiagnosisJsonSchema,
-  }, runWriter, runId);
+  const result = await runtime.spawnSession(
+    'diagnostician',
+    context,
+    issueNumber,
+    {
+      jsonSchema: bugDiagnosisJsonSchema,
+    },
+    runWriter,
+    runId,
+  );
 
   if (!result.ok) return result;
 
-  const parsed = BugDiagnosisSchema.safeParse(extractStructuredOutput(result.value));
+  const parsed = BugDiagnosisSchema.safeParse(
+    extractStructuredOutput(result.value),
+  );
   if (parsed.success) return ok(parsed.data);
 
   // Retry once on invalid output
-  const retry = await runtime.spawnSession('diagnostician', context, issueNumber, {
-    jsonSchema: bugDiagnosisJsonSchema,
-  }, runWriter, runId);
+  const retry = await runtime.spawnSession(
+    'diagnostician',
+    context,
+    issueNumber,
+    {
+      jsonSchema: bugDiagnosisJsonSchema,
+    },
+    runWriter,
+    runId,
+  );
 
   if (!retry.ok) return retry;
 
-  const retryParsed = BugDiagnosisSchema.safeParse(extractStructuredOutput(retry.value));
+  const retryParsed = BugDiagnosisSchema.safeParse(
+    extractStructuredOutput(retry.value),
+  );
   if (retryParsed.success) return ok(retryParsed.data);
 
-  return err(new Error(`Diagnosis produced invalid output after retry: ${retryParsed.error.message}`));
+  return err(
+    new Error(
+      `Diagnosis produced invalid output after retry: ${retryParsed.error.message}`,
+    ),
+  );
 }

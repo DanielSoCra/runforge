@@ -7,7 +7,7 @@ import type {
   Gotcha,
   PipelineVariant,
 } from '../types.js';
-import type { SupabaseRunWriter } from '../supabase/run-writer.js';
+import type { RunWriter } from '../data/run-writer.js';
 import type { GotchaStore } from '../knowledge/gotcha-store.js';
 import type { KnowledgeStore } from '../knowledge/knowledge-store.js';
 import type { KnowledgeRecord } from '../knowledge/record-types.js';
@@ -47,7 +47,7 @@ export class ImplementationCoordinator {
   async implement(
     request: WorkRequest,
     featureBranch: string,
-    runWriter?: SupabaseRunWriter,
+    runWriter?: RunWriter,
     runId?: string,
     options?: {
       complexity?: 'simple' | 'standard' | 'complex';
@@ -160,7 +160,11 @@ export class ImplementationCoordinator {
         request.issueNumber,
         this.runtime,
         this.repoRoot,
-        { staggerMs: this.staggerMs, maxDiffLines: this.maxDiffLines, baseBranch: options?.baseBranch },
+        {
+          staggerMs: this.staggerMs,
+          maxDiffLines: this.maxDiffLines,
+          baseBranch: options?.baseBranch,
+        },
         runWriter,
         runId,
         unitPitfalls,

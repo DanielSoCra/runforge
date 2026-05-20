@@ -1,7 +1,7 @@
 // src/validation/proactive-reviewer.ts
 import { z } from 'zod';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
-import type { SupabaseRunWriter } from '../supabase/run-writer.js';
+import type { RunWriter } from '../data/run-writer.js';
 
 export const ProactiveFindingSchema = z.object({
   title: z.string(),
@@ -20,9 +20,16 @@ const ProactiveResultSchema = z.object({
 const jsonSchema = JSON.stringify(z.toJSONSchema(ProactiveResultSchema));
 
 const SEVERITY_MAP: Record<string, string> = {
-  high: 'critical', severe: 'critical', blocker: 'critical',
-  medium: 'important', moderate: 'important', significant: 'important',
-  low: 'minor', info: 'minor', informational: 'minor', trivial: 'minor',
+  high: 'critical',
+  severe: 'critical',
+  blocker: 'critical',
+  medium: 'important',
+  moderate: 'important',
+  significant: 'important',
+  low: 'minor',
+  info: 'minor',
+  informational: 'minor',
+  trivial: 'minor',
 };
 
 function normalizeSeverities(data: unknown): unknown {
@@ -34,7 +41,10 @@ function normalizeSeverities(data: unknown): unknown {
     findings: obj.findings.map((f: unknown) => {
       if (f === null || typeof f !== 'object') return f;
       const finding = f as Record<string, unknown>;
-      const sev = typeof finding.severity === 'string' ? finding.severity.toLowerCase() : '';
+      const sev =
+        typeof finding.severity === 'string'
+          ? finding.severity.toLowerCase()
+          : '';
       const normalized = SEVERITY_MAP[sev];
       return normalized ? { ...finding, severity: normalized } : finding;
     }),
@@ -46,7 +56,7 @@ export interface ProactiveReviewInput {
   cwd: string;
   recentCommits: string;
   issueNumber: number;
-  runWriter?: SupabaseRunWriter;
+  runWriter?: RunWriter;
   runId?: string;
 }
 
@@ -109,7 +119,8 @@ export async function runProactiveReview(
         ? ((rawData as Record<string, unknown>).result as string)
         : result.value.output;
     const jsonMatch =
-      resultText.match(/```json\s*([\s\S]*?)```/s) ?? resultText.match(/(\{[\s\S]*\})/s);
+      resultText.match(/```json\s*([\s\S]*?)```/s) ??
+      resultText.match(/(\{[\s\S]*\})/s);
     if (jsonMatch?.[1]) {
       try {
         structuredPayload = JSON.parse(jsonMatch[1]);
@@ -121,9 +132,14 @@ export async function runProactiveReview(
     }
   }
 
-  const parsed = ProactiveResultSchema.safeParse(normalizeSeverities(structuredPayload));
+  const parsed = ProactiveResultSchema.safeParse(
+    normalizeSeverities(structuredPayload),
+  );
   if (!parsed.success) {
-    return { ok: false, error: `Invalid structured output: ${parsed.error.message}` };
+    return {
+      ok: false,
+      error: `Invalid structured output: ${parsed.error.message}`,
+    };
   }
 
   return { ok: true, findings: parsed.data.findings };

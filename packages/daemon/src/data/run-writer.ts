@@ -47,6 +47,16 @@ export interface PhaseRecord {
   completedAt: string;
 }
 
+export interface RunWriter {
+  insertRun(runId: string, data: Partial<RunRow>): Promise<void>;
+  upsertRun(runId: string, patch: Partial<RunRow>): Promise<void>;
+  writeCostEvent(
+    runId: string,
+    sessionType: SessionType,
+    cost: number,
+  ): Promise<void>;
+}
+
 export function toDbOutcome(outcome: RunWriterOutcome): DbOutcome {
   if (outcome === 'complete') return 'complete';
   if (outcome === 'stuck') return 'stuck';
@@ -84,7 +94,7 @@ export function toDbSessionType(type: SessionType): DbSessionType {
   }
 }
 
-export class PostgresRunWriter {
+export class PostgresRunWriter implements RunWriter {
   constructor(
     private readonly runs: RunStore,
     private readonly costs: CostEventStore,

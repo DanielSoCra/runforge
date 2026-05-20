@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, desc, eq, gte, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, gte, isNull } from 'drizzle-orm';
 
 import type { AutoClaudeDb } from './client.js';
 import {
@@ -152,6 +152,42 @@ export class PostgresRunStore implements RunStore {
         .where(gte(runs.updatedAt, timestamp))
         .orderBy(runs.updatedAt);
       return ok(rows);
+    });
+  }
+
+  async countStuckRunsForIssue(input: {
+    repoOwner: string;
+    repoName: string;
+    issueNumber: number;
+  }) {
+    return unavailableOnThrow(async () => {
+      const [row] = await this.db
+        .select({ value: count() })
+        .from(runs)
+        .where(
+          and(
+            eq(runs.repoOwner, input.repoOwner),
+            eq(runs.repoName, input.repoName),
+            eq(runs.issueNumber, input.issueNumber),
+            eq(runs.outcome, 'stuck'),
+          ),
+        );
+      return ok(row?.value ?? 0);
+    });
+  }
+
+  async markInProgressRunsStuck(completedAt: Date) {
+    return unavailableOnThrow(async () => {
+      const rows = await this.db
+        .update(runs)
+        .set({
+          outcome: 'stuck',
+          completedAt,
+          updatedAt: new Date(),
+        })
+        .where(eq(runs.outcome, 'in-progress'))
+        .returning({ id: runs.id });
+      return ok(rows.map((row) => row.id));
     });
   }
 }

@@ -46,6 +46,12 @@ export interface RunStore {
     changes: Partial<RunInsert>,
   ): Promise<StoreResult<Run>>;
   listRunsUpdatedSince(timestamp: Date): Promise<StoreResult<Run[]>>;
+  countStuckRunsForIssue(input: {
+    repoOwner: string;
+    repoName: string;
+    issueNumber: number;
+  }): Promise<StoreResult<number>>;
+  markInProgressRunsStuck(completedAt: Date): Promise<StoreResult<string[]>>;
 }
 
 export interface CostEventStore {

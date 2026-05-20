@@ -1,7 +1,7 @@
 // src/implementation/decompose.ts
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { WorkRequest, TaskGraph } from '../types.js';
-import type { SupabaseRunWriter } from '../supabase/run-writer.js';
+import type { RunWriter } from '../data/run-writer.js';
 import { validateTaskGraph } from './task-graph.js';
 import { createSingleUnitGraph } from './task-graph.js';
 import { ok, err, type Result } from '../lib/result.js';
@@ -12,7 +12,7 @@ export async function decompose(
   featureBranch: string,
   runtime: SessionRuntime,
   specContent: string,
-  runWriter?: SupabaseRunWriter,
+  runWriter?: RunWriter,
   runId?: string,
   activePlugins?: Array<{ id: string; activatedAt: string }>,
 ): Promise<Result<TaskGraph>> {

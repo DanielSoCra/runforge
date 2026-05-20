@@ -16,7 +16,14 @@ const DEFAULT_GLOBAL: GlobalConfig = {
   defaultModel: 'claude-sonnet-4-6',
 };
 
-export class PostgresConfigReader {
+export interface ConfigReader {
+  start(): Promise<void>;
+  stop(): void;
+  getGlobalConfig(): GlobalConfig;
+  getRepoConfig(owner: string, name: string): RepoConfig | undefined;
+}
+
+export class PostgresConfigReader implements ConfigReader {
   private globalConfig: GlobalConfig = DEFAULT_GLOBAL;
   private repoConfigs: Map<string, RepoConfig> = new Map();
   private timer: ReturnType<typeof setInterval> | null = null;

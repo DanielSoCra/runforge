@@ -35,7 +35,33 @@ import {
 import { RemoteControlManager } from './remote-control.js';
 import { getSupabaseClient } from '../supabase/client.js';
 import { SupabaseConfigReader } from '../supabase/config-reader.js';
-import { SupabaseRunWriter, toDbOutcome } from '../supabase/run-writer.js';
+import { SupabaseRunWriter } from '../supabase/run-writer.js';
+import {
+  createDbClient,
+  createPostgresStores,
+  readCredentialKey,
+} from '@auto-claude/db';
+import {
+  PostgresConfigReader,
+  type ConfigReader,
+} from '../data/config-reader.js';
+import {
+  PostgresRunWriter,
+  toDbOutcome,
+  type RunWriter,
+} from '../data/run-writer.js';
+import { readDaemonDataBackendKind } from '../data/backend-kind.js';
+import {
+  PostgresRepoDataSource,
+  SupabaseRepoDataSource,
+  type RepoDataSource,
+} from '../data/repo-source.js';
+import {
+  PostgresRunHistory,
+  SupabaseRunHistory,
+  type RunHistoryReader,
+  type RunMaintenance,
+} from '../data/run-history.js';
 import { GotchaStore } from '../knowledge/gotcha-store.js';
 import { KnowledgeStore } from '../knowledge/knowledge-store.js';
 import { DEFAULT_POLICIES } from '../knowledge/policy-registry.js';
@@ -150,32 +176,68 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   const stateMgr = new StateManager(stateDir);
   await stateMgr.initialize();
 
-  // Initialize Supabase layer (optional — daemon works without it in legacy mode)
-  const supabase = getSupabaseClient();
-  let configReader: SupabaseConfigReader | null = null;
-  let runWriter: SupabaseRunWriter | null = null;
+  // Initialize data layer. Default preserves current behavior: Supabase DB mode
+  // when configured, otherwise legacy single-repo config mode. Postgres is
+  // opt-in while parity work is still landing.
+  let requestedDataBackend: ReturnType<typeof readDaemonDataBackendKind>;
+  try {
+    requestedDataBackend = readDaemonDataBackendKind();
+  } catch (e) {
+    return err(e instanceof Error ? e : new Error(String(e)));
+  }
+  const supabase =
+    requestedDataBackend === 'postgres' || requestedDataBackend === 'legacy'
+      ? null
+      : getSupabaseClient();
+  let configReader: ConfigReader | null = null;
+  let runWriter: RunWriter | null = null;
+  let repoSource: RepoDataSource | null = null;
+  let runHistory: RunHistoryReader | null = null;
+  let runMaintenance: RunMaintenance | null = null;
+  let postgresClient: ReturnType<typeof createDbClient> | null = null;
 
-  if (supabase) {
+  if (requestedDataBackend === 'postgres') {
+    try {
+      postgresClient = createDbClient({ maxConnections: 8 });
+      const stores = createPostgresStores(postgresClient.db, {
+        credentialKey: readCredentialKey(),
+      });
+      configReader = new PostgresConfigReader(
+        stores.settings,
+        stores.repos,
+        stores.plugins,
+      );
+      await configReader.start();
+      runWriter = new PostgresRunWriter(stores.runs, stores.costs);
+      repoSource = new PostgresRepoDataSource(stores.repos, stores.credentials);
+      const history = new PostgresRunHistory(stores.runs);
+      runHistory = history;
+      runMaintenance = history;
+    } catch (e) {
+      await postgresClient?.sql.end();
+      return err(e instanceof Error ? e : new Error(String(e)));
+    }
+  } else if (supabase) {
     configReader = new SupabaseConfigReader(supabase);
     await configReader.start(); // throws if unreachable — prevents silent misconfiguration
     runWriter = new SupabaseRunWriter(supabase);
+    repoSource = new SupabaseRepoDataSource(supabase);
+    const history = new SupabaseRunHistory(supabase);
+    runHistory = history;
+    runMaintenance = history;
+  } else if (requestedDataBackend === 'supabase') {
+    return err(
+      new Error(
+        'DAEMON_DATA_BACKEND=supabase requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY',
+      ),
+    );
+  }
 
-    // Mark orphaned in-progress runs as stuck (from previous daemon crash/restart)
-    const { data: orphaned, error: orphanErr } = await supabase
-      .from('runs')
-      .update({ outcome: 'stuck', completed_at: new Date().toISOString() })
-      .eq('outcome', 'in-progress')
-      .select('id');
-    if (orphanErr) {
-      console.warn(
-        '[daemon] Failed to clean orphaned runs:',
-        orphanErr.message,
-      );
-    } else if (orphaned && orphaned.length > 0) {
-      console.log(
-        `[daemon] Marked ${orphaned.length} orphaned in-progress runs as stuck`,
-      );
-    }
+  const orphaned = await runMaintenance?.markInProgressRunsStuck();
+  if (orphaned && orphaned > 0) {
+    console.log(
+      `[daemon] Marked ${orphaned} orphaned in-progress runs as stuck`,
+    );
   }
 
   // 3. Initialize services
@@ -655,11 +717,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   let repoManager: RepoManager | null = null;
   let legacyDetector: WorkDetector | null = null;
 
-  if (supabase) {
+  if (repoSource) {
     // DB mode
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     repoManager = new RepoManager(
-      supabase as any,
+      repoSource,
       config.pollIntervalMs,
       async (repoId, owner, name, detector) => {
         if (paused || draining || shuttingDown) return;
@@ -724,6 +785,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
             stateDir,
             runWriter ?? undefined,
             configReader ?? undefined,
+            runHistory ?? undefined,
             repoRoot,
             knowledgeStore,
             repoManager,
@@ -779,6 +841,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
               stateDir,
               runWriter ?? undefined,
               configReader ?? undefined,
+              runHistory ?? undefined,
               repoRoot,
               knowledgeStore,
               repoManager,
@@ -835,6 +898,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
               stateDir,
               runWriter ?? undefined,
               configReader ?? undefined,
+              runHistory ?? undefined,
               repoRoot,
               knowledgeStore,
               repoManager,
@@ -876,6 +940,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     const initResult = await repoManager.initialize();
     if (!initResult.ok) {
       configReader?.stop();
+      await postgresClient?.sql.end();
       await remoteControl.stop();
       return initResult;
     }
@@ -980,6 +1045,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   if (!serverResult.ok) {
     repoManager?.stop();
     configReader?.stop();
+    await postgresClient?.sql.end();
     await remoteControl.stop();
     return serverResult;
   }
@@ -1380,6 +1446,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
             stateDir,
             undefined,
             undefined,
+            undefined,
             repoRoot,
             knowledgeStore,
           )
@@ -1435,6 +1502,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
               stateMgr,
               detector,
               stateDir,
+              undefined,
               undefined,
               undefined,
               repoRoot,
@@ -1493,6 +1561,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
               stateMgr,
               detector,
               stateDir,
+              undefined,
               undefined,
               undefined,
               repoRoot,
@@ -1561,6 +1630,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     stopTechLeadScheduler?.();
     repoManager?.stop();
     configReader?.stop();
+    await postgresClient?.sql.end();
     await remoteControl.stop();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     console.log('[daemon] Instance lock released');
@@ -1658,8 +1728,9 @@ async function processWorkRequest(
   stateMgr: StateManager,
   detector: WorkDetector,
   stateDir: string,
-  runWriter?: SupabaseRunWriter,
-  configReader?: SupabaseConfigReader,
+  runWriter?: RunWriter,
+  configReader?: ConfigReader,
+  runHistory?: RunHistoryReader,
   repoRoot?: string,
   knowledgeStore?: KnowledgeStore,
   repoManager?: RepoManager | null,
@@ -1708,17 +1779,14 @@ async function processWorkRequest(
   });
 
   // Per-issue retry cap (DB mode only) — auto-block issues that have gone stuck too many times
-  if (runWriter) {
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      const { count } = await supabase
-        .from('runs')
-        .select('*', { count: 'exact', head: true })
-        .eq('issue_number', request.issueNumber)
-        .eq('repo_owner', owner)
-        .eq('repo_name', repoName)
-        .eq('outcome', 'stuck');
-      if ((count ?? 0) >= config.maxRunsPerIssue) {
+  if (runWriter && runHistory) {
+    const count = await runHistory.countStuckRunsForIssue({
+      repoOwner: owner,
+      repoName,
+      issueNumber: request.issueNumber,
+    });
+    if (count !== null) {
+      if (count >= config.maxRunsPerIssue) {
         console.warn(
           `[daemon] Issue #${request.issueNumber} hit retry cap (${count} stuck runs) — auto-blocking`,
         );
