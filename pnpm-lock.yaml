@@ -13,6 +13,9 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.52.0
         version: 0.52.0
+      '@auto-claude/db':
+        specifier: workspace:*
+        version: link:../db
       '@supabase/supabase-js':
         specifier: ^2.49.4
         version: 2.99.3

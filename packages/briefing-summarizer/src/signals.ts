@@ -7,7 +7,6 @@
  */
 
 import { execSync } from 'node:child_process';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { log } from './log.js';
 
 export interface DaemonStatus {
@@ -25,20 +24,24 @@ export interface SignalResult {
   gaps: string[];
 }
 
+export interface RunSignalSource {
+  listRunsSince(since: string): Promise<Record<string, unknown>[]>;
+}
+
 /**
  * Collect all four signal sources in parallel.
  * Each source is independently wrapped — a single failure produces
  * a gap note but does not block other sources.
  */
 export async function collectSignals(
-  supabase: SupabaseClient,
+  runSource: RunSignalSource,
   daemonUrl: string,
   since: string,
 ): Promise<SignalResult> {
   const gaps: string[] = [];
 
   const [runsResult, daemonResult, gitResult] = await Promise.allSettled([
-    collectRuns(supabase, since),
+    runSource.listRunsSince(since),
     collectDaemonStatus(daemonUrl),
     collectGitLog(since),
   ]);
@@ -58,7 +61,10 @@ export async function collectSignals(
     daemonStatus = daemonResult.value;
   } else {
     gaps.push(`daemon: ${String(daemonResult.reason)}`);
-    log('warn', `Failed to collect daemon status: ${String(daemonResult.reason)}`);
+    log(
+      'warn',
+      `Failed to collect daemon status: ${String(daemonResult.reason)}`,
+    );
   }
 
   // --- Git log ---
@@ -85,25 +91,14 @@ export async function collectSignals(
 // Individual collectors
 // ---------------------------------------------------------------------------
 
-async function collectRuns(
-  supabase: SupabaseClient,
-  since: string,
-): Promise<Record<string, unknown>[]> {
-  const { data, error } = await supabase
-    .from('runs')
-    .select('*')
-    .gte('updated_at', since);
-
-  if (error) throw new Error(`Supabase runs query failed: ${error.message}`);
-  return (data ?? []) as Record<string, unknown>[];
-}
-
 async function collectDaemonStatus(daemonUrl: string): Promise<DaemonStatus> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
 
   try {
-    const res = await fetch(`${daemonUrl}/status`, { signal: controller.signal });
+    const res = await fetch(`${daemonUrl}/status`, {
+      signal: controller.signal,
+    });
     if (!res.ok) throw new Error(`Daemon status returned ${res.status}`);
     return (await res.json()) as DaemonStatus;
   } finally {

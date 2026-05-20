@@ -2,20 +2,25 @@
  * Briefing Summarizer — standalone process.
  *
  * Runs on a configurable interval (default 5 min), collects system signals,
- * calls Claude Haiku for structured summarization, and writes results to Supabase.
+ * calls Claude Haiku for structured summarization, and writes results.
  *
  * NOT part of Next.js or the daemon — this is a separate Node.js process.
  */
 
 import { execFileSync } from 'node:child_process';
 import Anthropic from '@anthropic-ai/sdk';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { collectSignals, type SignalResult } from './signals.js';
-import { buildSignalPrompt, briefingTool, type PreviousBriefing } from './prompt.js';
-import { extractActivityEvents, type PreviousSnapshot } from './events.js';
+import { collectSignals } from './signals.js';
+import { buildSignalPrompt, briefingTool } from './prompt.js';
+import { extractActivityEvents } from './events.js';
 import { log } from './log.js';
 import { createCycleRunner } from './cycle-runner.js';
 import { startHealthServer } from './health-server.js';
+import {
+  createBriefingDataBackend,
+  readBriefingDataBackendKind,
+  validateBriefingDataBackendEnv,
+} from './data/backend.js';
+import type { BriefingDataBackend, BriefingOutput } from './data/types.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -23,11 +28,10 @@ import { startHealthServer } from './health-server.js';
 
 const INTERVAL_MS = Number(process.env.SUMMARIZER_INTERVAL_MS) || 5 * 60 * 1000;
 const HEALTH_PORT = Number(process.env.HEALTH_PORT) || 3099;
-const HEALTH_MAX_CYCLE_MS = Number(process.env.HEALTH_MAX_CYCLE_MS)
-  || Math.max(INTERVAL_MS * 2, 10 * 60 * 1000);
+const HEALTH_MAX_CYCLE_MS =
+  Number(process.env.HEALTH_MAX_CYCLE_MS) ||
+  Math.max(INTERVAL_MS * 2, 10 * 60 * 1000);
 const DAEMON_URL = process.env.DAEMON_URL ?? 'http://daemon:3847';
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 // ---------------------------------------------------------------------------
@@ -35,13 +39,19 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 // ---------------------------------------------------------------------------
 
 function validateEnv(): void {
-  const missing: string[] = [];
-  if (!SUPABASE_URL) missing.push('SUPABASE_URL');
-  if (!SUPABASE_SERVICE_ROLE_KEY) missing.push('SUPABASE_SERVICE_ROLE_KEY');
-  if (!ANTHROPIC_API_KEY) missing.push('ANTHROPIC_API_KEY');
+  const errors: string[] = [];
+  if (!ANTHROPIC_API_KEY) {
+    errors.push('Missing required environment variables: ANTHROPIC_API_KEY');
+  }
 
-  if (missing.length > 0) {
-    log('error', `Missing required environment variables: ${missing.join(', ')}`);
+  try {
+    validateBriefingDataBackendEnv();
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+
+  if (errors.length > 0) {
+    log('error', errors.join('; '));
     process.exit(1);
   }
 }
@@ -49,12 +59,6 @@ function validateEnv(): void {
 // ---------------------------------------------------------------------------
 // Clients
 // ---------------------------------------------------------------------------
-
-function createSupabaseClient(): SupabaseClient {
-  return createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!, {
-    auth: { persistSession: false },
-  });
-}
 
 function createAnthropicClient(): Anthropic {
   return new Anthropic({ apiKey: ANTHROPIC_API_KEY });
@@ -86,33 +90,8 @@ function getRepoUrl(): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Previous briefing query
-// ---------------------------------------------------------------------------
-
-async function getPreviousBriefing(
-  supabase: SupabaseClient,
-): Promise<(PreviousBriefing & { signal_snapshot: PreviousSnapshot }) | null> {
-  const { data, error } = await supabase
-    .from('briefings')
-    .select('status_line, changes, attention, forecast, signal_snapshot, generated_at')
-    .order('generated_at', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (error || !data) return null;
-  return data as PreviousBriefing & { signal_snapshot: PreviousSnapshot };
-}
-
-// ---------------------------------------------------------------------------
 // Structured model call
 // ---------------------------------------------------------------------------
-
-interface BriefingOutput {
-  status_line: string;
-  changes: unknown[];
-  attention: unknown[];
-  forecast: string;
-}
 
 async function callModel(
   anthropic: Anthropic,
@@ -163,67 +142,29 @@ async function callModel(
 }
 
 // ---------------------------------------------------------------------------
-// Write briefing to Supabase
-// ---------------------------------------------------------------------------
-
-async function writeBriefing(
-  supabase: SupabaseClient,
-  briefing: BriefingOutput,
-  signalSnapshot: SignalResult,
-): Promise<void> {
-  const { error } = await supabase.from('briefings').insert({
-    status_line: briefing.status_line,
-    changes: briefing.changes,
-    attention: briefing.attention,
-    forecast: briefing.forecast,
-    signal_snapshot: signalSnapshot,
-    generated_at: new Date().toISOString(),
-  });
-
-  if (error) {
-    throw new Error(`Failed to write briefing: ${error.message}`);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Write activity events to Supabase
-// ---------------------------------------------------------------------------
-
-async function writeActivityEvents(
-  supabase: SupabaseClient,
-  events: { occurred_at: string; event_type: string; severity: string; summary: string; links: unknown[] }[],
-): Promise<void> {
-  if (events.length === 0) return;
-
-  const { error } = await supabase.from('activity_events').insert(events);
-
-  if (error) {
-    throw new Error(`Failed to write activity events: ${error.message}`);
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Check notification channels (stub)
 // ---------------------------------------------------------------------------
 
-async function checkNotificationChannels(supabase: SupabaseClient): Promise<void> {
-  const { data, error } = await supabase
-    .from('notification_channel_configs')
-    .select('id')
-    .limit(1);
-
-  if (error) {
-    log('warn', `Failed to query notification channels: ${error.message}`);
-    return;
+async function checkNotificationChannels(
+  backend: BriefingDataBackend,
+): Promise<void> {
+  try {
+    const count = await backend.countNotificationChannels();
+    if (count === 0) {
+      // No channels configured — skip dispatch (expected current behavior)
+      return;
+    }
+    // Future: dispatch attention items to configured channels
+    log(
+      'info',
+      `${count} notification channel(s) configured — dispatch not yet implemented`,
+    );
+  } catch (error) {
+    log(
+      'warn',
+      `Failed to query notification channels: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
-
-  if (!data || data.length === 0) {
-    // No channels configured — skip dispatch (expected current behavior)
-    return;
-  }
-
-  // Future: dispatch attention items to configured channels
-  log('info', `${data.length} notification channel(s) configured — dispatch not yet implemented`);
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +172,7 @@ async function checkNotificationChannels(supabase: SupabaseClient): Promise<void
 // ---------------------------------------------------------------------------
 
 async function runCycle(
-  supabase: SupabaseClient,
+  backend: BriefingDataBackend,
   anthropic: Anthropic,
   repoUrl: string | null,
 ): Promise<void> {
@@ -239,13 +180,18 @@ async function runCycle(
   log('info', 'Starting summarizer cycle');
 
   // 1. Get previous briefing's generated_at (or 24h ago)
-  const previous = await getPreviousBriefing(supabase);
-  const since = previous?.generated_at ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const previous = await backend.getPreviousBriefing();
+  const since =
+    previous?.generated_at ??
+    new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   log('info', `Collecting signals since ${since}`);
 
   // 2. Collect all signals in parallel
-  const signals = await collectSignals(supabase, DAEMON_URL, since);
-  log('info', `Collected: ${signals.runs.length} runs, ${signals.gitLog.length} commits, daemon=${signals.daemonStatus ? 'ok' : 'unavailable'}, gaps=${signals.gaps.length}`);
+  const signals = await collectSignals(backend, DAEMON_URL, since);
+  log(
+    'info',
+    `Collected: ${signals.runs.length} runs, ${signals.gitLog.length} commits, daemon=${signals.daemonStatus ? 'ok' : 'unavailable'}, gaps=${signals.gaps.length}`,
+  );
 
   // 3. Build prompt
   const signalPrompt = buildSignalPrompt(signals, previous);
@@ -253,22 +199,29 @@ async function runCycle(
   // 4. Call model
   const briefingOutput = await callModel(anthropic, signalPrompt);
   if (!briefingOutput) {
-    log('warn', 'Model call failed or returned invalid output — skipping this cycle');
+    log(
+      'warn',
+      'Model call failed or returned invalid output — skipping this cycle',
+    );
     return;
   }
   log('info', `Briefing generated: "${briefingOutput.status_line}"`);
 
-  // 5. Write briefing to Supabase
-  await writeBriefing(supabase, briefingOutput, signals);
-  log('info', 'Briefing written to Supabase');
+  // 5. Write briefing
+  await backend.writeBriefing(briefingOutput, signals);
+  log('info', 'Briefing written');
 
   // 6. Extract and write activity events
-  const events = extractActivityEvents(signals, previous?.signal_snapshot ?? null, repoUrl);
-  await writeActivityEvents(supabase, events);
+  const events = extractActivityEvents(
+    signals,
+    previous?.signal_snapshot ?? null,
+    repoUrl,
+  );
+  await backend.writeActivityEvents(events);
   log('info', `Wrote ${events.length} activity event(s)`);
 
   // 7. Check notification channels (stub)
-  await checkNotificationChannels(supabase);
+  await checkNotificationChannels(backend);
 
   const elapsed = Date.now() - cycleStart;
   log('info', `Cycle complete in ${elapsed}ms`);
@@ -281,13 +234,17 @@ async function runCycle(
 async function main(): Promise<void> {
   validateEnv();
 
-  const supabase = createSupabaseClient();
+  const backend = createBriefingDataBackend();
   const anthropic = createAnthropicClient();
   const repoUrl = getRepoUrl();
+  const backendKind = readBriefingDataBackendKind();
 
-  log('info', `Briefing summarizer starting (interval=${INTERVAL_MS}ms, daemon=${DAEMON_URL}, repo=${repoUrl ?? 'unknown'})`);
+  log(
+    'info',
+    `Briefing summarizer starting (interval=${INTERVAL_MS}ms, daemon=${DAEMON_URL}, repo=${repoUrl ?? 'unknown'}, backend=${backendKind})`,
+  );
 
-  const runner = createCycleRunner(() => runCycle(supabase, anthropic, repoUrl));
+  const runner = createCycleRunner(() => runCycle(backend, anthropic, repoUrl));
   const healthServer = await startHealthServer(HEALTH_PORT, {
     getStatus: runner.getStatus,
     maxCycleMs: HEALTH_MAX_CYCLE_MS,
@@ -306,6 +263,7 @@ async function main(): Promise<void> {
     try {
       await runner.shutdown(signal);
     } finally {
+      await backend.close?.();
       healthServer.close();
       process.exit(0);
     }
