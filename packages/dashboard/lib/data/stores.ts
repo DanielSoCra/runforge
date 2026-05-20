@@ -147,6 +147,31 @@ interface DashboardRunAccess {
   readRunDetail(runId: string): Promise<StoreResult<DashboardRunDetail>>;
 }
 
+export interface DashboardIssueRepo {
+  id: string;
+  owner: string;
+  name: string;
+  connectionId: string | null;
+}
+
+export interface DashboardIssueRunRecord {
+  issue_number: number;
+  repo_owner: string;
+  repo_name: string;
+  issue_title: string;
+  outcome: Run['outcome'];
+  current_phase: string | null;
+}
+
+export interface DashboardIssueBoardInputs {
+  repos: DashboardIssueRepo[];
+  runs: DashboardIssueRunRecord[];
+}
+
+interface DashboardIssueAccess {
+  listBoardInputs(): Promise<StoreResult<DashboardIssueBoardInputs>>;
+}
+
 export interface DashboardGitHubConnection {
   id: string;
   displayName: string;
@@ -219,6 +244,7 @@ export interface DashboardStores {
   settings: DashboardSettingsAccess;
   overview: DashboardOverviewAccess;
   runs: DashboardRunAccess;
+  issues: DashboardIssueAccess;
   costs: DashboardCostAccess;
   credentials: DashboardCredentialAccess;
   githubConnections: DashboardGitHubConnectionAccess;
@@ -235,6 +261,7 @@ export function getDashboardStores(): DashboardStores {
       settings: new DashboardSettingsStore(db),
       overview: new DashboardOverviewStore(db),
       runs: new DashboardRunStore(db),
+      issues: new DashboardIssueStore(db),
       costs: new DashboardCostStore(db),
       credentials: new DashboardCredentialStore(db),
       githubConnections: new DashboardGitHubConnectionStore(db),
@@ -323,6 +350,50 @@ class DashboardOverviewStore implements DashboardOverviewAccess {
         totalRepos: enabledRepoCount[0]?.value ?? 0,
         recentRuns: recentRuns.map(toDashboardRunRow),
         budgetByRepoId,
+      });
+    });
+  }
+}
+
+class DashboardIssueStore implements DashboardIssueAccess {
+  constructor(private readonly db: DashboardDb) {}
+
+  async listBoardInputs() {
+    return unavailableOnThrow(async () => {
+      const [repoRows, runRows] = await Promise.all([
+        this.db
+          .select({
+            id: repos.id,
+            owner: repos.owner,
+            name: repos.name,
+            connectionId: repos.connectionId,
+          })
+          .from(repos)
+          .where(and(eq(repos.enabled, true), isNull(repos.deletedAt)))
+          .orderBy(asc(repos.owner), asc(repos.name)),
+        this.db
+          .select({
+            issueNumber: runs.issueNumber,
+            repoOwner: runs.repoOwner,
+            repoName: runs.repoName,
+            issueTitle: runs.issueTitle,
+            outcome: runs.outcome,
+            currentPhase: runs.currentPhase,
+          })
+          .from(runs)
+          .orderBy(desc(runs.startedAt)),
+      ]);
+
+      return ok({
+        repos: repoRows,
+        runs: runRows.map((run) => ({
+          issue_number: run.issueNumber,
+          repo_owner: run.repoOwner,
+          repo_name: run.repoName,
+          issue_title: run.issueTitle,
+          outcome: run.outcome,
+          current_phase: run.currentPhase,
+        })),
       });
     });
   }
