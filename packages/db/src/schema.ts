@@ -101,6 +101,107 @@ export const globalSettings = pgTable('global_settings', {
     .defaultNow(),
 });
 
+export const authUsers = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    email: text('email').notNull(),
+    emailVerified: boolean('email_verified').notNull().default(false),
+    name: text('name').notNull().default(''),
+    image: text('image'),
+    role: teamRoleEnum('role').notNull().default('viewer'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    emailUnique: uniqueIndex('users_email_key').on(table.email),
+    roleIdx: index('idx_users_role').on(table.role),
+  }),
+);
+
+export const authSessions = pgTable(
+  'sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => authUsers.id, { onDelete: 'cascade' }),
+    token: text('token').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    ipAddress: text('ip_address'),
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    tokenUnique: uniqueIndex('sessions_token_key').on(table.token),
+    userIdx: index('idx_sessions_user_id').on(table.userId),
+  }),
+);
+
+export const authAccounts = pgTable(
+  'accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => authUsers.id, { onDelete: 'cascade' }),
+    accountId: text('account_id').notNull(),
+    providerId: text('provider_id').notNull(),
+    accessToken: text('access_token'),
+    refreshToken: text('refresh_token'),
+    idToken: text('id_token'),
+    accessTokenExpiresAt: timestamp('access_token_expires_at', {
+      withTimezone: true,
+    }),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at', {
+      withTimezone: true,
+    }),
+    scope: text('scope'),
+    password: text('password'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    providerAccountUnique: uniqueIndex('accounts_provider_account_key').on(
+      table.providerId,
+      table.accountId,
+    ),
+    userIdx: index('idx_accounts_user_id').on(table.userId),
+  }),
+);
+
+export const authVerifications = pgTable(
+  'verifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    identifier: text('identifier').notNull(),
+    value: text('value').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    identifierIdx: index('idx_verifications_identifier').on(table.identifier),
+  }),
+);
+
 export const githubConnections = pgTable('github_connections', {
   id: uuid('id').primaryKey().defaultRandom(),
   displayName: text('display_name').notNull(),
@@ -439,3 +540,7 @@ export type GitHubConnection = typeof githubConnections.$inferSelect;
 export type GitHubOrg = typeof githubOrgs.$inferSelect;
 export type Briefing = typeof briefings.$inferSelect;
 export type ActivityEvent = typeof activityEvents.$inferSelect;
+export type AuthAccount = typeof authAccounts.$inferSelect;
+export type AuthSession = typeof authSessions.$inferSelect;
+export type AuthUser = typeof authUsers.$inferSelect;
+export type AuthVerification = typeof authVerifications.$inferSelect;
