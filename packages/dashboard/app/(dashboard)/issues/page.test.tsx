@@ -1,18 +1,21 @@
 vi.mock('@/lib/supabase/server', () => ({
   createClient: vi.fn(),
 }));
-vi.mock('@/lib/supabase/service', () => ({
-  createServiceClient: vi.fn(),
-}));
 vi.mock('@/lib/auth', () => ({
   requireUser: vi.fn(),
+}));
+const storeMocks = vi.hoisted(() => ({
+  getDashboardStores: vi.fn(),
+  readCredential: vi.fn(),
+}));
+vi.mock('@/lib/data/stores', () => ({
+  getDashboardStores: storeMocks.getDashboardStores,
 }));
 
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import IssuesPage from './page';
 import { createClient } from '@/lib/supabase/server';
-import { createServiceClient } from '@/lib/supabase/service';
 import { requireUser } from '@/lib/auth';
 
 function mockSupabase(repos: Record<string, unknown>[] = [], runs: Record<string, unknown>[] = []) {
@@ -32,8 +35,6 @@ function mockSupabase(repos: Record<string, unknown>[] = [], runs: Record<string
     }),
   });
 
-  const rpcFn = vi.fn().mockResolvedValue({ data: null });
-
   const fromFn = vi.fn((table: string) => {
     if (table === 'repos') return { select: repoSelectFn };
     if (table === 'runs') return { select: vi.fn().mockReturnValue(runsChainable()) };
@@ -41,14 +42,20 @@ function mockSupabase(repos: Record<string, unknown>[] = [], runs: Record<string
   });
 
   vi.mocked(createClient).mockResolvedValue({ from: fromFn } as never);
-  vi.mocked(createServiceClient).mockReturnValue({ rpc: rpcFn } as never);
-  return { rpcFn };
 }
 
 describe('IssuesPage', () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
     delete process.env.GITHUB_TOKEN;
+    storeMocks.readCredential.mockResolvedValue({
+      ok: false,
+      error: 'not-found',
+      message: 'missing connection',
+    });
+    storeMocks.getDashboardStores.mockReturnValue({
+      githubConnections: { readCredential: storeMocks.readCredential },
+    });
   });
 
   it('shows empty-state when no enabled repos exist (#129)', async () => {
@@ -75,14 +82,18 @@ describe('IssuesPage', () => {
 
     expect(screen.getByText(/None of your enabled repos have a GitHub token/)).toBeInTheDocument();
     expect(screen.getByText('Go to Settings')).toBeInTheDocument();
+    expect(storeMocks.getDashboardStores).not.toHaveBeenCalled();
   });
 
-  it('calls decrypt_github_token via service-role client, not user-session client (#171)', async () => {
+  it('reads connection credentials through the app-owned store', async () => {
     const repos = [
       { id: '1', owner: 'acme', name: 'app', connection_id: 'conn-1' },
     ];
-    const { rpcFn } = mockSupabase(repos, []);
-    rpcFn.mockResolvedValue({ data: 'ghp_faketoken123' });
+    mockSupabase(repos, []);
+    storeMocks.readCredential.mockResolvedValue({
+      ok: true,
+      value: { githubLogin: 'acme', token: 'ghp_faketoken123' },
+    });
 
     const originalFetch = global.fetch;
     global.fetch = vi.fn().mockResolvedValue({
@@ -93,29 +104,29 @@ describe('IssuesPage', () => {
     try {
       await IssuesPage();
 
-      // Service client should have been used for decrypt_github_token
-      expect(createServiceClient).toHaveBeenCalled();
-      expect(rpcFn).toHaveBeenCalledWith('decrypt_github_token', { p_connection_id: 'conn-1' });
+      expect(storeMocks.readCredential).toHaveBeenCalledWith('conn-1');
     } finally {
       global.fetch = originalFetch;
     }
   });
 
   it('rejects unauthenticated users before decrypting tokens (#367)', async () => {
-    const { rpcFn } = mockSupabase([], []);
+    mockSupabase([], []);
     vi.mocked(requireUser).mockRejectedValueOnce(new Error('Unauthorized'));
 
     await expect(IssuesPage()).rejects.toThrow('Unauthorized');
-    // decrypt_github_token RPC must NOT have been called
-    expect(rpcFn).not.toHaveBeenCalled();
+    expect(storeMocks.readCredential).not.toHaveBeenCalled();
   });
 
   it('shows board when at least one repo has a GitHub token (#129)', async () => {
     const repos = [
       { id: '1', owner: 'acme', name: 'app', connection_id: 'conn-1' },
     ];
-    const { rpcFn } = mockSupabase(repos, []);
-    rpcFn.mockResolvedValue({ data: 'ghp_faketoken123' });
+    mockSupabase(repos, []);
+    storeMocks.readCredential.mockResolvedValue({
+      ok: true,
+      value: { githubLogin: 'acme', token: 'ghp_faketoken123' },
+    });
 
     // Mock fetch for GitHub API
     const originalFetch = global.fetch;
