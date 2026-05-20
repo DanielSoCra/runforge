@@ -12,7 +12,9 @@ export interface DatabaseEnv {
   AUTO_CLAUDE_DATABASE_URL?: string;
 }
 
-export function readDatabaseUrl(env: DatabaseEnv = process.env): string {
+export function readDatabaseUrl(
+  env: DatabaseEnv = process.env as DatabaseEnv,
+): string {
   const parsed = DatabaseUrl.safeParse(env.AUTO_CLAUDE_DATABASE_URL);
   if (!parsed.success) {
     throw new Error(
