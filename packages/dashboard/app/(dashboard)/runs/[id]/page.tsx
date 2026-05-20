@@ -1,9 +1,9 @@
-import { createClient } from '@/lib/supabase/server';
 import { notFound } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { BudgetBadge } from '@/components/budget-badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageError } from '@/components/page-error';
+import { getDashboardStores } from '@/lib/data/stores';
 
 interface PhaseEvent {
   name: string;
@@ -14,19 +14,14 @@ interface PhaseEvent {
 
 export default async function RunDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
-  const { data: run, error: runError } = await supabase.from('runs').select('*').eq('id', id).single();
-  if (runError && runError.code !== 'PGRST116') {
-    console.error('[run-detail] failed to load run:', runError);
+  const detail = await getDashboardStores().runs.readRunDetail(id);
+  if (!detail.ok && detail.error === 'not-found') return notFound();
+  if (!detail.ok) {
+    console.error('[run-detail] failed to load run:', detail.message);
     return <PageError />;
   }
-  if (!run) notFound();
 
-  let budgetLimit: number | null = null;
-  if (run.repo_id) {
-    const { data: repo } = await supabase.from('repos').select('budget_limit').eq('id', run.repo_id).single();
-    budgetLimit = repo?.budget_limit ?? null;
-  }
+  const { budgetLimit, run } = detail.value;
 
   const phases = Array.isArray(run.phases) ? (run.phases as unknown as PhaseEvent[]) : [];
 

@@ -1,8 +1,8 @@
 import { Suspense } from 'react';
-import { createClient } from '@/lib/supabase/server';
 import { RunTable } from '@/components/run-table';
 import { RunFilters } from '@/components/run-filters';
 import { PageError } from '@/components/page-error';
+import { getDashboardStores } from '@/lib/data/stores';
 import Link from 'next/link';
 
 const VALID_OUTCOMES = ['in-progress', 'complete', 'stuck', 'escalated'] as const;
@@ -19,6 +19,8 @@ function isValidRange(value: string): value is `${RangeDays}` {
   return RANGE_OPTIONS.map(String).includes(value);
 }
 
+export const dynamic = 'force-dynamic';
+
 export default async function RunsPage({
   searchParams,
 }: {
@@ -27,32 +29,19 @@ export default async function RunsPage({
   const { repo, outcome, range: rawRange } = await searchParams;
   const rangeDays = rawRange && isValidRange(rawRange) ? Number(rawRange) as RangeDays : 30;
 
-  const supabase = await createClient();
-
   const since = new Date();
   since.setDate(since.getDate() - rangeDays);
 
-  let query = supabase
-    .from('runs')
-    .select('*')
-    .gte('started_at', since.toISOString())
-    .order('started_at', { ascending: false })
-    .limit(100);
-
-  if (repo) query = query.eq('repo_id', repo);
-  if (outcome && isValidOutcome(outcome)) query = query.eq('outcome', outcome);
-
-  const [{ data: runs, error: runsError }, { data: repos }] = await Promise.all([
-    query,
-    supabase.from('repos').select('id, name, owner, budget_limit').is('deleted_at', null),
-  ]);
-  if (runsError) {
-    console.error('[runs] failed to load runs:', runsError);
+  const runHistory = await getDashboardStores().runs.listRunHistory({
+    since,
+    repoId: repo,
+    outcome: outcome && isValidOutcome(outcome) ? outcome : undefined,
+    limit: 100,
+  });
+  if (!runHistory.ok) {
+    console.error('[runs] failed to load runs:', runHistory.message);
     return <PageError />;
   }
-
-  const budgetByRepoId: Record<string, number | null> = {};
-  for (const r of repos ?? []) budgetByRepoId[r.id] = r.budget_limit;
 
   // Build base URL for range links, preserving existing filters
   const filterParams = new URLSearchParams();
@@ -88,9 +77,12 @@ export default async function RunsPage({
         </div>
       </div>
       <Suspense fallback={null}>
-        <RunFilters repos={(repos ?? []).map((r) => ({ id: r.id, name: r.name, owner: r.owner }))} />
+        <RunFilters repos={runHistory.value.repos} />
       </Suspense>
-      <RunTable runs={runs ?? []} budgetByRepoId={budgetByRepoId} />
+      <RunTable
+        runs={runHistory.value.runs}
+        budgetByRepoId={runHistory.value.budgetByRepoId}
+      />
     </div>
   );
 }
