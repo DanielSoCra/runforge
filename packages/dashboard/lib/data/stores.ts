@@ -12,6 +12,7 @@ import {
 } from '../../../db/src/credential-crypto';
 import { readDatabaseUrl } from '../../../db/src/env';
 import {
+  apiKeys,
   githubConnections,
   githubOrgs,
   globalSettings,
@@ -40,6 +41,19 @@ interface DashboardSettingsAccess {
   updateGlobalSettings(
     changes: Partial<GlobalSettings>,
   ): Promise<StoreResult<GlobalSettings>>;
+}
+
+type DashboardRepoCredentialKind =
+  | 'source-control'
+  | 'model-provider'
+  | 'webhook-secret';
+
+interface DashboardCredentialAccess {
+  storeRepoCredential(
+    repositoryId: string,
+    kind: DashboardRepoCredentialKind,
+    plaintext: string,
+  ): Promise<StoreResult>;
 }
 
 export interface DashboardGitHubConnection {
@@ -112,6 +126,7 @@ interface DashboardGitHubConnectionAccess {
 
 export interface DashboardStores {
   settings: DashboardSettingsAccess;
+  credentials: DashboardCredentialAccess;
   githubConnections: DashboardGitHubConnectionAccess;
 }
 
@@ -124,6 +139,7 @@ export function getDashboardStores(): DashboardStores {
     const db = getDashboardDbClient().db;
     dashboardStores = {
       settings: new DashboardSettingsStore(db),
+      credentials: new DashboardCredentialStore(db),
       githubConnections: new DashboardGitHubConnectionStore(db),
     };
   }
@@ -161,6 +177,43 @@ class DashboardSettingsStore implements DashboardSettingsAccess {
       return row
         ? ok(row)
         : unavailable('global settings update returned no row');
+    });
+  }
+}
+
+class DashboardCredentialStore implements DashboardCredentialAccess {
+  constructor(private readonly db: DashboardDb) {}
+
+  async storeRepoCredential(
+    repositoryId: string,
+    kind: DashboardRepoCredentialKind,
+    plaintext: string,
+  ) {
+    return unavailableOnThrow(async () => {
+      if (!(await repositoryExists(this.db, repositoryId))) {
+        return notFound(`repository ${repositoryId} was not found`);
+      }
+
+      const encryptedValue = encodeCredentialEnvelope(
+        encryptCredential(
+          plaintext,
+          readCredentialKey(),
+          repoCredentialAad(repositoryId, kind),
+        ),
+      );
+
+      const [row] = await this.db
+        .insert(apiKeys)
+        .values({ repoId: repositoryId, keyType: kind, encryptedValue })
+        .onConflictDoUpdate({
+          target: [apiKeys.repoId, apiKeys.keyType],
+          set: { encryptedValue, updatedAt: new Date() },
+        })
+        .returning({ id: apiKeys.id });
+
+      return row
+        ? ok(undefined)
+        : unavailable('repository credential upsert returned no row');
     });
   }
 }
@@ -430,7 +483,7 @@ class DashboardGitHubConnectionStore
 function createDashboardDbClient() {
   const sql = postgres(readDatabaseUrl(), { max: 14 });
   const db = drizzle(sql, {
-    schema: { githubConnections, githubOrgs, globalSettings, repos },
+    schema: { apiKeys, githubConnections, githubOrgs, globalSettings, repos },
   });
   return { db, sql };
 }
@@ -484,6 +537,25 @@ function decodeCredentialEnvelope(value: Buffer): CredentialEnvelope {
     );
   }
   return parsed;
+}
+
+function repoCredentialAad(
+  repositoryId: string,
+  kind: DashboardRepoCredentialKind,
+): string {
+  return `${repositoryId}:${kind}`;
+}
+
+async function repositoryExists(
+  db: DashboardDb,
+  repositoryId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: repos.id })
+    .from(repos)
+    .where(eq(repos.id, repositoryId))
+    .limit(1);
+  return Boolean(row);
 }
 
 function errorMessage(error: unknown): string {
