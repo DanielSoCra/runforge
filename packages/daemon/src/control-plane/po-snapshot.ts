@@ -127,6 +127,7 @@ async function readRunStates(stateDir: string): Promise<RunState[]> {
   try {
     files = await readdir(runsDir);
   } catch (e) {
+    if (isMissingPathError(e)) return [];
     console.warn('[po-snapshot] failed to read run states:', e);
     return [];
   }
@@ -137,6 +138,13 @@ async function readRunStates(stateDir: string): Promise<RunState[]> {
     if (result.ok) runs.push(result.value);
   }
   return runs;
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === 'ENOENT';
 }
 
 async function readBacklog(
