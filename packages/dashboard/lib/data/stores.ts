@@ -1,9 +1,14 @@
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
 import { readDatabaseUrl } from '../../../db/src/env';
-import { globalSettings, type GlobalSettings } from '../../../db/src/schema';
+import {
+  githubConnections,
+  githubOrgs,
+  globalSettings,
+  type GlobalSettings,
+} from '../../../db/src/schema';
 
 type StoreUnavailable = {
   ok: false;
@@ -21,8 +26,23 @@ interface DashboardSettingsAccess {
   ): Promise<StoreResult<GlobalSettings>>;
 }
 
+export interface DashboardGitHubConnection {
+  id: string;
+  displayName: string;
+  githubLogin: string;
+  avatarUrl: string | null;
+  status: string;
+  createdAt: Date;
+  organizations: Array<{ login: string }>;
+}
+
+interface DashboardGitHubConnectionAccess {
+  listConnections(): Promise<StoreResult<DashboardGitHubConnection[]>>;
+}
+
 export interface DashboardStores {
   settings: DashboardSettingsAccess;
+  githubConnections: DashboardGitHubConnectionAccess;
 }
 
 type DashboardDb = ReturnType<typeof createDashboardDbClient>['db'];
@@ -30,9 +50,13 @@ type DashboardDb = ReturnType<typeof createDashboardDbClient>['db'];
 let dashboardStores: DashboardStores | undefined;
 
 export function getDashboardStores(): DashboardStores {
-  dashboardStores ??= {
-    settings: new DashboardSettingsStore(getDashboardDbClient().db),
-  };
+  if (!dashboardStores) {
+    const db = getDashboardDbClient().db;
+    dashboardStores = {
+      settings: new DashboardSettingsStore(db),
+      githubConnections: new DashboardGitHubConnectionStore(db),
+    };
+  }
   return dashboardStores;
 }
 
@@ -71,9 +95,63 @@ class DashboardSettingsStore implements DashboardSettingsAccess {
   }
 }
 
+class DashboardGitHubConnectionStore
+  implements DashboardGitHubConnectionAccess
+{
+  constructor(private readonly db: DashboardDb) {}
+
+  async listConnections() {
+    return unavailableOnThrow(async () => {
+      const connections = await this.db
+        .select({
+          id: githubConnections.id,
+          displayName: githubConnections.displayName,
+          githubLogin: githubConnections.githubLogin,
+          avatarUrl: githubConnections.avatarUrl,
+          status: githubConnections.status,
+          createdAt: githubConnections.createdAt,
+        })
+        .from(githubConnections)
+        .orderBy(githubConnections.createdAt);
+
+      if (connections.length === 0) return ok([]);
+
+      const orgs = await this.db
+        .select({
+          connectionId: githubOrgs.connectionId,
+          login: githubOrgs.login,
+        })
+        .from(githubOrgs)
+        .where(
+          inArray(
+            githubOrgs.connectionId,
+            connections.map((connection) => connection.id),
+          ),
+        )
+        .orderBy(githubOrgs.login);
+
+      const orgsByConnection = new Map<string, Array<{ login: string }>>();
+      for (const org of orgs) {
+        const entries = orgsByConnection.get(org.connectionId) ?? [];
+        entries.push({ login: org.login });
+        orgsByConnection.set(org.connectionId, entries);
+      }
+
+      return ok(
+        connections.map((connection) => ({
+          ...connection,
+          organizations: orgsByConnection.get(connection.id) ?? [],
+        })),
+      );
+    });
+  }
+}
+
 function createDashboardDbClient() {
   const sql = postgres(readDatabaseUrl(), { max: 14 });
-  const db = drizzle(sql, { schema: { globalSettings } });
+  const db = drizzle(sql, {
+    schema: { githubConnections, githubOrgs, globalSettings },
+  });
   return { db, sql };
 }
 
