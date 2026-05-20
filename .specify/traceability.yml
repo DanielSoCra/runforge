@@ -1116,6 +1116,9 @@ STACK-AC-DATA-PLATFORM:
     - packages/daemon/src/data/**
     - packages/briefing-summarizer/src/data/**
     - infra/postgres/**
+    - scripts/install-daemon.sh
+    - scripts/com.autoclaude.daemon.plist
+    - .env.mac.example
   test_paths:
     - packages/db/**/*.test.ts
     - packages/dashboard/lib/data/**/*.test.ts

@@ -46,6 +46,29 @@ describe('docker-compose self-hosted Postgres runtime (#626)', () => {
   });
 });
 
+describe('native daemon launchd installer (#626)', () => {
+  const raw = readFileSync(resolve(REPO_ROOT, 'scripts/install-daemon.sh'), 'utf-8');
+
+  it('uses daemon backend values that do not force Postgres in legacy mode', () => {
+    expect(raw).toContain('DAEMON_DATA_BACKEND_VALUE="${DAEMON_DATA_BACKEND:-auto}"');
+    expect(raw).toContain('AUTO_CLAUDE_DATABASE_URL_VALUE="${AUTO_CLAUDE_DATABASE_URL:-}"');
+    expect(raw).toContain('ENCRYPTION_KEY_VALUE="${ENCRYPTION_KEY:-}"');
+  });
+
+  it('requires the project-owned database only for backends that use it', () => {
+    expect(raw).toContain('if [ "$DAEMON_DATA_BACKEND_VALUE" = "postgres" ]; then');
+    expect(raw).toContain('if [ "$DAEMON_DATA_BACKEND_VALUE" = "supabase" ]; then');
+    expect(raw).toContain('if [ "$DAEMON_DATA_BACKEND_VALUE" = "auto" ] && {');
+    expect(raw).not.toContain('-e "s|__AUTO_CLAUDE_DATABASE_URL__|${AUTO_CLAUDE_DATABASE_URL}|g"');
+  });
+
+  it('writes resolved backend values into the plist template', () => {
+    expect(raw).toContain('-e "s|__AUTO_CLAUDE_DATABASE_URL__|${AUTO_CLAUDE_DATABASE_URL_VALUE}|g"');
+    expect(raw).toContain('-e "s|__DAEMON_DATA_BACKEND__|${DAEMON_DATA_BACKEND_VALUE}|g"');
+    expect(raw).toContain('-e "s|__ENCRYPTION_KEY__|${ENCRYPTION_KEY_VALUE}|g"');
+  });
+});
+
 describe('.dockerignore excludes secret files (#183)', () => {
   const dockerignore = readFileSync(resolve(REPO_ROOT, '.dockerignore'), 'utf-8');
 
