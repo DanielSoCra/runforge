@@ -52,7 +52,7 @@ ARCH-SDD-SPEC-LIFECYCLE:
 # --- Auto-Claude L0 spec (vision — root of all Auto-Claude specs) ---
 
 L0-AC-VISION:
-  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, FUNC-AC-PLUGINS, FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, FUNC-AC-AGENT-DISCIPLINE, FUNC-AC-CONTROLLED-ARTIFACT-DELIVERY, FUNC-AC-RECOVERABLE-FAILURE-ROUTING, FUNC-AC-RUNTIME-SOURCE-ISOLATION, STACK-AC-CONVENTIONS]
+  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, FUNC-AC-PLUGINS, FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, FUNC-AC-AGENT-DISCIPLINE, FUNC-AC-CONTROLLED-ARTIFACT-DELIVERY, FUNC-AC-RECOVERABLE-FAILURE-ROUTING, FUNC-AC-RUNTIME-SOURCE-ISOLATION, FUNC-AC-DATA-PLATFORM, FUNC-AC-OPERATOR-AUTH, STACK-AC-CONVENTIONS]
   status: draft
 
 # --- Auto-Claude L1 specs ---
@@ -1083,4 +1083,64 @@ STACK-CONCIERGE-BOARD:
     - packages/concierge/src/board/
   test_paths:
     - packages/concierge/src/board/**/*.test.ts
+  status: draft
+
+# --- Issue #626: Supabase -> self-hosted Postgres 18 + Better Auth ---
+# Specified as TWO capability chains, not the single SELF-HOSTED-DATA-AUTH
+# chain suggested in the issue (which permits adjusting to local conventions).
+# The split keeps persistence/migration ownership (DATA-PLATFORM: stores,
+# migrations, credential store, backup, compose) separate from
+# identity/authorization ownership (OPERATOR-AUTH: identity, session, roles).
+# These entries are specs-only: every code_paths/test_paths value is a future
+# glob target that marks intended governance scope and is reassigned to
+# concrete governed paths when the implementation lands. The existing
+# DASHBOARD and CONTROL-PLANE entries remain authoritative for current code
+# until then; coexistence and eventual deprecation are described in the new
+# L2 System Boundaries.
+
+FUNC-AC-DATA-PLATFORM:
+  children: [ARCH-AC-DATA-PLATFORM]
+  status: draft
+
+ARCH-AC-DATA-PLATFORM:
+  parent: FUNC-AC-DATA-PLATFORM
+  children: [STACK-AC-DATA-PLATFORM]
+  status: draft
+
+STACK-AC-DATA-PLATFORM:
+  parent: ARCH-AC-DATA-PLATFORM
+  children: []
+  code_paths:
+    - packages/db/**
+    - packages/dashboard/lib/data/**
+    - packages/daemon/src/data/**
+    - packages/briefing-summarizer/src/data/**
+    - infra/postgres/**
+  test_paths:
+    - packages/db/**/*.test.ts
+    - packages/dashboard/lib/data/**/*.test.ts
+    - packages/daemon/src/data/**/*.test.ts
+  status: draft
+
+FUNC-AC-OPERATOR-AUTH:
+  children: [ARCH-AC-OPERATOR-AUTH]
+  status: draft
+
+ARCH-AC-OPERATOR-AUTH:
+  parent: FUNC-AC-OPERATOR-AUTH
+  children: [STACK-AC-OPERATOR-AUTH]
+  status: draft
+
+STACK-AC-OPERATOR-AUTH:
+  parent: ARCH-AC-OPERATOR-AUTH
+  children: []
+  code_paths:
+    - packages/auth/**
+    - packages/dashboard/lib/auth/**
+    - packages/dashboard/app/api/auth/**
+    - packages/dashboard/app/(auth)/**
+  test_paths:
+    - packages/auth/**/*.test.ts
+    - packages/dashboard/lib/auth/**/*.test.ts
+    - packages/dashboard/app/api/auth/**/*.test.ts
   status: draft
