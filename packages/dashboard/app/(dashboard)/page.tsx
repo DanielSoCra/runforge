@@ -1,34 +1,20 @@
-import { createClient } from '@/lib/supabase/server';
+import { PageError } from '@/components/page-error';
 import { StatsCards } from '@/components/stats-cards';
 import { RunTable } from '@/components/run-table';
+import { getDashboardStores } from '@/lib/data/stores';
+
+export const dynamic = 'force-dynamic';
 
 export default async function HomePage() {
-  const supabase = await createClient();
-
   // UTC midnight for "today" — consistent regardless of server timezone
   const todayUTC = new Date();
   todayUTC.setUTCHours(0, 0, 0, 0);
 
-  const [{ data: repos }, { data: runs }, { data: costs }, { count: activeRunsCount }, { data: allRepos }] = await Promise.all([
-    supabase.from('repos').select('id').is('deleted_at', null).eq('enabled', true),
-    supabase.from('runs')
-      .select('*')
-      .order('started_at', { ascending: false })
-      .limit(10),
-    supabase.from('cost_events')
-      .select('cost')
-      .gte('recorded_at', todayUTC.toISOString()),
-    // Dedicated count query — not limited to 10 rows like the recent-runs list
-    supabase.from('runs')
-      .select('id', { count: 'exact', head: true })
-      .eq('outcome', 'in-progress'),
-    supabase.from('repos').select('id, budget_limit').is('deleted_at', null),
-  ]);
-
-  const activeRuns = activeRunsCount ?? 0;
-  const todayCost = costs?.reduce((sum, e) => sum + Number(e.cost), 0) ?? 0;
-  const budgetByRepoId: Record<string, number | null> = {};
-  for (const r of allRepos ?? []) budgetByRepoId[r.id] = r.budget_limit;
+  const overview = await getDashboardStores().overview.readOverview(todayUTC);
+  if (!overview.ok) {
+    console.error('[dashboard] failed to load overview:', overview.message);
+    return <PageError />;
+  }
 
   let daemonStatus: 'running' | 'paused' | 'offline' = 'offline';
   if (!process.env.DAEMON_URL) {
@@ -53,14 +39,17 @@ export default async function HomePage() {
         <p className="text-muted-foreground text-sm">Overview of all pipeline activity</p>
       </div>
       <StatsCards
-        activeRuns={activeRuns}
-        todayCost={todayCost}
-        totalRepos={repos?.length ?? 0}
+        activeRuns={overview.value.activeRuns}
+        todayCost={overview.value.todayCost}
+        totalRepos={overview.value.totalRepos}
         daemonStatus={daemonStatus}
       />
       <div>
         <h2 className="text-lg font-medium mb-4">Recent Runs</h2>
-        <RunTable runs={runs ?? []} budgetByRepoId={budgetByRepoId} />
+        <RunTable
+          runs={overview.value.recentRuns}
+          budgetByRepoId={overview.value.budgetByRepoId}
+        />
       </div>
     </div>
   );

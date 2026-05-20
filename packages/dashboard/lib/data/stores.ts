@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, eq, gte, inArray, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
@@ -20,6 +20,7 @@ import {
   repos,
   runs,
   type GlobalSettings,
+  type Run,
 } from '../../../db/src/schema';
 
 type StoreUnavailable = {
@@ -70,6 +71,38 @@ interface DashboardCostAccess {
   listCostEventsSince(
     since: Date,
   ): Promise<StoreResult<DashboardCostEvent[]>>;
+}
+
+export interface DashboardRunRow {
+  id: string;
+  repo_id: string | null;
+  repo_owner: string;
+  repo_name: string;
+  issue_number: number;
+  issue_title: string;
+  pipeline_variant: string;
+  current_phase: string | null;
+  outcome: Run['outcome'];
+  total_cost: number;
+  phases: Run['phases'];
+  fix_attempts: number;
+  report: string | null;
+  active_plugins: string[];
+  started_at: string;
+  completed_at: string | null;
+  updated_at: string;
+}
+
+export interface DashboardOverview {
+  activeRuns: number;
+  todayCost: number;
+  totalRepos: number;
+  recentRuns: DashboardRunRow[];
+  budgetByRepoId: Record<string, number | null>;
+}
+
+interface DashboardOverviewAccess {
+  readOverview(todayUtc: Date): Promise<StoreResult<DashboardOverview>>;
 }
 
 export interface DashboardGitHubConnection {
@@ -142,6 +175,7 @@ interface DashboardGitHubConnectionAccess {
 
 export interface DashboardStores {
   settings: DashboardSettingsAccess;
+  overview: DashboardOverviewAccess;
   costs: DashboardCostAccess;
   credentials: DashboardCredentialAccess;
   githubConnections: DashboardGitHubConnectionAccess;
@@ -156,6 +190,7 @@ export function getDashboardStores(): DashboardStores {
     const db = getDashboardDbClient().db;
     dashboardStores = {
       settings: new DashboardSettingsStore(db),
+      overview: new DashboardOverviewStore(db),
       costs: new DashboardCostStore(db),
       credentials: new DashboardCredentialStore(db),
       githubConnections: new DashboardGitHubConnectionStore(db),
@@ -195,6 +230,56 @@ class DashboardSettingsStore implements DashboardSettingsAccess {
       return row
         ? ok(row)
         : unavailable('global settings update returned no row');
+    });
+  }
+}
+
+class DashboardOverviewStore implements DashboardOverviewAccess {
+  constructor(private readonly db: DashboardDb) {}
+
+  async readOverview(todayUtc: Date) {
+    return unavailableOnThrow(async () => {
+      const [
+        enabledRepoCount,
+        recentRuns,
+        todayCosts,
+        activeRunCount,
+        repoBudgets,
+      ] = await Promise.all([
+        this.db
+          .select({ value: count() })
+          .from(repos)
+          .where(and(isNull(repos.deletedAt), eq(repos.enabled, true))),
+        this.db.select().from(runs).orderBy(desc(runs.startedAt)).limit(10),
+        this.db
+          .select({ cost: costEvents.cost })
+          .from(costEvents)
+          .where(gte(costEvents.recordedAt, todayUtc)),
+        this.db
+          .select({ value: count() })
+          .from(runs)
+          .where(eq(runs.outcome, 'in-progress')),
+        this.db
+          .select({ id: repos.id, budgetLimit: repos.budgetLimit })
+          .from(repos)
+          .where(isNull(repos.deletedAt)),
+      ]);
+
+      const budgetByRepoId: Record<string, number | null> = {};
+      for (const repo of repoBudgets) {
+        budgetByRepoId[repo.id] = repo.budgetLimit;
+      }
+
+      return ok({
+        activeRuns: activeRunCount[0]?.value ?? 0,
+        todayCost: todayCosts.reduce(
+          (sum, event) => sum + Number(event.cost),
+          0,
+        ),
+        totalRepos: enabledRepoCount[0]?.value ?? 0,
+        recentRuns: recentRuns.map(toDashboardRunRow),
+        budgetByRepoId,
+      });
     });
   }
 }
@@ -542,6 +627,28 @@ let dashboardDbClient: ReturnType<typeof createDashboardDbClient> | undefined;
 function getDashboardDbClient() {
   dashboardDbClient ??= createDashboardDbClient();
   return dashboardDbClient;
+}
+
+function toDashboardRunRow(run: Run): DashboardRunRow {
+  return {
+    id: run.id,
+    repo_id: run.repoId,
+    repo_owner: run.repoOwner,
+    repo_name: run.repoName,
+    issue_number: run.issueNumber,
+    issue_title: run.issueTitle,
+    pipeline_variant: run.pipelineVariant,
+    current_phase: run.currentPhase,
+    outcome: run.outcome,
+    total_cost: run.totalCost,
+    phases: run.phases,
+    fix_attempts: run.fixAttempts,
+    report: run.report,
+    active_plugins: run.activePlugins,
+    started_at: run.startedAt.toISOString(),
+    completed_at: run.completedAt?.toISOString() ?? null,
+    updated_at: run.updatedAt.toISOString(),
+  };
 }
 
 async function unavailableOnThrow<T>(
