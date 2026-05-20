@@ -14,14 +14,13 @@ vi.mock('@/lib/supabase/server', () => ({
   }),
 }));
 
-// Mock service client for getUpNext (needs service-role to decrypt tokens)
-const mockServiceFrom = vi.fn();
-const mockServiceRpc = vi.fn();
-vi.mock('@/lib/supabase/service', () => ({
-  createServiceClient: vi.fn().mockReturnValue({
-    from: mockServiceFrom,
-    rpc: mockServiceRpc,
-  }),
+// Mock app-owned store for getUpNext connection credentials.
+const storeMocks = vi.hoisted(() => ({
+  getDashboardStores: vi.fn(),
+  readCredential: vi.fn(),
+}));
+vi.mock('@/lib/data/stores', () => ({
+  getDashboardStores: storeMocks.getDashboardStores,
 }));
 
 // Mock fetch for GitHub API calls
@@ -33,8 +32,14 @@ let savedGithubToken: string | undefined;
 beforeEach(() => {
   mockRequireUser.mockReset().mockResolvedValue({ id: 'user-1', email: 'viewer@test.com' });
   mockFrom.mockReset();
-  mockServiceFrom.mockReset();
-  mockServiceRpc.mockReset();
+  storeMocks.getDashboardStores.mockReset().mockReturnValue({
+    githubConnections: { readCredential: storeMocks.readCredential },
+  });
+  storeMocks.readCredential.mockReset().mockResolvedValue({
+    ok: false,
+    error: 'not-found',
+    message: 'missing connection',
+  });
   mockFetch.mockReset();
   globalThis.fetch = mockFetch;
   savedGithubToken = process.env.GITHUB_TOKEN;
@@ -512,7 +517,7 @@ describe('getUpNext', () => {
     expect(result[2].issueNumber).toBe(10);
   });
 
-  it('queries visible repos through the user-scoped client before service-role token decrypt', async () => {
+  it('queries visible repos through the user-scoped client before app-owned credential read', async () => {
     mockFrom.mockImplementation((table: string) => {
       if (table === 'repos') {
         return reposQueryResult([
@@ -524,7 +529,10 @@ describe('getUpNext', () => {
       }
       throw new Error(`unexpected table: ${table}`);
     });
-    mockServiceRpc.mockResolvedValueOnce({ data: 'repo-token', error: null });
+    storeMocks.readCredential.mockResolvedValueOnce({
+      ok: true,
+      value: { githubLogin: 'acme', token: 'repo-token' },
+    });
     setupGitHubIssuesResponse([
       { number: 20, title: 'Ready', html_url: 'https://github.com/acme/web/issues/20', labels: [{ name: 'feature-pipeline' }, { name: 'ready-to-implement' }] },
     ]);
@@ -533,20 +541,20 @@ describe('getUpNext', () => {
     const result = await getUpNext();
 
     expect(mockFrom).toHaveBeenCalledWith('repos');
-    expect(mockServiceFrom).not.toHaveBeenCalled();
-    expect(mockServiceRpc).toHaveBeenCalledWith('decrypt_github_token', {
-      p_connection_id: 'conn-1',
-    });
+    expect(storeMocks.readCredential).toHaveBeenCalledWith('conn-1');
     expect(result).toHaveLength(1);
   });
 
-  it('deduplicates token decrypts for repos sharing a connection', async () => {
+  it('deduplicates credential reads for repos sharing a connection', async () => {
     setupReposQuery([
       { id: 'r1', owner: 'acme', name: 'web', connection_id: 'conn-1' },
       { id: 'r2', owner: 'acme', name: 'api', connection_id: 'conn-1' },
     ]);
     setupActiveRunsQuery([]);
-    mockServiceRpc.mockResolvedValue({ data: 'shared-token', error: null });
+    storeMocks.readCredential.mockResolvedValue({
+      ok: true,
+      value: { githubLogin: 'acme', token: 'shared-token' },
+    });
     mockFetch
       .mockResolvedValueOnce({
         ok: true,
@@ -564,10 +572,8 @@ describe('getUpNext', () => {
     const { getUpNext } = await import('./briefing');
     const result = await getUpNext();
 
-    expect(mockServiceRpc).toHaveBeenCalledTimes(1);
-    expect(mockServiceRpc).toHaveBeenCalledWith('decrypt_github_token', {
-      p_connection_id: 'conn-1',
-    });
+    expect(storeMocks.readCredential).toHaveBeenCalledTimes(1);
+    expect(storeMocks.readCredential).toHaveBeenCalledWith('conn-1');
     expect(mockFetch).toHaveBeenCalledTimes(2);
     expect(result.map((item) => `${item.repoName}#${item.issueNumber}`)).toEqual(['web#20', 'api#30']);
   });
@@ -611,6 +617,7 @@ describe('getUpNext', () => {
     expect(result).toEqual([]);
     // Should not have called GitHub API
     expect(mockFetch).not.toHaveBeenCalled();
+    expect(storeMocks.getDashboardStores).not.toHaveBeenCalled();
   });
 
   it('excludes issues without feature-pipeline label', async () => {
@@ -798,7 +805,7 @@ describe('requireUser guard (SEC-25 regression — auth required)', () => {
     // requireUser was called 6 times (once per action), Supabase was never queried
     expect(mockRequireUser).toHaveBeenCalledTimes(6);
     expect(mockFrom).not.toHaveBeenCalled();
-    expect(mockServiceFrom).not.toHaveBeenCalled();
+    expect(storeMocks.getDashboardStores).not.toHaveBeenCalled();
   });
 });
 
