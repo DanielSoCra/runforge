@@ -2,9 +2,27 @@ import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { BudgetBadge } from '@/components/budget-badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import type { Database } from '@/lib/types';
 
-type Run = Database['public']['Tables']['runs']['Row'];
+const outcomeVariant = {
+  'in-progress': 'secondary',
+  complete: 'default',
+  stuck: 'destructive',
+  escalated: 'destructive',
+  failed: 'destructive',
+} as const;
+
+type Run = {
+  id: string;
+  repo_id: string | null;
+  repo_owner: string;
+  repo_name: string;
+  issue_number: number;
+  issue_title: string;
+  current_phase: string | null;
+  outcome: keyof typeof outcomeVariant;
+  total_cost: number | string;
+  started_at: string;
+};
 
 function formatElapsed(startedAt: string): string {
   const ms = Date.now() - new Date(startedAt).getTime();
@@ -20,14 +38,6 @@ function formatElapsed(startedAt: string): string {
   const remainHours = hours % 24;
   return `${days}d ${remainHours}h`;
 }
-
-const outcomeVariant = {
-  'in-progress': 'secondary',
-  complete: 'default',
-  stuck: 'destructive',
-  escalated: 'destructive',
-  failed: 'destructive',
-} as const;
 
 export function RunTable({ runs, budgetByRepoId }: { runs: Run[]; budgetByRepoId?: Record<string, number | null> }) {
   if (runs.length === 0) {
