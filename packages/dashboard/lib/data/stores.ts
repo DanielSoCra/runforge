@@ -143,6 +143,7 @@ interface DashboardRunAccess {
   listRunHistory(
     filters: DashboardRunHistoryFilters,
   ): Promise<StoreResult<DashboardRunHistory>>;
+  listCompletedRuns(limit?: number): Promise<StoreResult<DashboardRunRow[]>>;
   readRunDetail(runId: string): Promise<StoreResult<DashboardRunDetail>>;
 }
 
@@ -392,6 +393,19 @@ class DashboardRunStore implements DashboardRunAccess {
       }
 
       return ok({ run: toDashboardRunRow(run), budgetLimit });
+    });
+  }
+
+  async listCompletedRuns(limit = 100) {
+    return unavailableOnThrow(async () => {
+      const runRows = await this.db
+        .select()
+        .from(runs)
+        .where(eq(runs.outcome, 'complete'))
+        .orderBy(desc(runs.completedAt))
+        .limit(limit);
+
+      return ok(runRows.map(toDashboardRunRow));
     });
   }
 }

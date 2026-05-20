@@ -1,20 +1,9 @@
-import { createClient } from '@/lib/supabase/server';
-import { requireAdmin } from '@/lib/auth';
+import { requireDashboardAdmin } from '@/lib/auth/require-session';
 import { ReleaseApprovalPanel } from '@/components/release-approval-panel';
 import { PageError } from '@/components/page-error';
+import { getDashboardStores } from '@/lib/data/stores';
 
 export const dynamic = 'force-dynamic';
-
-interface CompletedRun {
-  issue_number: number;
-  repo_owner: string;
-  repo_name: string;
-  issue_title: string;
-  pipeline_variant: string;
-  total_cost: number;
-  completed_at: string | null;
-  report: string | null;
-}
 
 function formatCost(value: number) {
   return `$${value.toFixed(2)}`;
@@ -30,22 +19,15 @@ function formatCompletedAt(value: string | null) {
 }
 
 export default async function ReleasesPage() {
-  const supabase = await createClient();
-  await requireAdmin(supabase);
+  await requireDashboardAdmin();
 
-  const { data, error } = await supabase
-    .from('runs')
-    .select('issue_number, repo_owner, repo_name, issue_title, pipeline_variant, total_cost, completed_at, report')
-    .eq('outcome', 'complete')
-    .order('completed_at', { ascending: false })
-    .limit(100);
-
-  if (error) {
-    console.error('[releases] failed to load completed runs:', error);
+  const completedRuns = await getDashboardStores().runs.listCompletedRuns(100);
+  if (!completedRuns.ok) {
+    console.error('[releases] failed to load completed runs:', completedRuns.message);
     return <PageError />;
   }
 
-  const runs = (data ?? []) as CompletedRun[];
+  const runs = completedRuns.value;
   const totalCost = runs.reduce((sum, run) => sum + Number(run.total_cost ?? 0), 0);
 
   return (
