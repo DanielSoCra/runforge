@@ -1,6 +1,16 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, count, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  sql,
+} from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
@@ -105,6 +115,37 @@ interface DashboardOverviewAccess {
   readOverview(todayUtc: Date): Promise<StoreResult<DashboardOverview>>;
 }
 
+export interface DashboardRunHistoryFilters {
+  since: Date;
+  repoId?: string;
+  outcome?: Run['outcome'];
+  limit?: number;
+}
+
+export interface DashboardRunFilterRepo {
+  id: string;
+  name: string;
+  owner: string;
+}
+
+export interface DashboardRunHistory {
+  runs: DashboardRunRow[];
+  repos: DashboardRunFilterRepo[];
+  budgetByRepoId: Record<string, number | null>;
+}
+
+export interface DashboardRunDetail {
+  run: DashboardRunRow;
+  budgetLimit: number | null;
+}
+
+interface DashboardRunAccess {
+  listRunHistory(
+    filters: DashboardRunHistoryFilters,
+  ): Promise<StoreResult<DashboardRunHistory>>;
+  readRunDetail(runId: string): Promise<StoreResult<DashboardRunDetail>>;
+}
+
 export interface DashboardGitHubConnection {
   id: string;
   displayName: string;
@@ -176,6 +217,7 @@ interface DashboardGitHubConnectionAccess {
 export interface DashboardStores {
   settings: DashboardSettingsAccess;
   overview: DashboardOverviewAccess;
+  runs: DashboardRunAccess;
   costs: DashboardCostAccess;
   credentials: DashboardCredentialAccess;
   githubConnections: DashboardGitHubConnectionAccess;
@@ -191,6 +233,7 @@ export function getDashboardStores(): DashboardStores {
     dashboardStores = {
       settings: new DashboardSettingsStore(db),
       overview: new DashboardOverviewStore(db),
+      runs: new DashboardRunStore(db),
       costs: new DashboardCostStore(db),
       credentials: new DashboardCredentialStore(db),
       githubConnections: new DashboardGitHubConnectionStore(db),
@@ -280,6 +323,75 @@ class DashboardOverviewStore implements DashboardOverviewAccess {
         recentRuns: recentRuns.map(toDashboardRunRow),
         budgetByRepoId,
       });
+    });
+  }
+}
+
+class DashboardRunStore implements DashboardRunAccess {
+  constructor(private readonly db: DashboardDb) {}
+
+  async listRunHistory(filters: DashboardRunHistoryFilters) {
+    return unavailableOnThrow(async () => {
+      const conditions = [gte(runs.startedAt, filters.since)];
+      if (filters.repoId) {
+        conditions.push(eq(runs.repoId, filters.repoId));
+      }
+      if (filters.outcome) {
+        conditions.push(eq(runs.outcome, filters.outcome));
+      }
+
+      const [runRows, repoRows] = await Promise.all([
+        this.db
+          .select()
+          .from(runs)
+          .where(and(...conditions))
+          .orderBy(desc(runs.startedAt))
+          .limit(filters.limit ?? 100),
+        this.db
+          .select({
+            id: repos.id,
+            name: repos.name,
+            owner: repos.owner,
+            budgetLimit: repos.budgetLimit,
+          })
+          .from(repos)
+          .where(isNull(repos.deletedAt))
+          .orderBy(asc(repos.owner), asc(repos.name)),
+      ]);
+
+      const budgetByRepoId: Record<string, number | null> = {};
+      for (const repo of repoRows) {
+        budgetByRepoId[repo.id] = repo.budgetLimit;
+      }
+
+      return ok({
+        runs: runRows.map(toDashboardRunRow),
+        repos: repoRows.map(({ id, name, owner }) => ({ id, name, owner })),
+        budgetByRepoId,
+      });
+    });
+  }
+
+  async readRunDetail(runId: string) {
+    return unavailableOnThrow(async () => {
+      const [run] = await this.db
+        .select()
+        .from(runs)
+        .where(eq(runs.id, runId))
+        .limit(1);
+      if (!run) return notFound(`run ${runId} was not found`);
+
+      let budgetLimit: number | null = null;
+      if (run.repoId) {
+        const [repo] = await this.db
+          .select({ budgetLimit: repos.budgetLimit })
+          .from(repos)
+          .where(eq(repos.id, run.repoId))
+          .limit(1);
+        budgetLimit = repo?.budgetLimit ?? null;
+      }
+
+      return ok({ run: toDashboardRunRow(run), budgetLimit });
     });
   }
 }
