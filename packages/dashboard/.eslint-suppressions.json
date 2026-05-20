@@ -29,36 +29,6 @@
       "count": 1
     }
   },
-  "app/api/daemon/issues/scan/route.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
-  "app/api/daemon/pause/route.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
-  "app/api/daemon/release/route.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
-  "app/api/daemon/repos-reload/route.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
-  "app/api/daemon/resume/route.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
-  "app/api/daemon/status/route.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
   "app/api/github/connections/[id]/orgs/route.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
