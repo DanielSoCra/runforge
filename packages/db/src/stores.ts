@@ -151,3 +151,22 @@ export interface SettingsAccess {
 export interface GitHubConnectionStore {
   listOrganizations(connectionId: string): Promise<StoreResult<GitHubOrg[]>>;
 }
+
+export type OperatorRole = 'admin' | 'viewer';
+
+export interface OperatorMembership {
+  userId: string;
+  role: OperatorRole;
+  grantedAt: Date;
+}
+
+export interface OperatorAuthStore {
+  readMembership(userId: string): Promise<StoreResult<OperatorMembership>>;
+  setMembership(
+    userId: string,
+    role: OperatorRole,
+  ): Promise<StoreResult<OperatorMembership>>;
+  bootstrapFirstAdmin(
+    userId: string,
+  ): Promise<StoreResult<OperatorMembership>>;
+}

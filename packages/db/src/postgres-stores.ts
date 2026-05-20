@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, count, desc, eq, gte, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, gte, isNull, sql } from 'drizzle-orm';
 
 import type { AutoClaudeDb } from './client.js';
 import {
@@ -12,6 +12,7 @@ import {
 import {
   activityEvents,
   apiKeys,
+  authUsers,
   briefings,
   costEvents,
   githubConnections,
@@ -22,6 +23,7 @@ import {
   repoPlugins,
   repos,
   runs,
+  teamMembers,
   type JsonValue,
 } from './schema.js';
 import type {
@@ -30,6 +32,9 @@ import type {
   CredentialMetadata,
   CredentialStore,
   GitHubConnectionStore,
+  OperatorAuthStore,
+  OperatorMembership,
+  OperatorRole,
   PluginStore,
   RepoStore,
   RunStore,
@@ -46,6 +51,7 @@ export interface AutoClaudeStores {
   briefings: BriefingStore;
   settings: SettingsAccess;
   githubConnections: GitHubConnectionStore;
+  operatorAuth: OperatorAuthStore;
 }
 
 export interface PostgresStoreOptions {
@@ -67,8 +73,11 @@ export function createPostgresStores(
     briefings: new PostgresBriefingStore(db),
     settings: new PostgresSettingsAccess(db),
     githubConnections: new PostgresGitHubConnectionStore(db),
+    operatorAuth: new PostgresOperatorAuthStore(db),
   };
 }
+
+const OPERATOR_MEMBERSHIP_LOCK_NAME = 'auto_claude_operator_membership';
 
 export class PostgresRepoStore implements RepoStore {
   constructor(private readonly db: AutoClaudeDb) {}
@@ -679,6 +688,112 @@ export class PostgresGitHubConnectionStore implements GitHubConnectionStore {
   }
 }
 
+export class PostgresOperatorAuthStore implements OperatorAuthStore {
+  constructor(private readonly db: AutoClaudeDb) {}
+
+  async readMembership(userId: string) {
+    return unavailableOnThrow(async () => {
+      const [row] = await this.db
+        .select()
+        .from(teamMembers)
+        .where(eq(teamMembers.userId, userId))
+        .limit(1);
+      return row
+        ? ok(mapOperatorMembership(row))
+        : notFound(`operator membership for user ${userId} was not found`);
+    });
+  }
+
+  async setMembership(userId: string, role: OperatorRole) {
+    return unavailableOnThrow(async () =>
+      this.db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${OPERATOR_MEMBERSHIP_LOCK_NAME}))`,
+        );
+
+        const [user] = await tx
+          .select({ id: authUsers.id })
+          .from(authUsers)
+          .where(eq(authUsers.id, userId))
+          .limit(1);
+        if (!user) return notFound(`operator user ${userId} was not found`);
+
+        const grantedAt = new Date();
+        const [membership] = await tx
+          .insert(teamMembers)
+          .values({ userId, role, grantedAt })
+          .onConflictDoUpdate({
+            target: teamMembers.userId,
+            set: { role, grantedAt },
+          })
+          .returning();
+        if (!membership) {
+          throw new Error('operator membership upsert returned no row');
+        }
+
+        const [updatedUser] = await tx
+          .update(authUsers)
+          .set({ role, updatedAt: new Date() })
+          .where(eq(authUsers.id, userId))
+          .returning({ id: authUsers.id });
+        if (!updatedUser) {
+          throw new Error(
+            `operator user ${userId} disappeared during membership update`,
+          );
+        }
+
+        return ok(mapOperatorMembership(membership));
+      }),
+    );
+  }
+
+  async bootstrapFirstAdmin(userId: string) {
+    return unavailableOnThrow(async () =>
+      this.db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${OPERATOR_MEMBERSHIP_LOCK_NAME}))`,
+        );
+
+        const [user] = await tx
+          .select({ id: authUsers.id })
+          .from(authUsers)
+          .where(eq(authUsers.id, userId))
+          .limit(1);
+        if (!user) return notFound(`operator user ${userId} was not found`);
+
+        const [existing] = await tx
+          .select({ value: count() })
+          .from(teamMembers);
+        if ((existing?.value ?? 0) > 0) {
+          return denied('first administrator already exists');
+        }
+
+        const [membership] = await tx
+          .insert(teamMembers)
+          .values({ userId, role: 'admin' })
+          .onConflictDoNothing({ target: teamMembers.userId })
+          .returning();
+        if (!membership) {
+          return denied('first administrator already exists');
+        }
+
+        const [updatedUser] = await tx
+          .update(authUsers)
+          .set({ role: 'admin', updatedAt: new Date() })
+          .where(eq(authUsers.id, userId))
+          .returning({ id: authUsers.id });
+        if (!updatedUser) {
+          throw new Error(
+            `operator user ${userId} disappeared during first-admin bootstrap`,
+          );
+        }
+
+        return ok(mapOperatorMembership(membership));
+      }),
+    );
+  }
+}
+
 export function encodeCredentialEnvelope(envelope: CredentialEnvelope): Buffer {
   return Buffer.from(JSON.stringify(envelope), 'utf8');
 }
@@ -731,6 +846,16 @@ async function connectionExists(
     .where(eq(githubConnections.id, connectionId))
     .limit(1);
   return Boolean(row);
+}
+
+function mapOperatorMembership(
+  row: typeof teamMembers.$inferSelect,
+): OperatorMembership {
+  return {
+    userId: row.userId,
+    role: row.role,
+    grantedAt: row.grantedAt,
+  };
 }
 
 async function unavailableOnThrow<T>(
