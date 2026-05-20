@@ -1,13 +1,12 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { createServiceClient } from '@/lib/supabase/service';
 import { requireUser } from '@/lib/auth';
 import { formatDuration } from '@/lib/format';
+import { getDashboardStores } from '@/lib/data/stores';
 import type { Database } from '@/lib/types';
 
 type Briefing = Database['public']['Tables']['briefings']['Row'];
-type Run = Database['public']['Tables']['runs']['Row'];
 type ActivityEvent = Database['public']['Tables']['activity_events']['Row'];
 
 export type AttentionItem = {
@@ -192,8 +191,8 @@ interface GitHubIssue {
 export async function getUpNext(): Promise<UpNextItem[]> {
   const supabase = await createClient();
   await requireUser(supabase);
-  let service: ReturnType<typeof createServiceClient> | null = null;
-  const getService = () => service ??= createServiceClient();
+  let stores: ReturnType<typeof getDashboardStores> | undefined;
+  const getStores = () => stores ??= getDashboardStores();
 
   // Fetch enabled repos and active runs in parallel
   const [reposResult, runsResult] = await Promise.all([
@@ -230,10 +229,11 @@ export async function getUpNext(): Promise<UpNextItem[]> {
   const tokensByConnectionId = new Map<string, string | undefined>();
   await Promise.all(
     connectionIds.map(async (connectionId) => {
-      const { data } = await getService().rpc('decrypt_github_token', {
-        p_connection_id: connectionId,
-      });
-      tokensByConnectionId.set(connectionId, (data as string | null) ?? process.env.GITHUB_TOKEN);
+      const credential = await getStores().githubConnections.readCredential(connectionId);
+      tokensByConnectionId.set(
+        connectionId,
+        credential.ok ? credential.value.token : process.env.GITHUB_TOKEN,
+      );
     }),
   );
 
