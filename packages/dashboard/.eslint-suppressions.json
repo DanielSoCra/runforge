@@ -14,21 +14,6 @@
       "count": 2
     }
   },
-  "app/api/auth/github-connection/callback/route.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 3
-    }
-  },
-  "app/api/auth/github-connection/route.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 8
-    }
-  },
-  "app/api/auth/github-connection/route.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
-    }
-  },
   "components/run-table.test.tsx": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6

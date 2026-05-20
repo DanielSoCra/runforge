@@ -1,7 +1,15 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
+import {
+  decryptCredential,
+  encryptCredential,
+  readCredentialKey,
+  type CredentialEnvelope,
+} from '../../../db/src/credential-crypto';
 import { readDatabaseUrl } from '../../../db/src/env';
 import {
   githubConnections,
@@ -18,12 +26,14 @@ type StoreUnavailable = {
 };
 type StoreNotFound = { ok: false; error: 'not-found'; message: string };
 type StoreConflict = { ok: false; error: 'conflict'; message: string };
+type StoreDenied = { ok: false; error: 'denied'; message: string };
 type StoreOk<T = void> = { ok: true; value: T };
 type StoreResult<T = void> =
   | StoreOk<T>
   | StoreUnavailable
   | StoreNotFound
-  | StoreConflict;
+  | StoreConflict
+  | StoreDenied;
 
 interface DashboardSettingsAccess {
   readGlobalSettings(): Promise<StoreResult<GlobalSettings>>;
@@ -55,12 +65,41 @@ export interface DashboardRepositoryImport {
   name: string;
 }
 
+export interface DashboardGitHubOAuthOrg {
+  githubId: number;
+  login: string;
+  name: string | null;
+  avatarUrl: string | null;
+}
+
+export interface DashboardGitHubOAuthConnection {
+  displayName: string;
+  githubLogin: string;
+  avatarUrl: string | null;
+  connectionType: string;
+  scopes: string | null;
+  createdBy: string;
+  organizations: DashboardGitHubOAuthOrg[];
+}
+
+export interface DashboardGitHubCredential {
+  githubLogin: string;
+  token: string;
+}
+
 interface DashboardGitHubConnectionAccess {
   listConnections(): Promise<StoreResult<DashboardGitHubConnection[]>>;
   listOwnerOptions(): Promise<StoreResult<string[]>>;
   listOrganizations(
     connectionId: string,
   ): Promise<StoreResult<DashboardGitHubOrg[]>>;
+  readCredential(
+    connectionId: string,
+  ): Promise<StoreResult<DashboardGitHubCredential>>;
+  storeOAuthConnection(
+    connection: DashboardGitHubOAuthConnection,
+    plaintextToken: string,
+  ): Promise<StoreResult<string>>;
   removeConnection(
     connectionId: string,
   ): Promise<StoreResult<{ disableError?: string }>>;
@@ -216,6 +255,88 @@ class DashboardGitHubConnectionStore
     });
   }
 
+  async readCredential(connectionId: string) {
+    const selected = await unavailableOnThrow(async () => {
+      const [row] = await this.db
+        .select({
+          encryptedToken: githubConnections.encryptedToken,
+          githubLogin: githubConnections.githubLogin,
+        })
+        .from(githubConnections)
+        .where(eq(githubConnections.id, connectionId))
+        .limit(1);
+
+      return row
+        ? ok(row)
+        : notFound(`GitHub connection ${connectionId} was not found`);
+    });
+    if (!selected.ok) return selected;
+
+    try {
+      return ok({
+        githubLogin: selected.value.githubLogin,
+        token: decryptCredential(
+          decodeCredentialEnvelope(selected.value.encryptedToken),
+          readCredentialKey(),
+          connectionId,
+        ),
+      });
+    } catch (error) {
+      return denied(
+        `GitHub connection ${connectionId} credential could not be decrypted: ${errorMessage(error)}`,
+      );
+    }
+  }
+
+  async storeOAuthConnection(
+    connection: DashboardGitHubOAuthConnection,
+    plaintextToken: string,
+  ) {
+    return unavailableOnThrow(async () => {
+      const connectionId = randomUUID();
+      const encryptedToken = encodeCredentialEnvelope(
+        encryptCredential(plaintextToken, readCredentialKey(), connectionId),
+      );
+
+      await this.db.transaction(async (tx) => {
+        await tx.insert(githubConnections).values({
+          id: connectionId,
+          displayName: connection.displayName,
+          githubLogin: connection.githubLogin,
+          avatarUrl: connection.avatarUrl,
+          connectionType: connection.connectionType,
+          encryptedToken,
+          scopes: connection.scopes,
+          createdBy: connection.createdBy,
+        });
+
+        if (connection.organizations.length > 0) {
+          await tx
+            .insert(githubOrgs)
+            .values(
+              connection.organizations.map((org) => ({
+                connectionId,
+                githubId: org.githubId,
+                login: org.login,
+                name: org.name,
+                avatarUrl: org.avatarUrl,
+              })),
+            )
+            .onConflictDoUpdate({
+              target: [githubOrgs.connectionId, githubOrgs.githubId],
+              set: {
+                login: sql`excluded.login`,
+                name: sql`excluded.name`,
+                avatarUrl: sql`excluded.avatar_url`,
+              },
+            });
+        }
+      });
+
+      return ok(connectionId);
+    });
+  }
+
   async removeConnection(connectionId: string) {
     return unavailableOnThrow(async () => {
       const linkedRepos = await this.db
@@ -343,8 +464,26 @@ function conflict(message: string): StoreResult<never> {
   return { ok: false, error: 'conflict', message };
 }
 
+function denied(message: string): StoreResult<never> {
+  return { ok: false, error: 'denied', message };
+}
+
 function unavailable(message: string): StoreResult<never> {
   return { ok: false, error: 'unavailable', message };
+}
+
+function encodeCredentialEnvelope(envelope: CredentialEnvelope): Buffer {
+  return Buffer.from(JSON.stringify(envelope), 'utf8');
+}
+
+function decodeCredentialEnvelope(value: Buffer): CredentialEnvelope {
+  const parsed = JSON.parse(value.toString('utf8')) as CredentialEnvelope;
+  if (parsed.v !== 1) {
+    throw new Error(
+      `unsupported credential envelope version: ${String(parsed.v)}`,
+    );
+  }
+  return parsed;
 }
 
 function errorMessage(error: unknown): string {

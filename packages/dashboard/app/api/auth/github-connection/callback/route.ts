@@ -1,9 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { getOrigin } from '@/lib/auth';
+import {
+  getDashboardAuthError,
+  requireDashboardAdmin,
+} from '@/lib/auth/require-session';
+import { getDashboardStores } from '@/lib/data/stores';
 
 export async function GET(request: NextRequest) {
-  const origin = getOrigin(request);
+  const origin = getOAuthOrigin(request);
   const settingsUrl = `${origin}/settings`;
 
   const { searchParams } = new URL(request.url);
@@ -41,36 +44,61 @@ export async function GET(request: NextRequest) {
   const ghUser = await userRes.json() as { login: string; name?: string; avatar_url?: string; id: number };
   const ghOrgs = orgsRes.ok ? (await orgsRes.json() as Array<{ id: number; login: string; name?: string; avatar_url?: string }>) : [];
 
-  // Store connection via SECURITY DEFINER function
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.redirect(`${settingsUrl}?error=not_authenticated`);
-
-  const { data: member } = await supabase.from('team_members').select('role').eq('user_id', user.id).single();
-  if (member?.role !== 'admin') return NextResponse.redirect(`${settingsUrl}?error=not_admin`);
-
-  const { data: connectionId, error: connErr } = await supabase.rpc('store_github_connection', {
-    p_display_name: `${ghUser.login} (personal)`,
-    p_github_login: ghUser.login,
-    p_avatar_url: ghUser.avatar_url ?? '',
-    p_connection_type: 'oauth_token',
-    p_plaintext_token: token,
-    p_scopes: scope ?? '',
+  const session = await requireDashboardAdmin().catch((error) => {
+    const authError = getDashboardAuthError(error);
+    return authError.status === 401 ? 'not_authenticated' : 'not_admin';
   });
-  if (connErr) return NextResponse.redirect(`${settingsUrl}?error=store_failed`);
+  if (session === 'not_authenticated' || session === 'not_admin') {
+    return NextResponse.redirect(`${settingsUrl}?error=${session}`);
+  }
 
-  // Upsert orgs (personal account + orgs)
-  const allOrgs = [
-    { connection_id: connectionId, github_id: ghUser.id, login: ghUser.login, name: ghUser.name ?? ghUser.login, avatar_url: ghUser.avatar_url ?? null },
-    ...ghOrgs.map((o) => ({ connection_id: connectionId, github_id: o.id, login: o.login, name: o.name ?? o.login, avatar_url: o.avatar_url ?? null })),
-  ];
-  const { error: orgsErr } = await supabase.from('github_orgs').upsert(allOrgs, { onConflict: 'connection_id,github_id' });
-  if (orgsErr) {
-    console.error('github_orgs upsert failed:', orgsErr.message);
-    return NextResponse.redirect(`${settingsUrl}?error=orgs_failed`);
+  const storeResult =
+    await getDashboardStores().githubConnections.storeOAuthConnection(
+      {
+        displayName: `${ghUser.login} (personal)`,
+        githubLogin: ghUser.login,
+        avatarUrl: ghUser.avatar_url ?? null,
+        connectionType: 'oauth_token',
+        scopes: scope ?? '',
+        createdBy: session.user.id,
+        organizations: [
+          {
+            githubId: ghUser.id,
+            login: ghUser.login,
+            name: ghUser.name ?? ghUser.login,
+            avatarUrl: ghUser.avatar_url ?? null,
+          },
+          ...ghOrgs.map((org) => ({
+            githubId: org.id,
+            login: org.login,
+            name: org.name ?? org.login,
+            avatarUrl: org.avatar_url ?? null,
+          })),
+        ],
+      },
+      token,
+    );
+  if (!storeResult.ok) {
+    console.error(
+      '[github-connection] failed to store GitHub OAuth connection:',
+      storeResult.message,
+    );
+    return NextResponse.redirect(`${settingsUrl}?error=store_failed`);
   }
 
   const response = NextResponse.redirect(settingsUrl);
   response.cookies.delete('gh_oauth_state');
   return response;
+}
+
+function getOAuthOrigin(request: Request): string {
+  if (process.env.NEXT_PUBLIC_SITE_URL) {
+    return process.env.NEXT_PUBLIC_SITE_URL.replace(/\/+$/, '');
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'NEXT_PUBLIC_SITE_URL environment variable is required in production',
+    );
+  }
+  return new URL(request.url).origin;
 }
