@@ -1,24 +1,26 @@
-import { createClient } from '@/lib/supabase/server';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { changeRole, removeMember } from '@/actions/team';
 import { InviteForm } from '@/components/invite-form';
-import { isAdmin } from '@/lib/auth';
+import { isDashboardAdmin } from '@/lib/auth/require-session';
+import { getDashboardStores } from '@/lib/data/stores';
+import { PageError } from '@/components/page-error';
+
+export const dynamic = 'force-dynamic';
 
 export default async function TeamPage() {
-  const supabase = await createClient();
-  const admin = await isAdmin(supabase);
-  const { data: members } = await supabase
-    .from('team_members')
-    .select('*, user:user_id(email, raw_user_meta_data)')
-    .order('granted_at');
+  const admin = await isDashboardAdmin();
+  const teamData = await getDashboardStores().team.readTeamPage({
+    includePendingInvitations: admin,
+  });
 
-  const { data: invitations } = await supabase
-    .from('invitations')
-    .select('*')
-    .eq('status', 'pending')
-    .order('created_at', { ascending: false });
+  if (!teamData.ok) {
+    console.error('[team] failed to load team page:', teamData.message);
+    return <PageError />;
+  }
+
+  const { members, invitations } = teamData.value;
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -28,12 +30,13 @@ export default async function TeamPage() {
       <Card>
         <CardHeader><CardTitle>Members</CardTitle></CardHeader>
         <CardContent className="space-y-3">
-          {members?.map((member) => {
-            const meta = (member.user as any)?.raw_user_meta_data;
+          {members.map((member) => {
+            const displayName =
+              member.user?.name || member.user?.email || 'Unknown user';
             return (
               <div key={member.id} className="flex items-center justify-between py-2">
                 <div>
-                  <span className="font-medium text-sm">{meta?.user_name ?? (member.user as any)?.email}</span>
+                  <span className="font-medium text-sm">{displayName}</span>
                   <Badge variant={member.role === 'admin' ? 'default' : 'secondary'} className="ml-2">
                     {member.role}
                   </Badge>
@@ -57,11 +60,11 @@ export default async function TeamPage() {
       </Card>
 
       {/* Pending invitations — admin-only */}
-      {admin && (invitations?.length ?? 0) > 0 && (
+      {admin && invitations.length > 0 && (
         <Card>
           <CardHeader><CardTitle>Pending Invitations</CardTitle></CardHeader>
           <CardContent className="space-y-2">
-            {invitations?.map((inv) => (
+            {invitations.map((inv) => (
               <div key={inv.id} className="flex items-center justify-between text-sm py-1">
                 <span className="font-mono">{inv.provider_handle}</span>
                 <Badge variant="secondary">{inv.role}</Badge>

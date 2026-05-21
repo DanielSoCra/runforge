@@ -23,13 +23,16 @@ import {
 import { readDatabaseUrl } from '../../../db/src/env';
 import {
   apiKeys,
+  authUsers,
   costEvents,
   githubConnections,
   githubOrgs,
   globalSettings,
+  invitations,
   repoPlugins,
   repos,
   runs,
+  teamMembers,
   type GlobalSettings,
   type Run,
 } from '../../../db/src/schema';
@@ -230,6 +233,35 @@ interface DashboardRepositoryAccess {
   ): Promise<StoreResult<DashboardRepositoryDetail>>;
 }
 
+export interface DashboardTeamMember {
+  id: string;
+  role: 'admin' | 'viewer';
+  granted_at: string;
+  user: {
+    email: string;
+    name: string;
+    image: string | null;
+  } | null;
+}
+
+export interface DashboardPendingInvitation {
+  id: string;
+  provider_handle: string;
+  role: 'admin' | 'viewer';
+  created_at: string;
+}
+
+export interface DashboardTeamPageData {
+  members: DashboardTeamMember[];
+  invitations: DashboardPendingInvitation[];
+}
+
+interface DashboardTeamAccess {
+  readTeamPage(options?: {
+    includePendingInvitations?: boolean;
+  }): Promise<StoreResult<DashboardTeamPageData>>;
+}
+
 export interface DashboardPluginRepo {
   id: string;
   owner: string;
@@ -330,6 +362,7 @@ export interface DashboardStores {
   runs: DashboardRunAccess;
   issues: DashboardIssueAccess;
   repositories: DashboardRepositoryAccess;
+  team: DashboardTeamAccess;
   plugins: DashboardPluginAccess;
   costs: DashboardCostAccess;
   credentials: DashboardCredentialAccess;
@@ -349,6 +382,7 @@ export function getDashboardStores(): DashboardStores {
       runs: new DashboardRunStore(db),
       issues: new DashboardIssueStore(db),
       repositories: new DashboardRepositoryStore(db),
+      team: new DashboardTeamStore(db),
       plugins: new DashboardPluginStore(db),
       costs: new DashboardCostStore(db),
       credentials: new DashboardCredentialStore(db),
@@ -480,6 +514,62 @@ class DashboardPluginStore implements DashboardPluginAccess {
           recommendation_reason: plugin.recommendationReason,
           recommended_at: plugin.recommendedAt?.toISOString() ?? null,
           activated_at: plugin.activatedAt?.toISOString() ?? null,
+        })),
+      });
+    });
+  }
+}
+
+class DashboardTeamStore implements DashboardTeamAccess {
+  constructor(private readonly db: DashboardDb) {}
+
+  async readTeamPage(options: { includePendingInvitations?: boolean } = {}) {
+    return unavailableOnThrow(async () => {
+      const [memberRows, invitationRows] = await Promise.all([
+        this.db
+          .select({
+            id: teamMembers.id,
+            role: teamMembers.role,
+            grantedAt: teamMembers.grantedAt,
+            userEmail: authUsers.email,
+            userName: authUsers.name,
+            userImage: authUsers.image,
+          })
+          .from(teamMembers)
+          .leftJoin(authUsers, eq(teamMembers.userId, authUsers.id))
+          .orderBy(asc(teamMembers.grantedAt)),
+        options.includePendingInvitations
+          ? this.db
+              .select({
+                id: invitations.id,
+                providerHandle: invitations.providerHandle,
+                role: invitations.role,
+                createdAt: invitations.createdAt,
+              })
+              .from(invitations)
+              .where(eq(invitations.status, 'pending'))
+              .orderBy(desc(invitations.createdAt))
+          : Promise.resolve([]),
+      ]);
+
+      return ok({
+        members: memberRows.map((member) => ({
+          id: member.id,
+          role: member.role,
+          granted_at: member.grantedAt.toISOString(),
+          user: member.userEmail
+            ? {
+                email: member.userEmail,
+                name: member.userName ?? '',
+                image: member.userImage,
+              }
+            : null,
+        })),
+        invitations: invitationRows.map((invitation) => ({
+          id: invitation.id,
+          provider_handle: invitation.providerHandle,
+          role: invitation.role,
+          created_at: invitation.createdAt.toISOString(),
         })),
       });
     });
@@ -1050,13 +1140,16 @@ function createDashboardDbClient() {
   const db = drizzle(sql, {
     schema: {
       apiKeys,
+      authUsers,
       costEvents,
       githubConnections,
       githubOrgs,
       globalSettings,
+      invitations,
       repoPlugins,
       repos,
       runs,
+      teamMembers,
     },
   });
   return { db, sql };
