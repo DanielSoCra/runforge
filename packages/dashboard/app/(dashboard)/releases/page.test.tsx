@@ -65,7 +65,7 @@ describe('ReleasesPage', () => {
         phases: [],
         fix_attempts: 0,
         completed_at: '2026-05-04T16:36:23Z',
-        report: 'Rejected invalid repo numeric fields before Supabase mutations.',
+        report: 'Rejected invalid repo numeric fields before data mutations.',
         active_plugins: [],
         started_at: '2026-05-04T16:00:00Z',
         updated_at: '2026-05-04T16:36:23Z',

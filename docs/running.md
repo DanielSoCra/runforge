@@ -6,15 +6,14 @@ Auto-Claude consists of these runtime components:
 
 - **daemon** (`packages/daemon`) — polls GitHub for issues, spawns Claude workers, manages state
 - **dashboard** (`packages/dashboard`) — Next.js web UI
-- **postgres** — project-owned operational store used during the Supabase parity migration
+- **postgres** — project-owned operational store
 - **migrate** — one-shot job that applies app-owned database migrations before consumers start
 
-During the #626 migration, Supabase can still be the parity source of truth for dashboard/run data, but app-owned Postgres is required for credential storage and the replacement store layer.
+Auto-Claude now runs from the app-owned Postgres store. The dashboard uses Better Auth with application-owned authorization roles; the daemon, dashboard, and briefing summarizer all use direct Postgres-backed stores.
 
 ## Prerequisites
 
 - Docker and Docker Compose
-- A [Supabase](https://supabase.com) project (free tier works)
 - GitHub personal access token with `repo` scope
 - Anthropic API key
 
@@ -32,18 +31,14 @@ cp .env.prod.example .env.prod
 |----------|----------|-------------|
 | `GITHUB_TOKEN` | Yes | GitHub PAT with `repo` scope |
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
-| `NEXT_PUBLIC_SUPABASE_URL` | Yes | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase `anon` key (public) |
-| `SUPABASE_URL` | Yes | Same as above (daemon-side) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Supabase `service_role` key (server-only) |
 | `POSTGRES_DB` | Yes | Compose-managed Postgres database name |
 | `POSTGRES_USER` | Yes | Compose-managed Postgres user |
 | `POSTGRES_PASSWORD` | Yes | Compose-managed Postgres password |
 | `POSTGRES_PORT` | No | Host bind for native tools/daemon; defaults to `127.0.0.1:5432:5432` |
 | `AUTO_CLAUDE_DOCKER_DATABASE_URL` | Yes | Database URL used inside Docker services; host must be `postgres` |
 | `AUTO_CLAUDE_DATABASE_URL` | Mac native daemon only | Database URL used by a daemon running outside Docker; host is usually `127.0.0.1` |
-| `DAEMON_DATA_BACKEND` | No | `supabase` during parity, `postgres` after daemon cutover |
-| `BRIEFING_DATA_BACKEND` | No | `supabase` during parity, `postgres` after briefing cutover |
+| `DAEMON_DATA_BACKEND` | No | Must be `postgres`; unset defaults to `postgres` |
+| `BRIEFING_DATA_BACKEND` | No | Must be `postgres`; unset defaults to `postgres` |
 | `NEXT_PUBLIC_SITE_URL` | Yes | Full URL of the dashboard (for OAuth redirects) |
 | `DAEMON_URL` | Yes | Internal URL to reach the daemon (`http://daemon:3847` in Docker) |
 | `ENCRYPTION_KEY` | Yes | 32+ character secret for encrypting stored credentials |
@@ -78,7 +73,7 @@ For local development, the dashboard has its own dev server and the daemon runs 
 ```bash
 cd packages/dashboard
 cp .env.example .env.local
-# Fill in Supabase credentials and DAEMON_URL=http://localhost:3847
+# Fill in DAEMON_URL=http://localhost:3847 and database/auth settings
 pnpm dev
 ```
 
@@ -89,7 +84,7 @@ Dashboard runs at `http://localhost:3000`.
 ```bash
 # From repo root
 cp .env.prod.example .env
-# Fill in GITHUB_TOKEN, ANTHROPIC_API_KEY, Supabase vars
+# Fill in GITHUB_TOKEN, ANTHROPIC_API_KEY, database, auth, and encryption vars
 
 docker compose up --build
 ```
@@ -134,21 +129,12 @@ Dashboard is available at `http://localhost:3000` on the local network. Auth is 
 
 The Compose stack starts a `migrate` job that applies app-owned Postgres migrations from `packages/db/drizzle/` before dashboard, daemon, or briefing-summarizer start.
 
-During Supabase parity, existing Supabase migrations still need to be present in the hosted project for hosted-backed data paths. App-owned Postgres is the credential/store migration path and becomes the sole operational store after cutover.
-
-Apply migrations from `supabase/migrations/` to your Supabase project before first run. Run them in order via the Supabase SQL editor or:
-
-```bash
-# Via Supabase CLI (if configured)
-supabase db push
-```
-
 ## How It Works
 
 1. The daemon polls the configured GitHub repo for issues labelled `ready`.
 2. On finding one, it swaps the label to `in-progress` and spawns a Claude worker.
 3. The worker implements the issue on a feature branch, runs validation checks, then opens a PR.
-4. Run state (status, cost, logs) syncs to Supabase in real time.
+4. Run state (status, cost, logs) is written to the app-owned Postgres store.
 5. The dashboard displays active runs, repo status, and operator controls.
 
 ## Daemon Mode
@@ -190,7 +176,7 @@ launchctl list | grep autoclaude
 ./scripts/uninstall-daemon.sh
 ```
 
-The install script reads `.env.mac` for `GITHUB_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, Supabase public keys, `AUTO_CLAUDE_DATABASE_URL`, `DAEMON_DATA_BACKEND`, and `ENCRYPTION_KEY`, then substitutes them into the plist template at `scripts/com.autoclaude.daemon.plist`.
+The install script reads `.env.mac` for `GITHUB_TOKEN`, `AUTO_CLAUDE_DATABASE_URL`, `DAEMON_DATA_BACKEND`, and `ENCRYPTION_KEY`, then substitutes them into the plist template at `scripts/com.autoclaude.daemon.plist`.
 
 The daemon writes a heartbeat file to `~/logs/claude-daemon.heartbeat` on each poll interval. Check it with:
 
