@@ -1,5 +1,11 @@
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: vi.fn(),
+const storeMocks = vi.hoisted(() => ({
+  listRepositories: vi.fn(),
+}));
+
+vi.mock('@/lib/data/stores', () => ({
+  getDashboardStores: () => ({
+    repositories: { listRepositories: storeMocks.listRepositories },
+  }),
 }));
 
 vi.mock('@/components/import-repos-modal', () => ({
@@ -9,49 +15,31 @@ vi.mock('@/components/import-repos-modal', () => ({
 }));
 
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import { createClient } from '@/lib/supabase/server';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ReposPage from './page';
 
 describe('ReposPage', () => {
-  function mockReposPageSupabase({
+  beforeEach(() => {
+    storeMocks.listRepositories.mockReset();
+  });
+
+  function mockReposPageStore({
     repos,
-    activeRuns = [],
+    connections = [],
+    activeCostByRepoId = {},
   }: {
     repos: Record<string, unknown>[];
-    activeRuns?: Record<string, unknown>[];
+    connections?: Record<string, unknown>[];
+    activeCostByRepoId?: Record<string, number>;
   }) {
-    const from = vi.fn().mockImplementation((table: string) => {
-      if (table === 'repos') {
-        return {
-          select: vi.fn().mockReturnValue({
-            is: vi.fn().mockReturnValue({
-              order: vi.fn().mockResolvedValue({ data: repos, error: null }),
-            }),
-          }),
-        };
-      }
-      if (table === 'github_connections') {
-        return {
-          select: vi.fn().mockReturnValue({
-            order: vi.fn().mockResolvedValue({ data: [] }),
-          }),
-        };
-      }
-      if (table === 'runs') {
-        return {
-          select: vi.fn().mockReturnValue({
-            eq: vi.fn().mockResolvedValue({ data: activeRuns, error: null }),
-          }),
-        };
-      }
-      throw new Error(`unexpected table ${table}`);
+    storeMocks.listRepositories.mockResolvedValue({
+      ok: true,
+      value: { repos, connections, activeCostByRepoId },
     });
-    vi.mocked(createClient).mockResolvedValue({ from } as never);
   }
 
   it('shows repo-level budget warning when an active run reaches 80 percent of the repo budget', async () => {
-    mockReposPageSupabase({
+    mockReposPageStore({
       repos: [
         {
           id: 'repo-1',
@@ -66,12 +54,7 @@ describe('ReposPage', () => {
           credential_error: null,
         },
       ],
-      activeRuns: [
-        {
-          repo_id: 'repo-1',
-          total_cost: 8.5,
-        },
-      ],
+      activeCostByRepoId: { 'repo-1': 8.5 },
     });
 
     const jsx = await ReposPage();
@@ -82,7 +65,7 @@ describe('ReposPage', () => {
   });
 
   it('shows credential error status when daemon reports credential decryption failure (#445)', async () => {
-    mockReposPageSupabase({
+    mockReposPageStore({
       repos: [
         {
           id: 'repo-1',
@@ -104,5 +87,54 @@ describe('ReposPage', () => {
 
     expect(screen.getByText('acme/web')).toBeInTheDocument();
     expect(screen.getByText('credential error')).toBeInTheDocument();
+  });
+
+  it('renders import controls from app-owned GitHub connection data', async () => {
+    mockReposPageStore({
+      connections: [
+        {
+          id: 'conn-1',
+          display_name: 'Main GitHub',
+          github_login: 'acme',
+          status: 'active',
+        },
+      ],
+      repos: [
+        {
+          id: 'repo-1',
+          owner: 'acme',
+          name: 'web',
+          enabled: false,
+          budget_limit: null,
+          connection_id: 'conn-1',
+          github_connections: {
+            display_name: 'Main GitHub',
+            github_login: 'acme',
+          },
+          github_status: 'ok',
+          credential_status: 'ok',
+          credential_error: null,
+        },
+      ],
+    });
+
+    const jsx = await ReposPage();
+    render(jsx);
+
+    expect(screen.getByRole('button', { name: 'Import Main GitHub' })).toBeInTheDocument();
+    expect(screen.getByText('Main GitHub')).toBeInTheDocument();
+  });
+
+  it('shows the page error when the app-owned repository store is unavailable', async () => {
+    storeMocks.listRepositories.mockResolvedValueOnce({
+      ok: false,
+      error: 'unavailable',
+      message: 'database offline',
+    });
+
+    const jsx = await ReposPage();
+    render(jsx);
+
+    expect(screen.getByText(/Failed to load data/)).toBeInTheDocument();
   });
 });

@@ -172,6 +172,39 @@ interface DashboardIssueAccess {
   listBoardInputs(): Promise<StoreResult<DashboardIssueBoardInputs>>;
 }
 
+export interface DashboardRepositoryListItem {
+  id: string;
+  owner: string;
+  name: string;
+  enabled: boolean;
+  budget_limit: number | null;
+  connection_id: string | null;
+  github_status: string;
+  credential_status: string;
+  credential_error: string | null;
+  github_connections: {
+    display_name: string;
+    github_login: string;
+  } | null;
+}
+
+export interface DashboardRepositoryConnectionItem {
+  id: string;
+  display_name: string;
+  github_login: string;
+  status: string;
+}
+
+export interface DashboardRepositoryList {
+  repos: DashboardRepositoryListItem[];
+  connections: DashboardRepositoryConnectionItem[];
+  activeCostByRepoId: Record<string, number>;
+}
+
+interface DashboardRepositoryAccess {
+  listRepositories(): Promise<StoreResult<DashboardRepositoryList>>;
+}
+
 export interface DashboardGitHubConnection {
   id: string;
   displayName: string;
@@ -245,6 +278,7 @@ export interface DashboardStores {
   overview: DashboardOverviewAccess;
   runs: DashboardRunAccess;
   issues: DashboardIssueAccess;
+  repositories: DashboardRepositoryAccess;
   costs: DashboardCostAccess;
   credentials: DashboardCredentialAccess;
   githubConnections: DashboardGitHubConnectionAccess;
@@ -262,6 +296,7 @@ export function getDashboardStores(): DashboardStores {
       overview: new DashboardOverviewStore(db),
       runs: new DashboardRunStore(db),
       issues: new DashboardIssueStore(db),
+      repositories: new DashboardRepositoryStore(db),
       costs: new DashboardCostStore(db),
       credentials: new DashboardCredentialStore(db),
       githubConnections: new DashboardGitHubConnectionStore(db),
@@ -350,6 +385,81 @@ class DashboardOverviewStore implements DashboardOverviewAccess {
         totalRepos: enabledRepoCount[0]?.value ?? 0,
         recentRuns: recentRuns.map(toDashboardRunRow),
         budgetByRepoId,
+      });
+    });
+  }
+}
+
+class DashboardRepositoryStore implements DashboardRepositoryAccess {
+  constructor(private readonly db: DashboardDb) {}
+
+  async listRepositories() {
+    return unavailableOnThrow(async () => {
+      const [repoRows, connectionRows, activeRuns] = await Promise.all([
+        this.db
+          .select()
+          .from(repos)
+          .where(isNull(repos.deletedAt))
+          .orderBy(desc(repos.createdAt)),
+        this.db
+          .select({
+            id: githubConnections.id,
+            displayName: githubConnections.displayName,
+            githubLogin: githubConnections.githubLogin,
+            status: githubConnections.status,
+          })
+          .from(githubConnections)
+          .orderBy(githubConnections.createdAt),
+        this.db
+          .select({
+            repoId: runs.repoId,
+            totalCost: runs.totalCost,
+          })
+          .from(runs)
+          .where(eq(runs.outcome, 'in-progress')),
+      ]);
+
+      const connectionById = new Map(
+        connectionRows.map((connection) => [connection.id, connection]),
+      );
+      const activeCostByRepoId: Record<string, number> = {};
+      for (const run of activeRuns) {
+        if (!run.repoId) continue;
+        const cost = Number(run.totalCost ?? 0);
+        const current = activeCostByRepoId[run.repoId] ?? 0;
+        if (cost > current) activeCostByRepoId[run.repoId] = cost;
+      }
+
+      return ok({
+        repos: repoRows.map((repo) => {
+          const connection = repo.connectionId
+            ? connectionById.get(repo.connectionId)
+            : undefined;
+          return {
+            id: repo.id,
+            owner: repo.owner,
+            name: repo.name,
+            enabled: repo.enabled,
+            budget_limit: repo.budgetLimit,
+            connection_id: repo.connectionId,
+            github_status: repo.githubStatus,
+            credential_status: repo.credentialStatus,
+            credential_error: repo.credentialError,
+            github_connections: connection
+              ? {
+                  display_name: connection.displayName,
+                  github_login: connection.githubLogin,
+                }
+              : null,
+          };
+        }),
+        connections: connectionRows.map((connection) => ({
+          id: connection.id,
+          display_name: connection.displayName,
+          github_login: connection.githubLogin,
+          status: connection.status,
+        })),
+        activeCostByRepoId,
       });
     });
   }
