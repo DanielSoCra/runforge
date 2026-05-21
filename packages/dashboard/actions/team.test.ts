@@ -1,164 +1,220 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { revalidatePath } from 'next/cache';
 
-const mockInsert = vi.fn().mockResolvedValue({ error: null });
-const mockRpc = vi.fn();
+const mocks = vi.hoisted(() => ({
+  requireDashboardAdmin: vi.fn(),
+  createInvitation: vi.fn(),
+  changeMemberRole: vi.fn(),
+  removeMember: vi.fn(),
+}));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: vi.fn().mockResolvedValue({
-    from: vi.fn().mockReturnValue({
-      insert: mockInsert,
-      update: vi.fn().mockReturnValue({
-        eq: vi.fn().mockResolvedValue({ error: null }),
-      }),
-      select: vi.fn().mockReturnValue({
-        eq: vi.fn().mockReturnValue({
-          single: vi.fn().mockResolvedValue({ data: { role: 'admin' } }),
-          neq: vi.fn().mockResolvedValue({ data: [{ id: 'other-admin' }] }),
-        }),
-      }),
-      delete: vi.fn().mockReturnValue({
-        eq: vi.fn().mockResolvedValue({ error: null }),
-      }),
-    }),
-    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-123' } } }) },
-    rpc: mockRpc,
+vi.mock('@/lib/auth/require-session', () => ({
+  requireDashboardAdmin: mocks.requireDashboardAdmin,
+}));
+
+vi.mock('@/lib/data/stores', () => ({
+  getDashboardStores: () => ({
+    team: {
+      createInvitation: mocks.createInvitation,
+      changeMemberRole: mocks.changeMemberRole,
+      removeMember: mocks.removeMember,
+    },
   }),
 }));
+
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 
-let createInvitation: typeof import('./team').createInvitation;
-let changeRole: typeof import('./team').changeRole;
-let removeMember: typeof import('./team').removeMember;
-
-beforeEach(async () => {
-  vi.clearAllMocks();
-  const mod = await import('./team');
-  createInvitation = mod.createInvitation;
-  changeRole = mod.changeRole;
-  removeMember = mod.removeMember;
-});
+import { changeRole, createInvitation, removeMember } from './team';
 
 describe('team actions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireDashboardAdmin.mockResolvedValue({
+      user: { id: 'admin-1', role: 'admin' },
+    });
+    mocks.createInvitation.mockResolvedValue({ ok: true, value: undefined });
+    mocks.changeMemberRole.mockResolvedValue({ ok: true, value: undefined });
+    mocks.removeMember.mockResolvedValue({ ok: true, value: undefined });
+  });
+
+  it('does not mutate team state when the admin gate rejects', async () => {
+    mocks.requireDashboardAdmin.mockRejectedValueOnce(
+      new Error('Admin access required'),
+    );
+
+    await expect(changeRole('member-1', 'viewer')).rejects.toThrow(
+      'Admin access required',
+    );
+    expect(mocks.changeMemberRole).not.toHaveBeenCalled();
+    expect(mocks.createInvitation).not.toHaveBeenCalled();
+    expect(mocks.removeMember).not.toHaveBeenCalled();
+  });
+
   describe('createInvitation', () => {
-    it('inserts with pending status', async () => {
+    it('creates a pending invitation through the app-owned team store', async () => {
       const formData = new FormData();
-      formData.append('provider_handle', 'octocat');
+      formData.append('provider_handle', ' octocat ');
       formData.append('role', 'viewer');
+
       await createInvitation(formData);
 
-      expect(mockInsert).toHaveBeenCalledWith(
-        expect.objectContaining({ provider_handle: 'octocat', status: 'pending', invited_by: 'user-123' })
-      );
+      expect(mocks.requireDashboardAdmin).toHaveBeenCalledTimes(1);
+      expect(mocks.createInvitation).toHaveBeenCalledWith({
+        providerHandle: 'octocat',
+        role: 'viewer',
+        invitedBy: 'admin-1',
+      });
       expect(revalidatePath).toHaveBeenCalledWith('/team');
     });
 
-    it('throws on empty provider_handle', async () => {
+    it('throws on empty provider_handle before touching the store', async () => {
       const formData = new FormData();
       formData.append('provider_handle', '');
       formData.append('role', 'admin');
 
-      await expect(createInvitation(formData)).rejects.toThrow('GitHub username is required');
+      await expect(createInvitation(formData)).rejects.toThrow(
+        'GitHub username is required',
+      );
+      expect(mocks.createInvitation).not.toHaveBeenCalled();
     });
 
-    it('throws on missing provider_handle', async () => {
+    it('throws on missing provider_handle before touching the store', async () => {
       const formData = new FormData();
       formData.append('role', 'admin');
 
-      await expect(createInvitation(formData)).rejects.toThrow('GitHub username is required');
+      await expect(createInvitation(formData)).rejects.toThrow(
+        'GitHub username is required',
+      );
+      expect(mocks.createInvitation).not.toHaveBeenCalled();
     });
 
-    it('throws on invalid role', async () => {
+    it('throws on invalid role before touching the store', async () => {
       const formData = new FormData();
       formData.append('provider_handle', 'octocat');
       formData.append('role', 'superadmin');
 
       await expect(createInvitation(formData)).rejects.toThrow('Invalid role');
+      expect(mocks.createInvitation).not.toHaveBeenCalled();
     });
 
     it('throws on duplicate pending invitation', async () => {
-      mockInsert.mockResolvedValueOnce({ error: { code: '23505', message: 'duplicate' } });
+      mocks.createInvitation.mockResolvedValueOnce({
+        ok: false,
+        error: 'conflict',
+        message: 'duplicate',
+      });
       const formData = new FormData();
       formData.append('provider_handle', 'octocat');
       formData.append('role', 'viewer');
 
-      await expect(createInvitation(formData)).rejects.toThrow('A pending invitation for this user already exists');
+      await expect(createInvitation(formData)).rejects.toThrow(
+        'A pending invitation for this user already exists',
+      );
     });
 
-    it('throws generic error on insert failure', async () => {
-      mockInsert.mockResolvedValueOnce({ error: { code: '42000', message: 'db error' } });
+    it('throws generic error when the team store cannot create the invitation', async () => {
+      mocks.createInvitation.mockResolvedValueOnce({
+        ok: false,
+        error: 'unavailable',
+        message: 'db offline',
+      });
       const formData = new FormData();
       formData.append('provider_handle', 'octocat');
       formData.append('role', 'viewer');
 
-      await expect(createInvitation(formData)).rejects.toThrow('Failed to create invitation');
+      await expect(createInvitation(formData)).rejects.toThrow(
+        'Failed to create invitation',
+      );
     });
   });
 
   describe('changeRole', () => {
-    it('calls change_member_role RPC and revalidates', async () => {
-      mockRpc.mockResolvedValue({ data: 'ok', error: null });
+    it('changes a member role through the app-owned team store and revalidates', async () => {
       await changeRole('member-1', 'viewer');
 
-      expect(mockRpc).toHaveBeenCalledWith('change_member_role', {
-        p_member_id: 'member-1',
-        p_new_role: 'viewer',
-      });
+      expect(mocks.requireDashboardAdmin).toHaveBeenCalledTimes(1);
+      expect(mocks.changeMemberRole).toHaveBeenCalledWith('member-1', 'viewer');
       expect(revalidatePath).toHaveBeenCalledWith('/team');
     });
 
-    it('throws on last_admin response', async () => {
-      mockRpc.mockResolvedValue({ data: 'last_admin', error: null });
+    it('throws on last-admin conflict', async () => {
+      mocks.changeMemberRole.mockResolvedValueOnce({
+        ok: false,
+        error: 'conflict',
+        message: 'last admin',
+      });
 
       await expect(changeRole('member-1', 'viewer')).rejects.toThrow(
-        'Cannot demote the last admin'
+        'Cannot demote the last admin',
       );
     });
 
-    it('throws on not_found response', async () => {
-      mockRpc.mockResolvedValue({ data: 'not_found', error: null });
-
-      await expect(changeRole('member-1', 'admin')).rejects.toThrow('Member not found');
-    });
-
-    it('throws on RPC error', async () => {
-      mockRpc.mockResolvedValue({ data: null, error: { message: 'connection failed' } });
+    it('throws on not-found response', async () => {
+      mocks.changeMemberRole.mockResolvedValueOnce({
+        ok: false,
+        error: 'not-found',
+        message: 'missing',
+      });
 
       await expect(changeRole('member-1', 'admin')).rejects.toThrow(
-        'Failed to change member role'
+        'Member not found',
+      );
+    });
+
+    it('throws on store failure', async () => {
+      mocks.changeMemberRole.mockResolvedValueOnce({
+        ok: false,
+        error: 'unavailable',
+        message: 'db offline',
+      });
+
+      await expect(changeRole('member-1', 'admin')).rejects.toThrow(
+        'Failed to change member role',
       );
     });
   });
 
   describe('removeMember', () => {
-    it('calls remove_team_member RPC and revalidates', async () => {
-      mockRpc.mockResolvedValue({ data: 'ok', error: null });
+    it('removes a member through the app-owned team store and revalidates', async () => {
       await removeMember('member-2');
 
-      expect(mockRpc).toHaveBeenCalledWith('remove_team_member', {
-        p_member_id: 'member-2',
-      });
+      expect(mocks.requireDashboardAdmin).toHaveBeenCalledTimes(1);
+      expect(mocks.removeMember).toHaveBeenCalledWith('member-2');
       expect(revalidatePath).toHaveBeenCalledWith('/team');
     });
 
-    it('throws on last_admin response', async () => {
-      mockRpc.mockResolvedValue({ data: 'last_admin', error: null });
+    it('throws on last-admin conflict', async () => {
+      mocks.removeMember.mockResolvedValueOnce({
+        ok: false,
+        error: 'conflict',
+        message: 'last admin',
+      });
 
       await expect(removeMember('member-2')).rejects.toThrow(
-        'Cannot remove the last admin'
+        'Cannot remove the last admin',
       );
     });
 
-    it('throws on not_found response', async () => {
-      mockRpc.mockResolvedValue({ data: 'not_found', error: null });
+    it('throws on not-found response', async () => {
+      mocks.removeMember.mockResolvedValueOnce({
+        ok: false,
+        error: 'not-found',
+        message: 'missing',
+      });
 
       await expect(removeMember('member-2')).rejects.toThrow('Member not found');
     });
 
-    it('throws on RPC error', async () => {
-      mockRpc.mockResolvedValue({ data: null, error: { message: 'rpc failed' } });
+    it('throws on store failure', async () => {
+      mocks.removeMember.mockResolvedValueOnce({
+        ok: false,
+        error: 'unavailable',
+        message: 'db offline',
+      });
 
-      await expect(removeMember('member-2')).rejects.toThrow('Failed to remove member');
+      await expect(removeMember('member-2')).rejects.toThrow(
+        'Failed to remove member',
+      );
     });
   });
 });

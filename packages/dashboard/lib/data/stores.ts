@@ -256,10 +256,24 @@ export interface DashboardTeamPageData {
   invitations: DashboardPendingInvitation[];
 }
 
+export interface DashboardCreateInvitationInput {
+  providerHandle: string;
+  role: 'admin' | 'viewer';
+  invitedBy: string;
+}
+
 interface DashboardTeamAccess {
   readTeamPage(options?: {
     includePendingInvitations?: boolean;
   }): Promise<StoreResult<DashboardTeamPageData>>;
+  createInvitation(
+    input: DashboardCreateInvitationInput,
+  ): Promise<StoreResult>;
+  changeMemberRole(
+    memberId: string,
+    newRole: 'admin' | 'viewer',
+  ): Promise<StoreResult>;
+  removeMember(memberId: string): Promise<StoreResult>;
 }
 
 export interface DashboardPluginRepo {
@@ -370,6 +384,8 @@ export interface DashboardStores {
 }
 
 type DashboardDb = ReturnType<typeof createDashboardDbClient>['db'];
+
+const OPERATOR_MEMBERSHIP_LOCK_NAME = 'auto_claude_operator_membership';
 
 let dashboardStores: DashboardStores | undefined;
 
@@ -573,6 +589,116 @@ class DashboardTeamStore implements DashboardTeamAccess {
         })),
       });
     });
+  }
+
+  async createInvitation(input: DashboardCreateInvitationInput) {
+    return unavailableOnThrow(async () => {
+      const [row] = await this.db
+        .insert(invitations)
+        .values({
+          providerHandle: input.providerHandle,
+          role: input.role,
+          invitedBy: input.invitedBy,
+          status: 'pending',
+        })
+        .onConflictDoNothing({
+          target: [invitations.providerHandle, invitations.status],
+        })
+        .returning({ id: invitations.id });
+
+      return row
+        ? ok(undefined)
+        : conflict('pending invitation already exists for this provider handle');
+    });
+  }
+
+  async changeMemberRole(memberId: string, newRole: 'admin' | 'viewer') {
+    return unavailableOnThrow(async () =>
+      this.db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${OPERATOR_MEMBERSHIP_LOCK_NAME}))`,
+        );
+
+        const [member] = await tx
+          .select({
+            id: teamMembers.id,
+            userId: teamMembers.userId,
+            role: teamMembers.role,
+          })
+          .from(teamMembers)
+          .where(eq(teamMembers.id, memberId))
+          .limit(1);
+        if (!member) return notFound('team member was not found');
+
+        if (member.role === 'admin' && newRole === 'viewer') {
+          const [adminCount] = await tx
+            .select({ value: count() })
+            .from(teamMembers)
+            .where(eq(teamMembers.role, 'admin'));
+          if ((adminCount?.value ?? 0) <= 1) {
+            return conflict('at least one admin must remain');
+          }
+        }
+
+        const [updated] = await tx
+          .update(teamMembers)
+          .set({ role: newRole })
+          .where(eq(teamMembers.id, memberId))
+          .returning({ id: teamMembers.id });
+        if (!updated) return notFound('team member was not found');
+
+        await tx
+          .update(authUsers)
+          .set({ role: newRole, updatedAt: new Date() })
+          .where(eq(authUsers.id, member.userId));
+
+        return ok(undefined);
+      }),
+    );
+  }
+
+  async removeMember(memberId: string) {
+    return unavailableOnThrow(async () =>
+      this.db.transaction(async (tx) => {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${OPERATOR_MEMBERSHIP_LOCK_NAME}))`,
+        );
+
+        const [member] = await tx
+          .select({
+            id: teamMembers.id,
+            userId: teamMembers.userId,
+            role: teamMembers.role,
+          })
+          .from(teamMembers)
+          .where(eq(teamMembers.id, memberId))
+          .limit(1);
+        if (!member) return notFound('team member was not found');
+
+        if (member.role === 'admin') {
+          const [adminCount] = await tx
+            .select({ value: count() })
+            .from(teamMembers)
+            .where(eq(teamMembers.role, 'admin'));
+          if ((adminCount?.value ?? 0) <= 1) {
+            return conflict('at least one admin must remain');
+          }
+        }
+
+        const [removed] = await tx
+          .delete(teamMembers)
+          .where(eq(teamMembers.id, memberId))
+          .returning({ id: teamMembers.id });
+        if (!removed) return notFound('team member was not found');
+
+        await tx
+          .update(authUsers)
+          .set({ role: 'viewer', updatedAt: new Date() })
+          .where(eq(authUsers.id, member.userId));
+
+        return ok(undefined);
+      }),
+    );
   }
 }
 

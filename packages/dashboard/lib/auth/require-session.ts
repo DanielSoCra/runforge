@@ -1,4 +1,7 @@
 import { headers as nextHeaders } from 'next/headers';
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
 
 import { resolveLocalAuthBypass } from '../../../auth/src/local-bypass';
 import {
@@ -6,6 +9,8 @@ import {
   roleAllows,
   type OperatorRole,
 } from '../../../auth/src/roles';
+import { readDatabaseUrl } from '../../../db/src/env';
+import { teamMembers } from '../../../db/src/schema';
 import { getDashboardAuth } from './better-auth';
 
 export class DashboardAuthError extends Error {
@@ -48,11 +53,25 @@ interface DashboardAuthApi {
   };
 }
 
+type DashboardMembershipLookupResult =
+  | { ok: true; value: { role: OperatorRole } }
+  | { ok: false; error: 'not-found' | 'unavailable'; message: string };
+
+interface DashboardMembershipLookup {
+  readMembership(userId: string): Promise<DashboardMembershipLookupResult>;
+}
+
 interface RequireDashboardSessionOptions {
   headers?: Headers;
   env?: Parameters<typeof resolveLocalAuthBypass>[0];
   auth?: DashboardAuthApi;
+  membershipLookup?: DashboardMembershipLookup;
   requiredRole?: OperatorRole;
+}
+
+interface DashboardSessionIdentity {
+  user: Omit<DashboardOperator, 'role'>;
+  session: unknown;
 }
 
 const LOCAL_BYPASS_OPERATOR: DashboardSession = {
@@ -106,17 +125,34 @@ async function requireDashboardSession(
   const requestHeaders = options.headers ?? new Headers(await nextHeaders());
   const auth = options.auth ?? (getDashboardAuth() as DashboardAuthApi);
   const payload = await auth.api.getSession({ headers: requestHeaders });
-  const session = resolveSessionPayload(payload);
+  const identity = resolveSessionPayload(payload);
 
-  if (!session) {
+  if (!identity) {
     throw new DashboardAuthError('Unauthorized', 401);
   }
-  if (session === 'deny') {
+  if (identity === 'deny') {
     throw new DashboardAuthError(
       'Access denied — ask an admin to invite you',
       403,
     );
   }
+
+  const membershipLookup =
+    options.membershipLookup ?? getDashboardMembershipLookup();
+  const membership = await membershipLookup.readMembership(identity.user.id);
+  if (!membership.ok) {
+    throw new DashboardAuthError(
+      membership.error === 'unavailable'
+        ? 'Authorization unavailable'
+        : 'Access denied — ask an admin to invite you',
+      403,
+    );
+  }
+
+  const session = {
+    ...identity,
+    user: { ...identity.user, role: membership.value.role },
+  };
 
   const requiredRole = options.requiredRole ?? 'viewer';
   if (!roleAllows(session.user.role, requiredRole)) {
@@ -128,9 +164,8 @@ async function requireDashboardSession(
 
 function resolveSessionPayload(
   payload: SessionPayload | null,
-): DashboardSession | 'deny' | null {
+): DashboardSessionIdentity | 'deny' | null {
   if (!payload?.user?.id) return null;
-  if (!isOperatorRole(payload.user.role)) return 'deny';
 
   return {
     user: {
@@ -138,8 +173,74 @@ function resolveSessionPayload(
       email: payload.user.email ?? '',
       name: payload.user.name ?? '',
       image: payload.user.image,
-      role: payload.user.role,
     },
     session: payload.session,
   };
+}
+
+type DashboardMembershipDb = ReturnType<
+  typeof createDashboardMembershipDbClient
+>['db'];
+
+class DashboardDbMembershipLookup implements DashboardMembershipLookup {
+  constructor(private readonly db: DashboardMembershipDb) {}
+
+  async readMembership(userId: string): Promise<DashboardMembershipLookupResult> {
+    try {
+      const [membership] = await this.db
+        .select({ role: teamMembers.role })
+        .from(teamMembers)
+        .where(eq(teamMembers.userId, userId))
+        .limit(1);
+      if (!membership) {
+        return {
+          ok: false,
+          error: 'not-found',
+          message: `operator membership for user ${userId} was not found`,
+        };
+      }
+      if (!isOperatorRole(membership.role)) {
+        return {
+          ok: false,
+          error: 'not-found',
+          message: `operator membership for user ${userId} has invalid role`,
+        };
+      }
+      return { ok: true, value: { role: membership.role } };
+    } catch (error) {
+      return {
+        ok: false,
+        error: 'unavailable',
+        message: errorMessage(error),
+      };
+    }
+  }
+}
+
+let dashboardMembershipLookup: DashboardMembershipLookup | undefined;
+
+function getDashboardMembershipLookup(): DashboardMembershipLookup {
+  dashboardMembershipLookup ??= new DashboardDbMembershipLookup(
+    getDashboardMembershipDbClient().db,
+  );
+  return dashboardMembershipLookup;
+}
+
+function createDashboardMembershipDbClient() {
+  const sql = postgres(readDatabaseUrl(), { max: 4 });
+  const db = drizzle(sql, { schema: { teamMembers } });
+  return { db, sql };
+}
+
+let dashboardMembershipDbClient:
+  | ReturnType<typeof createDashboardMembershipDbClient>
+  | undefined;
+
+function getDashboardMembershipDbClient() {
+  dashboardMembershipDbClient ??= createDashboardMembershipDbClient();
+  return dashboardMembershipDbClient;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

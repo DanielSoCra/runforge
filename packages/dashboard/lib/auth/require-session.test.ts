@@ -28,6 +28,20 @@ function authWithSession(user: { id?: string; role?: unknown } | null) {
   };
 }
 
+function membershipWithRole(role: 'admin' | 'viewer' | null = 'viewer') {
+  return {
+    readMembership: vi.fn().mockResolvedValue(
+      role
+        ? { ok: true, value: { role } }
+        : {
+            ok: false,
+            error: 'not-found',
+            message: 'operator membership was not found',
+          },
+    ),
+  };
+}
+
 describe('requireDashboardUser', () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
@@ -35,9 +49,10 @@ describe('requireDashboardUser', () => {
 
   it('allows a viewer session through the viewer gate', async () => {
     const auth = authWithSession({ role: 'viewer' });
+    const membershipLookup = membershipWithRole('viewer');
 
     await expect(
-      requireDashboardUser({ auth, headers: new Headers() }),
+      requireDashboardUser({ auth, headers: new Headers(), membershipLookup }),
     ).resolves.toMatchObject({
       user: { id: 'operator-1', role: 'viewer' },
     });
@@ -64,11 +79,12 @@ describe('requireDashboardUser', () => {
     ).rejects.toMatchObject({ message: 'Unauthorized', status: 401 });
   });
 
-  it('throws 403 when the session role is not app-owned', async () => {
+  it('throws 403 when the operator has no app-owned membership', async () => {
     await expect(
       requireDashboardUser({
         auth: authWithSession({ role: 'owner' }),
         headers: new Headers(),
+        membershipLookup: membershipWithRole(null),
       }),
     ).rejects.toMatchObject({
       message: 'Access denied — ask an admin to invite you',
@@ -121,6 +137,17 @@ describe('requireDashboardAdmin', () => {
       requireDashboardAdmin({
         auth: authWithSession({ role: 'admin' }),
         headers: new Headers(),
+        membershipLookup: membershipWithRole('admin'),
+      }),
+    ).resolves.toMatchObject({ user: { role: 'admin' } });
+  });
+
+  it('uses membership role instead of a stale session role', async () => {
+    await expect(
+      requireDashboardAdmin({
+        auth: authWithSession({ role: 'viewer' }),
+        headers: new Headers(),
+        membershipLookup: membershipWithRole('admin'),
       }),
     ).resolves.toMatchObject({ user: { role: 'admin' } });
   });
@@ -128,11 +155,31 @@ describe('requireDashboardAdmin', () => {
   it('denies viewers at the admin gate', async () => {
     await expect(
       requireDashboardAdmin({
-        auth: authWithSession({ role: 'viewer' }),
+        auth: authWithSession({ role: 'admin' }),
         headers: new Headers(),
+        membershipLookup: membershipWithRole('viewer'),
       }),
     ).rejects.toMatchObject({
       message: 'Admin access required',
+      status: 403,
+    });
+  });
+
+  it('fails closed when membership lookup is unavailable', async () => {
+    await expect(
+      requireDashboardAdmin({
+        auth: authWithSession({ role: 'admin' }),
+        headers: new Headers(),
+        membershipLookup: {
+          readMembership: vi.fn().mockResolvedValue({
+            ok: false,
+            error: 'unavailable',
+            message: 'database offline',
+          }),
+        },
+      }),
+    ).rejects.toMatchObject({
+      message: 'Authorization unavailable',
       status: 403,
     });
   });
@@ -144,6 +191,7 @@ describe('isDashboardAdmin', () => {
       isDashboardAdmin({
         auth: authWithSession({ role: 'admin' }),
         headers: new Headers(),
+        membershipLookup: membershipWithRole('admin'),
       }),
     ).resolves.toBe(true);
   });
@@ -151,8 +199,9 @@ describe('isDashboardAdmin', () => {
   it('returns false for viewers and missing sessions', async () => {
     await expect(
       isDashboardAdmin({
-        auth: authWithSession({ role: 'viewer' }),
+        auth: authWithSession({ role: 'admin' }),
         headers: new Headers(),
+        membershipLookup: membershipWithRole('viewer'),
       }),
     ).resolves.toBe(false);
     await expect(
