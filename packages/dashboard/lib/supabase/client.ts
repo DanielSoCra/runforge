@@ -1,8 +1,9 @@
-import { createBrowserClient } from '@supabase/ssr';
-import type { Database } from '@/lib/types';
-import { getSupabaseEnv } from './env';
+function retiredDashboardHostedClient(): never {
+  throw new Error(
+    'Dashboard Supabase clients have been retired. Use app-owned stores instead.',
+  );
+}
 
-export function createClient() {
-  const { url, anonKey } = getSupabaseEnv();
-  return createBrowserClient<Database>(url, anonKey);
+export function createClient(): never {
+  return retiredDashboardHostedClient();
 }
