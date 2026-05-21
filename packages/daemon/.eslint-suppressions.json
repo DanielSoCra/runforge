@@ -57,7 +57,7 @@
       "count": 3
     },
     "@typescript-eslint/strict-boolean-expressions": {
-      "count": 12
+      "count": 5
     }
   },
   "src/control-plane/dag-executor.ts": {
@@ -164,11 +164,6 @@
   "src/control-plane/remote-control.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
-    }
-  },
-  "src/control-plane/repo-manager.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 12
     }
   },
   "src/control-plane/repo-manager.ts": {
@@ -529,24 +524,6 @@
   "src/session-runtime/scope-enforcement.ts": {
     "@typescript-eslint/strict-boolean-expressions": {
       "count": 5
-    }
-  },
-  "src/supabase/client.ts": {
-    "@typescript-eslint/strict-boolean-expressions": {
-      "count": 5
-    }
-  },
-  "src/supabase/config-reader.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 9
-    },
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    }
-  },
-  "src/supabase/run-writer.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 6
     }
   },
   "src/validation/deploy.ts": {

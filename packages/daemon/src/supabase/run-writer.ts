@@ -1,105 +1,37 @@
-// src/supabase/run-writer.ts
-import type { SupabaseClient } from '@supabase/supabase-js';
-import type { SessionType } from '../types.js';
-import type { PipelineResult } from '../control-plane/pipeline.js';
+// Retired compatibility shim. Use PostgresRunWriter from ../data/run-writer.js.
 
-export type DbOutcome = 'in-progress' | 'complete' | 'stuck' | 'escalated' | 'failed';
-export type RunWriterOutcome = PipelineResult['outcome'] | 'failed';
-export type DbSessionType = 'planning' | 'implementation' | 'validation' | 'diagnosis';
-
-export function toDbOutcome(outcome: RunWriterOutcome): DbOutcome {
-  if (outcome === 'complete') return 'complete';
-  if (outcome === 'stuck') return 'stuck';
-  if (outcome === 'failed') return 'failed';
-  if (outcome === 'error') return 'failed';
-  if (outcome === 'parked') return 'in-progress';
-  return 'in-progress'; // 'paused' is suspended, not terminal from the DB perspective
-}
-
-export function toDbSessionType(type: SessionType): DbSessionType {
-  switch (type) {
-    case 'coordinator':
-    case 'classifier':       return 'planning';
-    case 'worker':
-    case 'bug-worker':       return 'implementation';
-    case 'reviewer-spec':
-    case 'reviewer-quality':
-    case 'reviewer-security':
-    case 'codebase-reviewer': return 'validation';
-    case 'diagnostician':    return 'diagnosis';
-    case 'product-owner':
-    case 'tech-lead':
-    case 'l2-designer':
-    case 'l3-generator':
-    case 'compliance-reviewer': return 'planning';
-    default: {
-      const _exhaustive: never = type;
-      throw new Error(`Unknown session type: ${_exhaustive}`);
-    }
-  }
-}
-
-export interface RunRow {
-  id?: string;
-  repo_id?: string | null;
-  repo_owner?: string;
-  repo_name?: string;
-  issue_number?: number;
-  issue_title?: string;
-  pipeline_variant?: string;
-  current_phase?: string | null;
-  outcome?: DbOutcome;
-  total_cost?: number;
-  phases?: PhaseRecord[];
-  fix_attempts?: number;
-  report?: string | null;
-  started_at?: string;
-  completed_at?: string | null;
-  active_plugins?: string[];
-}
-
-export interface PhaseRecord {
-  phase: string;
-  outcome: 'success' | 'failure' | 'skipped';
-  completedAt: string;
-}
+export {
+  toDbOutcome,
+  toDbSessionType,
+  type DbOutcome,
+  type DbSessionType,
+  type PhaseRecord,
+  type RunRow,
+  type RunWriterOutcome,
+} from '../data/run-writer.js';
 
 export class SupabaseRunWriter {
-  constructor(private readonly supabase: SupabaseClient) {}
+  constructor(_client?: unknown) {}
 
-  /**
-   * Insert a new run row. Use for the initial creation only.
-   * All required fields (repo_owner, repo_name, etc.) must be provided.
-   */
-  async insertRun(runId: string, data: Partial<RunRow>): Promise<void> {
-    const { error } = await this.supabase
-      .from('runs')
-      .insert({ id: runId, ...data });
-    if (error) {
-      console.warn(`[run-writer] insertRun failed for ${runId}:`, error.message);
-    }
+  async insertRun(_runId?: string, _data?: unknown): Promise<void> {
+    this.warnRetired();
   }
 
-  /**
-   * Update an existing run row. Use for phase transitions and completion.
-   * Only updates provided fields — does not null out missing ones.
-   */
-  async upsertRun(runId: string, patch: Partial<RunRow>): Promise<void> {
-    const { error } = await this.supabase
-      .from('runs')
-      .update(patch)
-      .eq('id', runId);
-    if (error) {
-      console.warn(`[run-writer] upsertRun failed for ${runId}:`, error.message);
-    }
+  async upsertRun(_runId?: string, _patch?: unknown): Promise<void> {
+    this.warnRetired();
   }
 
-  async writeCostEvent(runId: string, sessionType: SessionType, cost: number): Promise<void> {
-    const { error } = await this.supabase
-      .from('cost_events')
-      .insert({ run_id: runId, session_type: toDbSessionType(sessionType), cost });
-    if (error) {
-      console.warn(`[run-writer] writeCostEvent failed for ${runId}:`, error.message);
-    }
+  async writeCostEvent(
+    _runId?: string,
+    _sessionType?: unknown,
+    _cost?: number,
+  ): Promise<void> {
+    this.warnRetired();
+  }
+
+  private warnRetired(): void {
+    console.warn(
+      '[run-writer] SupabaseRunWriter is retired; use PostgresRunWriter',
+    );
   }
 }

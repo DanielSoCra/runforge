@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { readAgencyConfig, mergeAgencyConfig, type AgencyConfig } from './agency-config.js';
+import {
+  readAgencyConfig,
+  mergeAgencyConfig,
+  type AgencyConfig,
+} from './agency-config.js';
 
 const DEFAULT_SETTINGS: AgencyConfig = {
   client: '',
@@ -55,45 +59,51 @@ describe('mergeAgencyConfig', () => {
   });
 
   it('source_url null in defaults can be overridden', () => {
-    const result = mergeAgencyConfig(DEFAULT_SETTINGS, { source_url: 'https://example.com' });
+    const result = mergeAgencyConfig(DEFAULT_SETTINGS, {
+      source_url: 'https://example.com',
+    });
     expect(result.source_url).toBe('https://example.com');
   });
 });
 
 describe('readAgencyConfig', () => {
   it('merges global settings with repo plugin config', async () => {
-    const mockSupabase = {
+    const mockConfigStore = {
       from: vi.fn().mockImplementation((table: string) => ({
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue(
-          table === 'plugin_global_settings'
-            ? { data: { settings: { default_stack: 'native' } }, error: null }
-            : { data: { config: { language: 'en' } }, error: null }
-        ),
+        single: vi
+          .fn()
+          .mockResolvedValue(
+            table === 'plugin_global_settings'
+              ? { data: { settings: { default_stack: 'native' } }, error: null }
+              : { data: { config: { language: 'en' } }, error: null },
+          ),
       })),
     } as any;
 
-    const result = await readAgencyConfig(mockSupabase, 'repo-123');
+    const result = await readAgencyConfig(mockConfigStore, 'repo-123');
     expect(result.stack).toBe('native');
     expect(result.language).toBe('en');
   });
 
-  it('falls back to defaults when Supabase returns no data', async () => {
-    const mockSupabase = {
+  it('falls back to defaults when the config store returns no data', async () => {
+    const mockConfigStore = {
       from: vi.fn().mockImplementation(() => ({
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({ data: null, error: { message: 'not found' } }),
+        single: vi
+          .fn()
+          .mockResolvedValue({ data: null, error: { message: 'not found' } }),
       })),
     } as any;
 
-    const result = await readAgencyConfig(mockSupabase, 'repo-123');
+    const result = await readAgencyConfig(mockConfigStore, 'repo-123');
     expect(result.stack).toBe('astro');
     expect(result.language).toBe('de');
   });
 
-  it('returns defaults immediately when supabase is null', async () => {
+  it('returns defaults immediately when the config store is null', async () => {
     const result = await readAgencyConfig(null, '');
     expect(result.stack).toBe('astro');
     expect(result.language).toBe('de');

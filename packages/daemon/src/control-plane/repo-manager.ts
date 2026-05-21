@@ -1,13 +1,8 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { Octokit } from '@octokit/rest';
 import { createWorkDetector, type WorkDetector } from './work-detection.js';
 import { ok, type Result } from '../lib/result.js';
 import { createPhaseLabelMirror } from './phase-labels.js';
-import {
-  SupabaseRepoDataSource,
-  type DataRepoRecord,
-  type RepoDataSource,
-} from '../data/repo-source.js';
+import type { DataRepoRecord, RepoDataSource } from '../data/repo-source.js';
 
 export type RepoRecord = DataRepoRecord;
 
@@ -28,7 +23,7 @@ export class RepoManager {
   private readonly source: RepoDataSource;
 
   constructor(
-    source: RepoDataSource | SupabaseClient,
+    source: RepoDataSource,
     private readonly defaultPollIntervalMs: number,
     private readonly onPoll: (
       repoId: string,
@@ -37,9 +32,7 @@ export class RepoManager {
       detector: WorkDetector,
     ) => void | Promise<void>,
   ) {
-    this.source = isRepoDataSource(source)
-      ? source
-      : new SupabaseRepoDataSource(source);
+    this.source = source;
   }
 
   async initialize(): Promise<Result<void>> {
@@ -204,14 +197,4 @@ export class RepoManager {
     if (!entry) return process.env.GITHUB_TOKEN;
     return this.resolveToken(repoId, entry.connectionId);
   }
-}
-
-function isRepoDataSource(source: unknown): source is RepoDataSource {
-  return (
-    typeof source === 'object' &&
-    source !== null &&
-    'listEnabledRepos' in source &&
-    'upsertRepo' in source &&
-    'resolveConnectionToken' in source
-  );
 }
