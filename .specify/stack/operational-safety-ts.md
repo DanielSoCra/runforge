@@ -14,6 +14,7 @@ code_paths:
   - packages/daemon/src/session-runtime/session-error.ts
   - packages/daemon/src/control-plane/daemon.ts
   - packages/daemon/src/control-plane/pipeline.ts
+  - packages/daemon/src/data/config-reader.ts
 test_paths:
   - packages/daemon/src/session-runtime/cost.test.ts
   - packages/daemon/src/session-runtime/rate-limiter.test.ts
@@ -21,6 +22,7 @@ test_paths:
   - packages/daemon/src/session-runtime/session-error.test.ts
   - packages/daemon/src/control-plane/daemon.test.ts
   - packages/daemon/src/control-plane/pipeline.test.ts
+  - packages/daemon/src/data/config-reader.test.ts
 ---
 
 # STACK-AC-OPERATIONAL-SAFETY — Operational Safety Coordination (TypeScript)
@@ -46,6 +48,8 @@ test_paths:
 **Graceful shutdown: Flag + signal cascade.** The Daemon sets `shuttingDown = true` on SIGTERM/SIGINT, which prevents the polling loop from claiming new work. Active runs complete naturally up to the grace period. After the grace period, the Daemon calls `remoteControl.stop()` (SIGTERM to subprocess), flushes run state via `writeJsonSafe()`, and closes the HTTP server to release the port lock. The `finally` block in the run loop ensures `notifyRunEnd()` always fires, even on crash.
 
 **Cost tracking persistence across errors.** `SessionError` always carries the `cost` field. The Daemon records cost from both successful results and errors — cost accrues regardless of outcome. This prevents a failure mode where errored sessions consume budget but don't report it.
+
+**Startup configuration load: bounded inline retry, then degraded background-retry.** `startDaemon()` reorders to bring the control HTTP server up before the first configuration fetch so the degraded state is observable from process start; `startupDegraded = true` is the initial value, set before any retry runs. The initial `configReader.fetch()` is wrapped in a bounded retry (default 5 attempts with `1s, 2s, 4s, 8s, 16s` backoff, configurable via `DAEMON_STARTUP_RETRY_MAX_ATTEMPTS`, `DAEMON_STARTUP_RETRY_BASE_MS`, `DAEMON_STARTUP_RETRY_MAX_DELAY_MS`); inline attempts do **not** advance the escalation counter. On inline-retry exhaustion the daemon stays in `startupDegraded = true` rather than `process.exit(1)`; the control endpoint's `/health` and `/status` payloads include `{ degraded: true, lastConfigError: { category, code, message } }`, the work-claiming loop refuses to claim until `startupDegraded === false`, and a background timer keeps calling `fetchSafe()` at the existing poll interval. The first successful fetch (inline or background) clears the flag. A categorical `rejected` Store outcome on **any** attempt — inline or background — short-circuits to fatal: an inline `rejected` returns `err(...)` from `startDaemon()`; a background-phase `rejected` logs the underlying reason and calls `process.exit(1)` (the background timer cannot return a `Result` to the caller — `startDaemon` has long since resolved by then). Degraded mode is for `unreachable`, never for permanent failures, regardless of phase. The **same** `config.maxConsecutiveStuck` counter pattern used for stuck runs counts unrecovered **background-phase** fetch attempts (no new threshold field is introduced); once the count reaches the threshold (matching the existing `>=` comparator in stuck-run auto-pause), a one-shot operator notification fires on the configured channel and is re-armed only when `startupDegraded` has cleared at least once (`notifiedThisDegradation` boolean reset on clear).
 
 ## Examples
 
@@ -87,6 +91,21 @@ applyGlobalTransition(event: PhaseEvent): Phase | null {
 }
 ```
 
+```typescript
+// Startup config load: bounded retry then degraded mode (shape, not literal code)
+for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  const result = await configReader.tryFetch();
+  if (result.ok) { startupDegraded = false; break; }
+  if (result.error.category === 'rejected') return err(result.error);
+  await delay(backoff(attempt));
+}
+if (!configReader.hasLoaded()) {
+  startupDegraded = true;
+  startBackgroundRetry(configReader);
+}
+// Control server starts BEFORE the loop above so /health is observable from t=0.
+```
+
 ## Gotchas
 
 - `SessionError.cost` must always be populated. A zero-cost error is valid (e.g., rejected before spawn); a missing cost field is a bug. The Daemon's cost recording path must handle both `SessionResult` and `SessionError` without branching on type.
@@ -95,3 +114,6 @@ applyGlobalTransition(event: PhaseEvent): Phase | null {
 - `shuttingDown` and `paused` are separate flags. `shuttingDown` is irreversible within a process lifetime (the daemon is exiting). `paused` is reversible via the `/resume` endpoint. Both prevent new work claims, but only `paused` can be cleared.
 - The port-based instance lock means a crashed daemon may hold the port in TIME_WAIT for ~60 seconds. Set `SO_REUSEADDR` on the server socket to allow immediate restart. See STACK-AC-CONTROL-PLANE for the pattern.
 - Budget signals use `PhaseEvent` union types (`'budget-exceeded'`, `'per-run-budget-exceeded'`, `'rate-limited'`). Adding a new signal requires updating the `PhaseEvent` type, the pipeline's `applyGlobalTransition()`, and the Daemon's signal-handling switch. All three must stay in sync.
+- **Startup ordering matters: the control HTTP server must `listen()` before the first `configReader.fetch()`.** Otherwise `/health` is unreachable exactly when the Operator needs it most — during a dependency outage. The instance-lock semantics of the control port (only-one-daemon) survive the reorder because the lock is acquired by `listen()` itself.
+- **Degraded-startup must refuse mutations, not just defer them.** Phases that depend on `getGlobalConfig()` or `getRepoConfig()` must read `daemon.startupDegraded` (or equivalent) and short-circuit, returning a categorical "configuration not yet loaded" outcome. Quietly using `DEFAULT_GLOBAL` would violate the fail-safe-default invariant — defaults are for the not-found store outcome only, never for an unreachable one.
+- **Don't use the `RECOVERABLE`-style retry pattern for categorical `rejected` errors.** A schema-missing or auth-failed result must short-circuit retry-and-degrade and exit with the underlying reason. Otherwise a permanent misconfiguration looks identical to a transient outage and silently consumes hours of crash-loop time.
