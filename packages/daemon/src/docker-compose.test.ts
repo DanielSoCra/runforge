@@ -23,7 +23,8 @@ describe('docker-compose self-hosted Postgres runtime (#626)', () => {
     expect(raw).toContain('postgres:');
     expect(raw).toContain('image: postgres:18-alpine');
     expect(raw).toContain('pg_isready');
-    expect(raw).toContain('postgres-data:/var/lib/postgresql/data');
+    expect(raw).toContain('postgres-data:/var/lib/postgresql');
+    expect(raw).not.toContain('postgres-data:/var/lib/postgresql/data');
   });
 
   it('runs app-owned migrations after Postgres is healthy', () => {
