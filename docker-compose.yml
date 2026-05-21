@@ -59,8 +59,6 @@ services:
       context: .
       dockerfile: packages/dashboard/Dockerfile
       args:
-        - NEXT_PUBLIC_SUPABASE_URL
-        - NEXT_PUBLIC_SUPABASE_ANON_KEY
         - NEXT_PUBLIC_SITE_URL
     restart: unless-stopped
     env_file: ${ENV_FILE:-.env.prod}
@@ -124,7 +122,7 @@ services:
     env_file: ${ENV_FILE:-.env.prod}
     environment:
       AUTO_CLAUDE_DATABASE_URL: ${AUTO_CLAUDE_DOCKER_DATABASE_URL:?set AUTO_CLAUDE_DOCKER_DATABASE_URL in the selected env file}
-      BRIEFING_DATA_BACKEND: ${BRIEFING_DATA_BACKEND:-supabase}
+      BRIEFING_DATA_BACKEND: ${BRIEFING_DATA_BACKEND:-postgres}
       NODE_ENV: production
       GIT_REPO_PATH: /repo
     depends_on:

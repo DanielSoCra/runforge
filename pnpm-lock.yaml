@@ -28,9 +28,6 @@ importers:
       '@auto-claude/db':
         specifier: workspace:*
         version: link:../db
-      '@supabase/supabase-js':
-        specifier: ^2.49.4
-        version: 2.99.3
     devDependencies:
       '@types/node':
         specifier: ^25.5.0
