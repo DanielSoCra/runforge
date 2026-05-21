@@ -71,6 +71,9 @@ interface DashboardCredentialAccess {
     kind: DashboardRepoCredentialKind,
     plaintext: string,
   ): Promise<StoreResult>;
+  listRepoCredentialMetadata(
+    repositoryId: string,
+  ): Promise<StoreResult<DashboardRepositoryCredentialMetadata[]>>;
 }
 
 export interface DashboardCostEvent {
@@ -226,11 +229,39 @@ export interface DashboardRepositoryDetail {
   credentials: DashboardRepositoryCredentialMetadata[];
 }
 
+export interface DashboardRepositoryCreateInput {
+  owner: string;
+  name: string;
+  stagingBranch: string;
+  productionBranch: string;
+  budgetLimit: number | null;
+  concurrencyLimit?: number;
+}
+
+export interface DashboardRepositoryUpdateInput {
+  stagingBranch: string;
+  productionBranch: string;
+  budgetLimit: number | null;
+  concurrencyLimit?: number;
+}
+
 interface DashboardRepositoryAccess {
   listRepositories(): Promise<StoreResult<DashboardRepositoryList>>;
   readRepository(
     repositoryId: string,
   ): Promise<StoreResult<DashboardRepositoryDetail>>;
+  createRepository(
+    input: DashboardRepositoryCreateInput,
+  ): Promise<StoreResult<{ id: string }>>;
+  updateRepository(
+    repositoryId: string,
+    input: DashboardRepositoryUpdateInput,
+  ): Promise<StoreResult>;
+  setRepositoryEnabled(
+    repositoryId: string,
+    enabled: boolean,
+  ): Promise<StoreResult>;
+  removeRepository(repositoryId: string): Promise<StoreResult>;
 }
 
 export interface DashboardTeamMember {
@@ -811,6 +842,88 @@ class DashboardRepositoryStore implements DashboardRepositoryAccess {
       });
     });
   }
+
+  async createRepository(input: DashboardRepositoryCreateInput) {
+    return unavailableOnThrow(async () => {
+      const [row] = await this.db
+        .insert(repos)
+        .values({
+          owner: input.owner,
+          name: input.name,
+          stagingBranch: input.stagingBranch,
+          productionBranch: input.productionBranch,
+          budgetLimit: input.budgetLimit,
+          ...withoutUndefined({ concurrencyLimit: input.concurrencyLimit }),
+          enabled: false,
+        })
+        .returning({ id: repos.id });
+
+      return row
+        ? ok({ id: row.id })
+        : unavailable('repository insert returned no row');
+    });
+  }
+
+  async updateRepository(
+    repositoryId: string,
+    input: DashboardRepositoryUpdateInput,
+  ) {
+    return unavailableOnThrow(async () => {
+      const [row] = await this.db
+        .update(repos)
+        .set({
+          stagingBranch: input.stagingBranch,
+          productionBranch: input.productionBranch,
+          budgetLimit: input.budgetLimit,
+          ...withoutUndefined({ concurrencyLimit: input.concurrencyLimit }),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(repos.id, repositoryId), isNull(repos.deletedAt)))
+        .returning({ id: repos.id });
+
+      return row
+        ? ok(undefined)
+        : notFound(`repository ${repositoryId} was not found`);
+    });
+  }
+
+  async setRepositoryEnabled(repositoryId: string, enabled: boolean) {
+    return unavailableOnThrow(async () => {
+      const [row] = await this.db
+        .update(repos)
+        .set({ enabled, updatedAt: new Date() })
+        .where(and(eq(repos.id, repositoryId), isNull(repos.deletedAt)))
+        .returning({ id: repos.id });
+
+      return row
+        ? ok(undefined)
+        : notFound(`repository ${repositoryId} was not found`);
+    });
+  }
+
+  async removeRepository(repositoryId: string) {
+    return unavailableOnThrow(async () => {
+      const [repo] = await this.db
+        .select({ enabled: repos.enabled })
+        .from(repos)
+        .where(and(eq(repos.id, repositoryId), isNull(repos.deletedAt)))
+        .limit(1);
+      if (!repo) return notFound(`repository ${repositoryId} was not found`);
+      if (repo.enabled) {
+        return conflict('enabled repositories must be disabled before removal');
+      }
+
+      const [row] = await this.db
+        .update(repos)
+        .set({ deletedAt: new Date(), enabled: false, updatedAt: new Date() })
+        .where(and(eq(repos.id, repositoryId), isNull(repos.deletedAt)))
+        .returning({ id: repos.id });
+
+      return row
+        ? ok(undefined)
+        : notFound(`repository ${repositoryId} was not found`);
+    });
+  }
 }
 
 class DashboardIssueStore implements DashboardIssueAccess {
@@ -995,6 +1108,27 @@ class DashboardCredentialStore implements DashboardCredentialAccess {
       return row
         ? ok(undefined)
         : unavailable('repository credential upsert returned no row');
+    });
+  }
+
+  async listRepoCredentialMetadata(repositoryId: string) {
+    return unavailableOnThrow(async () => {
+      if (!(await repositoryExists(this.db, repositoryId))) {
+        return notFound(`repository ${repositoryId} was not found`);
+      }
+
+      const rows = await this.db
+        .select({ keyType: apiKeys.keyType, updatedAt: apiKeys.updatedAt })
+        .from(apiKeys)
+        .where(eq(apiKeys.repoId, repositoryId))
+        .orderBy(apiKeys.keyType);
+
+      return ok(
+        rows.map((row) => ({
+          key_type: row.keyType,
+          updated_at: row.updatedAt.toISOString(),
+        })),
+      );
     });
   }
 }
