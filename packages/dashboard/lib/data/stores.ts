@@ -331,6 +331,20 @@ interface DashboardPluginAccess {
   readRepositoryPlugins(
     repositoryId: string,
   ): Promise<StoreResult<DashboardRepositoryPlugins>>;
+  listRecommendedInactivePluginIds(
+    repositoryId: string,
+  ): Promise<StoreResult<string[]>>;
+  setPluginActivation(
+    repositoryId: string,
+    pluginId: string,
+    active: boolean,
+    activatedAt?: Date | null,
+  ): Promise<StoreResult>;
+  recordPluginRecommendation(
+    repositoryId: string,
+    pluginId: string,
+    reason: string,
+  ): Promise<StoreResult>;
 }
 
 export interface DashboardGitHubConnection {
@@ -563,6 +577,82 @@ class DashboardPluginStore implements DashboardPluginAccess {
           activated_at: plugin.activatedAt?.toISOString() ?? null,
         })),
       });
+    });
+  }
+
+  async listRecommendedInactivePluginIds(repositoryId: string) {
+    return unavailableOnThrow(async () => {
+      const rows = await this.db
+        .select({ pluginId: repoPlugins.pluginId })
+        .from(repoPlugins)
+        .where(
+          and(
+            eq(repoPlugins.repoId, repositoryId),
+            eq(repoPlugins.recommended, true),
+            eq(repoPlugins.active, false),
+          ),
+        );
+
+      return ok(rows.map((row) => row.pluginId));
+    });
+  }
+
+  async setPluginActivation(
+    repositoryId: string,
+    pluginId: string,
+    active: boolean,
+    activatedAt: Date | null = active ? new Date() : null,
+  ) {
+    return unavailableOnThrow(async () => {
+      const [row] = await this.db
+        .insert(repoPlugins)
+        .values({
+          repoId: repositoryId,
+          pluginId,
+          active,
+          activatedAt,
+        })
+        .onConflictDoUpdate({
+          target: [repoPlugins.repoId, repoPlugins.pluginId],
+          set: { active, activatedAt },
+        })
+        .returning({ id: repoPlugins.id });
+
+      return row
+        ? ok(undefined)
+        : unavailable('plugin activation upsert returned no row');
+    });
+  }
+
+  async recordPluginRecommendation(
+    repositoryId: string,
+    pluginId: string,
+    reason: string,
+  ) {
+    return unavailableOnThrow(async () => {
+      const recommendedAt = new Date();
+      const [row] = await this.db
+        .insert(repoPlugins)
+        .values({
+          repoId: repositoryId,
+          pluginId,
+          recommended: true,
+          recommendationReason: reason,
+          recommendedAt,
+        })
+        .onConflictDoUpdate({
+          target: [repoPlugins.repoId, repoPlugins.pluginId],
+          set: {
+            recommended: true,
+            recommendationReason: reason,
+            recommendedAt,
+          },
+        })
+        .returning({ id: repoPlugins.id });
+
+      return row
+        ? ok(undefined)
+        : unavailable('plugin recommendation upsert returned no row');
     });
   }
 }
