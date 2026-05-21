@@ -57,7 +57,7 @@ const NEXT_PHASE: Partial<Record<Phase, Phase>> = {
 
 export function createWebsitePhaseHandlers(
   config: AgencyConfig,
-  supabase: WebsiteConfigWriter | null,
+  configStore: WebsiteConfigWriter | null,
   octokit: Octokit,
   owner: string,
   repo: string,
@@ -124,8 +124,8 @@ export function createWebsitePhaseHandlers(
       // Save start_from so the resume run knows which phase to begin from.
       // Resume: operator adds 'ready' back → work-detection picks up the issue →
       // selectVariant sees 'website-init' → readAgencyConfig reads start_from.
-      if (supabase && repoId && nextPhase) {
-        await supabase
+      if (configStore && repoId && nextPhase) {
+        await configStore
           .from('repo_plugins')
           .update({ config: { ...config, start_from: String(nextPhase) } })
           .eq('repo_id', repoId)

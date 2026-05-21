@@ -4,7 +4,6 @@ Auto-Claude runs on Hetzner via Docker Compose. The stack includes **Postgres**,
 
 ## Prerequisites
 
-- A [Supabase](https://supabase.com) project (free tier works)
 - A domain with DNS control (current: `app.example.com`)
 - An SSH key added to the Hetzner server
 
@@ -63,16 +62,12 @@ Fill in all values:
 |----------|----------------|
 | `GITHUB_TOKEN` | GitHub → Settings → Developer settings → Fine-grained PAT with `repo` scope |
 | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com/settings/keys) |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project → Settings → API → Project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase project → Settings → API → `anon` key |
-| `SUPABASE_URL` | Same as `NEXT_PUBLIC_SUPABASE_URL` |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase project → Settings → API → `service_role` key |
 | `POSTGRES_DB` | Use `autoclaude` unless you need a different local database name |
 | `POSTGRES_USER` | Use `autoclaude` unless you need a different local database user |
 | `POSTGRES_PASSWORD` | Generate a strong database password |
 | `AUTO_CLAUDE_DOCKER_DATABASE_URL` | `postgres://autoclaude:<url-encoded-password>@postgres:5432/autoclaude` |
-| `DAEMON_DATA_BACKEND` | `supabase` during parity; switch to `postgres` only after daemon cutover |
-| `BRIEFING_DATA_BACKEND` | `supabase` during parity; switch to `postgres` only after briefing cutover |
+| `DAEMON_DATA_BACKEND` | `postgres` |
+| `BRIEFING_DATA_BACKEND` | `postgres` |
 | `NEXT_PUBLIC_SITE_URL` | `https://app.example.com` (your domain) |
 | `DAEMON_URL` | `http://daemon:3847` (Docker service name — do not change) |
 | `ENCRYPTION_KEY` | Any 32+ character random string |
@@ -112,8 +107,6 @@ Change the domain if needed before first deploy.
 ## 8. Apply Migrations
 
 The Compose stack runs the app-owned Postgres migrations automatically through the `migrate` service before consumers start.
-
-During Supabase parity, hosted-backed paths still require the existing Supabase migrations in the Supabase project. Run them in the Supabase SQL editor or via the Supabase CLI before starting the stack.
 
 ## 9. Deploy
 

@@ -74,20 +74,20 @@ export function mergeAgencyConfig(
 }
 
 export async function readAgencyConfig(
-  supabase: AgencyConfigClient | null,
+  configStore: AgencyConfigClient | null,
   repoId: string,
 ): Promise<AgencyConfig> {
-  if (!supabase) return { ...DEFAULTS };
+  if (!configStore) return { ...DEFAULTS };
 
   // Read global plugin defaults
-  const { data: globalData } = await supabase
+  const { data: globalData } = await configStore
     .from('plugin_global_settings')
     .select('settings')
     .eq('plugin_id', 'agency')
     .single();
 
   // Read per-repo overrides
-  const { data: repoData } = await supabase
+  const { data: repoData } = await configStore
     .from('repo_plugins')
     .select('config')
     .eq('repo_id', repoId)

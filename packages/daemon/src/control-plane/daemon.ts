@@ -1580,7 +1580,7 @@ async function processWorkRequest(
     variant === 'website'
       ? createWebsitePhaseHandlers(
           agencyConfig,
-          null, // supabase — wired in follow-on
+          null, // config store — wired in follow-on
           notifyOctokit,
           owner,
           repoName,

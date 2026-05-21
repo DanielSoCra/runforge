@@ -27,7 +27,7 @@ function columnNames(table: Parameters<typeof getTableColumns>[0]): string[] {
 }
 
 describe('schema parity foundation', () => {
-  it('keeps later repository and run fields from the full Supabase migration history', () => {
+  it('keeps later repository and run fields from the full legacy migration history', () => {
     expect(columnNames(repos)).toEqual(
       expect.arrayContaining([
         'connection_id',

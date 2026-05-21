@@ -562,13 +562,8 @@ STACK-AC-DASHBOARD:
   spec: docs/superpowers/specs/2026-03-20-issues-board-design.md
   code_paths:
     - packages/dashboard/
-    - supabase/
     - package.json
     - packages/dashboard/lib/types.ts
-    - packages/dashboard/lib/supabase/client.ts
-    - packages/dashboard/lib/supabase/server.ts
-    - packages/dashboard/lib/supabase/middleware.ts
-    - packages/dashboard/lib/supabase/env.ts
     - packages/dashboard/proxy.ts
     - packages/dashboard/app/layout.tsx
     - packages/dashboard/app/(dashboard)/layout.tsx
@@ -614,9 +609,6 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/components/budget-badge.tsx
     - packages/dashboard/components/invite-form.tsx
     - packages/dashboard/lib/scaffold-templates.ts
-    - supabase/migrations/004_command_center.sql
-    - supabase/migrations/005_github_connections.sql
-    - packages/dashboard/lib/supabase/service.ts
     - packages/dashboard/app/api/auth/github-connection/route.ts
     - packages/dashboard/app/api/auth/github-connection/callback/route.ts
     - packages/dashboard/app/api/daemon/repos-reload/route.ts
@@ -637,7 +629,6 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/actions/github-connections.test.ts
     - packages/dashboard/app/api/github/connections/[id]/orgs/route.ts
     - packages/dashboard/app/api/github/connections/[id]/repos/route.ts
-    - supabase/migrations/008_fix_rpc_privilege_escalation.sql
     - docker-compose.yml
     - Caddyfile
     - packages/dashboard/Dockerfile
@@ -645,7 +636,6 @@ STACK-AC-DASHBOARD:
   test_paths:
     - packages/dashboard/**/*.test.ts
     - packages/dashboard/**/*.test.tsx
-    - supabase/tests/**/*.test.ts
     - packages/dashboard/actions/api-keys.test.ts
     - packages/dashboard/components/claude-panel/context-actions.test.ts
     - packages/dashboard/components/claude-panel/claude-panel.test.tsx
@@ -657,7 +647,6 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/app/api/daemon/daemon-routes.test.ts
     - packages/dashboard/lib/daemon-fetch.test.ts
     - packages/dashboard/app/(dashboard)/runs/[id]/page.test.tsx
-    - packages/dashboard/lib/supabase/env.test.ts
     - packages/dashboard/dockerfile.test.ts
   status: draft
 
@@ -710,7 +699,6 @@ STACK-AC-PLUGINS-DASHBOARD:
   parent: ARCH-AC-PLUGINS
   children: []
   code_paths:
-    - supabase/migrations/003_plugins.sql
     - packages/dashboard/actions/plugins.ts
     - packages/dashboard/app/(dashboard)/repos/[id]/plugins/page.tsx
     - packages/dashboard/app/(dashboard)/repos/[id]/plugins/realtime-refresh.tsx
@@ -721,7 +709,6 @@ STACK-AC-PLUGINS-DASHBOARD:
     - packages/dashboard/components/repo-tab-nav.tsx
     - packages/dashboard/vitest.lib.config.ts
   test_paths:
-    - supabase/tests/rls-plugins.test.ts
     - packages/dashboard/actions/plugins.test.ts
     - packages/dashboard/app/(dashboard)/repos/[id]/plugins/page.test.tsx
     - packages/dashboard/components/enable-all-form.test.tsx
@@ -757,15 +744,9 @@ STACK-AC-SUPABASE-SYNC:
   parent: ARCH-AC-CONTROL-PLANE
   children: []
   spec: docs/superpowers/specs/2026-03-20-supabase-sync-design.md
-  code_paths:
-    - packages/daemon/src/supabase/client.ts
-    - packages/daemon/src/supabase/config-reader.ts
-    - packages/daemon/src/supabase/run-writer.ts
-  test_paths:
-    - packages/daemon/src/supabase/client.test.ts
-    - packages/daemon/src/supabase/config-reader.test.ts
-    - packages/daemon/src/supabase/run-writer.test.ts
-  status: draft
+  code_paths: []
+  test_paths: []
+  status: deprecated
 
 STACK-AC-DASHBOARD-BRIEFING:
   parent: ARCH-AC-DASHBOARD
@@ -776,14 +757,10 @@ STACK-AC-DASHBOARD-BRIEFING:
     - packages/dashboard/actions/briefing.ts
     - packages/briefing-summarizer/
     - packages/briefing-summarizer/src/cycle-runner.ts
-    - supabase/migrations/009_briefing.sql
-    - supabase/migrations/011_add_failed_run_outcome.sql
-    - supabase/migrations/012_runs_updated_at.sql
   test_paths:
     - packages/dashboard/components/briefing/**/*.test.tsx
     - packages/dashboard/actions/briefing.test.ts
     - packages/briefing-summarizer/**/*.test.ts
-    - supabase/tests/rls-briefing.test.ts
   status: draft
 
 STACK-AC-COORDINATION:
@@ -1091,12 +1068,8 @@ STACK-CONCIERGE-BOARD:
 # The split keeps persistence/migration ownership (DATA-PLATFORM: stores,
 # migrations, credential store, backup, compose) separate from
 # identity/authorization ownership (OPERATOR-AUTH: identity, session, roles).
-# These entries are specs-only: every code_paths/test_paths value is a future
-# glob target that marks intended governance scope and is reassigned to
-# concrete governed paths when the implementation lands. The existing
-# DASHBOARD and CONTROL-PLANE entries remain authoritative for current code
-# until then; coexistence and eventual deprecation are described in the new
-# L2 System Boundaries.
+# These entries now govern the replacement data and auth runtime. Legacy
+# hosted-provider sync entries remain only as deprecated spec history.
 
 FUNC-AC-DATA-PLATFORM:
   children: [ARCH-AC-DATA-PLATFORM]
@@ -1116,9 +1089,12 @@ STACK-AC-DATA-PLATFORM:
     - packages/daemon/src/data/**
     - packages/briefing-summarizer/src/data/**
     - infra/postgres/**
+    - packages/db/Dockerfile
+    - docker-compose.yml
     - scripts/install-daemon.sh
     - scripts/com.autoclaude.daemon.plist
     - .env.mac.example
+    - .env.prod.example
   test_paths:
     - packages/db/**/*.test.ts
     - packages/dashboard/lib/data/**/*.test.ts
