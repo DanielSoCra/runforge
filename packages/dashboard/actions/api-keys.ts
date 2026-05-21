@@ -1,17 +1,13 @@
 'use server';
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
-import { requireAdmin } from '@/lib/auth';
+import { requireDashboardAdmin } from '@/lib/auth/require-session';
 import { getDashboardStores } from '@/lib/data/stores';
 
 const VALID_KEY_TYPES = ['source-control', 'model-provider'] as const;
 type KeyType = typeof VALID_KEY_TYPES[number];
 
 export async function upsertApiKey(formData: FormData) {
-  const supabase = await createClient();
-
-  // Admin-only — RPC uses SECURITY DEFINER which bypasses RLS
-  await requireAdmin(supabase);
+  await requireDashboardAdmin();
 
   const repoId = formData.get('repo_id');
   const keyType = formData.get('key_type');

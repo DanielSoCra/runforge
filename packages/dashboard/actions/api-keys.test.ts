@@ -1,43 +1,45 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockFrom = vi.fn();
 const storeMocks = vi.hoisted(() => ({
-  getDashboardStores: vi.fn(),
+  requireDashboardAdmin: vi.fn(),
   storeRepoCredential: vi.fn(),
 }));
 
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: vi.fn().mockResolvedValue({
-    from: mockFrom,
-    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'user-123' } } }) },
-  }),
+vi.mock('@/lib/auth/require-session', () => ({
+  requireDashboardAdmin: storeMocks.requireDashboardAdmin,
 }));
-vi.mock('@/lib/auth', () => ({ requireAdmin: vi.fn().mockResolvedValue({ id: 'user-123' }) }));
 vi.mock('@/lib/data/stores', () => ({
-  getDashboardStores: storeMocks.getDashboardStores,
+  getDashboardStores: () => ({
+    credentials: { storeRepoCredential: storeMocks.storeRepoCredential },
+  }),
 }));
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
 
-import { requireAdmin } from '@/lib/auth';
+import { revalidatePath } from 'next/cache';
+import { requireDashboardAdmin } from '@/lib/auth/require-session';
 
 describe('upsertApiKey', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    storeMocks.storeRepoCredential.mockResolvedValue({ ok: true, value: undefined });
-    storeMocks.getDashboardStores.mockReturnValue({
-      credentials: { storeRepoCredential: storeMocks.storeRepoCredential },
+    storeMocks.requireDashboardAdmin.mockResolvedValue({
+      user: { id: 'admin-1', role: 'admin' },
     });
+    storeMocks.storeRepoCredential.mockResolvedValue({ ok: true, value: undefined });
   });
 
-  it('rejects non-admin callers', async () => {
-    vi.mocked(requireAdmin).mockRejectedValueOnce(new Error('Unauthorized'));
+  it('rejects non-admin callers via the Better Auth admin gate', async () => {
+    vi.mocked(requireDashboardAdmin).mockRejectedValueOnce(
+      new Error('Admin access required'),
+    );
     const { upsertApiKey } = await import('./api-keys');
     const formData = new FormData();
     formData.append('repo_id', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11');
     formData.append('key_type', 'source-control');
     formData.append('key_value', 'ghp_secrettoken');
 
-    await expect(upsertApiKey(formData)).rejects.toThrow('Unauthorized');
+    await expect(upsertApiKey(formData)).rejects.toThrow(
+      'Admin access required',
+    );
     expect(storeMocks.storeRepoCredential).not.toHaveBeenCalled();
   });
 
@@ -50,13 +52,15 @@ describe('upsertApiKey', () => {
 
     await upsertApiKey(formData);
 
+    expect(requireDashboardAdmin).toHaveBeenCalledTimes(1);
     expect(storeMocks.storeRepoCredential).toHaveBeenCalledWith(
       'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
       'source-control',
       'ghp_secrettoken',
     );
-
-    expect(mockFrom).not.toHaveBeenCalled();
+    expect(revalidatePath).toHaveBeenCalledWith(
+      '/repos/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+    );
   });
 
   it('throws a generic error when the credential store fails', async () => {
