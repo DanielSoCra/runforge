@@ -1,6 +1,6 @@
 'use server';
-import { createClient } from '@/lib/supabase/server';
-import { requireAdmin } from '@/lib/auth';
+import { requireDashboardAdmin } from '@/lib/auth/require-session';
+import { getDashboardStores } from '@/lib/data/stores';
 import { createGitHubRepo, commitFile } from '@/lib/github-api';
 import {
   buildL0Vision,
@@ -29,13 +29,13 @@ export interface CreateProjectResult {
   error?: string;
 }
 
-export async function createProject(input: CreateProjectInput): Promise<CreateProjectResult> {
-  const supabase = await createClient();
-
+export async function createProject(
+  input: CreateProjectInput,
+): Promise<CreateProjectResult> {
   try {
-    await requireAdmin(supabase);
+    await requireDashboardAdmin();
   } catch (err) {
-    console.error('[new-project] requireAdmin failed:', err);
+    console.error('[new-project] requireDashboardAdmin failed:', err);
     return { error: 'Unauthorized' };
   }
 
@@ -43,10 +43,16 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
     return { error: 'Org and name are required' };
   }
   if (!SAFE_PATTERN.test(input.org)) {
-    return { error: 'Org must contain only alphanumeric characters, dots, underscores, and hyphens' };
+    return {
+      error:
+        'Org must contain only alphanumeric characters, dots, underscores, and hyphens',
+    };
   }
   if (!SAFE_PATTERN.test(input.name)) {
-    return { error: 'Name must contain only alphanumeric characters, dots, underscores, and hyphens' };
+    return {
+      error:
+        'Name must contain only alphanumeric characters, dots, underscores, and hyphens',
+    };
   }
   if (!input.l0Vision.trim()) {
     return { error: 'L0 vision statement is required' };
@@ -108,34 +114,31 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
       message: 'chore: scaffold CLAUDE.md',
     });
 
-    const { data, error } = await supabase
-      .from('repos')
-      .insert({
-        owner,
-        name: repoName,
-        enabled: false,
-        staging_branch: 'staging',
-        production_branch: 'main',
-      })
-      .select('id')
-      .single();
+    const result = await getDashboardStores().repositories.createRepository({
+      owner,
+      name: repoName,
+      stagingBranch: 'staging',
+      productionBranch: 'main',
+      budgetLimit: null,
+    });
 
-    if (error) {
-      console.error('[new-project] createProject supabase insert failed:', error);
-      throw new Error('Failed to register repository');
-    }
-    if (!data) {
-      console.error('[new-project] createProject: insert returned no data — check RLS policies');
+    if (!result.ok) {
+      console.error(
+        '[new-project] createProject repository insert failed:',
+        result.message,
+      );
       throw new Error('Failed to register repository');
     }
 
     revalidatePath('/repos');
-    return { repoId: data.id };
+    return { repoId: result.value.id };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     console.error('[new-project] createProject failed:', err);
     if (githubRepoCreated) {
-      return { error: 'GitHub repo was created but registration failed — add it manually via Repositories instead of retrying.' };
+      return {
+        error:
+          'GitHub repo was created but registration failed — add it manually via Repositories instead of retrying.',
+      };
     }
     return { error: 'Failed to create project' };
   }
