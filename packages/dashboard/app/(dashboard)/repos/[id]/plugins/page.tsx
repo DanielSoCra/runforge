@@ -1,12 +1,13 @@
-import { createClient } from '@/lib/supabase/server';
 import { loadDashboardRegistry } from '@/lib/plugins/registry';
 import { PluginCard } from '@/components/plugin-card';
 import { enableAllSuggested, triggerRecommendation } from '@/actions/plugins';
 import { EnableAllForm } from '@/components/enable-all-form';
 import { RealtimeRefresh } from './realtime-refresh';
 import { RepoTabNav } from '@/components/repo-tab-nav';
-import { isAdmin } from '@/lib/auth';
+import { isDashboardAdmin } from '@/lib/auth/require-session';
+import { getDashboardStores } from '@/lib/data/stores';
 import { TriggerRecommendationForm } from '@/components/trigger-recommendation-button';
+import { PageError } from '@/components/page-error';
 
 type Confidence = 'high' | 'medium' | 'low';
 
@@ -16,19 +17,26 @@ function extractConfidence(reason: string | null | undefined): Confidence | null
   return match ? (match[1] as Confidence) : null;
 }
 
+export const dynamic = 'force-dynamic';
+
 export default async function PluginsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
-  const [{ data: repo }, { data: repoPlugins }, registry, admin] = await Promise.all([
-    supabase.from('repos').select('id, owner, name').eq('id', id).single(),
-    supabase.from('repo_plugins').select('*').eq('repo_id', id),
+  const [pluginState, registry, admin] = await Promise.all([
+    getDashboardStores().plugins.readRepositoryPlugins(id),
     loadDashboardRegistry(),
-    isAdmin(supabase),
+    isDashboardAdmin(),
   ]);
 
-  if (!repo) return <p>Repository not found.</p>;
+  if (!pluginState.ok && pluginState.error === 'not-found') {
+    return <p>Repository not found.</p>;
+  }
+  if (!pluginState.ok) {
+    console.error('[plugins] failed to load repository plugins:', pluginState.message);
+    return <PageError />;
+  }
 
-  const activeMap = new Map((repoPlugins ?? []).map(rp => [rp.plugin_id, rp]));
+  const { plugins: repoPlugins, repo } = pluginState.value;
+  const activeMap = new Map(repoPlugins.map(rp => [rp.plugin_id, rp]));
   const suggested = registry.plugins.filter(p => {
     const rp = activeMap.get(p.id);
     return rp?.recommended && !rp?.active;

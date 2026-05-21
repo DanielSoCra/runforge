@@ -27,6 +27,7 @@ import {
   githubConnections,
   githubOrgs,
   globalSettings,
+  repoPlugins,
   repos,
   runs,
   type GlobalSettings,
@@ -229,6 +230,32 @@ interface DashboardRepositoryAccess {
   ): Promise<StoreResult<DashboardRepositoryDetail>>;
 }
 
+export interface DashboardPluginRepo {
+  id: string;
+  owner: string;
+  name: string;
+}
+
+export interface DashboardRepoPluginRecord {
+  plugin_id: string;
+  active: boolean;
+  recommended: boolean;
+  recommendation_reason: string | null;
+  recommended_at: string | null;
+  activated_at: string | null;
+}
+
+export interface DashboardRepositoryPlugins {
+  repo: DashboardPluginRepo;
+  plugins: DashboardRepoPluginRecord[];
+}
+
+interface DashboardPluginAccess {
+  readRepositoryPlugins(
+    repositoryId: string,
+  ): Promise<StoreResult<DashboardRepositoryPlugins>>;
+}
+
 export interface DashboardGitHubConnection {
   id: string;
   displayName: string;
@@ -303,6 +330,7 @@ export interface DashboardStores {
   runs: DashboardRunAccess;
   issues: DashboardIssueAccess;
   repositories: DashboardRepositoryAccess;
+  plugins: DashboardPluginAccess;
   costs: DashboardCostAccess;
   credentials: DashboardCredentialAccess;
   githubConnections: DashboardGitHubConnectionAccess;
@@ -321,6 +349,7 @@ export function getDashboardStores(): DashboardStores {
       runs: new DashboardRunStore(db),
       issues: new DashboardIssueStore(db),
       repositories: new DashboardRepositoryStore(db),
+      plugins: new DashboardPluginStore(db),
       costs: new DashboardCostStore(db),
       credentials: new DashboardCredentialStore(db),
       githubConnections: new DashboardGitHubConnectionStore(db),
@@ -409,6 +438,49 @@ class DashboardOverviewStore implements DashboardOverviewAccess {
         totalRepos: enabledRepoCount[0]?.value ?? 0,
         recentRuns: recentRuns.map(toDashboardRunRow),
         budgetByRepoId,
+      });
+    });
+  }
+}
+
+class DashboardPluginStore implements DashboardPluginAccess {
+  constructor(private readonly db: DashboardDb) {}
+
+  async readRepositoryPlugins(repositoryId: string) {
+    return unavailableOnThrow(async () => {
+      const [repo] = await this.db
+        .select({
+          id: repos.id,
+          owner: repos.owner,
+          name: repos.name,
+        })
+        .from(repos)
+        .where(and(eq(repos.id, repositoryId), isNull(repos.deletedAt)))
+        .limit(1);
+      if (!repo) return notFound(`repository ${repositoryId} was not found`);
+
+      const plugins = await this.db
+        .select({
+          pluginId: repoPlugins.pluginId,
+          active: repoPlugins.active,
+          recommended: repoPlugins.recommended,
+          recommendationReason: repoPlugins.recommendationReason,
+          recommendedAt: repoPlugins.recommendedAt,
+          activatedAt: repoPlugins.activatedAt,
+        })
+        .from(repoPlugins)
+        .where(eq(repoPlugins.repoId, repositoryId));
+
+      return ok({
+        repo,
+        plugins: plugins.map((plugin) => ({
+          plugin_id: plugin.pluginId,
+          active: plugin.active,
+          recommended: plugin.recommended,
+          recommendation_reason: plugin.recommendationReason,
+          recommended_at: plugin.recommendedAt?.toISOString() ?? null,
+          activated_at: plugin.activatedAt?.toISOString() ?? null,
+        })),
       });
     });
   }
@@ -982,6 +1054,7 @@ function createDashboardDbClient() {
       githubConnections,
       githubOrgs,
       globalSettings,
+      repoPlugins,
       repos,
       runs,
     },
