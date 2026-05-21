@@ -129,6 +129,34 @@ Dashboard is available at `http://localhost:3000` on the local network. Auth is 
 
 The Compose stack starts a `migrate` job that applies app-owned Postgres migrations from `packages/db/drizzle/` before dashboard, daemon, or briefing-summarizer start.
 
+## Backup and Restore
+
+Back up the Postgres database with `pg_dump` from the Compose service. Keep the matching environment file and `ENCRYPTION_KEY` with the backup; encrypted credentials in the database cannot be read after restore without that key.
+
+```bash
+mkdir -p backups
+docker compose --env-file .env.prod exec -T postgres sh -c \
+  'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' \
+  > "backups/autoclaude-$(date +%Y%m%d-%H%M%S).dump"
+```
+
+For a Mac Mini deployment, use `.env.mac` in the command above.
+
+To restore, stop consumers first so no process writes while the database is being replaced. This overwrites the current database contents.
+
+```bash
+docker compose --env-file .env.prod stop dashboard briefing-summarizer
+# If the daemon runs in Docker for this deployment:
+docker compose --env-file .env.prod --profile containerized-daemon stop daemon
+
+cat backups/autoclaude-YYYYMMDD-HHMMSS.dump | docker compose --env-file .env.prod exec -T postgres sh -c \
+  'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner'
+
+docker compose --env-file .env.prod up -d migrate dashboard briefing-summarizer
+```
+
+For a native Mac daemon, pause or unload launchd before restore, then reinstall or restart it after the database is restored.
+
 ## How It Works
 
 1. The daemon polls the configured GitHub repo for issues labelled `ready`.
