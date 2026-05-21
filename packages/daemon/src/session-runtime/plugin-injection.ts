@@ -11,6 +11,7 @@ export interface LoadedPlugin {
 }
 
 export interface CompositeContext {
+  governanceDocument: string;
   promptInjection: string;
   skills: SkillDoc[];
   agents: SkillDoc[];
@@ -23,13 +24,14 @@ const CHARS_PER_TOKEN = 4;
 function estimateTokens(ctx: CompositeContext): number {
   const text = ctx.skills.map(s => s.content).join('') +
     ctx.agents.map(a => a.content).join('') +
+    ctx.governanceDocument +
     ctx.promptInjection;
   return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
 export function buildCompositeContext(
   plugins: LoadedPlugin[],
-  options: { tokenBudget?: number } = {},
+  options: { tokenBudget?: number; governanceDocument?: string } = {},
 ): CompositeContext {
   const tokenBudget = options.tokenBudget ?? 20000;
   const sorted = [...plugins].sort((a, b) => a.activatedAt.localeCompare(b.activatedAt));
@@ -61,6 +63,7 @@ export function buildCompositeContext(
   }
 
   const ctx: CompositeContext = {
+    governanceDocument: options.governanceDocument ?? '',
     promptInjection: promptParts.join('\n\n---\n\n'),
     skills: [...skillMap.values()],
     agents: [...agentMap.values()],

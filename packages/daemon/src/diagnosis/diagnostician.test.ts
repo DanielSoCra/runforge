@@ -189,4 +189,40 @@ describe('diagnose', () => {
     ];
     expect(context.workspacePath).toBeUndefined();
   });
+
+  it('extracts structured_output from full CLI JSON response (#410 regression)', async () => {
+    // The CLI adapter sets structuredData to the full response: {result, cost_usd, structured_output}
+    // Before the fix, safeParse received this wrapper and always failed
+    const cliWrapper = {
+      result: 'Diagnosis complete',
+      cost_usd: 0.05,
+      structured_output: validDiagnosis,
+    };
+    const runtime = makeMockRuntime([ok(makeSessionResult(cliWrapper))]);
+
+    const result = await diagnose(runtime, 42, 'Bug', 'impl', 'spec');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.type).toBe('A');
+      expect(result.value.confidence).toBe(0.9);
+    }
+    expect((runtime.spawnSession as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
+  });
+
+  it('falls back to parsing JSON from result text when structured_output is null', async () => {
+    const cliWrapper = {
+      result: '```json\n' + JSON.stringify(validDiagnosis) + '\n```',
+      cost_usd: 0.05,
+      structured_output: null,
+    };
+    const runtime = makeMockRuntime([ok(makeSessionResult(cliWrapper))]);
+
+    const result = await diagnose(runtime, 42, 'Bug', 'impl', 'spec');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.type).toBe('A');
+    }
+  });
 });

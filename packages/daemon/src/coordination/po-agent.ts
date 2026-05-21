@@ -23,6 +23,7 @@ export interface POAgent {
 export function createPOAgent(deps: POAgentDeps, config: POAgentConfig): POAgent {
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   let intervalTimer: ReturnType<typeof setInterval> | null = null;
+  let running = false;
 
   async function sweepExpiredProposals(): Promise<void> {
     const proposals = await deps.loadProposals();
@@ -43,8 +44,14 @@ export function createPOAgent(deps: POAgentDeps, config: POAgentConfig): POAgent
   }
 
   async function runCycle(): Promise<void> {
-    await sweepExpiredProposals();
-    await deps.spawnPOSession();
+    if (running) return;
+    running = true;
+    try {
+      await sweepExpiredProposals();
+      await deps.spawnPOSession();
+    } finally {
+      running = false;
+    }
   }
 
   function start(): () => void {

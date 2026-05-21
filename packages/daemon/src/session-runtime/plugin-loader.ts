@@ -6,6 +6,14 @@ import type { PluginRegistry } from '../control-plane/plugin-registry.js';
 const MAX_FILE_BYTES = 100_000;    // 100KB per markdown skill/agent file
 const MAX_INJECTION_BYTES = 20_000; // 20KB per prompt-injection.md
 
+interface PluginContent {
+  promptInjection: string;
+  skills: SkillDoc[];
+  agents: SkillDoc[];
+  mcpConfigs: McpConfig[];
+  gates: string[];
+}
+
 // Read env at call time so tests can override process.env['PLUGINS_DIR'] after module load
 function getPluginsDir(): string {
   return process.env['PLUGINS_DIR'] ?? join(import.meta.dirname, '../../../../plugins');
@@ -96,9 +104,73 @@ function getRegistry(): Promise<PluginRegistry> {
   return _registryCachePromise;
 }
 
-/** For testing only — clears the cached registry Promise so the next call reloads from disk. */
+const _pluginContentCache = new Map<string, Promise<PluginContent>>();
+
+function cloneMcpConfig(config: McpConfig): McpConfig {
+  const cloned: McpConfig = {
+    ...config,
+    args: [...config.args],
+  };
+  if (config.env) cloned.env = { ...config.env };
+  return cloned;
+}
+
+function clonePluginContent(content: PluginContent): PluginContent {
+  return {
+    promptInjection: content.promptInjection,
+    skills: content.skills.map((skill) => ({ ...skill })),
+    agents: content.agents.map((agent) => ({ ...agent })),
+    mcpConfigs: content.mcpConfigs.map(cloneMcpConfig),
+    gates: [...content.gates],
+  };
+}
+
+async function loadPluginContent(id: string, dir: string): Promise<PluginContent> {
+  const [skillsRaw, agentsRaw, injectionRaw, mcpConfigs, gates] = await Promise.all([
+    readMarkdownFiles(join(dir, 'skills')),
+    readMarkdownFiles(join(dir, 'agents')),
+    readFile(join(dir, 'prompt-injection.md'), 'utf-8').catch(() => ''),
+    readMcpConfigs(join(dir, 'mcps')),
+    readGateScripts(join(dir, 'gates')),
+  ]);
+  const injectionByteLen = Buffer.byteLength(injectionRaw, 'utf-8');
+  const promptInjection = injectionByteLen > MAX_INJECTION_BYTES
+    ? (() => {
+        console.warn(`[plugins] prompt-injection.md for ${id} truncated (${injectionByteLen} bytes > ${MAX_INJECTION_BYTES} limit)`);
+        const buf = Buffer.from(injectionRaw, 'utf-8');
+        // Walk back from cut point to avoid splitting a multi-byte character
+        let end = MAX_INJECTION_BYTES;
+        while (end > 0 && (buf[end]! & 0xC0) === 0x80) end--;
+        return buf.subarray(0, end).toString('utf-8');
+      })()
+    : injectionRaw;
+
+  return {
+    promptInjection,
+    skills: skillsRaw.map(s => ({ ...s, pluginId: id })),
+    agents: agentsRaw.map(a => ({ ...a, pluginId: id })),
+    mcpConfigs,
+    gates,
+  };
+}
+
+async function getPluginContent(id: string): Promise<PluginContent> {
+  const dir = join(getPluginsDir(), id);
+  let contentPromise = _pluginContentCache.get(dir);
+  if (!contentPromise) {
+    contentPromise = loadPluginContent(id, dir).catch((err: unknown) => {
+      _pluginContentCache.delete(dir);
+      throw err;
+    });
+    _pluginContentCache.set(dir, contentPromise);
+  }
+  return clonePluginContent(await contentPromise);
+}
+
+/** For testing only — clears cached plugin data so the next call reloads from disk. */
 export function clearRegistryCache(): void {
   _registryCachePromise = null;
+  _pluginContentCache.clear();
 }
 
 export async function readPluginsForContext(
@@ -115,29 +187,11 @@ export async function readPluginsForContext(
       console.warn(`[plugins] Skipping unknown plugin id at spawn time: ${id}`);
       continue;
     }
-    const dir = join(getPluginsDir(), id);
-    const skills = (await readMarkdownFiles(join(dir, 'skills'))).map(s => ({ ...s, pluginId: id }));
-    const agents = (await readMarkdownFiles(join(dir, 'agents'))).map(a => ({ ...a, pluginId: id }));
-    const injectionRaw = await readFile(join(dir, 'prompt-injection.md'), 'utf-8').catch(() => '');
-    const injectionByteLen = Buffer.byteLength(injectionRaw, 'utf-8');
-    const injection = injectionByteLen > MAX_INJECTION_BYTES
-      ? (() => {
-          console.warn(`[plugins] prompt-injection.md for ${id} truncated (${injectionByteLen} bytes > ${MAX_INJECTION_BYTES} limit)`);
-          const buf = Buffer.from(injectionRaw, 'utf-8');
-          // Walk back from cut point to avoid splitting a multi-byte character
-          let end = MAX_INJECTION_BYTES;
-          while (end > 0 && (buf[end]! & 0xC0) === 0x80) end--;
-          return buf.subarray(0, end).toString('utf-8');
-        })()
-      : injectionRaw;
+    const content = await getPluginContent(id);
     results.push({
       id,
       activatedAt: pluginActivations.get(id) ?? new Date(0).toISOString(),
-      promptInjection: injection,
-      skills,
-      agents,
-      mcpConfigs: await readMcpConfigs(join(dir, 'mcps')),
-      gates: await readGateScripts(join(dir, 'gates')),
+      ...content,
     });
   }
 

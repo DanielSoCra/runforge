@@ -26,6 +26,30 @@ describe('buildCompositeContext', () => {
     );
   });
 
+  it('carries governance before plugin prompt injection', () => {
+    const ctx = buildCompositeContext([
+      makePlugin('plugin', '2024-01-01T00:00:00Z', { promptInjection: 'PLUGIN RULES' }),
+    ], { governanceDocument: 'GOVERNANCE RULES' });
+
+    expect(ctx.governanceDocument).toBe('GOVERNANCE RULES');
+    const assembled = [ctx.governanceDocument, ctx.promptInjection].filter(Boolean).join('\n\n---\n\n');
+    expect(assembled.indexOf('GOVERNANCE RULES')).toBeLessThan(assembled.indexOf('PLUGIN RULES'));
+  });
+
+  it('preserves governance when token budget is exceeded', () => {
+    const ctx = buildCompositeContext([
+      makePlugin('a', '2024-01-01T00:00:00Z', {
+        promptInjection: 'x'.repeat(100000),
+        skills: [{ name: 'big.md', content: 's'.repeat(100000), pluginId: 'a' }],
+        agents: [{ name: 'agent.md', content: 'a'.repeat(100000), pluginId: 'a' }],
+      }),
+    ], { tokenBudget: 1, governanceDocument: 'GOVERNANCE MUST STAY' });
+
+    expect(ctx.governanceDocument).toBe('GOVERNANCE MUST STAY');
+    expect(ctx.skills).toHaveLength(0);
+    expect(ctx.agents).toHaveLength(0);
+  });
+
   it('first-activated plugin wins on skill filename collision', () => {
     const plugins = [
       makePlugin('a', '2024-01-01T00:00:00Z', { skills: [{ name: 'pat.md', content: 'a-content', pluginId: 'a' }] }),

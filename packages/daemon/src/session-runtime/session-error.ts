@@ -9,13 +9,15 @@ export class SessionError extends Error {
   readonly cost: number;
   readonly rateLimited: boolean;
   readonly containmentBreach: boolean;
+  readonly scopeViolation: boolean;
 
-  constructor(message: string, cost = 0, rateLimited = false, containmentBreach = false) {
+  constructor(message: string, cost = 0, rateLimited = false, containmentBreach = false, scopeViolation = false) {
     super(message);
     this.name = 'SessionError';
     this.cost = cost;
     this.rateLimited = rateLimited;
     this.containmentBreach = containmentBreach;
+    this.scopeViolation = scopeViolation;
   }
 
   static budgetExceeded(reason: string): SessionError {
@@ -31,5 +33,9 @@ export class SessionError extends Error {
 
   static containmentBreached(details: string, cost: number): SessionError {
     return new SessionError(`Containment breach detected: ${details}`, cost, false, true);
+  }
+
+  static scopeViolated(details: string, cost: number): SessionError {
+    return new SessionError(`Scope violation detected: ${details}`, cost, false, true, true);
   }
 }

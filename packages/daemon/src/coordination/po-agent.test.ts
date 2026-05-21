@@ -119,6 +119,50 @@ describe('POAgent', () => {
     stop();
   });
 
+  it('submitIdea propagates saveIdeas rejection without scheduling evaluation (#577)', async () => {
+    const saveIdeasError = new Error('write failed');
+    const deps = makeDeps({
+      saveIdeas: vi.fn().mockRejectedValue(saveIdeasError),
+    });
+    const config = makeConfig({ intervalMs: 60000, debounceMs: 500 });
+    const agent = createPOAgent(deps, config);
+
+    await expect(agent.submitIdea('operator', 'Add queue visibility')).rejects.toThrow(
+      'write failed'
+    );
+
+    expect(deps.saveIdeas).toHaveBeenCalledWith([
+      expect.objectContaining({
+        submittedBy: 'operator',
+        description: 'Add queue visibility',
+        status: 'pending',
+        proposalId: null,
+      }),
+    ]);
+
+    await vi.advanceTimersByTimeAsync(600);
+    expect(deps.spawnPOSession).not.toHaveBeenCalled();
+  });
+
+  it('submitIdea propagates loadIdeas rejection without saving or scheduling evaluation (#561)', async () => {
+    const loadIdeasError = new Error('read failed');
+    const deps = makeDeps({
+      loadIdeas: vi.fn().mockRejectedValue(loadIdeasError),
+    });
+    const config = makeConfig({ intervalMs: 60000, debounceMs: 500 });
+    const agent = createPOAgent(deps, config);
+
+    await expect(agent.submitIdea('operator', 'Add queue visibility')).rejects.toThrow(
+      'read failed'
+    );
+
+    expect(deps.loadIdeas).toHaveBeenCalledTimes(1);
+    expect(deps.saveIdeas).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(600);
+    expect(deps.spawnPOSession).not.toHaveBeenCalled();
+  });
+
   it('debounces multiple ideas within debounce window', async () => {
     const deps = makeDeps();
     const config = makeConfig({ intervalMs: 60000, debounceMs: 500 });
@@ -146,6 +190,61 @@ describe('POAgent', () => {
 
     await vi.advanceTimersByTimeAsync(2000);
     expect(deps.spawnPOSession).not.toHaveBeenCalled();
+  });
+
+  it('skips concurrent runCycle when one is already in progress', async () => {
+    let resolveSession!: () => void;
+    const sessionPromise = new Promise<void>((resolve) => {
+      resolveSession = resolve;
+    });
+    const deps = makeDeps({
+      spawnPOSession: vi.fn().mockReturnValue(sessionPromise),
+    });
+    const config = makeConfig({ intervalMs: 100, debounceMs: 50 });
+    const agent = createPOAgent(deps, config);
+    const stop = agent.start();
+
+    // First interval fires — starts runCycle (blocks on spawnPOSession)
+    await vi.advanceTimersByTimeAsync(110);
+    expect(deps.spawnPOSession).toHaveBeenCalledTimes(1);
+
+    // Second interval fires while first is still running
+    await vi.advanceTimersByTimeAsync(110);
+    // Still only one call — second was skipped
+    expect(deps.spawnPOSession).toHaveBeenCalledTimes(1);
+
+    // Let first cycle complete
+    resolveSession();
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Third interval fires — now it can run again
+    await vi.advanceTimersByTimeAsync(110);
+    expect(deps.spawnPOSession).toHaveBeenCalledTimes(2);
+
+    stop();
+  });
+
+  it('resets running flag when runCycle throws', async () => {
+    let callCount = 0;
+    const deps = makeDeps({
+      spawnPOSession: vi.fn().mockImplementation(async () => {
+        callCount++;
+        if (callCount === 1) throw new Error('boom');
+      }),
+    });
+    const config = makeConfig({ intervalMs: 100 });
+    const agent = createPOAgent(deps, config);
+    const stop = agent.start();
+
+    // First cycle throws
+    await vi.advanceTimersByTimeAsync(110);
+    expect(deps.spawnPOSession).toHaveBeenCalledTimes(1);
+
+    // Second cycle should still run (running flag was reset via finally)
+    await vi.advanceTimersByTimeAsync(110);
+    expect(deps.spawnPOSession).toHaveBeenCalledTimes(2);
+
+    stop();
   });
 
   it('does not sweep already-decided proposals', async () => {

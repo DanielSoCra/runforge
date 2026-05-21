@@ -1,5 +1,11 @@
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: vi.fn(),
+const mocks = vi.hoisted(() => ({
+  listRunHistory: vi.fn(),
+}));
+
+vi.mock('@/lib/data/stores', () => ({
+  getDashboardStores: () => ({
+    runs: { listRunHistory: mocks.listRunHistory },
+  }),
 }));
 
 vi.mock('next/navigation', () => ({
@@ -8,34 +14,18 @@ vi.mock('next/navigation', () => ({
 }));
 
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import RunsPage from './page';
-import { createClient } from '@/lib/supabase/server';
 
-function mockSupabase(runs: Record<string, unknown>[] = []) {
-  // Create a chainable query object that supports any method order
-  const resolved = { data: runs, error: null };
-  function chainable(): Record<string, ReturnType<typeof vi.fn>> {
-    const obj: Record<string, ReturnType<typeof vi.fn>> = {};
-    for (const method of ['gte', 'order', 'limit', 'eq']) {
-      obj[method] = vi.fn().mockImplementation(() => chainable());
-    }
-    // Make it thenable so Promise.all resolves it
-    obj.then = vi.fn().mockImplementation((resolve: (v: unknown) => void) => resolve(resolved));
-    return obj;
-  }
-  const gteFn = vi.fn().mockImplementation(() => chainable());
-  const selectFn = vi.fn().mockReturnValue({ gte: gteFn });
-  const repoSelectFn = vi.fn().mockReturnValue({
-    is: vi.fn().mockResolvedValue({ data: [], error: null }),
+function mockRunHistory() {
+  mocks.listRunHistory.mockResolvedValue({
+    ok: true,
+    value: {
+      runs: [],
+      repos: [],
+      budgetByRepoId: {},
+    },
   });
-  const fromFn = vi.fn((table: string) => {
-    if (table === 'runs') return { select: selectFn };
-    if (table === 'repos') return { select: repoSelectFn };
-    return { select: vi.fn() };
-  });
-  vi.mocked(createClient).mockResolvedValue({ from: fromFn } as never);
-  return { gteFn, selectFn };
 }
 
 function searchParams(params: Record<string, string> = {}) {
@@ -43,17 +33,26 @@ function searchParams(params: Record<string, string> = {}) {
 }
 
 describe('RunsPage', () => {
-  it('applies date range filter from searchParams (#86)', async () => {
-    const { gteFn } = mockSupabase([]);
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-21T13:45:00Z'));
+    mocks.listRunHistory.mockReset();
+    mockRunHistory();
+  });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('applies date range filter from searchParams (#86)', async () => {
     const jsx = await RunsPage(searchParams({ range: '7' }));
     render(jsx);
 
-    // Verify gte was called with started_at and a date ~7 days ago
-    expect(gteFn).toHaveBeenCalledWith('started_at', expect.any(String));
-    const isoDate = gteFn.mock.calls[0][1] as string;
-    const queryDate = new Date(isoDate);
-    const now = new Date();
+    expect(mocks.listRunHistory).toHaveBeenCalledWith(
+      expect.objectContaining({ since: expect.any(Date), limit: 100 }),
+    );
+    const queryDate = mocks.listRunHistory.mock.calls[0][0].since as Date;
+    const now = new Date('2026-05-21T13:45:00Z');
     const diffDays = (now.getTime() - queryDate.getTime()) / (1000 * 60 * 60 * 24);
     expect(diffDays).toBeGreaterThan(6.9);
     expect(diffDays).toBeLessThan(7.1);
@@ -63,15 +62,11 @@ describe('RunsPage', () => {
   });
 
   it('defaults to 30 days when range param is missing (#86)', async () => {
-    const { gteFn } = mockSupabase([]);
-
     const jsx = await RunsPage(searchParams());
     render(jsx);
 
-    expect(gteFn).toHaveBeenCalledWith('started_at', expect.any(String));
-    const isoDate = gteFn.mock.calls[0][1] as string;
-    const queryDate = new Date(isoDate);
-    const now = new Date();
+    const queryDate = mocks.listRunHistory.mock.calls[0][0].since as Date;
+    const now = new Date('2026-05-21T13:45:00Z');
     const diffDays = (now.getTime() - queryDate.getTime()) / (1000 * 60 * 60 * 24);
     expect(diffDays).toBeGreaterThan(29.9);
     expect(diffDays).toBeLessThan(30.1);
@@ -80,22 +75,17 @@ describe('RunsPage', () => {
   });
 
   it('defaults to 30 days when range param is invalid (#86)', async () => {
-    const { gteFn } = mockSupabase([]);
-
     const jsx = await RunsPage(searchParams({ range: '999' }));
     render(jsx);
 
-    const isoDate = gteFn.mock.calls[0][1] as string;
-    const queryDate = new Date(isoDate);
-    const now = new Date();
+    const queryDate = mocks.listRunHistory.mock.calls[0][0].since as Date;
+    const now = new Date('2026-05-21T13:45:00Z');
     const diffDays = (now.getTime() - queryDate.getTime()) / (1000 * 60 * 60 * 24);
     expect(diffDays).toBeGreaterThan(29.9);
     expect(diffDays).toBeLessThan(30.1);
   });
 
   it('renders range selector with active state (#86)', async () => {
-    mockSupabase([]);
-
     const jsx = await RunsPage(searchParams({ range: '90' }));
     const { container } = render(jsx);
 
@@ -115,10 +105,12 @@ describe('RunsPage', () => {
   });
 
   it('preserves repo and outcome filters in range links (#86)', async () => {
-    mockSupabase([]);
-
     const jsx = await RunsPage(searchParams({ repo: 'abc', outcome: 'complete', range: '7' }));
     const { container } = render(jsx);
+
+    expect(mocks.listRunHistory).toHaveBeenCalledWith(
+      expect.objectContaining({ repoId: 'abc', outcome: 'complete' }),
+    );
 
     const selector = container.querySelector('[data-testid="range-selector"]')!;
     const links = Array.from(selector.querySelectorAll('a'));
@@ -129,5 +121,18 @@ describe('RunsPage', () => {
       expect(href).toContain('repo=abc');
       expect(href).toContain('outcome=complete');
     }
+  });
+
+  it('shows the page error when the app-owned run store is unavailable', async () => {
+    mocks.listRunHistory.mockResolvedValueOnce({
+      ok: false,
+      error: 'unavailable',
+      message: 'database offline',
+    });
+
+    const jsx = await RunsPage(searchParams());
+    render(jsx);
+
+    expect(screen.getByText(/Failed to load data/)).toBeInTheDocument();
   });
 });

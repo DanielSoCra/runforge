@@ -7,6 +7,12 @@ export interface ValidationError {
   message: string;
 }
 
+const SAFE_UNIT_ID = /^[A-Za-z0-9_-]+$/;
+
+export function isValidUnitId(unitId: string): boolean {
+  return SAFE_UNIT_ID.test(unitId);
+}
+
 export function validateTaskGraph(graph: TaskGraph): Result<TaskGraph, ValidationError[]> {
   const errors: ValidationError[] = [];
 
@@ -18,6 +24,12 @@ export function validateTaskGraph(graph: TaskGraph): Result<TaskGraph, Validatio
   // Check unique IDs
   const ids = new Set<string>();
   for (const unit of graph.units) {
+    if (!isValidUnitId(unit.id)) {
+      errors.push({
+        field: `units[${unit.id}].id`,
+        message: `Unit ID must contain only letters, numbers, hyphen, or underscore: ${unit.id}`,
+      });
+    }
     if (ids.has(unit.id)) {
       errors.push({ field: `units[${unit.id}].id`, message: `Duplicate unit ID: ${unit.id}` });
     }
@@ -72,11 +84,20 @@ export function getUnitsByBatch(graph: TaskGraph): Unit[][] {
     .map(([, units]) => units);
 }
 
+/** Default verification command for simple-complexity worker units.
+ *  This is passed into the worker prompt as `{{verification}}` — the worker
+ *  agent runs it as part of its TDD protocol. The daemon does not execute it
+ *  directly. Defaults to the standard repo-root checks every package supports.
+ */
+export const DEFAULT_VERIFICATION_COMMAND = 'pnpm -r typecheck && pnpm -r test';
+
 export function createSingleUnitGraph(
   issueNumber: number,
   featureBranch: string,
   title: string,
   context: string,
+  specContent: string = '',
+  verificationCommand: string = DEFAULT_VERIFICATION_COMMAND,
 ): TaskGraph {
   return {
     issueNumber,
@@ -85,11 +106,11 @@ export function createSingleUnitGraph(
       id: `issue-${issueNumber}`,
       title,
       specIds: [],
-      specContent: '',
+      specContent,
       expectedArtifacts: [],
       dependencies: [],
       batchNumber: 0,
-      verificationCommand: '',
+      verificationCommand,
       context,
     }],
   };

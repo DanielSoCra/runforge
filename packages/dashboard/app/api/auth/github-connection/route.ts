@@ -1,23 +1,25 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { getOrigin } from '@/lib/auth';
+import {
+  getDashboardAuthError,
+  requireDashboardAdmin,
+} from '@/lib/auth/require-session';
 
 export async function GET(request: NextRequest) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const { data: member } = await supabase.from('team_members')
-    .select('role').eq('user_id', user.id).single();
-  if (member?.role !== 'admin') {
-    return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
+  try {
+    await requireDashboardAdmin();
+  } catch (e) {
+    const authError = getDashboardAuthError(e);
+    return NextResponse.json(
+      { error: authError.message },
+      { status: authError.status },
+    );
   }
 
   const clientId = process.env.GITHUB_OAUTH_CLIENT_ID;
   if (!clientId) return NextResponse.json({ error: 'GitHub OAuth not configured' }, { status: 500 });
 
   const state = crypto.randomUUID();
-  const origin = getOrigin(request);
+  const origin = getOAuthOrigin(request);
 
   const callbackUrl = `${origin}/api/auth/github-connection/callback`;
   const githubUrl = new URL('https://github.com/login/oauth/authorize');
@@ -35,4 +37,16 @@ export async function GET(request: NextRequest) {
     path: '/',
   });
   return response;
+}
+
+function getOAuthOrigin(request: Request): string {
+  if (process.env.NEXT_PUBLIC_SITE_URL) {
+    return process.env.NEXT_PUBLIC_SITE_URL.replace(/\/+$/, '');
+  }
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'NEXT_PUBLIC_SITE_URL environment variable is required in production',
+    );
+  }
+  return new URL(request.url).origin;
 }

@@ -1,10 +1,9 @@
 # Hetzner Deployment Guide
 
-Auto-Claude runs on Hetzner via Docker Compose. Three containers — **daemon**, **dashboard**, and **Caddy** — communicate over a private Docker network. Caddy handles TLS termination and proxies HTTPS traffic to the dashboard.
+Auto-Claude runs on Hetzner via Docker Compose. The stack includes **Postgres**, a one-shot **migration** job, **daemon**, **dashboard**, **briefing-summarizer**, and **Caddy** on a private Docker network. Caddy handles TLS termination and proxies HTTPS traffic to the dashboard.
 
 ## Prerequisites
 
-- A [Supabase](https://supabase.com) project (free tier works)
 - A domain with DNS control (current: `app.example.com`)
 - An SSH key added to the Hetzner server
 
@@ -63,15 +62,17 @@ Fill in all values:
 |----------|----------------|
 | `GITHUB_TOKEN` | GitHub → Settings → Developer settings → Fine-grained PAT with `repo` scope |
 | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com/settings/keys) |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project → Settings → API → Project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase project → Settings → API → `anon` key |
-| `SUPABASE_URL` | Same as `NEXT_PUBLIC_SUPABASE_URL` |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase project → Settings → API → `service_role` key |
+| `POSTGRES_DB` | Use `autoclaude` unless you need a different local database name |
+| `POSTGRES_USER` | Use `autoclaude` unless you need a different local database user |
+| `POSTGRES_PASSWORD` | Generate a strong database password |
+| `AUTO_CLAUDE_DOCKER_DATABASE_URL` | `postgres://autoclaude:<url-encoded-password>@postgres:5432/autoclaude` |
+| `DAEMON_DATA_BACKEND` | `postgres` |
+| `BRIEFING_DATA_BACKEND` | `postgres` |
 | `NEXT_PUBLIC_SITE_URL` | `https://app.example.com` (your domain) |
 | `DAEMON_URL` | `http://daemon:3847` (Docker service name — do not change) |
 | `ENCRYPTION_KEY` | Any 32+ character random string |
-| `GITHUB_REPO_OAUTH_APP_CLIENT_ID` | GitHub OAuth App client ID |
-| `GITHUB_REPO_OAUTH_APP_CLIENT_SECRET` | GitHub OAuth App client secret |
+| `GITHUB_OAUTH_CLIENT_ID` | GitHub OAuth App client ID for repository connections |
+| `GITHUB_OAUTH_CLIENT_SECRET` | GitHub OAuth App client secret for repository connections |
 
 ## 6. Configure the Daemon
 
@@ -103,9 +104,9 @@ app.example.com {
 
 Change the domain if needed before first deploy.
 
-## 8. Apply Supabase Migrations
+## 8. Apply Migrations
 
-Migrations live in `packages/daemon/migrations/`. Run them in the Supabase SQL editor or via the Supabase CLI before starting the stack.
+The Compose stack runs the app-owned Postgres migrations automatically through the `migrate` service before consumers start.
 
 ## 9. Deploy
 
@@ -114,7 +115,7 @@ cd /home/autoclaude/auto-claude
 docker compose --env-file .env.prod --profile public up --build -d
 ```
 
-Verify all three containers are running:
+Verify the runtime containers are healthy and the migration job completed:
 
 ```bash
 docker compose --env-file .env.prod --profile public ps
@@ -160,6 +161,32 @@ docker compose --env-file .env.prod --profile public logs -f daemon
 
 ```bash
 docker compose --env-file .env.prod --profile public restart dashboard
+```
+
+### Back up Postgres
+
+Back up the app-owned database with `pg_dump`. Store `.env.prod` and especially `ENCRYPTION_KEY` with the backup; database credentials are encrypted and require the same key after restore.
+
+```bash
+mkdir -p backups
+docker compose --env-file .env.prod exec -T postgres sh -c \
+  'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' \
+  > "backups/autoclaude-$(date +%Y%m%d-%H%M%S).dump"
+```
+
+### Restore Postgres
+
+Restores overwrite the current database. Stop application consumers first, restore the dump, then start the stack again.
+
+```bash
+docker compose --env-file .env.prod --profile public stop dashboard briefing-summarizer
+# If this host also runs the containerized daemon profile:
+docker compose --env-file .env.prod --profile containerized-daemon stop daemon
+
+cat backups/autoclaude-YYYYMMDD-HHMMSS.dump | docker compose --env-file .env.prod exec -T postgres sh -c \
+  'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner'
+
+docker compose --env-file .env.prod --profile public up --build -d
 ```
 
 ### Stop everything

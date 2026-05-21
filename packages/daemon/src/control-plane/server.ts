@@ -2,15 +2,19 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { ok, err, type Result } from '../lib/result.js';
 import { getDashboardHtml } from './dashboard.js';
 import { readResults } from './results.js';
+import type { ReleaseProposalResult } from './release.js';
 
 export interface ControlHandlers {
   getStatus: () => unknown;
   pause: () => void;
-  resume: () => void;
+  resume: () => void | Result<void> | Promise<void | Result<void>>;
+  drain: () => void;
+  cancelDrain: () => void;
   retry: (issueNumber: number) => Result<void>;
   reloadRepos?: () => Promise<{ active: number }>;
   restartRemoteControl?: () => void | Promise<void>;
   scanIssues?: () => Promise<{ scanned: number }>;
+  release?: () => Promise<ReleaseProposalResult>;
   submitIdea?: (submittedBy: string, description: string) => Promise<{ id: string }>;
   stateDir?: string;
 }
@@ -51,8 +55,22 @@ export function createControlServer(
       handlers.pause();
       json(res, 200, { paused: true });
     } else if (method === 'POST' && url.pathname === '/resume') {
-      handlers.resume();
-      json(res, 200, { paused: false });
+      Promise.resolve(handlers.resume()).then((result) => {
+        if (isResult(result) && !result.ok) {
+          json(res, 409, { paused: true, error: result.error.message });
+          return;
+        }
+        json(res, 200, { paused: false });
+      }).catch((e: unknown) => {
+        console.error('[control-plane] POST /resume failed:', e);
+        json(res, 500, { paused: true, error: 'resume failed' });
+      });
+    } else if (method === 'POST' && url.pathname === '/drain') {
+      handlers.drain();
+      json(res, 200, { draining: true });
+    } else if (method === 'POST' && url.pathname === '/drain/cancel') {
+      handlers.cancelDrain();
+      json(res, 200, { draining: false });
     } else if (method === 'POST' && url.pathname === '/repos/reload') {
       if (handlers.reloadRepos) {
         handlers.reloadRepos().then((result) => {
@@ -82,6 +100,17 @@ export function createControlServer(
         }).catch((e: unknown) => {
           console.error('[control-plane] POST /issues/scan failed:', e);
           json(res, 500, { error: 'scan failed' });
+        });
+      } else {
+        json(res, 501, { error: 'not configured' });
+      }
+    } else if (method === 'POST' && url.pathname === '/release') {
+      if (handlers.release) {
+        handlers.release().then((result) => {
+          json(res, 200, result);
+        }).catch((e: unknown) => {
+          console.error('[control-plane] POST /release failed:', e);
+          json(res, 500, { error: 'release failed' });
         });
       } else {
         json(res, 501, { error: 'not configured' });
@@ -154,6 +183,10 @@ export function createControlServer(
         });
       }),
   };
+}
+
+function isResult(value: unknown): value is Result<void> {
+  return typeof value === 'object' && value !== null && 'ok' in value;
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {

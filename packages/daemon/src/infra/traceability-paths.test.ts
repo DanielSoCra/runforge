@@ -50,6 +50,45 @@ function extractPaths(content: string): { specId: string; path: string }[] {
   return results;
 }
 
+type TraceabilityEntry = {
+  id: string;
+  children: string[];
+  status?: string;
+};
+
+function extractEntries(content: string): Map<string, TraceabilityEntry> {
+  const entries = new Map<string, TraceabilityEntry>();
+  let currentSpec = '';
+
+  for (const line of content.split('\n')) {
+    const specMatch = line.match(/^([A-Z][A-Z0-9_-]+):\s*$/);
+    if (specMatch) {
+      currentSpec = specMatch[1]!;
+      entries.set(currentSpec, { id: currentSpec, children: [] });
+      continue;
+    }
+
+    if (!currentSpec) continue;
+    const current = entries.get(currentSpec)!;
+
+    const childrenMatch = line.match(/^\s+children:\s*\[(.*)\]/);
+    if (childrenMatch) {
+      current.children = childrenMatch[1]!
+        .split(',')
+        .map((child) => child.trim())
+        .filter(Boolean);
+      continue;
+    }
+
+    const statusMatch = line.match(/^\s+status:\s*(\w+)/);
+    if (statusMatch) {
+      current.status = statusMatch[1]!;
+    }
+  }
+
+  return entries;
+}
+
 describe('traceability.yml path validation', () => {
   it('all code_paths and test_paths reference files that exist on disk', () => {
     const raw = readFileSync(resolve(ROOT, '.specify/traceability.yml'), 'utf-8');
@@ -67,5 +106,46 @@ describe('traceability.yml path validation', () => {
     expect(missing, `Traceability references non-existent files:\n${missing.join('\n')}`).toEqual(
       [],
     );
+  });
+});
+
+describe('Auto-Claude traceability tree', () => {
+  it('all active Auto-Claude L1 specs are listed under L0-AC-VISION', () => {
+    const raw = readFileSync(resolve(ROOT, '.specify/traceability.yml'), 'utf-8');
+    const entries = extractEntries(raw);
+    const root = entries.get('L0-AC-VISION');
+
+    expect(root, 'expected L0-AC-VISION entry in traceability').toBeDefined();
+
+    const activeFunctionalSpecs = [...entries.values()]
+      .filter((entry) => entry.id.startsWith('FUNC-AC-') && entry.status !== 'deprecated')
+      .map((entry) => entry.id)
+      .sort();
+    const missing = activeFunctionalSpecs.filter((id) => !root!.children.includes(id));
+
+    expect(missing, `Active Auto-Claude L1 specs missing from L0-AC-VISION:\n${missing.join('\n')}`).toEqual(
+      [],
+    );
+  });
+});
+
+describe('concierge spec tree', () => {
+  it('L0-CONCIERGE-VISION exists with five L1 children', () => {
+    const raw = readFileSync(resolve(ROOT, '.specify/traceability.yml'), 'utf-8');
+    expect(raw).toContain('L0-CONCIERGE-VISION:');
+    expect(raw).toMatch(/L0-CONCIERGE-VISION:[\s\S]*?children:\s*\[FUNC-CONCIERGE-CORE.*FUNC-CONCIERGE-AWARENESS\]/);
+  });
+
+  it('all new concierge specs have entries', () => {
+    const raw = readFileSync(resolve(ROOT, '.specify/traceability.yml'), 'utf-8');
+    for (const id of [
+      'FUNC-CONCIERGE-CORE', 'FUNC-CONCIERGE-MEMORY', 'FUNC-CONCIERGE-BOARD',
+      'FUNC-CONCIERGE-CHANNEL', 'FUNC-CONCIERGE-AWARENESS',
+      'ARCH-CONCIERGE-RUNTIME', 'ARCH-EVENT-BUS', 'ARCH-TOOL-REGISTRY',
+      'ARCH-CONFIRMATION-LIFECYCLE',
+      'STACK-CONCIERGE-NODE', 'STACK-CONCIERGE-BOARD',
+    ]) {
+      expect(raw, `expected ${id} in traceability`).toContain(`${id}:`);
+    }
   });
 });

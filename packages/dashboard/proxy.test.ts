@@ -1,51 +1,84 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextRequest, NextResponse } from 'next/server';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
 
-// Mock the updateSession dependency
-const mockUpdateSession = vi.fn();
-vi.mock('@/lib/supabase/middleware', () => ({
-  updateSession: (...args: unknown[]) => mockUpdateSession(...args),
+const mocks = vi.hoisted(() => ({
+  resolveLocalAuthBypass: vi.fn(),
 }));
+
+vi.mock('../auth/src/local-bypass', () => ({
+  resolveLocalAuthBypass: mocks.resolveLocalAuthBypass,
+}));
+
+function makeRequest(path: string, cookie?: string): NextRequest {
+  return new NextRequest(`http://localhost:3000${path}`, {
+    headers: cookie ? { cookie } : undefined,
+  });
+}
 
 describe('proxy', () => {
   beforeEach(() => {
-    mockUpdateSession.mockReset();
+    vi.resetModules();
+    mocks.resolveLocalAuthBypass.mockReset();
+    mocks.resolveLocalAuthBypass.mockReturnValue({
+      enabled: false,
+      reason: 'not-requested',
+    });
   });
 
   describe('proxy()', () => {
-    it('calls updateSession with the request and returns its response', async () => {
-      const fakeResponse = NextResponse.next();
-      mockUpdateSession.mockResolvedValue(fakeResponse);
-
+    it('allows public paths without a session cookie', async () => {
       const { proxy } = await import('./proxy');
-      const request = new NextRequest('http://localhost:3000/dashboard');
 
-      const result = await proxy(request);
-
-      expect(mockUpdateSession).toHaveBeenCalledWith(request);
-      expect(result).toBe(fakeResponse);
+      await expect(proxy(makeRequest('/login'))).resolves.toMatchObject({
+        status: 200,
+      });
+      await expect(proxy(makeRequest('/auth/login'))).resolves.toMatchObject({
+        status: 200,
+      });
+      await expect(proxy(makeRequest('/api/daemon/status'))).resolves.toMatchObject({
+        status: 200,
+      });
     });
 
-    it('returns redirect response when updateSession redirects', async () => {
-      const redirectResponse = NextResponse.redirect(new URL('http://localhost:3000/login'));
-      mockUpdateSession.mockResolvedValue(redirectResponse);
-
+    it('allows protected paths with a Better Auth session cookie', async () => {
       const { proxy } = await import('./proxy');
-      const request = new NextRequest('http://localhost:3000/repos');
 
-      const result = await proxy(request);
+      const response = await proxy(
+        makeRequest('/repos', 'auto-claude.session_token=signed-token'),
+      );
 
-      expect(result).toBe(redirectResponse);
-      expect(result.status).toBe(307);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('location')).toBeNull();
     });
 
-    it('propagates errors from updateSession', async () => {
-      mockUpdateSession.mockRejectedValue(new Error('Supabase unreachable'));
-
+    it('allows protected paths with a secure Better Auth session cookie', async () => {
       const { proxy } = await import('./proxy');
-      const request = new NextRequest('http://localhost:3000/');
 
-      await expect(proxy(request)).rejects.toThrow('Supabase unreachable');
+      const response = await proxy(
+        makeRequest('/repos', '__Secure-auto-claude.session_token=signed-token'),
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('location')).toBeNull();
+    });
+
+    it('redirects protected paths without a Better Auth session cookie', async () => {
+      const { proxy } = await import('./proxy');
+
+      const response = await proxy(makeRequest('/repos'));
+
+      expect(response.status).toBe(307);
+      expect(response.headers.get('location')).toBe('http://localhost:3000/login');
+    });
+
+    it('allows all paths when local auth bypass is enabled', async () => {
+      mocks.resolveLocalAuthBypass.mockReturnValue({ enabled: true });
+      const { proxy } = await import('./proxy');
+
+      const response = await proxy(makeRequest('/repos'));
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('location')).toBeNull();
     });
   });
 
@@ -54,9 +87,6 @@ describe('proxy', () => {
 
     beforeEach(async () => {
       const { config } = await import('./proxy');
-      // Next.js applies matcher as a full-path match — anchor the regex.
-      // This construction is valid only because the matcher uses a raw regex
-      // pattern, not Next.js path parameter syntax (e.g. /:path*).
       matcherRegex = new RegExp('^' + config.matcher[0] + '$');
     });
 
@@ -68,7 +98,7 @@ describe('proxy', () => {
       expect('/settings').toMatch(matcherRegex);
       expect('/team').toMatch(matcherRegex);
       expect('/login').toMatch(matcherRegex);
-      expect('/auth/callback').toMatch(matcherRegex);
+      expect('/auth/login').toMatch(matcherRegex);
     });
 
     it('matches API routes', () => {
@@ -84,7 +114,6 @@ describe('proxy', () => {
       expect('/photo.jpeg').not.toMatch(matcherRegex);
       expect('/anim.gif').not.toMatch(matcherRegex);
       expect('/bg.webp').not.toMatch(matcherRegex);
-      // Nested static asset paths are also excluded
       expect('/images/hero.png').not.toMatch(matcherRegex);
     });
 

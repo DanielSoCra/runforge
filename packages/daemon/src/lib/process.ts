@@ -1,5 +1,6 @@
 // src/lib/process.ts
 import { spawn } from 'child_process';
+import { tmpdir } from 'os';
 import { ok, err, type Result } from './result.js';
 
 export interface RunCommandOptions {
@@ -15,7 +16,7 @@ export function buildSafeEnv(extra?: Record<string, string>): Record<string, str
     TERM: 'dumb',
     LANG: process.env.LANG ?? 'en_US.UTF-8',
   };
-  if (process.env.TMPDIR) safe.TMPDIR = process.env.TMPDIR;
+  safe.TMPDIR = process.env.TMPDIR ?? tmpdir();
   if (extra) Object.assign(safe, extra);
   return safe;
 }

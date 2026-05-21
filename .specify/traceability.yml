@@ -52,13 +52,13 @@ ARCH-SDD-SPEC-LIFECYCLE:
 # --- Auto-Claude L0 spec (vision — root of all Auto-Claude specs) ---
 
 L0-AC-VISION:
-  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, FUNC-AC-PLUGINS, FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, STACK-AC-CONVENTIONS]
+  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, FUNC-AC-PLUGINS, FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, FUNC-AC-AGENT-DISCIPLINE, FUNC-AC-CONTROLLED-ARTIFACT-DELIVERY, FUNC-AC-RECOVERABLE-FAILURE-ROUTING, FUNC-AC-RUNTIME-SOURCE-ISOLATION, FUNC-AC-DATA-PLATFORM, FUNC-AC-OPERATOR-AUTH, STACK-AC-CONVENTIONS]
   status: draft
 
 # --- Auto-Claude L1 specs ---
 
 FUNC-AC-PIPELINE:
-  children: [ARCH-AC-CONTROL-PLANE, ARCH-AC-SPEC-PIPELINE, ARCH-AC-PIPELINE-DISPATCH]
+  children: [ARCH-AC-CONTROL-PLANE, ARCH-AC-SPEC-PIPELINE, ARCH-AC-PIPELINE-DISPATCH, ARCH-AC-PHASE-LABELS, ARCH-AC-BATCH-CLASSIFIER, ARCH-AC-DAG-EXECUTOR]
   status: draft
 
 FUNC-AC-IMPLEMENTATION:
@@ -66,11 +66,11 @@ FUNC-AC-IMPLEMENTATION:
   status: draft
 
 FUNC-AC-QUALITY:
-  children: [ARCH-AC-VALIDATION]
+  children: [ARCH-AC-VALIDATION, ARCH-AC-ADVERSARIAL-REVIEWER]
   status: draft
 
 FUNC-AC-SAFETY:
-  children: [ARCH-AC-SESSION-RUNTIME, ARCH-AC-OPERATIONAL-SAFETY]
+  children: [ARCH-AC-SESSION-RUNTIME, ARCH-AC-OPERATIONAL-SAFETY, ARCH-AC-CONTAINMENT, ARCH-AC-SESSION-PROVIDERS, ARCH-AC-GOVERNANCE]
   status: draft
 
 FUNC-AC-BUG-TRIAGE:
@@ -78,7 +78,7 @@ FUNC-AC-BUG-TRIAGE:
   status: draft
 
 FUNC-AC-LEARNING:
-  children: [ARCH-AC-KNOWLEDGE, ARCH-AC-ENRICHED-COMMITS]
+  children: [ARCH-AC-KNOWLEDGE, ARCH-AC-ENRICHED-COMMITS, ARCH-AC-KNOWLEDGE-SYNC]
   status: draft
 
 FUNC-AC-DASHBOARD:
@@ -109,6 +109,22 @@ FUNC-AC-TECH-LEAD:
   children: [ARCH-AC-TECH-LEAD]
   status: draft
 
+FUNC-AC-AGENT-DISCIPLINE:
+  children: [ARCH-AC-AGENT-DISCIPLINE]
+  status: draft
+
+FUNC-AC-CONTROLLED-ARTIFACT-DELIVERY:
+  children: [ARCH-AC-CONTROLLED-ARTIFACT-DELIVERY]
+  status: draft
+
+FUNC-AC-RECOVERABLE-FAILURE-ROUTING:
+  children: [ARCH-AC-RECOVERABLE-FAILURE-ROUTING]
+  status: draft
+
+FUNC-AC-RUNTIME-SOURCE-ISOLATION:
+  children: [ARCH-AC-RUNTIME-SOURCE-ISOLATION]
+  status: draft
+
 # --- Auto-Claude Plugins L2 spec ---
 
 ARCH-AC-PLUGINS:
@@ -123,9 +139,24 @@ ARCH-AC-COORDINATION:
   children: [STACK-AC-COORDINATION, STACK-AC-MERGE-AGENT, STACK-AC-COORDINATION-DAEMON-WIRING]
   status: draft
 
+ARCH-AC-BATCH-CLASSIFIER:
+  parent: FUNC-AC-PIPELINE
+  children: [STACK-AC-BATCH-CLASSIFIER]
+  status: draft
+
 ARCH-AC-CONTROL-PLANE:
   parent: FUNC-AC-PIPELINE
   children: [STACK-AC-CONTROL-PLANE]
+  status: draft
+
+ARCH-AC-DAG-EXECUTOR:
+  parent: FUNC-AC-PIPELINE
+  children: [STACK-AC-DAG-EXECUTOR]
+  status: draft
+
+ARCH-AC-PHASE-LABELS:
+  parent: FUNC-AC-PIPELINE
+  children: [STACK-AC-PHASE-LABELS]
   status: draft
 
 ARCH-AC-SPEC-PIPELINE:
@@ -148,6 +179,11 @@ ARCH-AC-VALIDATION:
   children: [STACK-AC-VALIDATION]
   status: draft
 
+ARCH-AC-ADVERSARIAL-REVIEWER:
+  parent: FUNC-AC-QUALITY
+  children: []
+  status: draft
+
 ARCH-AC-SESSION-RUNTIME:
   parent: FUNC-AC-SAFETY
   children: [STACK-AC-SESSION-RUNTIME]
@@ -156,6 +192,21 @@ ARCH-AC-SESSION-RUNTIME:
 ARCH-AC-OPERATIONAL-SAFETY:
   parent: FUNC-AC-SAFETY
   children: [STACK-AC-OPERATIONAL-SAFETY]
+  status: draft
+
+ARCH-AC-CONTAINMENT:
+  parent: FUNC-AC-SAFETY
+  children: [STACK-AC-CONTAINMENT]
+  status: draft
+
+ARCH-AC-SESSION-PROVIDERS:
+  parent: FUNC-AC-SAFETY
+  children: [STACK-AC-SESSION-PROVIDERS]
+  status: draft
+
+ARCH-AC-GOVERNANCE:
+  parent: FUNC-AC-SAFETY
+  children: [STACK-AC-GOVERNANCE-DAEMON]
   status: draft
 
 ARCH-AC-DIAGNOSIS:
@@ -180,17 +231,42 @@ ARCH-AC-DASHBOARD:
 
 ARCH-AC-PRODUCT-OWNER:
   parent: FUNC-AC-PRODUCT-OWNER
-  children: [STACK-AC-PRODUCT-OWNER]
+  children: [STACK-AC-PRODUCT-OWNER, STACK-AC-PRODUCT-OWNER-INTERACTIVE, STACK-AC-PRODUCT-OWNER-FINDING-APPROVAL]
   status: draft
 
 ARCH-AC-TECH-LEAD:
   parent: FUNC-AC-TECH-LEAD
-  children: [STACK-AC-TECH-LEAD]
+  children: [STACK-AC-TECH-LEAD, STACK-AC-TECH-LEAD-TRIAGE]
   status: draft
 
 ARCH-AC-ENRICHED-COMMITS:
   parent: FUNC-AC-LEARNING
   children: [STACK-AC-ENRICHED-COMMITS-WORKER, STACK-AC-ENRICHED-COMMITS-KNOWLEDGE]
+  status: draft
+
+ARCH-AC-KNOWLEDGE-SYNC:
+  parent: FUNC-AC-LEARNING
+  children: [STACK-AC-KNOWLEDGE-SYNC]
+  status: draft
+
+ARCH-AC-AGENT-DISCIPLINE:
+  parent: FUNC-AC-AGENT-DISCIPLINE
+  children: [STACK-AC-AGENT-DISCIPLINE-PROMPTS, STACK-AC-AGENT-DISCIPLINE-REVIEW]
+  status: draft
+
+ARCH-AC-CONTROLLED-ARTIFACT-DELIVERY:
+  parent: FUNC-AC-CONTROLLED-ARTIFACT-DELIVERY
+  children: [STACK-AC-CONTROLLED-ARTIFACT-DELIVERY]
+  status: draft
+
+ARCH-AC-RECOVERABLE-FAILURE-ROUTING:
+  parent: FUNC-AC-RECOVERABLE-FAILURE-ROUTING
+  children: [STACK-AC-RECOVERABLE-FAILURE-ROUTING]
+  status: draft
+
+ARCH-AC-RUNTIME-SOURCE-ISOLATION:
+  parent: FUNC-AC-RUNTIME-SOURCE-ISOLATION
+  children: [STACK-AC-RUNTIME-SOURCE-ISOLATION]
   status: draft
 
 # --- Auto-Claude L3 specs (stack-specific) ---
@@ -201,8 +277,23 @@ ARCH-AC-ENRICHED-COMMITS:
 STACK-AC-CONVENTIONS:
   parent: L0-AC-VISION
   children: []
-  code_paths: [packages/daemon/src/types.ts, packages/daemon/src/main.ts, packages/daemon/src/config.ts, packages/daemon/src/lib/]
-  test_paths: [packages/daemon/src/**/*.test.ts]
+  code_paths:
+    - .github/workflows/ci.yml
+    - package.json
+    - packages/daemon/package.json
+    - packages/daemon/eslint.config.js
+    - packages/daemon/.eslint-suppressions.json
+    - packages/daemon/src/types.ts
+    - packages/daemon/src/main.ts
+    - packages/daemon/src/config.ts
+    - packages/daemon/src/lib/
+    - packages/daemon/src/lib/structured-output.ts
+    - packages/dashboard/package.json
+    - packages/dashboard/eslint.config.mjs
+    - packages/dashboard/.eslint-suppressions.json
+  test_paths:
+    - packages/daemon/src/**/*.test.ts
+    - packages/daemon/src/lib/structured-output.test.ts
   status: draft
 
 STACK-AC-CONTROL-PLANE:
@@ -233,6 +324,25 @@ STACK-AC-IMPLEMENTATION:
     - packages/daemon/src/implementation/exit-status.ts
   test_paths:
     - packages/daemon/src/implementation/**/*.test.ts
+  status: draft
+
+STACK-AC-AGENT-DISCIPLINE-PROMPTS:
+  parent: ARCH-AC-AGENT-DISCIPLINE
+  children: []
+  code_paths:
+    - prompts/classifier.md
+    - prompts/coordinator.md
+    - prompts/worker.md
+    - prompts/spec-implementer.md
+    - prompts/bug-worker.md
+    - packages/daemon/src/implementation/decompose.ts
+    - packages/daemon/src/implementation/context.ts
+    - packages/daemon/src/implementation/exit-status.ts
+  test_paths:
+    - packages/daemon/src/control-plane/classifier.test.ts
+    - packages/daemon/src/implementation/decompose.test.ts
+    - packages/daemon/src/implementation/context.test.ts
+    - packages/daemon/src/implementation/exit-status.test.ts
   status: draft
 
 STACK-AC-VALIDATION:
@@ -270,6 +380,80 @@ STACK-AC-VALIDATION:
     - packages/daemon/src/infra/spec-loader.test.ts
   status: draft
 
+STACK-AC-AGENT-DISCIPLINE-REVIEW:
+  parent: ARCH-AC-AGENT-DISCIPLINE
+  children: []
+  code_paths:
+    - prompts/reviewer-quality.md
+    - packages/daemon/src/validation/review.ts
+    - packages/daemon/src/validation/reviewer-session.ts
+    - packages/daemon/src/validation/knowledge-injector.ts
+  test_paths:
+    - packages/daemon/src/validation/review.test.ts
+    - packages/daemon/src/validation/reviewer-session.test.ts
+    - packages/daemon/src/validation/knowledge-injector.test.ts
+  status: draft
+
+STACK-AC-CONTROLLED-ARTIFACT-DELIVERY:
+  parent: ARCH-AC-CONTROLLED-ARTIFACT-DELIVERY
+  children: []
+  code_paths:
+    - prompts/l2-designer.md
+    - prompts/l3-generator.md
+    - packages/daemon/src/control-plane/phases.ts
+    - packages/daemon/src/control-plane/spec-pipeline/delivery.ts
+    - packages/daemon/src/control-plane/spec-pipeline/park.ts
+    - packages/daemon/src/control-plane/spec-pipeline/spec-chain.ts
+    - packages/daemon/src/types.ts
+  test_paths:
+    - packages/daemon/src/control-plane/phases.test.ts
+    - packages/daemon/src/control-plane/spec-pipeline/delivery.test.ts
+    - packages/daemon/src/control-plane/spec-pipeline/**/*.test.ts
+  status: draft
+
+STACK-AC-RECOVERABLE-FAILURE-ROUTING:
+  parent: ARCH-AC-RECOVERABLE-FAILURE-ROUTING
+  children: []
+  code_paths:
+    - packages/daemon/src/types.ts
+    - packages/daemon/src/control-plane/pipeline.ts
+    - packages/daemon/src/control-plane/failure-routing.ts
+    - packages/daemon/src/control-plane/fsm.ts
+    - packages/daemon/src/control-plane/phases.ts
+    - packages/daemon/src/control-plane/workspace.ts
+    - packages/daemon/src/control-plane/work-detection.ts
+    - packages/daemon/src/control-plane/daemon.ts
+  test_paths:
+    - packages/daemon/src/control-plane/pipeline.test.ts
+    - packages/daemon/src/control-plane/phases.test.ts
+    - packages/daemon/src/control-plane/workspace.test.ts
+    - packages/daemon/src/control-plane/work-detection.test.ts
+    - packages/daemon/src/control-plane/daemon.test.ts
+  status: draft
+
+STACK-AC-RUNTIME-SOURCE-ISOLATION:
+  parent: ARCH-AC-RUNTIME-SOURCE-ISOLATION
+  children: []
+  code_paths:
+    - packages/daemon/src/config.ts
+    - packages/daemon/src/main.ts
+    - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/control-plane/phases.ts
+    - packages/daemon/src/control-plane/runtime-source.ts
+    - packages/daemon/src/control-plane/server.ts
+    - packages/daemon/src/control-plane/workspace.ts
+    - packages/daemon/src/implementation/worktree.ts
+    - packages/daemon/src/types.ts
+  test_paths:
+    - packages/daemon/src/config.test.ts
+    - packages/daemon/src/control-plane/daemon.test.ts
+    - packages/daemon/src/control-plane/phases.test.ts
+    - packages/daemon/src/control-plane/runtime-source.test.ts
+    - packages/daemon/src/control-plane/server.test.ts
+    - packages/daemon/src/control-plane/workspace.test.ts
+    - packages/daemon/src/implementation/worktree.test.ts
+  status: draft
+
 STACK-AC-SESSION-RUNTIME:
   parent: ARCH-AC-SESSION-RUNTIME
   children: []
@@ -283,6 +467,26 @@ STACK-AC-SESSION-RUNTIME:
     - packages/daemon/src/session-runtime/generate-containment-script.test.ts
     - packages/daemon/src/session-runtime/rate-limiter.test.ts
     - packages/daemon/src/session-runtime/audit.test.ts
+  status: draft
+
+STACK-AC-SESSION-PROVIDERS:
+  parent: ARCH-AC-SESSION-PROVIDERS
+  children: []
+  code_paths:
+    - packages/daemon/src/types.ts
+    - packages/daemon/src/config.ts
+    - packages/daemon/src/session-runtime/runtime.ts
+    - packages/daemon/src/session-runtime/providers/registry.ts
+    - packages/daemon/src/session-runtime/adapters/types.ts
+    - packages/daemon/src/session-runtime/adapters/index.ts
+    - packages/daemon/src/session-runtime/adapters/cli.ts
+    - packages/daemon/src/session-runtime/adapters/codex-cli.ts
+  test_paths:
+    - packages/daemon/src/config.test.ts
+    - packages/daemon/src/session-runtime/runtime.test.ts
+    - packages/daemon/src/session-runtime/providers/registry.test.ts
+    - packages/daemon/src/session-runtime/adapters/index.test.ts
+    - packages/daemon/src/session-runtime/adapters/codex-cli.test.ts
   status: draft
 
 STACK-AC-OPERATIONAL-SAFETY:
@@ -327,8 +531,29 @@ STACK-AC-KNOWLEDGE:
     - packages/daemon/src/knowledge/exemplar-store.ts
     - packages/daemon/src/knowledge/pattern-extractor.ts
     - packages/daemon/src/knowledge/proposal-store.ts
+    - packages/daemon/src/knowledge/prompt-contracts.ts
   test_paths:
     - packages/daemon/src/knowledge/**/*.test.ts
+    - packages/daemon/src/knowledge/prompt-contracts.test.ts
+  status: draft
+
+STACK-AC-KNOWLEDGE-SYNC:
+  parent: ARCH-AC-KNOWLEDGE-SYNC
+  children: []
+  code_paths:
+    - packages/daemon/src/knowledge-sync/types.ts
+    - packages/daemon/src/knowledge-sync/manifest.ts
+    - packages/daemon/src/knowledge-sync/hash-registry.ts
+    - packages/daemon/src/knowledge-sync/document-mapper.ts
+    - packages/daemon/src/knowledge-sync/sync-service.ts
+  test_paths:
+    - packages/daemon/src/knowledge-sync/manifest.test.ts
+    - packages/daemon/src/knowledge-sync/hash-registry.test.ts
+    - packages/daemon/src/knowledge-sync/document-mapper.test.ts
+    - packages/daemon/src/knowledge-sync/sync-service.test.ts
+    - packages/daemon/src/knowledge-sync/hash-registry.test.ts
+    - packages/daemon/src/knowledge-sync/document-mapper.test.ts
+    - packages/daemon/src/knowledge-sync/sync-service.test.ts
   status: draft
 
 STACK-AC-DASHBOARD:
@@ -337,13 +562,8 @@ STACK-AC-DASHBOARD:
   spec: docs/superpowers/specs/2026-03-20-issues-board-design.md
   code_paths:
     - packages/dashboard/
-    - supabase/
     - package.json
     - packages/dashboard/lib/types.ts
-    - packages/dashboard/lib/supabase/client.ts
-    - packages/dashboard/lib/supabase/server.ts
-    - packages/dashboard/lib/supabase/middleware.ts
-    - packages/dashboard/lib/supabase/env.ts
     - packages/dashboard/proxy.ts
     - packages/dashboard/app/layout.tsx
     - packages/dashboard/app/(dashboard)/layout.tsx
@@ -352,7 +572,6 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/app/(dashboard)/page.tsx
     - packages/dashboard/app/login/page.tsx
     - packages/dashboard/app/auth/login/route.ts
-    - packages/dashboard/app/auth/callback/route.ts
     - packages/dashboard/components/stats-cards.tsx
     - packages/dashboard/components/sidebar.tsx
     - packages/dashboard/components/run-table.tsx
@@ -390,16 +609,18 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/components/budget-badge.tsx
     - packages/dashboard/components/invite-form.tsx
     - packages/dashboard/lib/scaffold-templates.ts
-    - supabase/migrations/004_command_center.sql
-    - supabase/migrations/005_github_connections.sql
-    - packages/dashboard/lib/supabase/service.ts
     - packages/dashboard/app/api/auth/github-connection/route.ts
     - packages/dashboard/app/api/auth/github-connection/callback/route.ts
     - packages/dashboard/app/api/daemon/repos-reload/route.ts
     - packages/dashboard/app/api/daemon/remote-control/restart/route.ts
     - packages/dashboard/app/api/daemon/issues/scan/route.ts
     - packages/dashboard/app/(dashboard)/issues/page.tsx
+    - packages/dashboard/app/(dashboard)/releases/page.tsx
+    - packages/dashboard/app/(dashboard)/releases/page.test.tsx
+    - packages/dashboard/app/api/daemon/release/route.ts
     - packages/dashboard/components/issues-board.tsx
+    - packages/dashboard/components/release-approval-panel.tsx
+    - packages/dashboard/components/release-approval-panel.test.tsx
     - packages/dashboard/lib/classify-issues.ts
     - packages/dashboard/actions/github-connections.ts
     - packages/dashboard/components/github-connections-section.tsx
@@ -408,7 +629,6 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/actions/github-connections.test.ts
     - packages/dashboard/app/api/github/connections/[id]/orgs/route.ts
     - packages/dashboard/app/api/github/connections/[id]/repos/route.ts
-    - supabase/migrations/008_fix_rpc_privilege_escalation.sql
     - docker-compose.yml
     - Caddyfile
     - packages/dashboard/Dockerfile
@@ -416,7 +636,6 @@ STACK-AC-DASHBOARD:
   test_paths:
     - packages/dashboard/**/*.test.ts
     - packages/dashboard/**/*.test.tsx
-    - supabase/tests/**/*.test.ts
     - packages/dashboard/actions/api-keys.test.ts
     - packages/dashboard/components/claude-panel/context-actions.test.ts
     - packages/dashboard/components/claude-panel/claude-panel.test.tsx
@@ -428,7 +647,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/app/api/daemon/daemon-routes.test.ts
     - packages/dashboard/lib/daemon-fetch.test.ts
     - packages/dashboard/app/(dashboard)/runs/[id]/page.test.tsx
-    - packages/dashboard/lib/supabase/env.test.ts
+    - packages/dashboard/dockerfile.test.ts
   status: draft
 
 STACK-AC-HANDOFF-RUNTIME:
@@ -480,7 +699,6 @@ STACK-AC-PLUGINS-DASHBOARD:
   parent: ARCH-AC-PLUGINS
   children: []
   code_paths:
-    - supabase/migrations/003_plugins.sql
     - packages/dashboard/actions/plugins.ts
     - packages/dashboard/app/(dashboard)/repos/[id]/plugins/page.tsx
     - packages/dashboard/app/(dashboard)/repos/[id]/plugins/realtime-refresh.tsx
@@ -491,10 +709,28 @@ STACK-AC-PLUGINS-DASHBOARD:
     - packages/dashboard/components/repo-tab-nav.tsx
     - packages/dashboard/vitest.lib.config.ts
   test_paths:
-    - supabase/tests/rls-plugins.test.ts
     - packages/dashboard/actions/plugins.test.ts
+    - packages/dashboard/app/(dashboard)/repos/[id]/plugins/page.test.tsx
     - packages/dashboard/components/enable-all-form.test.tsx
     - packages/dashboard/lib/plugins/registry.test.ts
+  status: draft
+
+STACK-AC-GOVERNANCE-DAEMON:
+  parent: ARCH-AC-GOVERNANCE
+  children: []
+  code_paths:
+    - FACTORY_RULES.md
+    - packages/daemon/src/config.ts
+    - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/control-plane/process-single.ts
+    - packages/daemon/src/session-runtime/governance-context.ts
+    - packages/daemon/src/session-runtime/plugin-injection.ts
+    - packages/daemon/src/session-runtime/runtime.ts
+  test_paths:
+    - packages/daemon/src/config.test.ts
+    - packages/daemon/src/session-runtime/governance-context.test.ts
+    - packages/daemon/src/session-runtime/plugin-injection.test.ts
+    - packages/daemon/src/session-runtime/runtime.test.ts
   status: draft
 
 STACK-AC-ENRICHED-COMMITS-KNOWLEDGE:
@@ -508,15 +744,9 @@ STACK-AC-SUPABASE-SYNC:
   parent: ARCH-AC-CONTROL-PLANE
   children: []
   spec: docs/superpowers/specs/2026-03-20-supabase-sync-design.md
-  code_paths:
-    - packages/daemon/src/supabase/client.ts
-    - packages/daemon/src/supabase/config-reader.ts
-    - packages/daemon/src/supabase/run-writer.ts
-  test_paths:
-    - packages/daemon/src/supabase/client.test.ts
-    - packages/daemon/src/supabase/config-reader.test.ts
-    - packages/daemon/src/supabase/run-writer.test.ts
-  status: draft
+  code_paths: []
+  test_paths: []
+  status: deprecated
 
 STACK-AC-DASHBOARD-BRIEFING:
   parent: ARCH-AC-DASHBOARD
@@ -527,12 +757,10 @@ STACK-AC-DASHBOARD-BRIEFING:
     - packages/dashboard/actions/briefing.ts
     - packages/briefing-summarizer/
     - packages/briefing-summarizer/src/cycle-runner.ts
-    - supabase/migrations/009_briefing.sql
   test_paths:
     - packages/dashboard/components/briefing/**/*.test.tsx
     - packages/dashboard/actions/briefing.test.ts
     - packages/briefing-summarizer/**/*.test.ts
-    - supabase/tests/rls-briefing.test.ts
   status: draft
 
 STACK-AC-COORDINATION:
@@ -595,6 +823,12 @@ STACK-AC-PIPELINE-DISPATCH:
     - packages/daemon/src/pipeline-dispatch/**/*.test.ts
   status: draft
 
+STACK-AC-TECH-LEAD-TRIAGE:
+  parent: ARCH-AC-TECH-LEAD
+  children: []
+  # code_paths and test_paths pending implementation in issue #393
+  status: draft
+
 STACK-AC-TECH-LEAD:
   parent: ARCH-AC-TECH-LEAD
   children: []
@@ -608,6 +842,7 @@ STACK-AC-TECH-LEAD:
     - packages/daemon/src/coordination/tech-lead/metrics.ts
     - packages/daemon/src/coordination/tech-lead/session-output-parser.ts
     - packages/daemon/src/coordination/tech-lead/retrospective.ts
+    # triage.ts and triage-store.ts pending implementation in issue #393
     - packages/daemon/src/coordination/tech-lead-scheduler.ts
     - prompts/tech-lead.md
     - prompts/tech-lead-enrichment.md
@@ -621,10 +856,14 @@ STACK-AC-COORDINATION-DAEMON-WIRING:
   children: []
   code_paths:
     - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/control-plane/po-snapshot.ts
     - packages/daemon/src/coordination/coordinator.ts
+    - packages/daemon/src/control-plane/workspace.ts
   test_paths:
     - packages/daemon/src/control-plane/daemon.test.ts
+    - packages/daemon/src/control-plane/daemon-po-wiring.test.ts
     - packages/daemon/src/coordination/coordinator.test.ts
+    - packages/daemon/src/control-plane/workspace.test.ts
   status: draft
 
 STACK-AC-PRODUCT-OWNER:
@@ -642,4 +881,247 @@ STACK-AC-PRODUCT-OWNER:
     - prompts/product-owner-enrichment.md
   test_paths:
     - packages/daemon/src/coordination/product-owner/**/*.test.ts
+  status: draft
+
+STACK-AC-PRODUCT-OWNER-FINDING-APPROVAL:
+  parent: ARCH-AC-PRODUCT-OWNER
+  children: []
+  code_paths:
+    - packages/daemon/src/coordination/product-owner/finding-approval.ts
+    - packages/daemon/src/coordination/product-owner/schemas.ts
+  test_paths:
+    - packages/daemon/src/coordination/product-owner/finding-approval.test.ts
+  status: draft
+
+STACK-AC-PRODUCT-OWNER-INTERACTIVE:
+  parent: ARCH-AC-PRODUCT-OWNER
+  children: []
+  # Code/test paths are forward-declared by the L3 spec (#409) but the
+  # implementation (issue #408) hasn't landed yet. Empty until the
+  # implementation PR re-adds the real paths.
+  code_paths: []
+  test_paths: []
+  status: draft
+
+STACK-AC-PHASE-LABELS:
+  parent: ARCH-AC-PHASE-LABELS
+  children: []
+  code_paths:
+    - packages/daemon/src/control-plane/phase-labels.ts
+    - packages/daemon/src/control-plane/pipeline.ts
+    - packages/daemon/src/control-plane/phases.ts
+    - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/control-plane/repo-manager.ts
+    - packages/daemon/src/control-plane/process-single.ts
+    - packages/daemon/src/types.ts
+  test_paths:
+    - packages/daemon/src/control-plane/phase-labels.test.ts
+    - packages/daemon/src/control-plane/pipeline.test.ts
+    - packages/daemon/src/control-plane/phases.test.ts
+  status: draft
+
+STACK-AC-DAG-EXECUTOR:
+  parent: ARCH-AC-DAG-EXECUTOR
+  children: []
+  code_paths:
+    - packages/daemon/src/control-plane/dag-executor.ts
+    - packages/daemon/src/control-plane/workflow-types.ts
+    - packages/daemon/src/control-plane/workflow-registry.ts
+    - packages/daemon/src/control-plane/builtin-workflows.ts
+    - packages/daemon/src/control-plane/run-state-migration.ts
+    - packages/daemon/src/control-plane/pipeline.ts
+    - packages/daemon/src/control-plane/fsm.ts
+    - packages/daemon/src/types.ts
+  test_paths:
+    - packages/daemon/src/control-plane/dag-executor.test.ts
+    - packages/daemon/src/control-plane/workflow-types.test.ts
+    - packages/daemon/src/control-plane/workflow-registry.test.ts
+    - packages/daemon/src/control-plane/run-state-migration.test.ts
+    - packages/daemon/src/control-plane/pipeline.test.ts
+  status: draft
+
+STACK-AC-CONTAINMENT:
+  parent: ARCH-AC-CONTAINMENT
+  children: []
+  code_paths:
+    - packages/daemon/src/types.ts
+    - packages/daemon/src/config.ts
+    - packages/daemon/src/session-runtime/containment-hooks.ts
+    - packages/daemon/src/session-runtime/audit.ts
+    - packages/daemon/src/session-runtime/generate-containment-script.ts
+    - packages/daemon/src/session-runtime/scope-registry.ts
+    - packages/daemon/src/session-runtime/scope-audit.ts
+    - packages/daemon/src/session-runtime/scope-enforcement.ts
+    - packages/daemon/src/session-runtime/session-error.ts
+    - packages/daemon/src/session-runtime/runtime.ts
+    - packages/daemon/src/session-runtime/adapters/types.ts
+    - packages/daemon/src/session-runtime/adapters/cli.ts
+  test_paths:
+    - packages/daemon/src/config.test.ts
+    - packages/daemon/src/session-runtime/containment-hooks.test.ts
+    - packages/daemon/src/session-runtime/audit.test.ts
+    - packages/daemon/src/session-runtime/generate-containment-script.test.ts
+    - packages/daemon/src/session-runtime/scope-registry.test.ts
+    - packages/daemon/src/session-runtime/scope-audit.test.ts
+    - packages/daemon/src/session-runtime/scope-enforcement.test.ts
+    - packages/daemon/src/session-runtime/session-error.test.ts
+    - packages/daemon/src/session-runtime/runtime.test.ts
+    - packages/daemon/src/session-runtime/adapters/cli.test.ts
+  status: draft
+
+STACK-AC-BATCH-CLASSIFIER:
+  parent: ARCH-AC-BATCH-CLASSIFIER
+  children: []
+  code_paths:
+    - packages/daemon/src/control-plane/batch-classifier.ts
+    - packages/daemon/src/control-plane/batch-classifier-schema.ts
+    - packages/daemon/src/config.ts
+    - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/control-plane/phases.ts
+    - packages/daemon/src/session-runtime/runtime.ts
+    - packages/daemon/src/types.ts
+  test_paths:
+    - packages/daemon/src/config.test.ts
+    - packages/daemon/src/control-plane/batch-classifier.test.ts
+    - packages/daemon/src/control-plane/batch-classifier-schema.test.ts
+    - packages/daemon/src/control-plane/daemon.test.ts
+    - packages/daemon/src/control-plane/phases.test.ts
+    - packages/daemon/src/session-runtime/runtime.test.ts
+  status: draft
+
+# --- Concierge L0 spec (vision — root of all concierge specs) ---
+# Note: relationship to L0-AC-VISION is expressed in prose inside the
+# L0-CONCIERGE-VISION document. NO parent: field is set on L0-AC-VISION.
+
+L0-CONCIERGE-VISION:
+  children: [FUNC-CONCIERGE-CORE, FUNC-CONCIERGE-MEMORY, FUNC-CONCIERGE-BOARD, FUNC-CONCIERGE-CHANNEL, FUNC-CONCIERGE-AWARENESS]
+  status: draft
+
+# --- Concierge L1 specs ---
+
+FUNC-CONCIERGE-CORE:
+  children: [ARCH-CONCIERGE-RUNTIME, ARCH-TOOL-REGISTRY, ARCH-CONFIRMATION-LIFECYCLE]
+  status: draft
+
+FUNC-CONCIERGE-MEMORY:
+  children: [ARCH-CONCIERGE-RUNTIME]
+  status: draft
+
+FUNC-CONCIERGE-BOARD:
+  children: [ARCH-CONCIERGE-RUNTIME, ARCH-EVENT-BUS]
+  related: [FUNC-AC-DASHBOARD]   # boundary documented in concierge-board.md spec
+  status: draft
+
+FUNC-CONCIERGE-CHANNEL:
+  children: [ARCH-CONCIERGE-RUNTIME]
+  status: draft
+
+FUNC-CONCIERGE-AWARENESS:
+  children: [ARCH-EVENT-BUS]
+  status: draft
+
+# --- Concierge L2 specs ---
+
+ARCH-CONCIERGE-RUNTIME:
+  parent: FUNC-CONCIERGE-CORE
+  children: [STACK-CONCIERGE-NODE, STACK-CONCIERGE-BOARD]
+  status: draft
+
+ARCH-EVENT-BUS:
+  parent: FUNC-CONCIERGE-AWARENESS
+  children: [STACK-CONCIERGE-NODE]
+  status: draft
+
+ARCH-TOOL-REGISTRY:
+  parent: FUNC-CONCIERGE-CORE
+  children: [STACK-CONCIERGE-NODE]
+  status: draft
+
+ARCH-CONFIRMATION-LIFECYCLE:
+  parent: FUNC-CONCIERGE-CORE
+  children: [STACK-CONCIERGE-NODE]
+  status: draft
+
+# --- Concierge L3 specs ---
+
+STACK-CONCIERGE-NODE:
+  parent: ARCH-CONCIERGE-RUNTIME
+  children: []
+  code_paths:
+    - packages/concierge/
+  test_paths:
+    - packages/concierge/**/*.test.ts
+  status: draft
+
+STACK-CONCIERGE-BOARD:
+  parent: ARCH-CONCIERGE-RUNTIME
+  children: []
+  code_paths:
+    - packages/concierge/src/board/
+  test_paths:
+    - packages/concierge/src/board/**/*.test.ts
+  status: draft
+
+# --- Issue #626: Supabase -> self-hosted Postgres 18 + Better Auth ---
+# Specified as TWO capability chains, not the single SELF-HOSTED-DATA-AUTH
+# chain suggested in the issue (which permits adjusting to local conventions).
+# The split keeps persistence/migration ownership (DATA-PLATFORM: stores,
+# migrations, credential store, backup, compose) separate from
+# identity/authorization ownership (OPERATOR-AUTH: identity, session, roles).
+# These entries now govern the replacement data and auth runtime. Legacy
+# hosted-provider sync entries remain only as deprecated spec history.
+
+FUNC-AC-DATA-PLATFORM:
+  children: [ARCH-AC-DATA-PLATFORM]
+  status: draft
+
+ARCH-AC-DATA-PLATFORM:
+  parent: FUNC-AC-DATA-PLATFORM
+  children: [STACK-AC-DATA-PLATFORM]
+  status: draft
+
+STACK-AC-DATA-PLATFORM:
+  parent: ARCH-AC-DATA-PLATFORM
+  children: []
+  code_paths:
+    - packages/db/**
+    - packages/dashboard/lib/data/**
+    - packages/daemon/src/data/**
+    - packages/briefing-summarizer/src/data/**
+    - infra/postgres/**
+    - packages/db/Dockerfile
+    - docker-compose.yml
+    - scripts/install-daemon.sh
+    - scripts/com.autoclaude.daemon.plist
+    - .env.mac.example
+    - .env.prod.example
+    - docs/running.md
+    - docs/hetzner-setup.md
+  test_paths:
+    - packages/db/**/*.test.ts
+    - packages/dashboard/lib/data/**/*.test.ts
+    - packages/daemon/src/data/**/*.test.ts
+  status: draft
+
+FUNC-AC-OPERATOR-AUTH:
+  children: [ARCH-AC-OPERATOR-AUTH]
+  status: draft
+
+ARCH-AC-OPERATOR-AUTH:
+  parent: FUNC-AC-OPERATOR-AUTH
+  children: [STACK-AC-OPERATOR-AUTH]
+  status: draft
+
+STACK-AC-OPERATOR-AUTH:
+  parent: ARCH-AC-OPERATOR-AUTH
+  children: []
+  code_paths:
+    - packages/auth/**
+    - packages/dashboard/lib/auth/**
+    - packages/dashboard/app/api/auth/**
+    - packages/dashboard/app/(auth)/**
+  test_paths:
+    - packages/auth/**/*.test.ts
+    - packages/dashboard/lib/auth/**/*.test.ts
+    - packages/dashboard/app/api/auth/**/*.test.ts
   status: draft

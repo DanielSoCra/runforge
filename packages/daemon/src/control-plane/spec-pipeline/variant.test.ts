@@ -77,12 +77,34 @@ describe('specDrivenTransitions', () => {
     expect(transition(table, 'l3-compliance', 'success')?.next).toBe('implement');
   });
 
+  it('l3-compliance → escalated → stuck', () => {
+    expect(transition(table, 'l3-compliance', 'escalated')?.next).toBe('stuck');
+  });
+
   it('implement → success → review', () => {
     expect(transition(table, 'implement', 'success')?.next).toBe('review');
   });
 
   it('review → success → holdout', () => {
     expect(transition(table, 'review', 'success')?.next).toBe('holdout');
+  });
+
+  it('holdout → success → integrate', () => {
+    expect(transition(table, 'holdout', 'success')?.next).toBe('integrate');
+  });
+
+  // Regression for #449: holdout Type A failure (fix cycles remain) must route back to implement,
+  // not stuck. phases.ts:745 returns 'failure' expecting a retry via the implement phase.
+  it('holdout → failure → implement (Type A fix cycle retry, regression #449)', () => {
+    expect(transition(table, 'holdout', 'failure')?.next).toBe('implement');
+  });
+
+  // Regression for #448: holdout handler returns 'escalated' in multiple paths
+  // (Type B/C diagnosis, max-fix-cycles exceeded, diagnosis session failure).
+  // Without this transition, advancePhase() returned false and pipeline.ts silently
+  // forced run.phase = 'stuck' with an opaque "No transition for holdout:escalated" error.
+  it('holdout → escalated → stuck (regression #448)', () => {
+    expect(transition(table, 'holdout', 'escalated')?.next).toBe('stuck');
   });
 
   it('report → failure → stuck', () => {

@@ -1,3 +1,8 @@
+---
+deprecated_by: STACK-AC-DATA-PLATFORM
+deprecation_reason: "Superseded by the app-owned Postgres data platform cutover from issue #626."
+---
+
 # Design: Daemon Supabase Config Sync and Run Writes
 
 Date: 2026-03-20

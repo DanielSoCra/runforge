@@ -7,7 +7,7 @@ Auto-Claude polls GitHub for work requests (issues with spec references), classi
 ## Architecture
 
 - **daemon** (`packages/daemon`) — polls GitHub issues, manages pipeline state, spawns Claude workers
-- **dashboard** (`packages/dashboard`) — Next.js web UI backed by Supabase for monitoring and operator controls
+- **dashboard** (`packages/dashboard`) — Next.js web UI backed by app-owned Postgres and Better Auth for monitoring and operator controls
 - **briefing-summarizer** (`packages/briefing-summarizer`) — generates periodic activity summaries
 
 ## Quick start

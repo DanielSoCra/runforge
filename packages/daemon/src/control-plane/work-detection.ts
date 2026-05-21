@@ -85,11 +85,14 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
           { labels: 'feature-pipeline,l1-approved', exclude: ['l2-in-progress', 'blocked', 'stuck', 'awaiting-l2-review'], workType: 'l2-brainstorm' },
         ];
 
-        for (const tier of tiers) {
+        const tierResults = await Promise.all(tiers.map(async (tier) => {
           const { data } = await octokit.issues.listForRepo({
             owner, repo, labels: tier.labels, state: 'open', per_page: 100,
           });
+          return { tier, data };
+        }));
 
+        for (const { tier, data } of tierResults) {
           const candidates = data
             .filter((issue) => !('pull_request' in issue && issue.pull_request))
             .filter((issue) => {
@@ -150,8 +153,8 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
     async completeBugFixWork(issueNumber: number, commitSha: string): Promise<Result<void>> {
       try {
         await octokit.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: 'in-progress' }).catch(() => {});
-        await octokit.issues.createComment({ owner, repo, issue_number: issueNumber, body: `Fixed in commit ${commitSha}` });
         await octokit.issues.update({ owner, repo, issue_number: issueNumber, state: 'closed' });
+        await octokit.issues.createComment({ owner, repo, issue_number: issueNumber, body: `Fixed in commit ${commitSha}` }).catch(() => {});
         return ok(undefined);
       } catch (e) {
         return err(e instanceof Error ? e : new Error(String(e)));
@@ -160,7 +163,7 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
 
     async claimWork(issueNumber: number): Promise<Result<void>> {
       try {
-        await octokit.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: 'ready' }).catch(() => {});
+        await octokit.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: 'ready' });
         await octokit.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: ['in-progress'] });
         return ok(undefined);
       } catch (e) {
@@ -172,8 +175,8 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
       try {
         await octokit.issues.removeLabel({ owner, repo, issue_number: issueNumber, name: 'in-progress' }).catch(() => {});
         await octokit.issues.addLabels({ owner, repo, issue_number: issueNumber, labels: ['complete'] });
-        await octokit.issues.createComment({ owner, repo, issue_number: issueNumber, body: comment });
         await octokit.issues.update({ owner, repo, issue_number: issueNumber, state: 'closed' });
+        await octokit.issues.createComment({ owner, repo, issue_number: issueNumber, body: comment }).catch(() => {});
         return ok(undefined);
       } catch (e) {
         return err(e instanceof Error ? e : new Error(String(e)));

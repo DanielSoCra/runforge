@@ -1,372 +1,251 @@
 import { describe, it, expect, vi } from 'vitest';
+
 import { RepoManager } from './repo-manager.js';
+import type { DataRepoRecord, RepoDataSource } from '../data/repo-source.js';
+import { ok, err, type Result } from '../lib/result.js';
+
+vi.mock('@octokit/rest', () => ({
+  Octokit: class {
+    issues = {};
+  },
+}));
+
+vi.mock('./phase-labels.js', () => ({
+  createPhaseLabelMirror: () => ({
+    provisionLabels: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
+vi.mock('./work-detection.js', () => ({
+  createWorkDetector: vi.fn((_octokit, owner: string, repo: string) => ({
+    owner,
+    repo,
+  })),
+}));
+
+class FakeRepoSource implements RepoDataSource {
+  repos: DataRepoRecord[];
+  upsertResult: Result<string>;
+  tokenResult: string | undefined = 'token';
+  resolveCalls: Array<{ repoId: string; connectionId: string }> = [];
+
+  constructor(repos: DataRepoRecord[] = []) {
+    this.repos = repos;
+    this.upsertResult = ok('new-id');
+  }
+
+  async listEnabledRepos(): Promise<Result<DataRepoRecord[]>> {
+    return ok(this.repos);
+  }
+
+  async upsertRepo(_owner: string, _name: string): Promise<Result<string>> {
+    return this.upsertResult;
+  }
+
+  async resolveConnectionToken(
+    repoId: string,
+    connectionId: string,
+  ): Promise<string | undefined> {
+    this.resolveCalls.push({ repoId, connectionId });
+    return this.tokenResult;
+  }
+}
+
+const repo = (
+  id: string,
+  owner = 'acme',
+  name = id,
+  connectionId: string | null = null,
+): DataRepoRecord => ({
+  id,
+  owner,
+  name,
+  poll_interval_ms: null,
+  connection_id: connectionId,
+});
 
 describe('RepoManager', () => {
   it('starts pollers for all enabled repos on initialize', async () => {
-    const onPoll = vi.fn();
-    const supabase = {
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        is: vi.fn().mockResolvedValue({
-          data: [
-            { id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: null },
-            { id: 'r2', owner: 'acme', name: 'api', poll_interval_ms: null, connection_id: null },
-          ],
-          error: null,
-        }),
-      }),
-      rpc: vi.fn().mockResolvedValue({ data: 'token', error: null }),
-    } as any;
+    const source = new FakeRepoSource([repo('web'), repo('api')]);
+    const mgr = new RepoManager(source, 60_000, vi.fn());
 
-    const mgr = new RepoManager(supabase, 60_000, onPoll);
     await mgr.initialize();
+
     expect(mgr.activePollerCount()).toBe(2);
     mgr.stop();
   });
 
   it('reload adds new enabled repos and removes disabled ones', async () => {
-    const onPoll = vi.fn();
-    let callCount = 0;
-    const supabase = {
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        is: vi.fn().mockImplementation(() => {
-          callCount++;
-          // First call: 2 repos. Second call (after reload): 1 repo.
-          const repos = callCount === 1
-            ? [
-                { id: 'r1', owner: 'a', name: 'b', poll_interval_ms: null, connection_id: null },
-                { id: 'r2', owner: 'c', name: 'd', poll_interval_ms: null, connection_id: null },
-              ]
-            : [
-                { id: 'r1', owner: 'a', name: 'b', poll_interval_ms: null, connection_id: null },
-              ];
-          return Promise.resolve({ data: repos, error: null });
-        }),
-      }),
-      rpc: vi.fn().mockResolvedValue({ data: 'token', error: null }),
-    } as any;
-
-    const mgr = new RepoManager(supabase, 60_000, onPoll);
+    const source = new FakeRepoSource([repo('r1'), repo('r2')]);
+    const mgr = new RepoManager(source, 60_000, vi.fn());
     await mgr.initialize();
     expect(mgr.activePollerCount()).toBe(2);
 
+    source.repos = [repo('r1')];
     await mgr.reload();
+
     expect(mgr.activePollerCount()).toBe(1);
     mgr.stop();
   });
 
-  it('graceful disable: poller removed immediately when activeRuns=0', async () => {
-    const onPoll = vi.fn();
-    const supabase = {
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        is: vi.fn().mockResolvedValue({
-          data: [{ id: 'r1', owner: 'a', name: 'b', poll_interval_ms: null, connection_id: null }],
-          error: null,
-        }),
-      }),
-      rpc: vi.fn().mockResolvedValue({ data: 'token', error: null }),
-    } as any;
-
-    const mgr = new RepoManager(supabase, 60_000, onPoll);
+  it('graceful disable removes idle pollers immediately', async () => {
+    const mgr = new RepoManager(
+      new FakeRepoSource([repo('r1')]),
+      60_000,
+      vi.fn(),
+    );
     await mgr.initialize();
-    expect(mgr.activePollerCount()).toBe(1);
 
-    // Disable with no active runs — should remove immediately
     mgr.disablePoller('r1');
+
     expect(mgr.activePollerCount()).toBe(0);
     mgr.stop();
   });
 
-  it('graceful disable: poller deferred when activeRuns>0', async () => {
-    const onPoll = vi.fn();
-    const supabase = {
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        is: vi.fn().mockResolvedValue({
-          data: [{ id: 'r1', owner: 'a', name: 'b', poll_interval_ms: null, connection_id: null }],
-          error: null,
-        }),
-      }),
-      rpc: vi.fn().mockResolvedValue({ data: 'token', error: null }),
-    } as any;
-
-    const mgr = new RepoManager(supabase, 60_000, onPoll);
+  it('graceful disable defers removal while a run is active', async () => {
+    const mgr = new RepoManager(
+      new FakeRepoSource([repo('r1')]),
+      60_000,
+      vi.fn(),
+    );
     await mgr.initialize();
 
-    mgr.notifyRunStart('r1'); // activeRuns = 1
-    mgr.disablePoller('r1'); // should not remove yet
-    expect(mgr.activePollerCount()).toBe(1); // still there
+    mgr.notifyRunStart('r1');
+    mgr.disablePoller('r1');
+    expect(mgr.activePollerCount()).toBe(1);
 
-    mgr.notifyRunEnd('r1'); // activeRuns back to 0 → remove
+    mgr.notifyRunEnd('r1');
     expect(mgr.activePollerCount()).toBe(0);
     mgr.stop();
   });
 
-  it('scanNow() immediately calls onPoll for all active pollers and returns count', async () => {
+  it('scanNow immediately calls onPoll for all active pollers and returns count', async () => {
     const onPoll = vi.fn();
-    const supabase = {
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        is: vi.fn().mockResolvedValue({
-          data: [
-            { id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: null },
-            { id: 'r2', owner: 'acme', name: 'api', poll_interval_ms: null, connection_id: null },
-          ],
-          error: null,
-        }),
-      }),
-      rpc: vi.fn().mockResolvedValue({ data: 'token', error: null }),
-    } as any;
-
-    const mgr = new RepoManager(supabase, 60_000, onPoll);
+    const mgr = new RepoManager(
+      new FakeRepoSource([repo('r1'), repo('r2')]),
+      60_000,
+      onPoll,
+    );
     await mgr.initialize();
 
     const result = await mgr.scanNow();
+
     expect(result.scanned).toBe(2);
     expect(onPoll).toHaveBeenCalledTimes(2);
     mgr.stop();
   });
 
-  it('scanNow() skips pollers that are pendingDisable', async () => {
+  it('scanNow skips pollers marked pendingDisable with active runs', async () => {
     const onPoll = vi.fn();
-    const supabase = {
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        is: vi.fn().mockResolvedValue({
-          data: [
-            { id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: null },
-            { id: 'r2', owner: 'acme', name: 'api', poll_interval_ms: null, connection_id: null },
-          ],
-          error: null,
-        }),
-      }),
-      rpc: vi.fn().mockResolvedValue({ data: 'token', error: null }),
-    } as any;
-
-    const mgr = new RepoManager(supabase, 60_000, onPoll);
-    await mgr.initialize();
-    mgr.disablePoller('r1'); // marks pendingDisable (no active runs, so removes immediately)
-
-    const result = await mgr.scanNow();
-    expect(result.scanned).toBe(1);
-    mgr.stop();
-  });
-
-  it('scanNow() skips pollers marked pendingDisable with active runs', async () => {
-    const onPoll = vi.fn();
-    const supabase = {
-      from: vi.fn().mockReturnValue({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        is: vi.fn().mockResolvedValue({
-          data: [
-            { id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: null },
-            { id: 'r2', owner: 'acme', name: 'api', poll_interval_ms: null, connection_id: null },
-          ],
-          error: null,
-        }),
-      }),
-      rpc: vi.fn().mockResolvedValue({ data: 'token', error: null }),
-    } as any;
-
-    const mgr = new RepoManager(supabase, 60_000, onPoll);
+    const mgr = new RepoManager(
+      new FakeRepoSource([repo('r1'), repo('r2')]),
+      60_000,
+      onPoll,
+    );
     await mgr.initialize();
 
-    // Mark r1 as having an active run so disablePoller defers removal
     mgr.notifyRunStart('r1');
-    mgr.disablePoller('r1'); // pendingDisable=true, stays in map
-
+    mgr.disablePoller('r1');
     const result = await mgr.scanNow();
-    expect(result.scanned).toBe(1); // only r2
-    expect(onPoll).not.toHaveBeenCalledWith('r1', expect.anything(), expect.anything(), expect.anything());
-    expect(onPoll).toHaveBeenCalledWith('r2', 'acme', 'api', expect.any(Object));
+
+    expect(result.scanned).toBe(1);
+    expect(onPoll).not.toHaveBeenCalledWith(
+      'r1',
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(onPoll).toHaveBeenCalledWith('r2', 'acme', 'r2', expect.any(Object));
     mgr.stop();
   });
 
-  it('upsertRepo returns err() when Supabase returns null data without error', async () => {
-    const onPoll = vi.fn();
-    const supabase = {
-      from: vi.fn().mockImplementation((table: string) => {
-        if (table === 'repos') {
-          return {
-            select: vi.fn().mockReturnThis(),
-            eq: vi.fn().mockReturnThis(),
-            is: vi.fn().mockResolvedValue({ data: [], error: null }),
-            upsert: vi.fn().mockReturnValue({
-              select: vi.fn().mockReturnValue({
-                single: vi.fn().mockResolvedValue({ data: null, error: null }),
-              }),
-            }),
-          };
-        }
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          is: vi.fn().mockResolvedValue({ data: [], error: null }),
-        };
-      }),
-      rpc: vi.fn().mockResolvedValue({ data: 'token', error: null }),
-    } as any;
+  it('does not start an overlapping interval poll while the previous poll is still running', async () => {
+    vi.useFakeTimers();
+    let resolvePoll!: () => void;
+    const pendingPoll = new Promise<void>((resolve) => {
+      resolvePoll = resolve;
+    });
+    const onPoll = vi.fn(() => pendingPoll);
+    const source = new FakeRepoSource([
+      { ...repo('r1'), poll_interval_ms: 1000 },
+    ]);
+    const mgr = new RepoManager(source, 60_000, onPoll);
 
-    const mgr = new RepoManager(supabase, 60_000, onPoll);
-    await mgr.initialize();
+    try {
+      await mgr.initialize();
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onPoll).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onPoll).toHaveBeenCalledTimes(1);
+
+      resolvePoll();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onPoll).toHaveBeenCalledTimes(2);
+    } finally {
+      mgr.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it('upsertRepo returns source errors', async () => {
+    const source = new FakeRepoSource();
+    source.upsertResult = err(new Error('upsert failed'));
+    const mgr = new RepoManager(source, 60_000, vi.fn());
+
     const result = await mgr.upsertRepo('acme', 'web');
+
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.message).toBe('upsertRepo returned null data');
+    if (!result.ok) expect(result.error.message).toBe('upsert failed');
     mgr.stop();
   });
 
-  it('resolveToken logs warning and falls back to GITHUB_TOKEN when RPC fails', async () => {
-    const onPoll = vi.fn();
-    const originalEnv = process.env.GITHUB_TOKEN;
-    process.env.GITHUB_TOKEN = 'fallback-token';
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    try {
-      const supabase = {
-        from: vi.fn().mockReturnValue({
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          is: vi.fn().mockResolvedValue({
-            data: [{ id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: 'conn-1' }],
-            error: null,
-          }),
-        }),
-        rpc: vi.fn().mockResolvedValue({ data: null, error: { message: 'RPC failed: missing row' } }),
-      } as any;
-
-      const mgr = new RepoManager(supabase, 60_000, onPoll);
-      await mgr.initialize();
-
-      // The poller should still be created (using fallback token)
-      expect(mgr.activePollerCount()).toBe(1);
-      // A warning should have been logged
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('decrypt_github_token RPC failed for connection conn-1'),
-      );
-
-      mgr.stop();
-    } finally {
-      warnSpy.mockRestore();
-      process.env.GITHUB_TOKEN = originalEnv;
-    }
-  });
-
-  it('resolveToken logs warning when RPC returns null data without error', async () => {
-    const onPoll = vi.fn();
-    const originalEnv = process.env.GITHUB_TOKEN;
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    try {
-      const supabase = {
-        from: vi.fn().mockReturnValue({
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          is: vi.fn().mockResolvedValue({
-            data: [{ id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: 'conn-2' }],
-            error: null,
-          }),
-        }),
-        rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
-      } as any;
-
-      const mgr = new RepoManager(supabase, 60_000, onPoll);
-      await mgr.initialize();
-
-      expect(mgr.activePollerCount()).toBe(1);
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('decrypt_github_token returned null for connection conn-2'),
-      );
-
-      mgr.stop();
-    } finally {
-      warnSpy.mockRestore();
-      process.env.GITHUB_TOKEN = originalEnv;
-    }
-  });
-
-  it('resolveTokenForRepo returns per-connection token for DB repos (#359)', async () => {
-    const onPoll = vi.fn();
+  it('resolveTokenForRepo returns per-connection token for DB repos', async () => {
     const originalEnv = process.env.GITHUB_TOKEN;
     process.env.GITHUB_TOKEN = 'global-fallback';
+    const source = new FakeRepoSource([
+      repo('r1', 'acme', 'web', 'conn-abc'),
+      repo('r2', 'acme', 'api', null),
+    ]);
+    source.tokenResult = 'decrypted-oauth-token';
+    const mgr = new RepoManager(source, 60_000, vi.fn());
 
     try {
-      const supabase = {
-        from: vi.fn().mockReturnValue({
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          is: vi.fn().mockResolvedValue({
-            data: [
-              { id: 'r1', owner: 'acme', name: 'web', poll_interval_ms: null, connection_id: 'conn-abc' },
-              { id: 'r2', owner: 'acme', name: 'api', poll_interval_ms: null, connection_id: null },
-            ],
-            error: null,
-          }),
-        }),
-        rpc: vi.fn().mockResolvedValue({ data: 'decrypted-oauth-token', error: null }),
-      } as any;
-
-      const mgr = new RepoManager(supabase, 60_000, onPoll);
       await mgr.initialize();
+      source.resolveCalls = [];
 
-      // Repo with connection_id should resolve per-connection token
-      const token1 = await mgr.resolveTokenForRepo('r1');
-      expect(token1).toBe('decrypted-oauth-token');
-      expect(supabase.rpc).toHaveBeenCalledWith('decrypt_github_token', { p_connection_id: 'conn-abc' });
+      await expect(mgr.resolveTokenForRepo('r1')).resolves.toBe(
+        'decrypted-oauth-token',
+      );
+      expect(source.resolveCalls).toEqual([
+        { repoId: 'r1', connectionId: 'conn-abc' },
+      ]);
 
-      // Repo without connection_id should fall back to GITHUB_TOKEN
-      supabase.rpc.mockClear();
-      const token2 = await mgr.resolveTokenForRepo('r2');
-      expect(token2).toBe('global-fallback');
-
-      // Unknown repo should fall back to GITHUB_TOKEN
-      const token3 = await mgr.resolveTokenForRepo('nonexistent');
-      expect(token3).toBe('global-fallback');
-
+      await expect(mgr.resolveTokenForRepo('r2')).resolves.toBe(
+        'global-fallback',
+      );
+      await expect(mgr.resolveTokenForRepo('missing')).resolves.toBe(
+        'global-fallback',
+      );
       mgr.stop();
     } finally {
       process.env.GITHUB_TOKEN = originalEnv;
     }
   });
 
-  it('upsertRepo inserts a repo and returns its id', async () => {
-    const onPoll = vi.fn();
-    const supabase = {
-      from: vi.fn().mockImplementation((table: string) => {
-        if (table === 'repos') {
-          return {
-            select: vi.fn().mockReturnThis(),
-            eq: vi.fn().mockReturnThis(),
-            is: vi.fn().mockResolvedValue({ data: [], error: null }),
-            upsert: vi.fn().mockReturnValue({
-              select: vi.fn().mockReturnValue({
-                single: vi.fn().mockResolvedValue({ data: { id: 'new-id' }, error: null }),
-              }),
-            }),
-          };
-        }
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          is: vi.fn().mockResolvedValue({ data: [], error: null }),
-        };
-      }),
-      rpc: vi.fn().mockResolvedValue({ data: 'token', error: null }),
-    } as any;
+  it('skips pollers when per-connection token resolution fails', async () => {
+    const source = new FakeRepoSource([repo('r1', 'acme', 'web', 'conn-1')]);
+    source.tokenResult = undefined;
+    const mgr = new RepoManager(source, 60_000, vi.fn());
 
-    const mgr = new RepoManager(supabase, 60_000, onPoll);
     await mgr.initialize();
-    const result = await mgr.upsertRepo('acme', 'web');
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value).toBe('new-id');
+
+    expect(mgr.activePollerCount()).toBe(0);
+    expect(source.resolveCalls).toEqual([
+      { repoId: 'r1', connectionId: 'conn-1' },
+    ]);
     mgr.stop();
   });
 });

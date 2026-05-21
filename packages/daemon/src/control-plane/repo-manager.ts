@@ -1,37 +1,39 @@
-import { createClient } from '@supabase/supabase-js';
 import { Octokit } from '@octokit/rest';
 import { createWorkDetector, type WorkDetector } from './work-detection.js';
-import { ok, err, type Result } from '../lib/result.js';
+import { ok, type Result } from '../lib/result.js';
+import { createPhaseLabelMirror } from './phase-labels.js';
+import type { DataRepoRecord, RepoDataSource } from '../data/repo-source.js';
 
-export interface RepoRecord {
-  id: string;
-  owner: string;
-  name: string;
-  poll_interval_ms: number | null;
-  connection_id: string | null;
-}
+export type RepoRecord = DataRepoRecord;
 
 interface PollEntry {
   detector: WorkDetector;
   intervalHandle: ReturnType<typeof setInterval>;
   activeRuns: number;
+  pollInProgress: boolean;
   pendingDisable: boolean;
   owner: string;
   name: string;
   connectionId: string | null;
 }
 
-type SupabaseClient = ReturnType<typeof createClient>;
-
 export class RepoManager {
   private pollers = new Map<string, PollEntry>();
   private fallbackHandle: ReturnType<typeof setInterval> | null = null;
+  private readonly source: RepoDataSource;
 
   constructor(
-    private readonly supabase: SupabaseClient,
+    source: RepoDataSource,
     private readonly defaultPollIntervalMs: number,
-    private readonly onPoll: (repoId: string, owner: string, name: string, detector: WorkDetector) => void,
-  ) {}
+    private readonly onPoll: (
+      repoId: string,
+      owner: string,
+      name: string,
+      detector: WorkDetector,
+    ) => void | Promise<void>,
+  ) {
+    this.source = source;
+  }
 
   async initialize(): Promise<Result<void>> {
     const result = await this.loadEnabledRepos();
@@ -39,7 +41,9 @@ export class RepoManager {
     for (const repo of result.value) {
       await this.startPoller(repo);
     }
-    this.fallbackHandle = setInterval(() => { void this.sync(); }, 60_000);
+    this.fallbackHandle = setInterval(() => {
+      void this.sync();
+    }, 60_000);
     return ok(undefined);
   }
 
@@ -52,21 +56,13 @@ export class RepoManager {
     let scanned = 0;
     for (const [repoId, entry] of this.pollers) {
       if (entry.pendingDisable) continue;
-      this.onPoll(repoId, entry.owner, entry.name, entry.detector);
-      scanned++;
+      if (this.startPoll(repoId, entry)) scanned++;
     }
     return { scanned };
   }
 
   async upsertRepo(owner: string, name: string): Promise<Result<string>> {
-    const { data, error } = await this.supabase
-      .from('repos')
-      .upsert({ owner, name, enabled: true } as any, { onConflict: 'owner,name' })
-      .select('id')
-      .single();
-    if (error) return err(new Error(error.message));
-    if (!data) return err(new Error('upsertRepo returned null data'));
-    return ok((data as { id: string }).id);
+    return this.source.upsertRepo(owner, name);
   }
 
   notifyRunStart(repoId: string): void {
@@ -105,7 +101,10 @@ export class RepoManager {
   }
 
   stop(): void {
-    if (this.fallbackHandle) { clearInterval(this.fallbackHandle); this.fallbackHandle = null; }
+    if (this.fallbackHandle) {
+      clearInterval(this.fallbackHandle);
+      this.fallbackHandle = null;
+    }
     for (const [id] of this.pollers) this.removePoller(id);
   }
 
@@ -127,47 +126,39 @@ export class RepoManager {
   }
 
   private async loadEnabledRepos(): Promise<Result<RepoRecord[]>> {
-    const { data, error } = await this.supabase
-      .from('repos')
-      .select('id, owner, name, poll_interval_ms, connection_id')
-      .eq('enabled', true)
-      .is('deleted_at', null);
-    if (error) return err(new Error(error.message));
-    return ok((data ?? []) as RepoRecord[]);
+    return this.source.listEnabledRepos();
   }
 
-  private async resolveToken(connectionId: string | null): Promise<string | undefined> {
+  private async resolveToken(
+    repoId: string,
+    connectionId: string | null,
+  ): Promise<string | undefined> {
     if (!connectionId) return process.env.GITHUB_TOKEN;
-    const { data, error } = await (this.supabase.rpc as any)('decrypt_github_token', {
-      p_connection_id: connectionId,
-    });
-    if (error) {
-      console.warn(`[repo-manager] decrypt_github_token RPC failed for connection ${connectionId}: ${error.message} — falling back to GITHUB_TOKEN`);
-      return process.env.GITHUB_TOKEN;
-    }
-    if (!data) {
-      console.warn(`[repo-manager] decrypt_github_token returned null for connection ${connectionId} — falling back to GITHUB_TOKEN`);
-    }
-    return (data as string | null) ?? process.env.GITHUB_TOKEN;
+    return this.source.resolveConnectionToken(repoId, connectionId);
   }
 
   private async startPoller(repo: RepoRecord): Promise<void> {
-    const token = await this.resolveToken(repo.connection_id);
+    const token = await this.resolveToken(repo.id, repo.connection_id);
+    if (repo.connection_id && !token) return;
     const octokit = new Octokit({ auth: token });
+    void createPhaseLabelMirror(
+      octokit,
+      repo.owner,
+      repo.name,
+    ).provisionLabels();
     const detector = createWorkDetector(octokit, repo.owner, repo.name);
     const intervalMs = repo.poll_interval_ms ?? this.defaultPollIntervalMs;
 
     const intervalHandle = setInterval(() => {
       const entry = this.pollers.get(repo.id);
-      if (entry && !entry.pendingDisable) {
-        this.onPoll(repo.id, repo.owner, repo.name, detector);
-      }
+      if (entry) this.startPoll(repo.id, entry);
     }, intervalMs);
 
     this.pollers.set(repo.id, {
       detector,
       intervalHandle,
       activeRuns: 0,
+      pollInProgress: false,
       pendingDisable: false,
       owner: repo.owner,
       name: repo.name,
@@ -175,15 +166,35 @@ export class RepoManager {
     });
   }
 
+  private startPoll(repoId: string, entry: PollEntry): boolean {
+    if (entry.pendingDisable || entry.pollInProgress) return false;
+    entry.pollInProgress = true;
+    Promise.resolve()
+      .then(() => this.onPoll(repoId, entry.owner, entry.name, entry.detector))
+      .catch((e) =>
+        console.error(
+          `[repo-manager] Poll failed for ${entry.owner}/${entry.name}:`,
+          e,
+        ),
+      )
+      .finally(() => {
+        const latest = this.pollers.get(repoId);
+        if (latest) latest.pollInProgress = false;
+      });
+    return true;
+  }
+
   private removePoller(repoId: string): void {
     const entry = this.pollers.get(repoId);
-    if (entry) { clearInterval(entry.intervalHandle); }
+    if (entry) {
+      clearInterval(entry.intervalHandle);
+    }
     this.pollers.delete(repoId);
   }
 
   async resolveTokenForRepo(repoId: string): Promise<string | undefined> {
     const entry = this.pollers.get(repoId);
     if (!entry) return process.env.GITHUB_TOKEN;
-    return this.resolveToken(entry.connectionId);
+    return this.resolveToken(repoId, entry.connectionId);
   }
 }

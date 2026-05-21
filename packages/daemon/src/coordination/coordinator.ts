@@ -49,12 +49,13 @@ export function createCoordinator(deps: CoordinatorDeps, config: CoordinatorConf
     let consecutiveTickErrors = 0;
 
     // Start Merge Agent
-    const stopMergeAgent = deps.mergeAgent.start();
+    let stopMergeAgent = deps.mergeAgent.start();
 
     // Register crash handler — restart Merge Agent unless paused/shutting down
     deps.onMergeAgentCrash(() => {
       if (deps.isPaused() || deps.isShuttingDown()) return;
-      deps.mergeAgent.start();
+      stopMergeAgent(); // clean up crashed instance's timer chain
+      stopMergeAgent = deps.mergeAgent.start();
     });
 
     async function tick(): Promise<void> {
@@ -116,7 +117,18 @@ export function createCoordinator(deps: CoordinatorDeps, config: CoordinatorConf
 
           if (!claimResult.ok) continue; // Already claimed or error — skip
 
-          await deps.spawnWorker(claimResult.value, decision);
+          try {
+            await deps.spawnWorker(claimResult.value, decision);
+          } catch (spawnErr) {
+            console.error(`[coordinator] spawnWorker failed for issue #${decision.issueNumber}, releasing claim ${claimResult.value.id}:`, spawnErr);
+            await deps.workClaimer.updateStatus(
+              claimResult.value.id,
+              'failed',
+              spawnErr instanceof Error ? spawnErr.message : String(spawnErr),
+            ).catch((updateErr) => {
+              console.error(`[coordinator] failed to release orphaned claim ${claimResult.value.id}:`, updateErr);
+            });
+          }
         }
         consecutiveTickErrors = 0;
       } finally {

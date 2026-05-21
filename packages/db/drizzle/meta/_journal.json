@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1779303733791,
+      "tag": "0000_self_hosted_data_platform",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779308765210,
+      "tag": "0001_operator_auth_tables",
+      "breakpoints": true
+    }
+  ]
+}

@@ -1,16 +1,27 @@
 // src/implementation/batch.test.ts
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { executeBatch, type UnitResult } from './batch.js';
 import type { Unit, SessionResult } from '../types.js';
 import { ok, err } from '../lib/result.js';
 import { SessionError } from '../session-runtime/session-error.js';
-import { createWorktree, getWorktreeDiffSize } from './worktree.js';
+import { createWorktree, getBranchDiffSize, getWorktreeDiffSize } from './worktree.js';
+import { git } from '../lib/git.js';
+import { runCommand } from '../lib/process.js';
 
 // Mock the worktree module
 vi.mock('./worktree.js', () => ({
   createWorktree: vi.fn().mockResolvedValue({ ok: true, value: '/tmp/workspace' }),
   removeWorktree: vi.fn().mockResolvedValue({ ok: true, value: undefined }),
   getWorktreeDiffSize: vi.fn().mockResolvedValue({ ok: true, value: 50 }),
+  getBranchDiffSize: vi.fn().mockResolvedValue({ ok: true, value: 0 }),
+}));
+
+vi.mock('../lib/git.js', () => ({
+  git: vi.fn().mockResolvedValue({ ok: true, value: '' }),
+}));
+
+vi.mock('../lib/process.js', () => ({
+  runCommand: vi.fn().mockResolvedValue({ ok: true, value: '' }),
 }));
 
 const makeUnit = (id: string, batch: number = 0): Unit => ({
@@ -32,6 +43,20 @@ function createMockRuntime(result: SessionResult = successResult) {
 }
 
 describe('executeBatch', () => {
+  beforeEach(() => {
+    vi.mocked(createWorktree).mockReset();
+    vi.mocked(getWorktreeDiffSize).mockReset();
+    vi.mocked(getBranchDiffSize).mockReset();
+    vi.mocked(git).mockReset();
+    vi.mocked(runCommand).mockReset();
+
+    vi.mocked(createWorktree).mockResolvedValue(ok('/tmp/workspace'));
+    vi.mocked(getWorktreeDiffSize).mockResolvedValue(ok(50));
+    vi.mocked(getBranchDiffSize).mockResolvedValue(ok(0));
+    vi.mocked(git).mockResolvedValue(ok(''));
+    vi.mocked(runCommand).mockResolvedValue(ok(''));
+  });
+
   it('executes all units and returns results', async () => {
     const runtime = createMockRuntime();
     const units = [makeUnit('a'), makeUnit('b')];
@@ -171,6 +196,68 @@ describe('executeBatch', () => {
     expect(runtime.spawnSession).not.toHaveBeenCalled();
   });
 
+  it('warns and continues when dependency install fails (#556)', async () => {
+    const installError = new Error('pnpm missing');
+    vi.mocked(runCommand).mockResolvedValueOnce(err(installError));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const runtime = createMockRuntime();
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    expect(runCommand).toHaveBeenCalledWith('pnpm', ['install', '--no-frozen-lockfile'], {
+      cwd: '/tmp/workspace',
+      timeoutMs: 120_000,
+    });
+    expect(warn).toHaveBeenCalledWith('[batch] pnpm install failed for a: pnpm missing');
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(1);
+    expect(result.results[0]?.exitStatus).toBe('completed');
+
+    warn.mockRestore();
+  });
+
+  it('auto-commits dirty worker changes before measuring the unit diff (#557)', async () => {
+    vi.mocked(git)
+      .mockResolvedValueOnce(ok(' M src/file.ts\n'))
+      .mockResolvedValueOnce(ok(''))
+      .mockResolvedValueOnce(ok(''))
+      .mockResolvedValue(ok(''));
+    const runtime = createMockRuntime();
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    expect(git).toHaveBeenNthCalledWith(1, ['status', '--porcelain'], '/tmp/workspace');
+    expect(git).toHaveBeenNthCalledWith(2, ['add', '-A'], '/tmp/workspace');
+    expect(git).toHaveBeenNthCalledWith(
+      3,
+      ['commit', '-m', expect.stringContaining('worker(a): completed session output')],
+      '/tmp/workspace',
+    );
+    expect(getWorktreeDiffSize).toHaveBeenCalledWith('a', 'feature/1', '/tmp/repo');
+    expect(result.results[0]?.exitStatus).toBe('completed');
+  });
+
+  it('warns and continues when auto-commit git add fails (#557)', async () => {
+    vi.mocked(git)
+      .mockResolvedValueOnce(ok(' M src/file.ts\n'))
+      .mockResolvedValueOnce(err(new Error('index locked')))
+      .mockResolvedValue(ok(''));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const runtime = createMockRuntime();
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    expect(git).toHaveBeenNthCalledWith(1, ['status', '--porcelain'], '/tmp/workspace');
+    expect(git).toHaveBeenNthCalledWith(2, ['add', '-A'], '/tmp/workspace');
+    expect(warn).toHaveBeenCalledWith('[batch] git add failed for a: index locked');
+    expect(getWorktreeDiffSize).toHaveBeenCalledWith('a', 'feature/1', '/tmp/repo');
+    expect(result.results[0]?.exitStatus).toBe('completed');
+
+    warn.mockRestore();
+  });
+
   it('returns failed when diff size exceeds maxDiffLines (#64)', async () => {
     vi.mocked(getWorktreeDiffSize).mockResolvedValueOnce({ ok: true, value: 500 });
     const runtime = createMockRuntime();
@@ -185,6 +272,49 @@ describe('executeBatch', () => {
     expect(result.results[0]?.error).toContain('Diff size 500 exceeds limit of 300');
     // Cost should still be tracked even though the unit was rejected
     expect(result.results[0]?.cost).toBe(0.5);
+  });
+
+  it('returns failed when a completed worker produces no diff', async () => {
+    vi.mocked(getWorktreeDiffSize).mockResolvedValueOnce({ ok: true, value: 0 });
+    const runtime = createMockRuntime();
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    expect(result.results[0]?.exitStatus).toBe('failed');
+    expect(result.results[0]?.error).toContain('produced no diff');
+    expect(result.results[0]?.cost).toBe(0.5);
+  });
+
+  it('returns failed when a completed-with-concerns worker produces no diff', async () => {
+    vi.mocked(getWorktreeDiffSize).mockResolvedValueOnce({ ok: true, value: 0 });
+    const runtime = createMockRuntime({
+      ...successResult,
+      exitStatus: 'completed-with-concerns',
+    });
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', { staggerMs: 0 });
+
+    expect(result.results[0]?.exitStatus).toBe('failed');
+    expect(result.results[0]?.error).toContain('produced no diff');
+    expect(result.results[0]?.cost).toBe(0.5);
+  });
+
+  it('accepts a completed no-op unit when the feature branch already has diff from base', async () => {
+    vi.mocked(getWorktreeDiffSize).mockResolvedValueOnce({ ok: true, value: 0 });
+    vi.mocked(getBranchDiffSize).mockResolvedValueOnce({ ok: true, value: 125 });
+    const runtime = createMockRuntime();
+    const units = [makeUnit('a')];
+
+    const result = await executeBatch(units, 'feature/1', 1, runtime, '/tmp/repo', {
+      staggerMs: 0,
+      baseBranch: 'dev',
+    });
+
+    expect(result.results[0]?.exitStatus).toBe('completed');
+    expect(result.results[0]?.error).toBeUndefined();
+    expect(getBranchDiffSize).toHaveBeenCalledWith('dev', 'feature/1', '/tmp/repo');
   });
 
   it('returns failed when getWorktreeDiffSize returns an error (#141)', async () => {

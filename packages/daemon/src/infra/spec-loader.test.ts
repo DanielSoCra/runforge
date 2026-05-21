@@ -334,3 +334,59 @@ describe('resolveCurrentSpecRefs', () => {
     expect(archCount).toBe(1);
   });
 });
+
+describe('spec-loader multi-L0 root scanning', () => {
+  let specifyRoot: string;
+
+  beforeEach(async () => {
+    specifyRoot = await mkdtemp(join(tmpdir(), 'spec-loader-l0-'));
+    await mkdir(join(specifyRoot, 'functional'), { recursive: true });
+    await writeFile(
+      join(specifyRoot, 'L0-vision.md'),
+      '---\nid: L0-CONCIERGE-VISION\ntype: vision\nlayer: 0\n---\n# Concierge L0\n',
+    );
+    await writeFile(
+      join(specifyRoot, 'L0-ac-vision.md'),
+      '---\nid: L0-AC-VISION\ntype: vision\nlayer: 0\n---\n# Auto-Claude L0\n',
+    );
+    await writeFile(
+      join(specifyRoot, 'functional', 'concierge-core.md'),
+      '---\nid: FUNC-CONCIERGE-CORE\nlayer: 1\n---\n# concierge core L1\n',
+    );
+  });
+
+  afterEach(async () => {
+    await rm(specifyRoot, { recursive: true, force: true });
+  });
+
+  it('loads both L0 specs by id from the .specify root', async () => {
+    const content = await loadSpecContent(
+      ['L0-CONCIERGE-VISION', 'L0-AC-VISION'],
+      specifyRoot,
+    );
+    expect(content).toContain('Concierge L0');
+    expect(content).toContain('Auto-Claude L0');
+  });
+
+  it('loads subdir specs alongside L0 specs', async () => {
+    const content = await loadSpecContent(
+      ['L0-CONCIERGE-VISION', 'FUNC-CONCIERGE-CORE'],
+      specifyRoot,
+    );
+    expect(content).toContain('Concierge L0');
+    expect(content).toContain('concierge core L1');
+  });
+
+  it('does not match non-L0 root files', async () => {
+    await writeFile(
+      join(specifyRoot, 'traceability.yml'),
+      'irrelevant: content\n',
+    );
+    const content = await loadSpecContent(
+      ['L0-CONCIERGE-VISION'],
+      specifyRoot,
+    );
+    expect(content).toContain('Concierge L0');
+    expect(content).not.toContain('irrelevant');
+  });
+});

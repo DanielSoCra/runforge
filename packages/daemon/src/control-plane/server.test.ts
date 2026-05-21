@@ -15,6 +15,8 @@ const handlers = {
   getStatus: () => ({ activeRuns: 0, dailyCost: 1.5, paused: false }),
   pause: () => {},
   resume: () => {},
+  drain: () => {},
+  cancelDrain: () => {},
   retry: (n: number) => n === 42 ? ok(undefined) : err(new Error('not found')),
 };
 
@@ -50,6 +52,29 @@ describe('ControlServer', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.paused).toBe(true);
+  });
+
+  it('POST /resume can reject a blocked resume', async () => {
+    const { server, start } = createControlServer(PORT + 13, {
+      ...handlers,
+      resume: async () => err(new Error('runtime source unhealthy')),
+    });
+    const result = await start();
+    expect(result.ok).toBe(true);
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT + 13}/resume`, {
+        method: 'POST',
+        headers: { 'X-Requested-By': 'test' },
+      });
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body).toEqual({
+        paused: true,
+        error: 'runtime source unhealthy',
+      });
+    } finally {
+      server.close();
+    }
   });
 
   it('POST /retry/42 succeeds', async () => {
@@ -136,6 +161,42 @@ describe('ControlServer', () => {
   it('POST /issues/scan returns 501 when handler not wired', async () => {
     await startServer();
     const res = await fetch(`http://127.0.0.1:${PORT}/issues/scan`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+    expect(res.status).toBe(501);
+  });
+
+  it('POST /release calls release handler and returns release proposal details', async () => {
+    const release = vi.fn().mockResolvedValue({
+      status: 'success',
+      prNumber: 12,
+      prUrl: 'https://github.com/example/repo/pull/12',
+      issueCount: 2,
+      totalCost: 3.5,
+    });
+    const { server, start } = createControlServer(PORT + 12, {
+      ...handlers,
+      release,
+    });
+    const result = await start();
+    expect(result.ok).toBe(true);
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT + 12}/release`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        status: 'success',
+        prNumber: 12,
+        prUrl: 'https://github.com/example/repo/pull/12',
+        issueCount: 2,
+        totalCost: 3.5,
+      });
+      expect(release).toHaveBeenCalledOnce();
+    } finally {
+      server.close();
+    }
+  });
+
+  it('POST /release returns 501 when handler not wired', async () => {
+    await startServer();
+    const res = await fetch(`http://127.0.0.1:${PORT}/release`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
     expect(res.status).toBe(501);
   });
 
@@ -276,6 +337,50 @@ describe('ControlServer', () => {
     }
   });
 
+  it('POST /drain calls drain handler and returns draining:true (#425)', async () => {
+    const drain = vi.fn();
+    const { server, start } = createControlServer(PORT + 10, { ...handlers, drain });
+    const result = await start();
+    expect(result.ok).toBe(true);
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT + 10}/drain`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toEqual({ draining: true });
+      expect(drain).toHaveBeenCalledOnce();
+    } finally {
+      server.close();
+    }
+  });
+
+  it('POST /drain/cancel calls cancelDrain handler and returns draining:false (#425)', async () => {
+    const cancelDrain = vi.fn();
+    const { server, start } = createControlServer(PORT + 11, { ...handlers, cancelDrain });
+    const result = await start();
+    expect(result.ok).toBe(true);
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT + 11}/drain/cancel`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toEqual({ draining: false });
+      expect(cancelDrain).toHaveBeenCalledOnce();
+    } finally {
+      server.close();
+    }
+  });
+
+  it('POST /drain rejects missing X-Requested-By (CSRF protection) (#425)', async () => {
+    await startServer();
+    const res = await fetch(`http://127.0.0.1:${PORT}/drain`, { method: 'POST' });
+    expect(res.status).toBe(403);
+  });
+
+  it('POST /drain/cancel rejects missing X-Requested-By (CSRF protection) (#425)', async () => {
+    await startServer();
+    const res = await fetch(`http://127.0.0.1:${PORT}/drain/cancel`, { method: 'POST' });
+    expect(res.status).toBe(403);
+  });
+
   it('GET /status includes remote_control_state but not remote_control_url', async () => {
     const { server: s2, start: start2 } = createControlServer(PORT + 1, {
       getStatus: () => ({
@@ -286,6 +391,8 @@ describe('ControlServer', () => {
       }),
       pause: () => {},
       resume: () => {},
+      drain: () => {},
+      cancelDrain: () => {},
       retry: () => ok(undefined),
     });
     const result2 = await start2();

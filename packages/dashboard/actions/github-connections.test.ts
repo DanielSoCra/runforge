@@ -1,261 +1,73 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { revalidatePath } from 'next/cache';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Chain helper: eq().eq() for removeRepo, eq() for removeConnection/others
-const makeEqChain = (result: { error: null | { message: string } }) => {
-  const inner = vi.fn().mockResolvedValue(result);
-  const outer = vi.fn().mockReturnValue({ eq: inner });
-  return { outer, inner };
-};
+import { requireDashboardAdmin } from '@/lib/auth/require-session';
 
-const mockRepos: Record<string, ReturnType<typeof vi.fn>> = {
-  update: vi.fn(),
-  select: vi.fn(),
-};
-const mockConnections = {
-  delete: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) }),
-};
-const mockFrom = vi.fn((table: string) => table === 'repos' ? mockRepos : mockConnections);
+import { importRepos, removeConnection, removeRepo } from './github-connections';
 
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: vi.fn().mockResolvedValue({
-    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: { id: 'u1' } } }) },
-    from: mockFrom,
+const mocks = vi.hoisted(() => ({
+  importRepositories: vi.fn(),
+  removeConnection: vi.fn(),
+  removeRepository: vi.fn(),
+  requireDashboardAdmin: vi.fn(),
+}));
+
+vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
+vi.mock('@/lib/auth/require-session', () => ({
+  requireDashboardAdmin: mocks.requireDashboardAdmin,
+}));
+vi.mock('@/lib/data/stores', () => ({
+  getDashboardStores: () => ({
+    githubConnections: {
+      importRepositories: mocks.importRepositories,
+      removeConnection: mocks.removeConnection,
+      removeRepository: mocks.removeRepository,
+    },
   }),
 }));
-vi.mock('@/lib/auth', () => ({ requireAdmin: vi.fn().mockResolvedValue(undefined) }));
-vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
+
+const originalFetch = globalThis.fetch;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  delete process.env.DAEMON_URL;
+  globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok'));
+  mocks.requireDashboardAdmin.mockResolvedValue({
+    user: { id: 'admin-1', role: 'admin' },
+  });
+  mocks.importRepositories.mockResolvedValue({ ok: true, value: undefined });
+  mocks.removeConnection.mockResolvedValue({
+    ok: true,
+    value: { disableError: undefined },
+  });
+  mocks.removeRepository.mockResolvedValue({ ok: true, value: undefined });
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+  delete process.env.DAEMON_URL;
+});
 
 describe('removeConnection', () => {
-  function setupRemoveConnectionMocks(opts?: { deleteError?: boolean; linkedRepos?: Array<{ id: string }> }) {
-    const repos = opts?.linkedRepos ?? [{ id: 'r1' }, { id: 'r2' }];
-    // select('id').eq('connection_id', connectionId) → { data: repos }
-    mockRepos.select = vi.fn().mockReturnValue({
-      eq: vi.fn().mockResolvedValue({ data: repos }),
-    });
-    // update({...}).in('id', repoIds) → { error: null }
-    mockRepos.update = vi.fn().mockReturnValue({
-      in: vi.fn().mockResolvedValue({ error: null }),
-    });
-    mockConnections.delete = vi.fn().mockReturnValue({
-      eq: vi.fn().mockResolvedValue({
-        error: opts?.deleteError ? { message: 'DB error' } : null,
-      }),
-    });
-  }
+  it('requires an admin before mutating connection data', async () => {
+    mocks.requireDashboardAdmin.mockRejectedValueOnce(
+      new Error('Admin access required'),
+    );
 
-  beforeEach(() => {
-    vi.resetModules();
-    setupRemoveConnectionMocks();
+    await expect(removeConnection('conn-1')).rejects.toThrow(
+      'Admin access required',
+    );
+
+    expect(mocks.removeConnection).not.toHaveBeenCalled();
   });
 
-  it('disables repos after deleting connection (cascade handles connection_id)', async () => {
-    const { removeConnection } = await import('./github-connections.js');
+  it('removes through the app-owned store and reloads dashboard state', async () => {
+    process.env.DAEMON_URL = 'http://localhost:7532/';
+
     await removeConnection('conn-1');
-    // update should set enabled=false but NOT connection_id (handled by ON DELETE SET NULL)
-    expect(mockRepos.update).toHaveBeenCalledWith(
-      expect.objectContaining({ enabled: false })
-    );
-    const updateArg = mockRepos.update.mock.calls[0][0];
-    expect(updateArg).not.toHaveProperty('connection_id');
-  });
 
-  it('fires POST to DAEMON_URL/repos/reload after removal (#179)', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok'));
-    process.env.DAEMON_URL = 'http://localhost:7532';
-    try {
-      const { removeConnection } = await import('./github-connections.js');
-      await removeConnection('conn-1');
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        'http://localhost:7532/repos/reload',
-        expect.objectContaining({
-          method: 'POST',
-          headers: { 'X-Requested-By': 'dashboard' },
-          signal: expect.any(AbortSignal),
-        }),
-      );
-    } finally {
-      globalThis.fetch = originalFetch;
-      delete process.env.DAEMON_URL;
-    }
-  });
-
-  it('silently swallows fetch failure when daemon is unreachable (#179)', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
-    process.env.DAEMON_URL = 'http://localhost:9999';
-    try {
-      const { removeConnection } = await import('./github-connections.js');
-      await expect(removeConnection('conn-1')).resolves.not.toThrow();
-      expect(globalThis.fetch).toHaveBeenCalled();
-    } finally {
-      globalThis.fetch = originalFetch;
-      delete process.env.DAEMON_URL;
-    }
-  });
-
-  it('does not disable repos when connection delete fails (#277)', async () => {
-    vi.resetModules();
-    setupRemoveConnectionMocks({ deleteError: true });
-    const updateSpy = mockRepos.update;
-    const { removeConnection } = await import('./github-connections.js');
-    await expect(removeConnection('conn-1')).rejects.toThrow('Failed to remove connection');
-    expect(updateSpy).not.toHaveBeenCalled();
-  });
-
-  it('skips repo disable when no repos are linked to connection (#277)', async () => {
-    vi.resetModules();
-    setupRemoveConnectionMocks({ linkedRepos: [] });
-    const { removeConnection } = await import('./github-connections.js');
-    await removeConnection('conn-1');
-    expect(mockRepos.update).not.toHaveBeenCalled();
-  });
-});
-
-describe('removeRepo', () => {
-  function setupRemoveRepoMock(opts: { enabled: boolean; fetchError?: boolean; updateError?: boolean }) {
-    // select('enabled').eq('id',...).eq('connection_id',...).single()
-    const singleFn = vi.fn().mockResolvedValue(
-      opts.fetchError
-        ? { data: null, error: { message: 'not found' } }
-        : { data: { enabled: opts.enabled }, error: null },
-    );
-    const selectEqInner = vi.fn().mockReturnValue({ single: singleFn });
-    const selectEqOuter = vi.fn().mockReturnValue({ eq: selectEqInner });
-    (mockRepos as Record<string, unknown>).select = vi.fn().mockReturnValue({ eq: selectEqOuter });
-
-    // update().eq().eq()
-    const { outer } = makeEqChain({ error: opts.updateError ? { message: 'db error' } : null });
-    mockRepos.update.mockReturnValue({ eq: outer });
-  }
-
-  beforeEach(() => {
-    vi.resetModules();
-    setupRemoveRepoMock({ enabled: false });
-  });
-
-  it('soft-deletes the repo by setting deleted_at and enabled=false', async () => {
-    const { removeRepo } = await import('./github-connections.js');
-    await removeRepo('repo-1', 'conn-1');
-    expect(mockRepos.update).toHaveBeenCalledWith(
-      expect.objectContaining({ enabled: false, deleted_at: expect.any(String) })
-    );
-  });
-
-  it('throws a generic error if the update fails', async () => {
-    vi.resetModules();
-    setupRemoveRepoMock({ enabled: false, updateError: true });
-    const { removeRepo } = await import('./github-connections.js');
-    await expect(removeRepo('repo-1', 'conn-1')).rejects.toThrow('Failed to remove repository');
-  });
-
-  it('rejects removal of an enabled repo (#172)', async () => {
-    vi.resetModules();
-    setupRemoveRepoMock({ enabled: true });
-    mockRepos.update.mockClear();
-    const { removeRepo } = await import('./github-connections.js');
-    await expect(removeRepo('repo-1', 'conn-1')).rejects.toThrow(
-      'Cannot remove an enabled repository'
-    );
-    expect(mockRepos.update).not.toHaveBeenCalled();
-  });
-
-  it('throws when repo is not found (#172)', async () => {
-    vi.resetModules();
-    setupRemoveRepoMock({ enabled: false, fetchError: true });
-    mockRepos.update.mockClear();
-    const { removeRepo } = await import('./github-connections.js');
-    await expect(removeRepo('repo-1', 'conn-1')).rejects.toThrow('Repository not found');
-    expect(mockRepos.update).not.toHaveBeenCalled();
-  });
-});
-
-describe('importRepos', () => {
-  const originalFetch = globalThis.fetch;
-
-  beforeEach(() => {
-    vi.resetModules();
-    globalThis.fetch = vi.fn().mockResolvedValue(new Response('ok'));
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    delete process.env.DAEMON_URL;
-  });
-
-  it('rejects owner containing shell metacharacters', async () => {
-    const { importRepos } = await import('./github-connections.js');
-    await expect(importRepos('conn-1', [{ owner: 'foo;rm -rf', name: 'bar' }]))
-      .rejects.toThrow('Owner must contain only alphanumeric characters');
-  });
-
-  it('rejects name containing shell metacharacters', async () => {
-    const { importRepos } = await import('./github-connections.js');
-    await expect(importRepos('conn-1', [{ owner: 'foo', name: 'bar$(evil)' }]))
-      .rejects.toThrow('Name must contain only alphanumeric characters');
-  });
-
-  it('rejects owner with spaces', async () => {
-    const { importRepos } = await import('./github-connections.js');
-    await expect(importRepos('conn-1', [{ owner: 'foo bar', name: 'repo' }]))
-      .rejects.toThrow('Owner must contain only alphanumeric characters');
-  });
-
-  // Helper: mock that supports both upsert (step 1) and update().eq().eq() (step 2)
-  function setupImportMock() {
-    const mockUpsert = vi.fn().mockResolvedValue({ error: null });
-    const mockUpdatePayload = vi.fn();
-    const eqName = vi.fn().mockResolvedValue({ error: null });
-    const eqOwner = vi.fn().mockReturnValue({ eq: eqName });
-    mockUpdatePayload.mockReturnValue({ eq: eqOwner });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockFrom.mockImplementation((() => ({ upsert: mockUpsert, update: mockUpdatePayload })) as any);
-    return { mockUpsert, mockUpdatePayload };
-  }
-
-  it('accepts valid owner and name with dots, underscores, hyphens', async () => {
-    const { mockUpsert } = setupImportMock();
-    const { importRepos } = await import('./github-connections.js');
-    await importRepos('conn-1', [{ owner: 'my-org.test', name: 'repo_name-1' }]);
-    expect(mockUpsert).toHaveBeenCalled();
-  });
-
-  it('inserts new repos with enabled=false per credential-first workflow (SPEC-4 regression)', async () => {
-    const { mockUpsert } = setupImportMock();
-    const { importRepos } = await import('./github-connections.js');
-    await importRepos('conn-1', [{ owner: 'acme', name: 'repo' }]);
-    expect(mockUpsert).toHaveBeenCalledWith(
-      expect.objectContaining({ enabled: false }),
-      expect.objectContaining({ ignoreDuplicates: true }),
-    );
-  });
-
-  it('update step does not include enabled field, preserving existing state (#176)', async () => {
-    const { mockUpdatePayload } = setupImportMock();
-    const { importRepos } = await import('./github-connections.js');
-    await importRepos('conn-1', [{ owner: 'acme', name: 'repo' }]);
-    const updateArg = mockUpdatePayload.mock.calls[0][0];
-    expect(updateArg).toEqual({ connection_id: 'conn-1', deleted_at: null });
-    expect(updateArg).not.toHaveProperty('enabled');
-  });
-
-  it('throws when update step fails (#176)', async () => {
-    const mockUpsert = vi.fn().mockResolvedValue({ error: null });
-    const eqName = vi.fn().mockResolvedValue({ error: { message: 'update failed' } });
-    const eqOwner = vi.fn().mockReturnValue({ eq: eqName });
-    const mockUpdatePayload = vi.fn().mockReturnValue({ eq: eqOwner });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockFrom.mockImplementation((() => ({ upsert: mockUpsert, update: mockUpdatePayload })) as any);
-    const { importRepos } = await import('./github-connections.js');
-    await expect(importRepos('conn-1', [{ owner: 'acme', name: 'repo' }]))
-      .rejects.toThrow('Failed to import repository');
-  });
-
-  it('fires POST to DAEMON_URL/repos/reload after upserts (#166)', async () => {
-    process.env.DAEMON_URL = 'http://localhost:7532';
-    setupImportMock();
-    const { importRepos } = await import('./github-connections.js');
-    await importRepos('conn-1', [{ owner: 'acme', name: 'repo' }]);
+    expect(requireDashboardAdmin).toHaveBeenCalledTimes(1);
+    expect(mocks.removeConnection).toHaveBeenCalledWith('conn-1');
     expect(globalThis.fetch).toHaveBeenCalledWith(
       'http://localhost:7532/repos/reload',
       expect.objectContaining({
@@ -264,15 +76,183 @@ describe('importRepos', () => {
         signal: expect.any(AbortSignal),
       }),
     );
+    expect(revalidatePath).toHaveBeenCalledWith('/settings');
+    expect(revalidatePath).toHaveBeenCalledWith('/repos');
+  });
+
+  it('silently swallows fetch failure when daemon is unreachable (#179)', async () => {
+    process.env.DAEMON_URL = 'http://localhost:9999';
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+
+    await expect(removeConnection('conn-1')).resolves.not.toThrow();
+
+    expect(globalThis.fetch).toHaveBeenCalled();
+  });
+
+  it('keeps removal successful when linked repo disabling reports a warning (#277)', async () => {
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.removeConnection.mockResolvedValueOnce({
+      ok: true,
+      value: { disableError: 'disable failed' },
+    });
+
+    await expect(removeConnection('conn-1')).resolves.not.toThrow();
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      '[github-connections] removeConnection disable repos failed:',
+      'disable failed',
+    );
+    expect(revalidatePath).toHaveBeenCalledWith('/settings');
+    expect(revalidatePath).toHaveBeenCalledWith('/repos');
+    consoleSpy.mockRestore();
+  });
+
+  it('does not revalidate or notify when store removal fails (#277)', async () => {
+    mocks.removeConnection.mockResolvedValueOnce({
+      ok: false,
+      error: 'unavailable',
+      message: 'db unavailable',
+    });
+    process.env.DAEMON_URL = 'http://localhost:7532/';
+
+    await expect(removeConnection('conn-1')).rejects.toThrow(
+      'Failed to remove connection',
+    );
+
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe('importRepos', () => {
+  it('requires an admin before importing repositories', async () => {
+    mocks.requireDashboardAdmin.mockRejectedValueOnce(
+      new Error('Admin access required'),
+    );
+
+    await expect(
+      importRepos('conn-1', [{ owner: 'acme', name: 'repo' }]),
+    ).rejects.toThrow('Admin access required');
+
+    expect(mocks.importRepositories).not.toHaveBeenCalled();
+  });
+
+  it('returns early for an empty import list', async () => {
+    await importRepos('conn-1', []);
+
+    expect(mocks.importRepositories).not.toHaveBeenCalled();
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('rejects owner containing shell metacharacters', async () => {
+    await expect(
+      importRepos('conn-1', [{ owner: 'foo;rm -rf', name: 'bar' }]),
+    ).rejects.toThrow('Owner must contain only alphanumeric characters');
+    expect(mocks.importRepositories).not.toHaveBeenCalled();
+  });
+
+  it('rejects name containing shell metacharacters', async () => {
+    await expect(
+      importRepos('conn-1', [{ owner: 'foo', name: 'bar$(evil)' }]),
+    ).rejects.toThrow('Name must contain only alphanumeric characters');
+    expect(mocks.importRepositories).not.toHaveBeenCalled();
+  });
+
+  it('rejects owner with spaces', async () => {
+    await expect(
+      importRepos('conn-1', [{ owner: 'foo bar', name: 'repo' }]),
+    ).rejects.toThrow('Owner must contain only alphanumeric characters');
+    expect(mocks.importRepositories).not.toHaveBeenCalled();
+  });
+
+  it('imports valid repos through the app-owned store and notifies the daemon', async () => {
+    process.env.DAEMON_URL = 'http://localhost:7532/';
+    const repositories = [{ owner: 'my-org.test', name: 'repo_name-1' }];
+
+    await importRepos('conn-1', repositories);
+
+    expect(mocks.importRepositories).toHaveBeenCalledWith(
+      'conn-1',
+      repositories,
+    );
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'http://localhost:7532/repos/reload',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'X-Requested-By': 'dashboard' },
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(revalidatePath).toHaveBeenCalledWith('/repos');
+  });
+
+  it('throws when the store import fails (#176)', async () => {
+    mocks.importRepositories.mockResolvedValueOnce({
+      ok: false,
+      error: 'unavailable',
+      message: 'update failed',
+    });
+
+    await expect(
+      importRepos('conn-1', [{ owner: 'acme', name: 'repo' }]),
+    ).rejects.toThrow('Failed to import repository');
   });
 
   it('silently swallows fetch failure when daemon is unreachable (#166)', async () => {
     process.env.DAEMON_URL = 'http://localhost:9999';
     globalThis.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
-    setupImportMock();
-    const { importRepos } = await import('./github-connections.js');
-    // Should not throw despite fetch failure
-    await expect(importRepos('conn-1', [{ owner: 'acme', name: 'repo' }])).resolves.not.toThrow();
+
+    await expect(
+      importRepos('conn-1', [{ owner: 'acme', name: 'repo' }]),
+    ).resolves.not.toThrow();
+
     expect(globalThis.fetch).toHaveBeenCalled();
+  });
+});
+
+describe('removeRepo', () => {
+  it('soft-deletes the repo through the app-owned store', async () => {
+    await removeRepo('repo-1', 'conn-1');
+
+    expect(mocks.removeRepository).toHaveBeenCalledWith('repo-1', 'conn-1');
+    expect(revalidatePath).toHaveBeenCalledWith('/repos');
+  });
+
+  it('throws a generic error if the update fails', async () => {
+    mocks.removeRepository.mockResolvedValueOnce({
+      ok: false,
+      error: 'unavailable',
+      message: 'db error',
+    });
+
+    await expect(removeRepo('repo-1', 'conn-1')).rejects.toThrow(
+      'Failed to remove repository',
+    );
+  });
+
+  it('rejects removal of an enabled repo (#172)', async () => {
+    mocks.removeRepository.mockResolvedValueOnce({
+      ok: false,
+      error: 'conflict',
+      message: 'enabled repositories must be disabled before removal',
+    });
+
+    await expect(removeRepo('repo-1', 'conn-1')).rejects.toThrow(
+      'Cannot remove an enabled repository',
+    );
+    expect(revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it('throws when repo is not found (#172)', async () => {
+    mocks.removeRepository.mockResolvedValueOnce({
+      ok: false,
+      error: 'not-found',
+      message: 'repository was not found',
+    });
+
+    await expect(removeRepo('repo-1', 'conn-1')).rejects.toThrow(
+      'Repository not found',
+    );
+    expect(revalidatePath).not.toHaveBeenCalled();
   });
 });

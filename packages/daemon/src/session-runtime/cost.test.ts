@@ -29,16 +29,60 @@ describe('CostTracker', () => {
     expect(tracker.getRunCost(42)).toBe(5);
   });
 
+  it('reserveCost holds daily budget until released (#550)', () => {
+    tracker.recordCost(1, 48);
+    const reservation = tracker.reserveCost([2], 2);
+
+    expect(reservation.reserved).toBe(true);
+    expect(tracker.checkBudget(3)).toEqual({
+      available: false,
+      reason: 'daily-budget-exceeded',
+    });
+
+    if (reservation.reserved) {
+      tracker.releaseCostReservation(reservation.reservation);
+    }
+
+    expect(tracker.checkBudget(3)).toEqual({ available: true, remaining: 2 });
+  });
+
+  it('recordReservedCost replaces held budget with actual spend (#550)', () => {
+    tracker.recordCost(1, 48);
+    const reservation = tracker.reserveCost([2], 2);
+    expect(reservation.reserved).toBe(true);
+    if (!reservation.reserved) return;
+
+    tracker.recordReservedCost(reservation.reservation, 1.25);
+    expect(tracker.getDailyCost()).toBe(49.25);
+    expect(tracker.getRunCost(2)).toBe(1.25);
+    expect(tracker.checkBudget(3)).toEqual({
+      available: false,
+      reason: 'daily-budget-exceeded',
+    });
+
+    tracker.releaseCostReservation(reservation.reservation);
+    expect(tracker.checkBudget(3)).toEqual({
+      available: true,
+      remaining: 0.75,
+    });
+  });
+
   it('checkBudget rejects when daily budget exceeded', () => {
     tracker.recordCost(1, 51);
     const result = tracker.checkBudget(2);
-    expect(result).toEqual({ available: false, reason: 'daily-budget-exceeded' });
+    expect(result).toEqual({
+      available: false,
+      reason: 'daily-budget-exceeded',
+    });
   });
 
   it('checkBudget rejects when per-run budget exceeded', () => {
     tracker.recordCost(1, 11);
     const result = tracker.checkBudget(1);
-    expect(result).toEqual({ available: false, reason: 'per-run-budget-exceeded' });
+    expect(result).toEqual({
+      available: false,
+      reason: 'per-run-budget-exceeded',
+    });
   });
 
   it('resetDaily clears daily total but keeps run costs', () => {
@@ -58,7 +102,10 @@ describe('CostTracker', () => {
   it('checkBudget uses perRunBudgetOverride when provided', () => {
     tracker.recordCost(1, 5); // under global 10 but over override 3
     const result = tracker.checkBudget(1, 3);
-    expect(result).toEqual({ available: false, reason: 'per-run-budget-exceeded' });
+    expect(result).toEqual({
+      available: false,
+      reason: 'per-run-budget-exceeded',
+    });
   });
 
   it('checkBudget allows higher override than global default', () => {
@@ -70,7 +117,10 @@ describe('CostTracker', () => {
   it('checkBudget falls back to global default when no override', () => {
     tracker.recordCost(1, 11); // over global 10
     const result = tracker.checkBudget(1);
-    expect(result).toEqual({ available: false, reason: 'per-run-budget-exceeded' });
+    expect(result).toEqual({
+      available: false,
+      reason: 'per-run-budget-exceeded',
+    });
   });
 
   // Regression tests for BUG-16: NaN/negative/Infinity cost corrupts budget tracking
@@ -141,7 +191,10 @@ describe('CostTracker', () => {
       // Advance time past reset
       vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 25 * 60 * 60 * 1000);
       tracker.maybeResetDaily();
-      expect(tracker.checkBudget(42)).toEqual({ available: true, remaining: 50 });
+      expect(tracker.checkBudget(42)).toEqual({
+        available: true,
+        remaining: 50,
+      });
       vi.restoreAllMocks();
     });
 
@@ -159,7 +212,9 @@ describe('CostTracker', () => {
     it('resets daily cost to zero and allows fresh cost accumulation', () => {
       tracker.recordCost(1, 45);
       expect(tracker.getDailyCost()).toBe(45);
-      const spy = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 25 * 60 * 60 * 1000);
+      const spy = vi
+        .spyOn(Date, 'now')
+        .mockReturnValue(Date.now() + 25 * 60 * 60 * 1000);
       tracker.maybeResetDaily();
       expect(tracker.getDailyCost()).toBe(0);
       // Fresh costs accumulate from zero

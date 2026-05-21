@@ -12,7 +12,7 @@ export interface RunRecord {
   repo_owner: string;
   repo_name: string;
   issue_title: string;
-  outcome: 'in-progress' | 'complete' | 'stuck' | 'escalated';
+  outcome: 'in-progress' | 'complete' | 'stuck' | 'escalated' | 'failed';
   current_phase: string | null;
 }
 
@@ -64,7 +64,12 @@ export function classifyIssues(
       if (run?.outcome === 'in-progress' || labelNames.includes('in-progress')) {
         column = 'running';
         currentPhase = run?.current_phase ?? null;
-      } else if (run?.outcome === 'stuck' || run?.outcome === 'escalated' || labelNames.includes('stuck')) {
+      } else if (
+        run?.outcome === 'stuck' ||
+        run?.outcome === 'escalated' ||
+        run?.outcome === 'failed' ||
+        labelNames.includes('stuck')
+      ) {
         column = 'stuck';
       } else if (labelNames.includes('ready')) {
         column = 'ready';

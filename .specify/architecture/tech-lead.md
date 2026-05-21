@@ -12,9 +12,9 @@ references: FUNC-AC-TECH-LEAD
 
 ## Overview
 
-The Tech Lead Agent is a scheduled analysis agent within the Coordination Service's agent pool. It monitors code health by consuming a pre-computed signal digest, generates technical proposals that flow through the Product Owner for priority assessment, participates in structured protocols via orchestrator-mediated exchanges, and interacts with the Knowledge Service to both consume findings and produce distilled pitfalls. The Tech Lead operates at the L2-L3 layer — it never makes business-level decisions.
+The Tech Lead Agent is a scheduled analysis agent within the Coordination Service's agent pool. It monitors code health by consuming a pre-computed signal digest, triages incoming review findings against a configurable daily cap, generates technical proposals that flow through the Product Owner for priority assessment, participates in structured protocols via orchestrator-mediated exchanges, and interacts with the Knowledge Service to both consume findings and produce distilled pitfalls. The Tech Lead operates at the L2-L3 layer — it never makes business-level decisions.
 
-The Tech Lead is not a long-running process. It is a session spawned by the Coordination Engine on a configurable schedule (default: 2 hours) or triggered by specific events (run failures, new review findings, batch retrospective completion). Each session receives a signal digest as context, performs analysis, and produces structured output. The Coordination Engine interprets the output and takes action (stores proposals, triggers protocols, updates state).
+The Tech Lead is not a long-running process. It is a session spawned by the Coordination Engine on a configurable schedule (default: 2 hours) or triggered by specific events (run failures, new review findings, batch retrospective completion). Each session receives a signal digest as context, performs analysis and triage, and produces structured output. The Coordination Engine interprets the output and takes action (stores triage decisions, applies GitHub label transitions, stores proposals, triggers protocols, updates state).
 
 ## Data Model
 
@@ -26,8 +26,16 @@ When a TechnicalProposal is rejected by the PO, the Tech Lead may generate a new
 
 **TechnicalEnrichment** represents the Tech Lead's contribution to a PO-initiated business proposal. It contains: a unique identifier, a reference to the PO's Proposal, an effort estimate (or "unassessed" flag), a dependency analysis (array of identified dependencies), technical risks (array of risk descriptions), prerequisite work (array of references to issues or specs that should be completed first), and a creation timestamp. When the Tech Lead cannot produce a reliable enrichment (unfamiliar area, insufficient data), it returns an enrichment with the "unassessed" flag set, so the proposal reaches the operator with incomplete technical review.
 
+**TriageDecision** represents a single finding triage outcome produced by the Tech Lead and applied by the Coordination Engine. It contains: a unique identifier, a finding issue number (the GitHub issue number of the triaged finding), a decision (one of: `approve`, `reject`, `defer`, `promote`), a reason (the Tech Lead's justification for the decision), a promoted severity label (nullable — the new severity label when the decision is `promote`, e.g., `P2` replacing `P3`), a cycle date (the calendar date of the triage cycle that produced this decision, used for daily cap enforcement), and a creation timestamp.
+
+TriageDecisions are immutable once recorded. A finding that has already been triaged in a given cycle is not re-evaluated in the same cycle.
+
+**TriageDailyCap** tracks the number of findings approved in a given calendar day. It contains: a unique identifier, a date (the calendar day), an approved count (the number of findings approved or promoted on that date), and the cap value at time of creation (snapshot of the configured cap for audit purposes). The Coordination Engine uses optimistic locking when incrementing the approved count to prevent concurrent sessions from both approving findings at the cap boundary.
+
 **SignalDigest** represents the pre-computed bundle of signals assembled by the Coordination Engine for each Tech Lead analysis cycle. It contains: a unique identifier, a cycle trigger (one of: `scheduled`, `run_failure`, `new_findings`, `retrospective_complete`), and signal sections:
 - **review_findings**: active KnowledgeRecords of type `review_finding` with severity and affected areas, queried from the Knowledge Service.
+- **untriaged_findings**: GitHub issues with the `review-finding` label but without the `tl-triaged` label, queried from the GitHub Service. Each entry contains: issue number, title, severity label, and a summary of the finding body.
+- **triage_cap_remaining**: the number of approvals remaining for the current calendar day, computed from the configured `triage_daily_cap` minus the count of today's TriageDecisions with decision `approve` or `promote`.
 - **run_outcomes**: recent run completion records with failure reasons, error categories, phase-level breakdowns, and retry counts, queried from the Control Plane's run state.
 - **drift_indicators**: comparison results between L3 spec expectations and actual implementation, computed by a deterministic diff process against the traceability map.
 - **deferred_work**: aggregated counts of deferred work markers per code area, computed by a deterministic scan.
@@ -42,17 +50,10 @@ The signal digest is assembled deterministically by the Coordination Engine befo
 
 ProtocolExchanges are stored for audit and for feeding into retrospective analysis. The Coordination Engine creates and manages them — agents do not directly write to them.
 
-**TriageDecision** represents a single triage verdict produced by the Tech Lead for a review finding. It contains: a unique identifier, `finding_issue_number` (the GitHub issue number of the finding), `decision` (one of: `approve`, `reject`, `defer`, `promote`), `reason` (text explanation of the decision), `promoted_to_severity` (nullable label string, set only when `decision` is `promote` — the target severity label, e.g., `P2`), `cycle_date` (ISO date string recording which day this decision was made, used for daily cap accounting), and `timestamp` (creation timestamp).
-
-TriageDecision records are persisted by the Coordination Service after each triage session. They serve as the audit trail and as the basis for daily cap enforcement.
-
-**TriageDailyCap** tracks the number of triage approvals made on a given calendar day. It contains: `date` (ISO date string, primary key), `approval_count` (count of decisions with `approve` or `promote` made on this date), and `cap` (the configured cap value as recorded at the time the first decision was written for this date — a snapshot of GlobalSettings at decision time, preventing mid-day config changes from retroactively affecting the cap). The Coordination Engine reads this record before each approval to determine whether the cap has been reached.
-
 **Extensions to existing models:**
 
 - **WorkerClaim** (ARCH-AC-COORDINATION) gains a new agent type value: `tech_lead`. The Tech Lead is a pooled agent with min 0, max 1 — it is spawned on schedule, not kept running.
-- **GlobalSettings** (ARCH-AC-COORDINATION) gains: `tech_lead_interval` (schedule for the Tech Lead agent, default 7200 seconds / 2 hours), `tech_lead_proposal_expiry` (default 7 days), `recurring_finding_threshold` (number of records sharing a root-cause tag before triggering a systemic proposal, default 3), `drift_scan_paths` (array of artifact patterns to include in spec-code drift analysis), `triage_daily_cap` (maximum number of finding approvals per calendar day, default 5).
-- **SignalDigest** gains two fields in the `review_findings` section: `untriaged_findings` (the subset of active review findings that carry the `review-finding` label but lack the `tl-triaged` label — these are the candidates for the current triage phase) and `triage_cap_remaining` (integer — the configured daily cap minus the number of approvals already recorded for the current calendar day; capped at zero, never negative). These fields are computed by the digest assembly process before the Tech Lead session is spawned.
+- **GlobalSettings** (ARCH-AC-COORDINATION) gains: `tech_lead_interval` (schedule for the Tech Lead agent, default 7200 seconds / 2 hours), `tech_lead_proposal_expiry` (default 7 days), `recurring_finding_threshold` (number of records sharing a root-cause tag before triggering a systemic proposal, default 3), `drift_scan_paths` (array of artifact patterns to include in spec-code drift analysis), `triage_daily_cap` (maximum number of findings the Tech Lead may approve or promote per calendar day, default 5).
 
 ## API Contract
 
@@ -60,9 +61,15 @@ The Tech Lead Agent's functionality is exposed through operations on the Coordin
 
 **Tech Lead analysis operations:**
 
-- `trigger_tech_lead_cycle` — Called by the Coordination Engine's scheduler or by event handlers (run failure, new findings). Parameters: cycle trigger type. Effect: assembles a SignalDigest, spawns a Tech Lead session via Session Runtime, parses the structured output, stores any generated TechnicalProposals, and triggers protocol exchanges if the output requests them. Returns: acknowledgment with the number of proposals generated.
+- `trigger_tech_lead_cycle` — Called by the Coordination Engine's scheduler or by event handlers (run failure, new findings). Parameters: cycle trigger type. Effect: assembles a SignalDigest, spawns a Tech Lead session via Session Runtime, parses the structured output, stores any generated TechnicalProposals and TriageDecisions, applies GitHub mutations for triage outcomes, and triggers protocol exchanges if the output requests them. Returns: acknowledgment with the number of proposals generated and findings triaged.
 
 - `get_technical_proposals` — Called by the PO Agent session (via context injection) and by the dashboard. Parameters: optional status filter. Returns: array of TechnicalProposals matching the filter.
+
+**Triage operations:**
+
+- `record_triage_decisions` — Called by the Coordination Engine after parsing a Tech Lead session's structured output. Parameters: array of TriageDecisions to apply. Effect: for each decision (in order, stopping at the daily cap): posts an audit comment on the GitHub issue explaining the triage outcome, then applies the appropriate label transitions, then stores the TriageDecision record and increments the TriageDailyCap counter. If the cap is reached mid-array, remaining decisions are not applied and the corresponding findings are left untriaged for the next cycle. Returns: array of applied decisions and count of deferred-to-next-cycle decisions.
+
+- `get_triage_decisions` — Called by the dashboard. Parameters: optional filters for date, decision type, or finding issue number. Returns: array of TriageDecisions matching the filters.
 
 **PO-facing operations (for protocol mediation):**
 
@@ -80,53 +87,39 @@ The Tech Lead Agent's functionality is exposed through operations on the Coordin
 
 - `execute_protocol` — Called by the Coordination Engine when a protocol trigger fires. Parameters: protocol type, initiating context (varies by protocol type). Effect: creates a ProtocolExchange, spawns agent sessions in the defined sequence, passes structured output between sessions, records each step, stores the final outcome. Returns: the completed ProtocolExchange.
 
-**Triage operations:**
-
-- `record_triage_decisions` — Called by the Coordination Engine after processing a Tech Lead session's triage output. Parameters: array of TriageDecision records produced by the session. Effect: for each decision in order, the engine (a) checks `TriageDailyCap` — if `approval_count` equals or exceeds `cap` and the decision is `approve` or `promote`, the decision is automatically converted to `defer` before processing; (b) persists the TriageDecision; (c) applies label transitions to the corresponding GitHub issue via GitHubClient; (d) posts an audit comment to the GitHub issue; (e) increments `TriageDailyCap.approval_count` when the decision is `approve` or `promote`. Returns: array of applied decisions with their final outcomes (noting any cap-forced deferrals).
-
-  Label transitions by decision:
-  - `approve`: add labels `tl-approved`, `tl-triaged`
-  - `reject`: add label `tl-triaged`, then close the issue
-  - `defer`: add labels `deferred`, `tl-triaged`
-  - `promote`: remove the existing severity label, add `promoted_to_severity` label, add `tl-approved`, `tl-triaged`
-
-  Audit comment format: A structured comment posted to the finding's GitHub issue containing the decision type, the Tech Lead's reason, and (for `promote`) the old and new severity. Posted before label changes are applied so the comment is visible even if label application fails.
-
-- `get_triage_decisions` — Called by the dashboard and by signal digest assembly. Parameters: optional date filter, optional finding issue number. Returns: array of TriageDecision records matching the filter.
-
 **Signal digest assembly operations (internal):**
 
-- `assemble_signal_digest` — Called internally before spawning a Tech Lead session. Parameters: cycle trigger type. Effect: queries all signal sources (Knowledge Service, Control Plane run state, traceability map, deferred work scan, test results, dependency audit), assembles a SignalDigest. Includes: querying GitHub via GitHubClient for issues with `review-finding` label lacking `tl-triaged` to populate `untriaged_findings`; querying TriageDailyCap for the current date to compute `triage_cap_remaining`. Returns: the assembled digest.
+- `assemble_signal_digest` — Called internally before spawning a Tech Lead session. Parameters: cycle trigger type. Effect: queries all signal sources (Knowledge Service, Control Plane run state, traceability map, deferred work scan, test results, dependency audit, GitHub Service for untriaged findings, TriageDecision store for daily cap remaining), assembles a SignalDigest. Returns: the assembled digest.
 
 ## System Boundaries
 
-**Tech Lead Agent (as a component within the Coordination Service) OWNS:** TechnicalProposal, TechnicalEnrichment, SignalDigest assembly, Tech Lead session scheduling, and proposal lifecycle management.
+**Tech Lead Agent (as a component within the Coordination Service) OWNS:** TechnicalProposal, TechnicalEnrichment, TriageDecision, TriageDailyCap, SignalDigest assembly, Tech Lead session scheduling, and proposal lifecycle management.
 
-**Tech Lead Agent IS ORCHESTRATED BY:** the Coordination Engine, which spawns Tech Lead sessions on schedule or on events, mediates protocol exchanges, and manages the proposal lifecycle state machine.
+**Tech Lead Agent IS ORCHESTRATED BY:** the Coordination Engine, which spawns Tech Lead sessions on schedule or on events, mediates protocol exchanges, applies GitHub mutations for triage outcomes (label transitions and audit comments), and manages the proposal lifecycle state machine.
 
 **Tech Lead Agent READS FROM:**
 - Knowledge Service — review findings (record type: `review_finding`), technical pitfalls, root-cause tag queries via the existing "Match records" and "Query by root cause" APIs.
+- GitHub Service — untriaged findings (issues with `review-finding` label and without `tl-triaged` label), for the `untriaged_findings` signal section.
 - Control Plane — run completion records with failure details.
 - Traceability map — spec-to-code mappings for drift detection.
 - Codebase — deferred work marker counts (deterministic scan).
 - Test infrastructure — test results and coverage trends.
 - Dependency metadata — package versions and security advisories (deterministic audit).
-- GitHub Issues — untriaged review findings (issues with `review-finding` but lacking `tl-triaged`), queried via GitHubClient during signal digest assembly. The Tech Lead session does not call GitHub directly — the digest assembly pre-fetches this data.
 
-**Tech Lead Agent WRITES TO (all writes mediated by the Coordination Engine):**
+**Tech Lead Agent WRITES TO:**
 - Knowledge Service — distilled pitfalls from retrospectives (record type: `technical_pitfall`, origin: `retrospective-tech-lead`) via the existing "Store record" API.
-- Coordination Service — TechnicalProposals, TechnicalEnrichments, TriageDecision records, TriageDailyCap updates.
-- GitHub Issues — label transitions and audit comments applied by `record_triage_decisions` via GitHubClient. The Tech Lead session does not call GitHub directly — it produces a structured TriageDecision array, and the Coordination Engine applies all GitHub mutations after the session completes.
+- Coordination Service — TechnicalProposals, TechnicalEnrichments, TriageDecisions, TriageDailyCap records.
+- GitHub Service — triage audit comments and label transitions, applied by the Coordination Engine after each Tech Lead session completes (not directly by the session itself).
+
+**Triage handoff boundary:** The Tech Lead's triage authority ends at the `tl-approved` label. A finding with `tl-approved` + `tl-triaged` has cleared the Tech Lead gate and enters the PO evaluation queue. The PO Agent (ARCH-AC-PRODUCT-OWNER) reads `tl-approved` findings on its own cycle and decides whether to forward them to the operator as work requests. The Tech Lead never creates work requests and never interacts with the PO's approval flow. The `tl-approved` label is the complete and sole handoff mechanism between the two agents.
 
 **Tech Lead Agent PARTICIPATES IN:** all six L1 protocols, orchestrated by the Coordination Engine's ProtocolExecutor. The Tech Lead never directly communicates with the PO Agent — all exchange is mediated by the Coordination Engine.
 
-**Relationship to ARCH-AC-COORDINATION:** The Tech Lead is a new agent type within the Coordination Service's agent pool. The Coordination Service gains the ProtocolExecutor responsibility and the TechnicalProposal/TechnicalEnrichment data models. The existing PO cycle in ARCH-AC-COORDINATION is extended — the PO now also evaluates TechnicalProposals during its cycle.
+**Relationship to ARCH-AC-COORDINATION:** The Tech Lead is a new agent type within the Coordination Service's agent pool. The Coordination Service gains the ProtocolExecutor responsibility and the TechnicalProposal/TechnicalEnrichment/TriageDecision/TriageDailyCap data models. The existing PO cycle in ARCH-AC-COORDINATION is extended — the PO now also evaluates TechnicalProposals and `tl-approved` findings during its cycle.
 
 **Relationship to ARCH-AC-KNOWLEDGE:** The Tech Lead consumes and produces KnowledgeRecords through the Knowledge Service's existing APIs. No changes to the Knowledge Service are required — the record types (`review_finding`, `technical_pitfall`) and consumer sets (technical leadership sessions) are already defined in ARCH-AC-KNOWLEDGE.
 
 **Relationship to ARCH-AC-SESSION-RUNTIME:** Tech Lead sessions are spawned through Session Runtime like all other agent types. A new AgentConfig is registered for the `tech_lead` session type with appropriate model tier, timeout, budget cap, and containment rules. The containment rules include `.specify/` as a prohibited path pattern, structurally preventing the Tech Lead from modifying specs (see Operational Constraints).
-
-**Handoff boundary to ARCH-AC-PRODUCT-OWNER (triage output):** The Tech Lead's triage process terminates at label application. Once a finding is labeled `tl-approved` (and `tl-triaged`), it exits the Tech Lead's responsibility domain. The PO agent (ARCH-AC-PRODUCT-OWNER) reads `tl-approved` findings as part of its backlog signal during its own cycle and decides whether to include them in work proposals. The Tech Lead does not create work requests for approved findings and does not interact with the PO approval process. The `tl-approved` label is the boundary marker: it is set by ARCH-AC-TECH-LEAD and consumed by ARCH-AC-PRODUCT-OWNER.
 
 ## Event Flows
 
@@ -134,18 +127,34 @@ The Tech Lead Agent's functionality is exposed through operations on the Coordin
 
 1. The Coordination Engine's scheduler fires the Tech Lead tick (default: every 2 hours).
 2. The engine calls `assemble_signal_digest` with trigger type `scheduled`.
-3. The digest assembly queries all signal sources: Knowledge Service for review findings and root-cause patterns, Control Plane for recent run outcomes, traceability map for drift indicators, codebase scan for deferred work density, test infrastructure for health metrics, dependency audit for risks. It also loads active TechnicalProposals and prior rejections for context.
+3. The digest assembly queries all signal sources: Knowledge Service for review findings and root-cause patterns, GitHub Service for untriaged findings, TriageDecision store for today's approval count (to compute `triage_cap_remaining`), Control Plane for recent run outcomes, traceability map for drift indicators, codebase scan for deferred work density, test infrastructure for health metrics, dependency audit for risks. It also loads active TechnicalProposals and prior rejections for context.
 4. The engine spawns a Tech Lead session via Session Runtime with the signal digest as context.
-5. The Tech Lead session analyzes the digest and produces structured output: zero or more TechnicalProposals and optional protocol trigger requests.
-6. The engine parses the output, stores TechnicalProposals, and enqueues any requested protocol triggers.
+5. The Tech Lead session analyzes the digest, produces triage decisions for untriaged findings (up to `triage_cap_remaining`), and produces structured output: zero or more TriageDecisions, zero or more TechnicalProposals, and optional protocol trigger requests.
+6. The engine parses the output, calls `record_triage_decisions` to apply triage outcomes, stores TechnicalProposals, and enqueues any requested protocol triggers.
 
 **Event-driven analysis flow:**
 
 1. An event occurs: a run fails, new review findings are stored, or a retrospective completes.
 2. The Coordination Engine detects the event and fires `trigger_tech_lead_cycle` with the appropriate trigger type.
-3. The digest assembly includes event-specific emphasis (e.g., for `run_failure`, the failing run's details are highlighted).
+3. The digest assembly includes event-specific emphasis (e.g., for `run_failure`, the failing run's details are highlighted; for `new_findings`, the new untriaged findings are emphasized).
 4. The flow continues as in steps 4-6 of the scheduled flow.
 5. Event-driven cycles are debounced — if multiple events fire within a configurable window (default: 5 minutes), they are batched into a single cycle.
+
+**Finding triage event flow:**
+
+1. The signal digest includes `untriaged_findings` (GitHub issues with `review-finding` but without `tl-triaged`) and `triage_cap_remaining` (approvals remaining today).
+2. The Tech Lead session evaluates each untriaged finding for validity, proportionality, and impact. It produces an ordered array of TriageDecision outputs, stopping when the array length equals `triage_cap_remaining` for approve and promote decisions. Reject and defer decisions do not consume cap.
+3. The Coordination Engine receives the TriageDecision array and calls `record_triage_decisions`.
+4. For each TriageDecision in order, the Coordination Engine:
+   a. Posts an audit comment on the GitHub issue with the decision and reason. If the comment cannot be posted, processing stops for this finding and it remains untriaged.
+   b. Applies label transitions based on the decision:
+      - **approve**: adds `tl-approved` and `tl-triaged` labels.
+      - **reject**: adds `tl-triaged` label, then closes the issue.
+      - **defer**: adds `deferred` and `tl-triaged` labels.
+      - **promote**: replaces the current severity label with the promoted severity, then adds `tl-approved` and `tl-triaged` labels.
+   c. Stores the TriageDecision record and increments the TriageDailyCap approved count (for approve and promote decisions only).
+5. Findings with `tl-approved` + `tl-triaged` are now visible to the PO Agent on its next cycle for priority evaluation.
+6. If `triage_cap_remaining` was zero at cycle start, triage phase is skipped entirely. The Tech Lead may still generate TechnicalProposals and participate in protocols.
 
 **Tech Lead proposal flow through PO:**
 
@@ -226,24 +235,12 @@ Chain definitions are registered in the ProtocolExecutor's configuration alongsi
 2. Non-terminal proposals are transitioned to `expired`.
 3. Expired proposals do not appear in the PO's evaluation context or the operator's dashboard active view.
 
-**Finding triage flow:**
-
-1. Signal digest assembly queries GitHub via GitHubClient for issues with `review-finding` label lacking `tl-triaged`. These are injected as `untriaged_findings` into the SignalDigest alongside the current `triage_cap_remaining` value (cap minus today's approval count).
-2. The Coordination Engine spawns a Tech Lead session with the assembled digest (which includes untriaged findings and cap state).
-3. The Tech Lead session evaluates each untriaged finding for validity, proportionality, and impact. It produces a TriageDecision for each, stopping new approvals once its internal count of approvals in this session would exceed `triage_cap_remaining`. Findings beyond the cap are assigned `defer` decisions.
-4. The session returns a structured output containing the TriageDecision array.
-5. The Coordination Engine calls `record_triage_decisions` to process the array sequentially:
-   - For each decision, it re-checks the TriageDailyCap to guard against concurrent sessions (the session-level cap check is advisory; the engine enforces the cap authoritatively at write time).
-   - It persists the TriageDecision record.
-   - It posts an audit comment to the GitHub issue before applying any label changes.
-   - It applies the label transition for the decision type (see `record_triage_decisions` in API Contract).
-   - For `approve` and `promote` decisions, it increments `TriageDailyCap.approval_count`.
-6. Findings labeled `tl-approved` are now visible to the PO agent on its next cycle via the backlog signal (issues with `tl-approved` label lacking a work request).
-
 **Metrics computation flow:**
 
 1. Periodically (configurable, aligned with the retrospective cadence), the Coordination Engine computes Tech Lead effectiveness metrics from existing data stores:
    - **Finding-to-fix rate:** KnowledgeRecords of type `review_finding` that have corresponding completed work requests, divided by total findings.
+   - **Triage throughput:** TriageDecisions per cycle, broken down by decision type (approve, reject, defer, promote), measured over a rolling window.
+   - **Triage accuracy proxy:** `tl-approved` findings that are subsequently rejected by the PO or operator, as a fraction of total approved findings.
    - **Spec-code drift reduction:** drift items in the SignalDigest that were present in a prior cycle but absent in the current one, counted per cycle.
    - **Failure pattern detection speed:** timestamp delta between the first run failure matching a pattern and the TechnicalProposal creation for that pattern.
    - **Repeat gotcha rate:** KnowledgeRecords sharing a root-cause tag, divided by total records, measured over a rolling window.
@@ -263,21 +260,29 @@ The Tech Lead Agent operates under the following hard boundaries, derived from L
 
 4. **Technical proposals always flow through PO for priority assessment before reaching operator.** No TechnicalProposal may transition to `pending_operator` without a PO verdict. The Coordination Engine enforces this by requiring `submit_po_verdict_on_technical_proposal` before any proposal reaches operator-visible status.
 
-5. **Triage does not bypass the PO approval gate.** A finding labeled `tl-approved` requires PO sign-off before becoming a work request. The Tech Lead's triage output is a label transition only — it never creates issues, pull requests, or work requests on behalf of approved findings. The Coordination Engine enforces this by treating `tl-approved` as a signal for the PO's backlog signal, not as a directive to create work.
+5. **Triage is capped at a configurable daily maximum.** The `triage_daily_cap` setting (default: 5) limits the number of findings the Tech Lead may approve or promote in a single calendar day. Reject and defer decisions do not count against the cap. The cap prevents capacity runaway from large batches of findings. The Coordination Engine enforces the cap via optimistic locking on the TriageDailyCap record before applying any approve or promote decision.
 
-6. **Triage approvals are capped per calendar day.** The daily cap (default: 5, configurable via `triage_daily_cap`) is enforced by the Coordination Engine at write time via TriageDailyCap. The session is informed of remaining capacity via `triage_cap_remaining` in the signal digest but the engine re-checks at each write to prevent races. Once the daily cap is reached, all remaining untriaged findings are deferred rather than approved.
+6. **Audit comment must precede label transitions.** For every triage decision, the audit comment is posted on the GitHub issue before any label changes are applied. If the comment fails, no label changes are applied for that finding. This ensures every label transition has a traceable justification visible on the issue.
 
-7. **All triage decisions produce audit comments.** Every TriageDecision results in a comment posted to the corresponding GitHub issue before label transitions are applied. The comment records the decision type, the reason, and (for promotions) the severity change. This is a hard requirement — if the comment cannot be posted, the decision is rolled back rather than applied silently.
+7. **Triage does not bypass the PO approval gate.** A finding with `tl-approved` + `tl-triaged` has passed the Tech Lead's technical gate but has not been approved for work. The PO Agent must still evaluate `tl-approved` findings and decide whether to forward them to the operator. The Tech Lead never creates work requests or GitHub issues for findings it approves.
 
-8. **Configurable defaults.** The following operational parameters are configurable via GlobalSettings (ARCH-AC-COORDINATION): analysis schedule (`tech_lead_interval`, default 7200 seconds), proposal expiry (`tech_lead_proposal_expiry`, default 7 days), recurring finding threshold (`recurring_finding_threshold`, default 3), drift scan paths (`drift_scan_paths`), event debounce window (default 5 minutes), and triage daily cap (`triage_daily_cap`, default 5).
+8. **Triage decisions are recorded and immutable.** Every triage outcome is stored as a TriageDecision record. A finding already triaged in a given cycle is not re-evaluated in the same cycle. Once stored, a TriageDecision is not modified — corrections require a new triage decision in a subsequent cycle (with the prior decision visible in the issue's comment history).
+
+9. **Configurable defaults.** The following operational parameters are configurable via GlobalSettings (ARCH-AC-COORDINATION): analysis schedule (`tech_lead_interval`, default 7200 seconds), proposal expiry (`tech_lead_proposal_expiry`, default 7 days), recurring finding threshold (`recurring_finding_threshold`, default 3), drift scan paths (`drift_scan_paths`), event debounce window (default 5 minutes), and triage daily cap (`triage_daily_cap`, default 5).
 
 ## Error Handling
 
-**Tech Lead session failure:** The session is treated like any other agent session failure in the Coordination Service. The WorkerClaim is set to `failed`. The Coordination Engine logs the failure and retries on the next scheduled cycle. No proposals are generated from a failed session.
+**Tech Lead session failure:** The session is treated like any other agent session failure in the Coordination Service. The WorkerClaim is set to `failed`. The Coordination Engine logs the failure and retries on the next scheduled cycle. No proposals or triage decisions are generated from a failed session.
 
-**Signal digest assembly failure (partial):** If one signal source is unavailable (e.g., dependency audit times out), the digest is assembled with the available signals and a marker indicating which sources are missing. The Tech Lead session receives the partial digest and can still analyze available signals. The missing source is logged for operator visibility.
+**Signal digest assembly failure (partial):** If one signal source is unavailable (e.g., dependency audit times out, GitHub Service query for untriaged findings fails), the digest is assembled with the available signals and a marker indicating which sources are missing. The Tech Lead session receives the partial digest and can still analyze available signals and perform triage on any findings that were successfully loaded. The missing source is logged for operator visibility.
 
 **Signal digest assembly failure (total):** If critical sources (Knowledge Service, Control Plane) are both unreachable, the cycle is skipped and retried on the next tick. Logged as a warning.
+
+**Triage audit comment failure:** If the GitHub Service cannot post the audit comment for a triage decision (network error, rate limit, permission error), no label transitions are applied for that finding. The finding remains untriaged (`tl-triaged` not applied) and will be re-evaluated on the next Tech Lead cycle. The error is logged with the finding issue number and reason. Cap consumption does not occur if the comment fails.
+
+**Triage label transition failure:** If label transitions fail after the audit comment has been successfully posted, the Coordination Engine logs the failure with the finding issue number and which labels could not be applied. On the next cycle, the digest assembly detects findings with an audit comment from the prior cycle but without `tl-triaged` — these are flagged for label re-application without re-posting the audit comment.
+
+**Triage cap race condition:** If two concurrent Tech Lead sessions (e.g., a scheduled session and an event-driven session that fired within the debounce window) both attempt to increment the TriageDailyCap at the boundary, optimistic locking on the TriageDailyCap record causes one session's update to fail. The failing session's remaining approve/promote decisions are not applied. Those findings remain untriaged and will be picked up on the next cycle.
 
 **PO unavailable for proposal evaluation:** TechnicalProposals remain in `generated` status. On the PO's next cycle, they are included for evaluation. If proposals approach their expiry timestamp without PO evaluation, they are flagged on the dashboard under "Needs Attention."
 
@@ -290,11 +295,3 @@ The Tech Lead Agent operates under the following hard boundaries, derived from L
 **Duplicate proposal detection:** Before storing a new TechnicalProposal, the Coordination Engine checks for active proposals with overlapping affected areas and the same proposal type. If a duplicate is detected, the existing proposal's evidence is updated rather than creating a new proposal. This prevents proposal churn from repeated analysis cycles identifying the same issue.
 
 **Metrics computation failure:** Metrics are advisory. If computation fails (data unavailable, query timeout), the failure is logged and the metrics are skipped for that cycle. Previous metric values remain on the dashboard. No escalation needed.
-
-**Triage audit comment failure:** If posting the audit comment to a GitHub issue fails, the Coordination Engine does not apply the label transition for that finding. The TriageDecision record is persisted with a `comment_failed` flag and the finding remains untriaged. The failure is logged and surfaced on the dashboard under "Needs Attention." The next triage cycle will re-attempt the comment and label transition.
-
-**GitHub label transition failure:** If applying labels to a GitHub issue fails after the audit comment has been posted, the Coordination Engine marks the TriageDecision as `label_failed` and logs the partial state. The next triage cycle will detect the inconsistency (comment posted but no `tl-triaged` label) and re-attempt the label application without re-posting the comment. This prevents duplicate audit comments.
-
-**TriageDailyCap race condition:** Two concurrent triage events (e.g., a scheduled cycle and an event-driven cycle firing simultaneously) could both read the same `approval_count`. The Coordination Engine resolves this by using optimistic locking on TriageDailyCap writes: if the expected count at write time does not match the stored count, the write is retried with the updated count. Approvals that would exceed the cap after accounting for concurrent writes are converted to defers.
-
-**GitHub unavailable during digest assembly:** If the GitHubClient cannot be reached during signal digest assembly, the `untriaged_findings` section is populated with an empty array and `triage_cap_remaining` reflects the current TriageDailyCap value. The assembled digest is marked as having a missing source. The Tech Lead session can still run its analysis cycle (signal analysis, proposals) but skips the triage phase, as it has no untriaged findings to evaluate. Logged for operator visibility.

@@ -35,6 +35,8 @@ export class GotchaStore {
   private mutex: Promise<void> = Promise.resolve();
 
   private archivePath: string;
+  private recordsCache: Gotcha[] | null = null;
+  private logEntryCount: number | null = null;
 
   constructor(private path: string) {
     this.archivePath = path.replace(/\.jsonl$/, '-archive.jsonl');
@@ -64,12 +66,15 @@ export class GotchaStore {
           jaccardSimilarity(tokenize(g.description), markerTokens) > 0.7,
         );
         if (duplicate) {
-          duplicate.hitCount++;
+          let updated: Gotcha = { ...duplicate, hitCount: duplicate.hitCount + 1 };
           if (originType === 'operator' && duplicate.originType !== 'operator') {
-            duplicate.originType = 'operator';
-            duplicate.priorityTier = 'elevated';
+            updated = {
+              ...updated,
+              originType: 'operator',
+              priorityTier: 'elevated',
+            };
           }
-          await appendJsonl(this.path, duplicate);
+          await this.appendLatestGotcha(updated);
         } else {
           const gotcha: Gotcha = {
             id: randomUUID(),
@@ -84,8 +89,7 @@ export class GotchaStore {
             originType,
             priorityTier: originType === 'operator' ? 'elevated' : 'normal',
           };
-          await appendJsonl(this.path, gotcha);
-          existing.push(gotcha);
+          await this.appendLatestGotcha(gotcha);
           stored++;
         }
       }
@@ -103,16 +107,19 @@ export class GotchaStore {
           artifactPaths.some((path) => minimatch(path, pattern, { dot: true })),
         ));
       // Increment hit counts for each matched gotcha (ARCH-AC-KNOWLEDGE §match-gotchas)
-      for (const gotcha of matched) {
-        gotcha.hitCount++;
-        await appendJsonl(this.path, gotcha);
+      const updatedMatched = matched.map(gotcha => ({
+        ...gotcha,
+        hitCount: gotcha.hitCount + 1,
+      }));
+      for (const gotcha of updatedMatched) {
+        await this.appendLatestGotcha(gotcha);
       }
       await this.compactIfNeeded();
-      matched.sort((a, b) => {
+      updatedMatched.sort((a, b) => {
         const tierOrder = (t: string) => t === 'elevated' ? 1 : 0;
         return tierOrder(b.priorityTier) - tierOrder(a.priorityTier) || b.hitCount - a.hitCount;
       });
-      return matched;
+      return this.cloneGotchas(updatedMatched);
     });
   }
 
@@ -121,8 +128,10 @@ export class GotchaStore {
       const all = await this.loadAll();
       const gotcha = all.find((g) => g.id === id);
       if (gotcha) {
-        gotcha.hitCount++;
-        await appendJsonl(this.path, gotcha);
+        await this.appendLatestGotcha({
+          ...gotcha,
+          hitCount: gotcha.hitCount + 1,
+        });
         await this.compactIfNeeded();
       }
     });
@@ -132,7 +141,7 @@ export class GotchaStore {
     return this.withMutex(async () => {
       const all = await this.loadAll();
       const now = Date.now();
-      return all.filter((g) => {
+      return this.cloneGotchas(all.filter((g) => {
         if (g.promoted || g.archived) return false;
         const age = (now - new Date(g.createdAt).getTime()) / (1000 * 60 * 60 * 24);
         if (age > maxAgeDays) return false;
@@ -142,7 +151,7 @@ export class GotchaStore {
         }
         const effectiveThreshold = g.priorityTier === 'elevated' ? Math.floor(threshold / 2) : threshold;
         return g.hitCount >= effectiveThreshold;
-      });
+      }));
     });
   }
 
@@ -151,8 +160,10 @@ export class GotchaStore {
       const all = await this.loadAll();
       const gotcha = all.find((g) => g.id === id);
       if (gotcha) {
-        gotcha.promoted = true;
-        await appendJsonl(this.path, gotcha);
+        await this.appendLatestGotcha({
+          ...gotcha,
+          promoted: true,
+        });
         await this.compactIfNeeded();
       }
     });
@@ -163,8 +174,10 @@ export class GotchaStore {
       const all = await this.loadAll();
       const gotcha = all.find((g) => g.id === id);
       if (gotcha) {
-        gotcha.reviewedAt = new Date().toISOString();
-        await appendJsonl(this.path, gotcha);
+        await this.appendLatestGotcha({
+          ...gotcha,
+          reviewedAt: new Date().toISOString(),
+        });
         await this.compactIfNeeded();
       }
     });
@@ -175,8 +188,10 @@ export class GotchaStore {
       const all = await this.loadAll();
       const gotcha = all.find((g) => g.id === id);
       if (gotcha) {
-        gotcha.archived = true;
-        await appendJsonl(this.path, gotcha);
+        await this.appendLatestGotcha({
+          ...gotcha,
+          archived: true,
+        });
         await this.compactIfNeeded();
       }
     });
@@ -193,8 +208,10 @@ export class GotchaStore {
         if (g.originType === 'operator') continue;
         const age = (now - new Date(g.createdAt).getTime()) / (1000 * 60 * 60 * 24);
         if (age > maxAgeDays && g.hitCount < minHitCount) {
-          g.archived = true;
-          await appendJsonl(this.path, g);
+          await this.appendLatestGotcha({
+            ...g,
+            archived: true,
+          });
           toArchive.push(g.id);
         }
       }
@@ -217,25 +234,55 @@ export class GotchaStore {
       await appendJsonl(this.archivePath, g);
     }
     await writeTextSafe(this.path, active.map((g) => JSON.stringify(g)).join('\n') + '\n');
+    this.recordsCache = this.cloneGotchas(active);
+    this.logEntryCount = active.length;
   }
 
   /** Called from within mutex-holding methods — no lock needed. */
   private async compactIfNeeded(): Promise<void> {
-    const entries = await readJsonl<Gotcha>(this.path);
-    const unique = new Set(entries.map((e) => e.id)).size;
-    if (entries.length >= 50 && entries.length >= unique * 2) {
+    const all = await this.loadAll();
+    const entries = this.logEntryCount ?? all.length;
+    if (entries >= 50 && entries >= all.length * 2) {
       await this.doCompact();
     }
   }
 
   private async loadAll(): Promise<Gotcha[]> {
+    if (this.recordsCache) return this.recordsCache;
     const entries = await readJsonl<Gotcha>(this.path);
     // Last version of each ID wins
     const latest = new Map<string, Gotcha>();
     for (const entry of entries) {
       latest.set(entry.id, entry);
     }
-    return [...latest.values()];
+    this.recordsCache = this.cloneGotchas([...latest.values()]);
+    this.logEntryCount = entries.length;
+    return this.recordsCache;
+  }
+
+  private cloneGotcha(gotcha: Gotcha): Gotcha {
+    return {
+      ...gotcha,
+      artifactPatterns: [...gotcha.artifactPatterns],
+    };
+  }
+
+  private cloneGotchas(gotchas: Gotcha[]): Gotcha[] {
+    return gotchas.map(gotcha => this.cloneGotcha(gotcha));
+  }
+
+  private async appendLatestGotcha(gotcha: Gotcha): Promise<void> {
+    await appendJsonl(this.path, gotcha);
+    this.logEntryCount = (this.logEntryCount ?? 0) + 1;
+    if (!this.recordsCache) return;
+
+    const latest = this.cloneGotcha(gotcha);
+    const index = this.recordsCache.findIndex(g => g.id === latest.id);
+    if (index >= 0) {
+      this.recordsCache[index] = latest;
+    } else {
+      this.recordsCache.push(latest);
+    }
   }
 
   private patternsMatch(a: string[], b: string[]): boolean {

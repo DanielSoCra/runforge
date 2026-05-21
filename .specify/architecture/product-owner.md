@@ -99,6 +99,9 @@ The PO agent is a session-based component — it has no persistent process. The 
 - Auto-approves its own proposals.
 - Approves findings beyond the daily cap (Coordination Service enforces the cap).
 
+**Operator bypass — `auto-fix-approved` label (L1 scenario: Operator overrides triage via auto-fix-approved):**
+The operator may manually label a finding `auto-fix-approved` to bypass the TL/PO triage lifecycle entirely. Work Detection (defined in ARCH-AC-COORDINATION) treats `auto-fix-approved` findings as eligible for bug-fix work regardless of whether TL triage or PO approval has occurred. This preserves the operator's authority to fast-track urgent fixes. The PO agent is not involved in this path — it is a Work Detection boundary exception. The PO's finding approval cap and daily quota do not apply to `auto-fix-approved` findings.
+
 **Coordination Service responsibilities:**
 - Spawns PO daemon sessions on schedule and on protocol triggers.
 - Spawns PO interactive sessions on operator request.

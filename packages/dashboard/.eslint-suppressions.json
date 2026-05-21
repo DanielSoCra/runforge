@@ -1,0 +1,17 @@
+{
+  "components/run-table.test.tsx": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 6
+    }
+  },
+  "components/stats-cards.tsx": {
+    "react/no-unescaped-entities": {
+      "count": 1
+    }
+  },
+  "lib/github-api.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  }
+}

@@ -7,24 +7,29 @@ import { collectSignals } from './signals.js';
 
 // Mock child_process.execSync
 vi.mock('node:child_process', () => ({
-  execSync: vi.fn(() => 'abc1234 fix: some commit\ndef5678 feat: another commit\n'),
+  execSync: vi.fn(
+    () => 'abc1234 fix: some commit\ndef5678 feat: another commit\n',
+  ),
 }));
 
-function createMockSupabase(overrides?: {
+function createMockRunSource(overrides?: {
   runsData?: Record<string, unknown>[] | null;
-  runsError?: { message: string } | null;
+  runsError?: Error | null;
 }) {
   const runsData = overrides?.runsData ?? [
-    { id: 'run-1', issue_number: 42, outcome: 'success', updated_at: '2026-03-22T10:00:00Z' },
+    {
+      id: 'run-1',
+      issue_number: 42,
+      outcome: 'success',
+      updated_at: '2026-03-22T10:00:00Z',
+    },
   ];
   const runsError = overrides?.runsError ?? null;
 
   return {
-    from: vi.fn(() => ({
-      select: vi.fn(() => ({
-        gte: vi.fn(() => Promise.resolve({ data: runsData, error: runsError })),
-      })),
-    })),
+    listRunsSince: vi.fn(() =>
+      runsError ? Promise.reject(runsError) : Promise.resolve(runsData ?? []),
+    ),
   } as unknown as Parameters<typeof collectSignals>[0];
 }
 
@@ -50,8 +55,12 @@ describe('collectSignals', () => {
       json: () => Promise.resolve({ state: 'running', activeRuns: 2 }),
     }) as unknown as typeof fetch;
 
-    const supabase = createMockSupabase();
-    const result = await collectSignals(supabase, 'http://localhost:3847', '2026-03-22T00:00:00Z');
+    const runSource = createMockRunSource();
+    const result = await collectSignals(
+      runSource,
+      'http://localhost:3847',
+      '2026-03-22T00:00:00Z',
+    );
 
     expect(result.runs).toHaveLength(1);
     expect(result.runs[0]).toMatchObject({ id: 'run-1' });
@@ -61,18 +70,36 @@ describe('collectSignals', () => {
     expect(result.gaps).toHaveLength(0);
   });
 
+  it('asks the run source for runs since the previous briefing timestamp (#398)', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ state: 'running' }),
+    }) as unknown as typeof fetch;
+
+    const runSource = createMockRunSource({ runsData: [] });
+    const since = '2026-03-22T00:00:00Z';
+
+    await collectSignals(runSource, 'http://localhost:3847', since);
+
+    expect(runSource.listRunsSince).toHaveBeenCalledWith(since);
+  });
+
   it('handles runs query failure with gap note', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ state: 'running' }),
     }) as unknown as typeof fetch;
 
-    const supabase = createMockSupabase({
+    const runSource = createMockRunSource({
       runsData: null,
-      runsError: { message: 'connection refused' },
+      runsError: new Error('connection refused'),
     });
 
-    const result = await collectSignals(supabase, 'http://localhost:3847', '2026-03-22T00:00:00Z');
+    const result = await collectSignals(
+      runSource,
+      'http://localhost:3847',
+      '2026-03-22T00:00:00Z',
+    );
 
     expect(result.runs).toHaveLength(0);
     expect(result.gaps).toContainEqual(expect.stringContaining('runs:'));
@@ -82,10 +109,16 @@ describe('collectSignals', () => {
   });
 
   it('handles daemon fetch failure with gap note', async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED')) as unknown as typeof fetch;
+    globalThis.fetch = vi
+      .fn()
+      .mockRejectedValue(new Error('ECONNREFUSED')) as unknown as typeof fetch;
 
-    const supabase = createMockSupabase();
-    const result = await collectSignals(supabase, 'http://localhost:3847', '2026-03-22T00:00:00Z');
+    const runSource = createMockRunSource();
+    const result = await collectSignals(
+      runSource,
+      'http://localhost:3847',
+      '2026-03-22T00:00:00Z',
+    );
 
     // Daemon returns null on fetch failure (caught internally), not a rejection
     expect(result.daemonStatus).toBeNull();
@@ -106,8 +139,12 @@ describe('collectSignals', () => {
       json: () => Promise.resolve({ state: 'running' }),
     }) as unknown as typeof fetch;
 
-    const supabase = createMockSupabase();
-    const result = await collectSignals(supabase, 'http://localhost:3847', '2026-03-22T00:00:00Z');
+    const runSource = createMockRunSource();
+    const result = await collectSignals(
+      runSource,
+      'http://localhost:3847',
+      '2026-03-22T00:00:00Z',
+    );
 
     expect(result.gitLog).toHaveLength(0);
     expect(result.gaps).toContainEqual(expect.stringContaining('git:'));
@@ -122,14 +159,20 @@ describe('collectSignals', () => {
       throw new Error('not a git repo');
     });
 
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error('ECONNREFUSED')) as unknown as typeof fetch;
+    globalThis.fetch = vi
+      .fn()
+      .mockRejectedValue(new Error('ECONNREFUSED')) as unknown as typeof fetch;
 
-    const supabase = createMockSupabase({
+    const runSource = createMockRunSource({
       runsData: null,
-      runsError: { message: 'timeout' },
+      runsError: new Error('timeout'),
     });
 
-    const result = await collectSignals(supabase, 'http://localhost:3847', '2026-03-22T00:00:00Z');
+    const result = await collectSignals(
+      runSource,
+      'http://localhost:3847',
+      '2026-03-22T00:00:00Z',
+    );
 
     expect(result.runs).toHaveLength(0);
     expect(result.daemonStatus).toBeNull();

@@ -58,16 +58,16 @@ describe('FSM', () => {
   describe('bug pipeline', () => {
     const table = getPipeline('bug');
 
-    it('detect → success → diagnose (#48)', () => {
-      expect(transition(table, 'detect', 'success')?.next).toBe('diagnose');
+    it('detect → success → implement (no diagnose phase — #440)', () => {
+      expect(transition(table, 'detect', 'success')?.next).toBe('implement');
     });
 
-    it('diagnose → success → implement (#48)', () => {
-      expect(transition(table, 'diagnose', 'success')?.next).toBe('implement');
+    it('detect → failure → stuck', () => {
+      expect(transition(table, 'detect', 'failure')?.next).toBe('stuck');
     });
 
-    it('diagnose → failure → stuck (#48)', () => {
-      expect(transition(table, 'diagnose', 'failure')?.next).toBe('stuck');
+    it('diagnose phase does not exist in bug pipeline (#440)', () => {
+      expect(transition(table, 'diagnose', 'success')).toBeUndefined();
     });
 
     it('review → success → integrate (skip holdout)', () => {
@@ -80,6 +80,28 @@ describe('FSM', () => {
 
     it('report → failure → stuck (#107)', () => {
       expect(transition(table, 'report', 'failure')?.next).toBe('stuck');
+    });
+  });
+
+  describe('holdout diagnosis routing (#441)', () => {
+    it('feature: holdout → failure → implement (Type A fix cycle)', () => {
+      const table = getPipeline('feature');
+      expect(transition(table, 'holdout', 'failure')?.next).toBe('implement');
+    });
+
+    it('feature: holdout → escalated → stuck (Type B/C or diagnosis failure)', () => {
+      const table = getPipeline('feature');
+      expect(transition(table, 'holdout', 'escalated')?.next).toBe('stuck');
+    });
+
+    it('feature-simple: holdout → failure → implement (Type A fix cycle)', () => {
+      const table = getPipeline('feature-simple');
+      expect(transition(table, 'holdout', 'failure')?.next).toBe('implement');
+    });
+
+    it('feature-simple: holdout → escalated → stuck (Type B/C or diagnosis failure)', () => {
+      const table = getPipeline('feature-simple');
+      expect(transition(table, 'holdout', 'escalated')?.next).toBe('stuck');
     });
   });
 

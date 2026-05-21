@@ -4,21 +4,31 @@ import { writeFileSync, mkdirSync, mkdtempSync, unlinkSync, existsSync, readFile
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { ok, err, type Result } from '../../lib/result.js';
-import type { AgentDefinition, SessionContext, SessionResult, ExitStatus, PitfallMarker } from '../../types.js';
+import type { AgentDefinition, SessionContext, SessionResult, ExitStatus, PitfallMarker, DirectoryScope, ProviderDefinition } from '../../types.js';
 import type { ContainmentPolicy } from '../containment-hooks.js';
 import type { ProviderAdapter } from './types.js';
 import type { McpConfig } from '../plugin-injection.js';
 import { generateContainmentScript } from '../generate-containment-script.js';
 import { generateTimeoutHookScript } from '../timeout-hook-script.js';
 import { SessionError } from '../session-error.js';
+import { generateScopeHookScript, makeCliPermissionDenyEntries } from '../scope-enforcement.js';
 
 export class CliAdapter implements ProviderAdapter {
-  buildArgs(def: AgentDefinition, prompt: string, jsonSchema?: string): string[] {
+  buildArgs(
+    def: AgentDefinition,
+    prompt: string,
+    jsonSchema?: string,
+    provider?: ProviderDefinition,
+  ): string[] {
     const args = [
       '-p', prompt,
       '--output-format', 'json',
       '--max-turns', String(def.maxTurns),
     ];
+    const model = provider?.model ?? def.modelOverride;
+    if (model) {
+      args.push('--model', model);
+    }
     if (def.allowedTools.length > 0) {
       args.push('--allowedTools', def.allowedTools.join(','));
     }
@@ -28,7 +38,7 @@ export class CliAdapter implements ProviderAdapter {
     return args;
   }
 
-  buildEnv(extra?: Record<string, string>): Record<string, string> {
+  buildEnv(extra?: Record<string, string>, provider?: ProviderDefinition): Record<string, string> {
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? '/usr/bin:/bin',
       HOME: process.env.HOME ?? '/tmp',
@@ -49,6 +59,7 @@ export class CliAdapter implements ProviderAdapter {
     for (const key of passthrough) {
       if (process.env[key]) env[key] = process.env[key];
     }
+    if (provider?.env) Object.assign(env, provider.env);
     if (extra) Object.assign(env, extra);
     return env;
   }
@@ -95,6 +106,7 @@ export class CliAdapter implements ProviderAdapter {
     timeoutMs: number,
     sessionStartTime?: number,
     mcpConfigs?: McpConfig[],
+    directoryScope?: DirectoryScope,
   ): { scriptPaths: string[]; settingsPath: string; markerPath?: string } {
     const now = sessionStartTime ?? Date.now();
     const scriptPaths: string[] = [];
@@ -108,6 +120,25 @@ export class CliAdapter implements ProviderAdapter {
       preToolUseHooks.push({
         matcher: '',
         hooks: [{ type: 'command', command: `node "${containmentPath}"` }],
+      });
+    }
+
+    if (directoryScope) {
+      const scopePath = join(tmpdir(), `scope-hook-${process.pid}-${now}.mjs`);
+      writeFileSync(
+        scopePath,
+        generateScopeHookScript(directoryScope, {
+          sessionId: `cli-${now}`,
+          agentType: 'cli',
+          detectionLayer: 'pre-execution',
+          workspacePath: cwd,
+        }),
+        { mode: 0o755 },
+      );
+      scriptPaths.push(scopePath);
+      preToolUseHooks.push({
+        matcher: '',
+        hooks: [{ type: 'command', command: `node "${scopePath}"` }],
       });
     }
 
@@ -137,6 +168,19 @@ export class CliAdapter implements ProviderAdapter {
       ...(settings.hooks as Record<string, unknown> ?? {}),
       PreToolUse: preToolUseHooks,
     };
+
+    if (directoryScope) {
+      const existingPermissions = (settings.permissions ?? {}) as Record<string, unknown>;
+      const existingDeny = Array.isArray(existingPermissions.deny)
+        ? existingPermissions.deny.map(String)
+        : [];
+      const scopeDeny = makeCliPermissionDenyEntries(directoryScope);
+      settings.permissions = {
+        ...existingPermissions,
+        deny: [...new Set([...existingDeny, ...scopeDeny])],
+      };
+      settings._scopeDenyEntries = scopeDeny;
+    }
 
     // Inject plugin MCP server configs (ARCH-AC-PLUGINS Flow 4 step 3)
     // Merge with any pre-existing mcpServers — plugin configs take precedence on name collision
@@ -191,6 +235,17 @@ export class CliAdapter implements ProviderAdapter {
         }
       }
       delete settings._pluginMcpNames;
+      const scopeDenyEntries = settings._scopeDenyEntries as string[] | undefined;
+      if (scopeDenyEntries && settings.permissions) {
+        const permissions = settings.permissions as Record<string, unknown>;
+        const deny = Array.isArray(permissions.deny) ? permissions.deny.map(String) : [];
+        const scopeDenySet = new Set(scopeDenyEntries);
+        const remaining = deny.filter(entry => !scopeDenySet.has(entry));
+        if (remaining.length > 0) permissions.deny = remaining;
+        else delete permissions.deny;
+        if (Object.keys(permissions).length === 0) delete settings.permissions;
+      }
+      delete settings._scopeDenyEntries;
       if (Object.keys(settings).length === 0) {
         unlinkSync(paths.settingsPath);
       } else {
@@ -202,15 +257,27 @@ export class CliAdapter implements ProviderAdapter {
   async spawn(
     def: AgentDefinition,
     prompt: string,
-    options?: { cwd?: string; jsonSchema?: string; containmentPolicy?: ContainmentPolicy; mcpConfigs?: McpConfig[] },
+    options?: {
+      cwd?: string;
+      jsonSchema?: string;
+      containmentPolicy?: ContainmentPolicy;
+      mcpConfigs?: McpConfig[];
+      directoryScope?: DirectoryScope;
+      provider?: ProviderDefinition;
+    },
   ): Promise<Result<SessionResult>> {
-    const args = this.buildArgs(def, prompt, options?.jsonSchema);
+    const args = this.buildArgs(
+      def,
+      prompt,
+      options?.jsonSchema,
+      options?.provider,
+    );
     const sessionStartTime = Date.now();
     const extraEnv: Record<string, string> = {
       SESSION_START_TIME: String(sessionStartTime),
       SESSION_TIMEOUT_MS: String(def.timeoutMs),
     };
-    const env = this.buildEnv(extraEnv);
+    const env = this.buildEnv(extraEnv, options?.provider);
 
     // Set up hooks for EVERY session — timeout hooks are always needed,
     // containment hooks only when a policy is provided.
@@ -226,16 +293,27 @@ export class CliAdapter implements ProviderAdapter {
       tempCwd = mkdtempSync(join(tmpdir(), 'session-cwd-'));
       effectiveCwd = tempCwd;
     }
-    hookPaths = this.setupHooks(effectiveCwd, options?.containmentPolicy, def.timeoutMs, sessionStartTime, options?.mcpConfigs);
+    hookPaths = this.setupHooks(
+      effectiveCwd,
+      options?.containmentPolicy,
+      def.timeoutMs,
+      sessionStartTime,
+      options?.mcpConfigs,
+      options?.directoryScope,
+    );
 
     return new Promise((resolve) => {
       const chunks: Buffer[] = [];
       const errChunks: Buffer[] = [];
 
-      const proc = spawn('claude', args, {
+      const proc = spawn(
+        options?.provider?.binaryPath ?? options?.provider?.cliTool ?? 'claude',
+        args,
+        {
         cwd: effectiveCwd,
         env,
-      });
+        },
+      );
 
       let timedOut = false;
       let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -267,6 +345,14 @@ export class CliAdapter implements ProviderAdapter {
           return;
         }
 
+        if (stdout.includes('scope-violation') || stderr.includes('scope-violation')) {
+          const parsed = this.parseOutput(stdout);
+          const cost = parsed.ok ? parsed.value.cost : 0;
+          const evidence = (stderr + '\n' + stdout).trim().slice(-1200);
+          resolve(err(SessionError.scopeViolated(evidence || 'pre-execution hook blocked tool call', cost)));
+          return;
+        }
+
         if (timedOut) {
           const timedOutParsed = this.parseOutput(stdout);
           const timedOutCost = timedOutParsed.ok ? timedOutParsed.value.cost : 0;
@@ -288,9 +374,25 @@ export class CliAdapter implements ProviderAdapter {
           return;
         }
 
+        const reportedStatus = this.parseExitStatusFromOutput(parsed.value.output);
+        // When the CLI exits non-zero but produced parseable output that the worker
+        // marked as "completed", downgrade to 'completed-with-concerns' rather than
+        // hard-failing the unit. The review gates still run; we don't loop at
+        // implement burning budget on retries that won't improve. Other reported
+        // statuses (failed/blocked/needs-context) are preserved as-is.
         const exitStatus: ExitStatus = code === 0
-          ? this.parseExitStatusFromOutput(parsed.value.output)
-          : 'failed';
+          ? reportedStatus
+          : reportedStatus === 'completed'
+            ? 'completed-with-concerns'
+            : reportedStatus;
+
+        if (code !== 0) {
+          const stderrTail = stderr.trim().slice(-1200) || '(empty stderr)';
+          const outputTail = parsed.value.output.trim().slice(-1200) || '(empty output)';
+          console.warn(
+            `[cli-adapter] claude exited ${code}; reported=${reportedStatus}; returning=${exitStatus}; stderr_tail=${JSON.stringify(stderrTail)}; output_tail=${JSON.stringify(outputTail)}`,
+          );
+        }
 
         resolve(ok({
           output: parsed.value.output,

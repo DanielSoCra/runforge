@@ -3,7 +3,7 @@ id: STACK-AC-TECH-LEAD
 type: stack-specific
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 3
 stack: typescript
 references: ARCH-AC-TECH-LEAD
@@ -17,10 +17,14 @@ code_paths:
   - packages/daemon/src/coordination/tech-lead/metrics.ts
   - packages/daemon/src/coordination/tech-lead/session-output-parser.ts
   - packages/daemon/src/coordination/tech-lead/retrospective.ts
+  - packages/daemon/src/coordination/tech-lead/triage.ts
+  - packages/daemon/src/coordination/tech-lead/triage-store.ts
+  - packages/daemon/src/coordination/tech-lead-scheduler.ts
   - prompts/tech-lead.md
   - prompts/tech-lead-enrichment.md
 test_paths:
   - packages/daemon/src/coordination/tech-lead/**/*.test.ts
+  - packages/daemon/src/coordination/tech-lead-scheduler.test.ts
 ---
 
 # STACK-AC-TECH-LEAD — Tech Lead Agent (TypeScript)
@@ -119,15 +123,75 @@ async function scanDeferredWork(paths: string[], fs: FsLike): Promise<DeferredWo
 
 **Dependency audit: `npm audit --json`.** Spawn `npm audit --json --omit=dev` as a child process, parse the JSON output. Extract vulnerability counts by severity. Timeout after 30 seconds — if it hangs, return an empty result with a missing-source marker. No library wrapper — `child_process.execFile` is sufficient.
 
-**Session output parsing: Zod validated structured output.** The Tech Lead session returns structured JSON. The Coordinator parses it through a Zod schema (`TechLeadOutputSchema`) that expects an array of TechnicalProposals and an optional array of protocol trigger requests. Malformed output is logged and treated as "zero proposals generated."
+**Session output parsing: Zod validated structured output.** The Tech Lead session returns structured JSON. The Coordinator parses it through a Zod schema (`TechLeadOutputSchema`) that expects an array of TechnicalProposals, an array of TriageDecisions, and an optional array of protocol trigger requests. Malformed output is logged and treated as "zero proposals generated, zero triage decisions."
 
 ```typescript
 const TechLeadOutputSchema = z.object({
   proposals: z.array(TechnicalProposalSchema).default([]),
+  triageDecisions: z.array(TriageDecisionSchema).default([]),
   protocolTriggers: z.array(z.enum([
     'escalation', 'batch_planning', 'backlog_grooming', 'retrospective',
   ])).default([]),
 });
+```
+
+**TriageDecision schema.** Immutable record of a single finding triage outcome. The `promotedToSeverity` field is only present when `decision === 'promote'`. The `cycleDate` is the calendar date string (ISO 8601 date only, not datetime) used for daily cap grouping.
+
+```typescript
+const TriageDecisionSchema = z.object({
+  id: z.string().uuid(),
+  findingIssueNumber: z.number().int().positive(),
+  decision: z.enum(['approve', 'reject', 'defer', 'promote']),
+  reason: z.string().min(1),
+  promotedToSeverity: z.string().nullable(),
+  cycleDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  createdAt: z.string().datetime(),
+});
+```
+
+**TriageDailyCap schema.** Persisted per-date record with an ETag for optimistic locking. The ETag is a content hash of the record at read time — a write that provides a stale ETag is rejected with a conflict error, causing the caller to re-read and retry.
+
+```typescript
+const TriageDailyCapSchema = z.object({
+  id: z.string().uuid(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  approvedCount: z.number().int().nonnegative(), cap: z.number().int().positive(),
+  etag: z.string(),  // content hash — stale ETag write is rejected
+});
+```
+
+**Triage application: GitHub mutations applied by Coordinator, not session.** The Tech Lead session produces TriageDecision records in its output. The Coordinator applies all GitHub side effects after the session completes, matching the existing output-then-act pattern. For each decision in order (respecting the remaining cap): (1) post audit comment on the GitHub issue, (2) apply label transitions, (3) store TriageDecision record, (4) increment TriageDailyCap. If the daily cap is reached mid-array, remaining approve/promote decisions are not applied.
+
+```typescript
+// In triage.ts — applied by Coordinator after parsing session output
+async function applyTriageDecision(d: TriageDecision, gh: GitHubClient, store: TriageStore) {
+  await gh.addIssueComment(d.findingIssueNumber, formatAuditComment(d));  // must succeed first
+  await applyLabelTransition(d, gh);   // add/remove labels per decision type
+  await store.recordDecision(d);       // persist TriageDecision record
+  if (d.decision === 'approve' || d.decision === 'promote') await store.incrementDailyCap(d.cycleDate);
+}
+```
+
+**Label transitions per decision type.** Explicit mapping — no implicit defaults.
+
+```typescript
+// In triage.ts — exact label transitions per ARCH-AC-TECH-LEAD
+const LABEL_TRANSITIONS: Record<TriageDecision['decision'], (issue: number, promoted?: string) => LabelOp[]> = {
+  approve:  (n)    => [{ add: ['tl-approved', 'tl-triaged'], issue: n }],
+  reject:   (n)    => [{ add: ['tl-triaged'], issue: n }, { close: n }],
+  defer:    (n)    => [{ add: ['deferred', 'tl-triaged'], issue: n }],
+  promote:  (n, s) => [{ swap: { from: /^P\d$/, to: s! }, issue: n }, { add: ['tl-approved', 'tl-triaged'], issue: n }],
+};
+```
+
+**SignalDigest v2 assembly: untriaged findings + cap remaining.** Two new queries added to `assembleSignalDigest`. GitHub issues with `review-finding` but without `tl-triaged` are fetched from the GitHub Service. Today's TriageDailyCap record is queried to compute remaining capacity. Both are included in the digest as read-only context.
+
+```typescript
+// Added to assembleSignalDigest alongside existing queries
+const [untriaged, capRecord] = await Promise.all([
+  gh.listIssues({ labels: ['review-finding'], excludeLabels: ['tl-triaged'], limit: cfg.triageSignalLimit }),
+  store.getDailyCapForDate(today()),
+]);
+const triageCapRemaining = Math.max(0, (capRecord?.cap ?? cfg.triageDailyCap) - (capRecord?.approvedCount ?? 0));
 ```
 
 **TechnicalEnrichment: Effort + risks + dependencies.** When the Coordinator requests enrichment, it spawns a Tech Lead session with a PO proposal as context. The session returns a TechnicalEnrichment with structured fields. The `unassessed` flag on effort is a defined degraded path, not an error.
@@ -209,4 +273,11 @@ function findDuplicate(newProposal: TechnicalProposal, active: TechnicalProposal
 - Protocol exchange timeout: if an agent session within a protocol exceeds its timeout, the ProtocolExecutor records a partial result in the ProtocolExchange and allows the protocol to complete with whatever output was produced. The Coordinator may fall back to a degraded path (e.g., PO grooms backlog solo if Tech Lead times out during grooming).
 - PO unavailable for proposal evaluation: TechnicalProposals remain in `generated` status. If proposals approach their `expiresAt` without PO evaluation, flag them on the dashboard under "Needs Attention" so the operator can intervene.
 - Protocol chain halting: if any protocol in a composition chain fails (agent timeout, session failure), the chain halts at the failed step. The partial result is recorded in the ProtocolExchange, remaining steps are logged as skipped, and the operator is notified. Do not silently proceed with the next chain step.
-- Tech Lead session failure: the WorkerClaim is set to `failed` (same as any pooled agent failure in STACK-AC-COORDINATION). No proposals are generated from a failed session. The Coordinator retries on the next scheduled cycle — no immediate retry.
+- Tech Lead session failure: the WorkerClaim is set to `failed` (same as any pooled agent failure in STACK-AC-COORDINATION). No proposals or triage decisions are generated from a failed session. The Coordinator retries on the next scheduled cycle — no immediate retry.
+- Triage audit comment before labels: the `applyTriageDecision` function must post the audit comment before attempting any label changes. If the comment call throws, the function must not proceed to labels. The `tl-triaged` label is the canary — a finding with a comment but without `tl-triaged` on the next cycle indicates a partial application that needs label retry (not comment retry).
+- TriageDailyCap optimistic locking: use a file-level advisory lock (same pattern as other file-based stores) plus an ETag check. On increment, read the current cap record, verify the ETag matches the one loaded at read time, then write. If the ETag has changed (concurrent write), retry once. After two failures, skip the remaining approve/promote decisions for this cycle and log a warning.
+- `triage_cap_remaining` in digest vs. actual cap at apply time: the cap remaining is computed during digest assembly (before the session runs). By the time the Coordinator calls `applyTriageDecision`, another cycle may have consumed part of the cap. The `incrementDailyCap` optimistic locking is the source of truth — `triage_cap_remaining` in the digest is advisory for the session prompt, not an authoritative reservation.
+- Triage decisions are capped on approve+promote only: reject and defer decisions do not consume cap and should always be applied regardless of `triage_cap_remaining`. Sort or process the TriageDecision array so that reject and defer decisions are applied first, then approve/promote up to the remaining cap.
+- `promotedToSeverity` must be a valid severity label string (e.g., `P1`, `P2`). Validate against the known severity label set before applying. An invalid value should cause the `promote` decision to be skipped with a logged error, not to apply incorrect labels.
+- GitHub rate limits: triage mutations (comments + label changes) count against the GitHub API rate limit. For large batches of untriaged findings, spread mutations across the cycle rather than firing all at once. Cap the triage signal at `triageSignalLimit` (default: 20 per cycle) to bound the mutation count per cycle.
+- The `cycleDate` field uses ISO date string (`YYYY-MM-DD`) in the local time zone of the process, not UTC. If the process runs across midnight UTC but in a time zone where it is still the previous day, use the local date consistently. Choose one time zone (local) and document the choice in a comment in `triage-store.ts`.

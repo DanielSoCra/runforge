@@ -1,0 +1,28 @@
+{
+  "name": "@auto-claude/concierge",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Spec-governed concierge core, tool router, confirmation lifecycle, and integration boundaries.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "start:board": "tsx src/board/main.ts",
+    "start:consolidator": "tsx src/memory/consolidator-main.ts",
+    "start:core": "tsx src/core/main.ts",
+    "start:observer": "tsx src/observer/main.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.2",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.11",
+    "hono": "^4.12.8"
+  }
+}

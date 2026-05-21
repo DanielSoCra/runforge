@@ -1,17 +1,21 @@
-import { createClient } from '@/lib/supabase/server';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 import { removeConnection } from '@/actions/github-connections';
 import { Plus } from 'lucide-react';
+import { getDashboardStores } from '@/lib/data/stores';
 
 export async function GitHubConnectionsSection() {
-  const supabase = await createClient();
-  const { data: connections } = await supabase
-    .from('github_connections')
-    .select('id, display_name, github_login, avatar_url, status, created_at, github_orgs(login)')
-    .order('created_at', { ascending: true });
+  const connectionsResult =
+    await getDashboardStores().githubConnections.listConnections();
+  const connections = connectionsResult.ok ? connectionsResult.value : [];
+  if (!connectionsResult.ok) {
+    console.error(
+      '[github-connections] failed to load connections:',
+      connectionsResult.message,
+    );
+  }
 
   return (
     <Card>
@@ -20,16 +24,16 @@ export async function GitHubConnectionsSection() {
         <CardDescription>System-level GitHub accounts used for repo polling</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {connections?.map((conn) => (
+        {connections.map((conn) => (
           <div key={conn.id} className="flex items-center justify-between border rounded-md p-3">
             <div className="flex items-center gap-3">
-              {conn.avatar_url && (
-                <img src={conn.avatar_url} alt={conn.github_login} className="w-8 h-8 rounded-full" />
+              {conn.avatarUrl && (
+                <img src={conn.avatarUrl} alt={conn.githubLogin} className="w-8 h-8 rounded-full" />
               )}
               <div>
-                <p className="font-medium text-sm">{conn.display_name}</p>
+                <p className="font-medium text-sm">{conn.displayName}</p>
                 <p className="text-xs text-muted-foreground">
-                  {(conn.github_orgs as Array<{ login: string }>)?.map((o) => o.login).join(', ')}
+                  {conn.organizations.map((o) => o.login).join(', ')}
                 </p>
               </div>
               {conn.status === 'token_invalid' && (
@@ -46,8 +50,12 @@ export async function GitHubConnectionsSection() {
             </div>
           </div>
         ))}
-        {(!connections || connections.length === 0) && (
-          <p className="text-sm text-muted-foreground">No GitHub accounts connected.</p>
+        {connections.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            {connectionsResult.ok
+              ? 'No GitHub accounts connected.'
+              : 'GitHub connections unavailable.'}
+          </p>
         )}
         <Button asChild variant="outline" className="w-full">
           <Link href="/api/auth/github-connection">

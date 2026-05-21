@@ -40,13 +40,23 @@ export async function fix(
       .join('\n');
 
     const taskContext = [
-      '## Fix Protocol: Regression-Test-First',
+      '## Fix Protocol',
       '',
-      '1. Write a test that reproduces each finding below',
-      '2. Confirm the test fails',
-      '3. Fix the code to address the finding',
-      '4. Confirm the test passes',
-      '5. Run all local verification checks',
+      'Address each finding below. Choose the approach that fits the finding:',
+      '',
+      '- **For code changes that affect runtime behavior**: regression-test-first.',
+      '  Write a failing test that exercises the bug, fix the code, confirm the test passes.',
+      '- **For spec, prompt, config, or documentation changes** (e.g., findings citing',
+      '  `prompts/*.md`, `.specify/**`, `auto-claude.config.json`, `*.md` docs): edit the',
+      '  file directly. No regression test is required for prose or template edits — rely',
+      '  on the static checks (`tsc --noEmit`, `pnpm test`, `prettier --check`) to confirm',
+      '  nothing else broke.',
+      '- **For configuration or wiring**: make the wiring change, then confirm via static checks.',
+      '',
+      'Always run `pnpm -r typecheck && pnpm -r test` (or the verification command below)',
+      'before finishing. If you cannot reproduce a finding or it requires changes far',
+      'outside this fix\'s scope, report DONE_WITH_CONCERNS with the rationale rather than',
+      'BLOCKED with no diff — that distinguishes "tried and could not" from "did nothing".',
       '',
       '## Findings',
       '',
@@ -54,13 +64,16 @@ export async function fix(
     ].join('\n');
 
     // 3. Spawn worker session
+    // Note: findingsText is already embedded in taskContext above (## Findings
+    // section); passing it as a separate `findings` variable would be a silent
+    // drop under the worker prompt contract (Codex review of fix/silent-prompt-vars
+    // follow-up — variables not referenced in the template are now rejected).
     const sessionResult = await runtime.spawnSession(
       'worker',
       {
         variables: {
           task: taskContext,
           specs: specContent ?? '',
-          findings: findingsText,
           verification: verificationCommand ?? 'pnpm -r run test',
           pitfalls: '',
         },

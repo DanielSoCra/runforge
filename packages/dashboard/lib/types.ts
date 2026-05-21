@@ -7,11 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.4"
-  }
   public: {
     Tables: {
       activity_events: {
@@ -337,6 +332,8 @@ export type Database = {
           concurrency_limit: number
           connection_id: string | null
           created_at: string
+          credential_error: string | null
+          credential_status: string
           deleted_at: string | null
           enabled: boolean
           github_status: string
@@ -354,6 +351,8 @@ export type Database = {
           concurrency_limit?: number
           connection_id?: string | null
           created_at?: string
+          credential_error?: string | null
+          credential_status?: string
           deleted_at?: string | null
           enabled?: boolean
           github_status?: string
@@ -371,6 +370,8 @@ export type Database = {
           concurrency_limit?: number
           connection_id?: string | null
           created_at?: string
+          credential_error?: string | null
+          credential_status?: string
           deleted_at?: string | null
           enabled?: boolean
           github_status?: string
@@ -531,7 +532,7 @@ export type Database = {
       matrix_status: "ok" | "degraded" | "failed"
       notification_channel_type: "web-push" | "slack" | "macos" | "webhook"
       notification_event_kind: "attention-required" | "work-completed" | "error" | "digest"
-      run_outcome: "in-progress" | "complete" | "stuck" | "escalated"
+      run_outcome: "in-progress" | "complete" | "stuck" | "escalated" | "failed"
       session_type:
         | "planning"
         | "implementation"
@@ -546,7 +547,7 @@ export type Database = {
   }
 }
 
-type DatabaseWithoutInternals = Omit<Database, "__InternalSupabase">
+type DatabaseWithoutInternals = Database
 
 type DefaultSchema = DatabaseWithoutInternals[Extract<keyof Database, "public">]
 
@@ -673,7 +674,7 @@ export const Constants = {
       matrix_status: ["ok", "degraded", "failed"],
       notification_channel_type: ["web-push", "slack", "macos", "webhook"],
       notification_event_kind: ["attention-required", "work-completed", "error", "digest"],
-      run_outcome: ["in-progress", "complete", "stuck", "escalated"],
+      run_outcome: ["in-progress", "complete", "stuck", "escalated", "failed"],
       session_type: [
         "planning",
         "implementation",

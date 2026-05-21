@@ -13,6 +13,12 @@ vi.mock('@/actions/auth', () => ({
 }));
 
 describe('Sidebar', () => {
+  it('renders Releases navigation entry', () => {
+    render(<Sidebar />);
+
+    expect(screen.getByRole('link', { name: 'Releases' })).toHaveAttribute('href', '/releases');
+  });
+
   it('renders Issues between Runs and Repos per spec', () => {
     render(<Sidebar />);
 

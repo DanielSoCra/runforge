@@ -1,14 +1,13 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
-import { createServiceClient } from '@/lib/supabase/service';
-import { requireUser } from '@/lib/auth';
+import { requireDashboardUser } from '@/lib/auth/require-session';
 import { formatDuration } from '@/lib/format';
-import type { Database } from '@/lib/types';
-
-type Briefing = Database['public']['Tables']['briefings']['Row'];
-type Run = Database['public']['Tables']['runs']['Row'];
-type ActivityEvent = Database['public']['Tables']['activity_events']['Row'];
+import {
+  getDashboardStores,
+  type DashboardActivityEvent,
+  type DashboardBriefing,
+  type DashboardBriefingRun,
+} from '@/lib/data/stores';
 
 export type AttentionItem = {
   issueNumber: number;
@@ -26,12 +25,6 @@ export type UpNextItem = {
   pipelineLabel: string;
 };
 
-/**
- * Compute a human-readable duration from a timestamp to now.
- * Examples: "<1m", "30m", "2h", "3d"
- */
-// formatDuration moved to lib/format.ts (Next.js 16 requires all 'use server' exports to be async)
-
 const URGENCY_ORDER: Record<AttentionItem['reason'], number> = {
   blocked: 0,
   review: 1,
@@ -41,53 +34,17 @@ const URGENCY_ORDER: Record<AttentionItem['reason'], number> = {
 /**
  * Fetch the most recent briefing snapshot.
  */
-export async function getLatestBriefing(): Promise<Briefing | null> {
-  const supabase = await createClient();
-  await requireUser(supabase);
-  const { data, error } = await supabase
-    .from('briefings')
-    .select('*')
-    .order('generated_at', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') {
-      // No rows found
-      return null;
-    }
-    console.error('[briefing] getLatestBriefing failed:', error);
-    throw new Error('Failed to fetch latest briefing');
-  }
-  return data ?? null;
+export async function getLatestBriefing(): Promise<DashboardBriefing | null> {
+  await requireDashboardUser();
+  return readLatestBriefing();
 }
 
 /**
  * Fetch all runs currently in progress.
  */
 export async function getActiveRuns() {
-  const supabase = await createClient();
-  await requireUser(supabase);
-  const { data, error } = await supabase
-    .from('runs')
-    .select('id, repo_owner, repo_name, issue_number, issue_title, current_phase, outcome, total_cost, started_at, phases')
-    .eq('outcome', 'in-progress')
-    .order('started_at', { ascending: true });
-
-  if (error) {
-    console.error('[briefing] getActiveRuns failed:', error);
-    throw new Error('Failed to fetch active runs');
-  }
-  // Deduplicate by issue — keep latest run per issue (multiple runs can exist from retries)
-  const seen = new Map<string, typeof data[number]>();
-  for (const run of data ?? []) {
-    const key = `${run.repo_owner}/${run.repo_name}#${run.issue_number}`;
-    const existing = seen.get(key);
-    if (!existing || run.started_at > existing.started_at) {
-      seen.set(key, run);
-    }
-  }
-  return [...seen.values()];
+  await requireDashboardUser();
+  return readActiveRuns();
 }
 
 /**
@@ -95,57 +52,8 @@ export async function getActiveRuns() {
  * Sorted by urgency: blocked (0) > review (1) > failure (2).
  */
 export async function getNeedsAttention(): Promise<AttentionItem[]> {
-  const supabase = await createClient();
-  await requireUser(supabase);
-
-  const [stuckResult, escalatedResult] = await Promise.all([
-    supabase
-      .from('runs')
-      .select('id, repo_owner, repo_name, issue_number, issue_title, outcome, started_at')
-      .eq('outcome', 'stuck'),
-    supabase
-      .from('runs')
-      .select('id, repo_owner, repo_name, issue_number, issue_title, outcome, started_at')
-      .eq('outcome', 'escalated'),
-  ]);
-
-  if (stuckResult.error) {
-    console.error('[briefing] getNeedsAttention stuck query failed:', stuckResult.error);
-    throw new Error('Failed to fetch stuck runs');
-  }
-  if (escalatedResult.error) {
-    console.error('[briefing] getNeedsAttention escalated query failed:', escalatedResult.error);
-    throw new Error('Failed to fetch escalated runs');
-  }
-
-  // Deduplicate by issue — keep most urgent entry per issue, with latest timestamp
-  const byIssue = new Map<string, AttentionItem>();
-
-  const addRun = (run: { issue_number: number; repo_owner: string; repo_name: string; started_at: string }, reason: AttentionItem['reason']) => {
-    const key = `${run.repo_owner}/${run.repo_name}#${run.issue_number}`;
-    const existing = byIssue.get(key);
-    // Keep the more urgent reason, or the newer run if same urgency
-    if (!existing || URGENCY_ORDER[reason] < URGENCY_ORDER[existing.reason]) {
-      byIssue.set(key, {
-        issueNumber: run.issue_number,
-        repoOwner: run.repo_owner,
-        repoName: run.repo_name,
-        reason,
-        waitDuration: formatDuration(run.started_at),
-        actionLinks: [
-          { label: 'View Issue', url: `https://github.com/${run.repo_owner}/${run.repo_name}/issues/${run.issue_number}` },
-        ],
-      });
-    }
-  };
-
-  for (const run of stuckResult.data ?? []) addRun(run, 'blocked');
-  for (const run of escalatedResult.data ?? []) addRun(run, 'review');
-
-  const items = [...byIssue.values()];
-  items.sort((a, b) => URGENCY_ORDER[a.reason] - URGENCY_ORDER[b.reason]);
-
-  return items;
+  await requireDashboardUser();
+  return readNeedsAttention();
 }
 
 // Pipeline labels that indicate queued work, ordered by priority (highest first).
@@ -170,7 +78,7 @@ interface GitHubIssueLabel {
 interface GitHubIssue {
   number: number;
   title: string;
-  labels: GitHubIssueLabel[];
+  labels: Array<GitHubIssueLabel | string>;
   pull_request?: unknown;
 }
 
@@ -181,57 +89,147 @@ interface GitHubIssue {
  * excludes issues with in-progress runs, and sorts by label priority.
  */
 export async function getUpNext(): Promise<UpNextItem[]> {
-  const service = createServiceClient();
-  const supabase = await createClient();
-  await requireUser(supabase);
+  await requireDashboardUser();
+  return readUpNext();
+}
 
-  // Fetch enabled repos and active runs in parallel
-  const [reposResult, runsResult] = await Promise.all([
-    service
-      .from('repos')
-      .select('id, owner, name, connection_id')
-      .eq('enabled', true)
-      .is('deleted_at', null),
-    supabase
-      .from('runs')
-      .select('issue_number, repo_owner, repo_name')
-      .eq('outcome', 'in-progress'),
+/**
+ * Refresh live panel data (called by auto-refresh interval on the client).
+ */
+export async function refreshLivePanels() {
+  await requireDashboardUser();
+  const [activeRuns, needsAttention, upNext] = await Promise.all([
+    readActiveRuns(),
+    readNeedsAttention(),
+    readUpNext(),
   ]);
+  return { activeRuns, needsAttention, upNext };
+}
 
-  if (reposResult.error) {
-    console.error('[briefing] getUpNext repos query failed:', reposResult.error);
+/**
+ * Fetch recent activity events with cursor-based pagination.
+ * Defaults to 50 events per page.
+ */
+export async function getActivityFeed(
+  opts?: { cursor?: string; pageSize?: number },
+): Promise<DashboardActivityEvent[]> {
+  await requireDashboardUser();
+  return readActivityFeed(opts);
+}
+
+async function readLatestBriefing(): Promise<DashboardBriefing | null> {
+  const result = await getDashboardStores().briefings.readLatestBriefing();
+  if (result.ok) return result.value;
+  if (result.error === 'not-found') return null;
+
+  console.error('[briefing] getLatestBriefing failed:', result);
+  throw new Error('Failed to fetch latest briefing');
+}
+
+async function readActiveRuns(): Promise<DashboardBriefingRun[]> {
+  const result = await getDashboardStores().briefings.listActiveRuns();
+  if (!result.ok) {
+    console.error('[briefing] getActiveRuns failed:', result);
+    throw new Error('Failed to fetch active runs');
+  }
+
+  return latestRunByIssue(result.value);
+}
+
+async function readNeedsAttention(): Promise<AttentionItem[]> {
+  const result = await getDashboardStores().briefings.listAttentionRuns();
+  if (!result.ok) {
+    console.error('[briefing] getNeedsAttention failed:', result);
+    throw new Error('Failed to fetch attention runs');
+  }
+
+  const byIssue = new Map<
+    string,
+    { item: AttentionItem; startedAt: string }
+  >();
+
+  for (const run of result.value) {
+    const reason = attentionReasonForOutcome(run.outcome);
+    if (!reason) continue;
+
+    const key = `${run.repo_owner}/${run.repo_name}#${run.issue_number}`;
+    const existing = byIssue.get(key);
+    if (
+      existing &&
+      (URGENCY_ORDER[existing.item.reason] < URGENCY_ORDER[reason] ||
+        (URGENCY_ORDER[existing.item.reason] === URGENCY_ORDER[reason] &&
+          existing.startedAt >= run.started_at))
+    ) {
+      continue;
+    }
+
+    byIssue.set(key, {
+      startedAt: run.started_at,
+      item: {
+        issueNumber: run.issue_number,
+        repoOwner: run.repo_owner,
+        repoName: run.repo_name,
+        reason,
+        waitDuration: formatDuration(run.started_at),
+        actionLinks: [
+          {
+            label: 'View Issue',
+            url: `https://github.com/${run.repo_owner}/${run.repo_name}/issues/${run.issue_number}`,
+          },
+        ],
+      },
+    });
+  }
+
+  const items = [...byIssue.values()].map(({ item }) => item);
+  items.sort((a, b) => URGENCY_ORDER[a.reason] - URGENCY_ORDER[b.reason]);
+
+  return items;
+}
+
+async function readUpNext(): Promise<UpNextItem[]> {
+  const stores = getDashboardStores();
+  const boardInputs = await stores.issues.listBoardInputs();
+
+  if (!boardInputs.ok) {
+    console.error('[briefing] getUpNext board input query failed:', boardInputs);
     throw new Error('Failed to fetch repos for up-next');
   }
-  if (runsResult.error) {
-    console.error('[briefing] getUpNext runs query failed:', runsResult.error);
-    throw new Error('Failed to fetch runs for up-next');
-  }
 
-  const repos = (reposResult.data ?? []) as Array<{
-    id: string; owner: string; name: string; connection_id: string | null;
-  }>;
+  const { repos, runs } = boardInputs.value;
   if (repos.length === 0) return [];
+
+  const connectionIds = [...new Set(
+    repos
+      .map((repo) => repo.connectionId)
+      .filter((connectionId): connectionId is string => Boolean(connectionId)),
+  )];
+  const tokensByConnectionId = new Map<string, string | undefined>();
+  await Promise.all(
+    connectionIds.map(async (connectionId) => {
+      const credential = await stores.githubConnections.readCredential(
+        connectionId,
+      );
+      tokensByConnectionId.set(
+        connectionId,
+        credential.ok ? credential.value.token : process.env.GITHUB_TOKEN,
+      );
+    }),
+  );
 
   // Build set of in-progress run keys for exclusion
   const activeRunKeys = new Set(
-    (runsResult.data ?? []).map(
-      (r: { repo_owner: string; repo_name: string; issue_number: number }) =>
-        `${r.repo_owner}/${r.repo_name}#${r.issue_number}`,
-    ),
+    runs
+      .filter((run) => run.outcome === 'in-progress')
+      .map((run) => `${run.repo_owner}/${run.repo_name}#${run.issue_number}`),
   );
 
   // Resolve tokens and fetch issues per repo (first 100 per repo — sufficient for pipeline queues)
   const perRepoItems = await Promise.all(
     repos.map(async (repo): Promise<UpNextItem[]> => {
-      let token: string | undefined;
-      if (repo.connection_id) {
-        const { data } = await service.rpc('decrypt_github_token', {
-          p_connection_id: repo.connection_id,
-        });
-        token = (data as string | null) ?? process.env.GITHUB_TOKEN;
-      } else {
-        token = process.env.GITHUB_TOKEN;
-      }
+      const token = repo.connectionId
+        ? tokensByConnectionId.get(repo.connectionId)
+        : process.env.GITHUB_TOKEN;
       if (!token) return [];
 
       try {
@@ -293,45 +291,44 @@ export async function getUpNext(): Promise<UpNextItem[]> {
   return items;
 }
 
-/**
- * Refresh live panel data (called by auto-refresh interval on the client).
- */
-export async function refreshLivePanels() {
-  const supabase = await createClient();
-  await requireUser(supabase);
-  const [activeRuns, needsAttention, upNext] = await Promise.all([
-    getActiveRuns(),
-    getNeedsAttention(),
-    getUpNext(),
-  ]);
-  return { activeRuns, needsAttention, upNext };
-}
-
-/**
- * Fetch recent activity events with cursor-based pagination.
- * Defaults to 50 events per page.
- */
-export async function getActivityFeed(
+async function readActivityFeed(
   opts?: { cursor?: string; pageSize?: number },
-): Promise<ActivityEvent[]> {
-  const supabase = await createClient();
-  await requireUser(supabase);
-  const pageSize = opts?.pageSize ?? 50;
-
-  let query = supabase
-    .from('activity_events')
-    .select('*')
-    .order('occurred_at', { ascending: false });
-
-  if (opts?.cursor) {
-    query = query.lt('occurred_at', opts.cursor);
-  }
-
-  const { data, error } = await query.limit(pageSize);
-
-  if (error) {
-    console.error('[briefing] getActivityFeed failed:', error);
+): Promise<DashboardActivityEvent[]> {
+  const result = await getDashboardStores().briefings.listActivityEvents({
+    cursor: opts?.cursor,
+    pageSize: opts?.pageSize ?? 50,
+  });
+  if (!result.ok) {
+    console.error('[briefing] getActivityFeed failed:', result);
     throw new Error('Failed to fetch activity feed');
   }
-  return data ?? [];
+
+  return result.value;
+}
+
+function latestRunByIssue(runs: DashboardBriefingRun[]) {
+  const seen = new Map<string, DashboardBriefingRun>();
+  for (const run of runs) {
+    const key = `${run.repo_owner}/${run.repo_name}#${run.issue_number}`;
+    const existing = seen.get(key);
+    if (!existing || run.started_at > existing.started_at) {
+      seen.set(key, run);
+    }
+  }
+  return [...seen.values()];
+}
+
+function attentionReasonForOutcome(
+  outcome: DashboardBriefingRun['outcome'],
+): AttentionItem['reason'] | null {
+  switch (outcome) {
+    case 'stuck':
+      return 'blocked';
+    case 'escalated':
+      return 'review';
+    case 'failed':
+      return 'failure';
+    default:
+      return null;
+  }
 }

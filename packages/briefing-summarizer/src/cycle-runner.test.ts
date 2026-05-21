@@ -20,6 +20,11 @@ describe('createCycleRunner', () => {
     await runner.wrappedCycle();
 
     expect(cycleFn).toHaveBeenCalledTimes(1);
+    expect(runner.getStatus()).toMatchObject({
+      inFlight: false,
+      shuttingDown: false,
+    });
+    expect(runner.getStatus().lastCompletedAt).not.toBeNull();
   });
 
   it('skips overlapping cycles when previous is still running', async () => {
@@ -40,6 +45,7 @@ describe('createCycleRunner', () => {
 
     // cycleFn should have been called only once — second call was skipped
     expect(cycleFn).toHaveBeenCalledTimes(1);
+    expect(runner.getStatus()).toMatchObject({ inFlight: true });
     expect(log).toHaveBeenCalledWith('warn', 'Previous cycle still running — skipping this interval');
 
     // Complete the first cycle
@@ -67,6 +73,7 @@ describe('createCycleRunner', () => {
     // First cycle fails
     await runner.wrappedCycle();
     expect(log).toHaveBeenCalledWith('error', 'Cycle failed: Error: boom');
+    expect(runner.getStatus().lastFailedAt).not.toBeNull();
 
     // Second cycle should still run (inFlight was cleared in finally)
     await runner.wrappedCycle();

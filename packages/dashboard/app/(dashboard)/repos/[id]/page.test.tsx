@@ -1,48 +1,16 @@
-vi.mock('@/lib/supabase/server', () => ({
-  createClient: vi.fn().mockResolvedValue({
-    from: vi.fn().mockImplementation((table: string) => {
-      if (table === 'repos') {
-        return {
-          select: vi.fn().mockReturnValue({
-            eq: vi.fn().mockReturnValue({
-              single: vi.fn().mockResolvedValue({
-                data: {
-                  id: 'repo-1',
-                  owner: 'acme',
-                  name: 'web',
-                  enabled: true,
-                  deleted_at: null,
-                  staging_branch: 'staging',
-                  production_branch: 'main',
-                  budget_limit: 5.0,
-                  concurrency_limit: 2,
-                },
-                error: null,
-              }),
-            }),
-          }),
-        };
-      }
-      if (table === 'api_keys') {
-        return {
-          select: vi.fn().mockReturnValue({
-            eq: vi.fn().mockResolvedValue({
-              data: [
-                { key_type: 'source-control', updated_at: '2026-01-01' },
-                { key_type: 'model-provider', updated_at: '2026-01-01' },
-              ],
-              error: null,
-            }),
-          }),
-        };
-      }
-      return { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis() };
-    }),
-  }),
+const mocks = vi.hoisted(() => ({
+  isDashboardAdmin: vi.fn(),
+  readRepository: vi.fn(),
 }));
 
-vi.mock('@/lib/auth', () => ({
-  isAdmin: vi.fn().mockResolvedValue(true),
+vi.mock('@/lib/auth/require-session', () => ({
+  isDashboardAdmin: mocks.isDashboardAdmin,
+}));
+
+vi.mock('@/lib/data/stores', () => ({
+  getDashboardStores: () => ({
+    repositories: { readRepository: mocks.readRepository },
+  }),
 }));
 
 vi.mock('@/actions/repos', () => ({
@@ -61,10 +29,35 @@ vi.mock('@/components/repo-tab-nav', () => ({
 }));
 
 import { render, screen } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import RepoDetailPage from './page';
 
 describe('RepoDetailPage', () => {
+  beforeEach(() => {
+    mocks.isDashboardAdmin.mockReset();
+    mocks.readRepository.mockReset();
+    mocks.isDashboardAdmin.mockResolvedValue(true);
+    mocks.readRepository.mockResolvedValue({
+      ok: true,
+      value: {
+        repo: {
+          id: 'repo-1',
+          owner: 'acme',
+          name: 'web',
+          enabled: true,
+          staging_branch: 'staging',
+          production_branch: 'main',
+          budget_limit: 5.0,
+          concurrency_limit: 2,
+        },
+        credentials: [
+          { key_type: 'source-control', updated_at: '2026-01-01T00:00:00.000Z' },
+          { key_type: 'model-provider', updated_at: '2026-01-01T00:00:00.000Z' },
+        ],
+      },
+    });
+  });
+
   it('renders settings form with branch, budget, and concurrency fields (#78)', async () => {
     const jsx = await RepoDetailPage({ params: Promise.resolve({ id: 'repo-1' }) });
     render(jsx);
@@ -95,13 +88,25 @@ describe('RepoDetailPage', () => {
   });
 
   it('does not render settings form for non-admin users (#78)', async () => {
-    const { isAdmin } = await import('@/lib/auth');
-    vi.mocked(isAdmin).mockResolvedValueOnce(false);
+    mocks.isDashboardAdmin.mockResolvedValueOnce(false);
 
     const jsx = await RepoDetailPage({ params: Promise.resolve({ id: 'repo-1' }) });
     render(jsx);
 
     expect(screen.queryByText('Settings')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Staging Branch')).not.toBeInTheDocument();
+  });
+
+  it('shows the page error when the app-owned repository store is unavailable', async () => {
+    mocks.readRepository.mockResolvedValueOnce({
+      ok: false,
+      error: 'unavailable',
+      message: 'database offline',
+    });
+
+    const jsx = await RepoDetailPage({ params: Promise.resolve({ id: 'repo-1' }) });
+    render(jsx);
+
+    expect(screen.getByText(/Failed to load data/)).toBeInTheDocument();
   });
 });

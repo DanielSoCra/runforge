@@ -15,11 +15,10 @@ export async function loadTemplate(path: string): Promise<Result<string>> {
 const PLACEHOLDER_RE = /\{\{([\w-]+)\}\}/g;
 
 export interface RenderOptions {
-  /**
-   * When true, throws if any template placeholders have no matching variable.
-   * Default: false (leaves unmatched placeholders as-is for backward compat).
-   */
+  /** Throws if any template placeholder has no matching variable. */
   strict?: boolean;
+  /** Throws if any caller-passed variable has no matching placeholder. */
+  rejectUnused?: boolean;
 }
 
 /**
@@ -38,6 +37,17 @@ export function findUnsubstitutedVars(
   return missing;
 }
 
+export function findUnusedVariables(
+  template: string,
+  variables: Record<string, string>,
+): string[] {
+  const placeholders = new Set<string>();
+  for (const [, key] of template.matchAll(PLACEHOLDER_RE)) {
+    if (key) placeholders.add(key);
+  }
+  return Object.keys(variables).filter((k) => !placeholders.has(k));
+}
+
 export function renderTemplate(
   template: string,
   variables: Record<string, string>,
@@ -49,6 +59,15 @@ export function renderTemplate(
       throw new Error(
         `renderTemplate: missing variables: ${missing.join(', ')}. ` +
         `Template expects these placeholders but no values were provided.`,
+      );
+    }
+  }
+  if (options?.rejectUnused) {
+    const unused = findUnusedVariables(template, variables);
+    if (unused.length > 0) {
+      throw new Error(
+        `renderTemplate: unused variables (silent drop risk): ${unused.join(', ')}. ` +
+        `These keys were passed by the caller but the template references no matching placeholder.`,
       );
     }
   }

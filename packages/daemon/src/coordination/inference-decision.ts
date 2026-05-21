@@ -79,11 +79,12 @@ export function createInferenceEngine(
       };
     } else {
       try {
+        let handle: ReturnType<typeof setTimeout> | undefined;
         const raw = await Promise.race([
-          deps.infer(context),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error('inference timeout')), config.inferenceTimeoutMs),
-          ),
+          deps.infer(context).finally(() => clearTimeout(handle)),
+          new Promise<never>((_, reject) => {
+            handle = setTimeout(() => reject(new Error('inference timeout')), config.inferenceTimeoutMs);
+          }),
         ]);
 
         tickBudgetRemaining -= config.estimateCostPerCall;
@@ -106,13 +107,21 @@ export function createInferenceEngine(
       }
     }
 
-    // Append to ring buffer log
-    const log = await deps.loadLog();
-    log.push(decision);
-    while (log.length > config.logCapacity) {
-      log.shift();
+    // Append to ring buffer log. Logging is best-effort; callers need the decision
+    // even when the visibility log cannot be read or written.
+    try {
+      const log = await deps.loadLog();
+      log.push(decision);
+      while (log.length > config.logCapacity) {
+        log.shift();
+      }
+      await deps.saveLog(log);
+    } catch (logError) {
+      console.warn(
+        '[inference-decision] failed to persist inference log:',
+        logError instanceof Error ? logError.message : logError,
+      );
     }
-    await deps.saveLog(log);
 
     return decision;
   }

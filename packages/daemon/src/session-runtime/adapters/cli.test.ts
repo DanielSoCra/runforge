@@ -45,6 +45,23 @@ describe('CliAdapter', () => {
     expect(args).toContain('Read,Write,Bash');
   });
 
+  it('includes --model flag when modelOverride is set (#424)', () => {
+    const adapter = new CliAdapter();
+    const defWithModel: AgentDefinition = { ...mockDef, modelOverride: 'claude-opus-4-6' };
+    const args = adapter.buildArgs(defWithModel, 'prompt');
+    expect(args).toContain('--model');
+    expect(args).toContain('claude-opus-4-6');
+    // Verify --model appears immediately before the value
+    const idx = args.indexOf('--model');
+    expect(args[idx + 1]).toBe('claude-opus-4-6');
+  });
+
+  it('omits --model flag when modelOverride is absent (#424)', () => {
+    const adapter = new CliAdapter();
+    const args = adapter.buildArgs(mockDef, 'prompt');
+    expect(args).not.toContain('--model');
+  });
+
   it('includes --json-schema when schema is provided', () => {
     const adapter = new CliAdapter();
     const schema = JSON.stringify({ type: 'object', properties: { a: { type: 'string' } } });
@@ -306,6 +323,45 @@ describe('CliAdapter containment hook setup', () => {
     adapter.cleanupHooks(paths);
   });
 
+  it('adds scope hook and permission deny entries when directory scope is provided', () => {
+    const adapter = new CliAdapter();
+    const paths = adapter.setupHooks(tempDir, DEFAULT_POLICY, 30000, undefined, [], {
+      readPaths: ['**/*'],
+      writePaths: ['src/**'],
+      denyPaths: ['secret/**'],
+    });
+
+    expect(paths.scriptPaths.length).toBe(3);
+    expect(paths.scriptPaths.some(p => p.includes('scope-hook-'))).toBe(true);
+
+    const settings = JSON.parse(readFileSync(paths.settingsPath, 'utf8'));
+    expect(settings.hooks.PreToolUse.length).toBe(3);
+    expect(settings.permissions.deny).toContain('secret/**');
+
+    adapter.cleanupHooks(paths);
+  });
+
+  it('preserves pre-existing permission denies when cleaning up scope entries', () => {
+    const adapter = new CliAdapter();
+    const { mkdirSync, writeFileSync } = require('fs');
+    mkdirSync(join(tempDir, '.claude'), { recursive: true });
+    writeFileSync(
+      join(tempDir, '.claude', 'settings.local.json'),
+      JSON.stringify({ permissions: { deny: ['pre-existing/**'] } }),
+    );
+
+    const paths = adapter.setupHooks(tempDir, DEFAULT_POLICY, 30000, undefined, [], {
+      readPaths: ['**/*'],
+      writePaths: ['src/**'],
+      denyPaths: ['secret/**'],
+    });
+
+    adapter.cleanupHooks(paths);
+
+    const restored = JSON.parse(readFileSync(paths.settingsPath, 'utf8'));
+    expect(restored.permissions.deny).toEqual(['pre-existing/**']);
+  });
+
   it('cleans up hook scripts and settings after cleanup', () => {
     const adapter = new CliAdapter();
     const paths = adapter.setupHooks(tempDir, DEFAULT_POLICY, 30000);
@@ -507,7 +563,11 @@ describe('CliAdapter.spawn() (#102)', () => {
     }
   });
 
-  it('returns failed result on non-zero exit code', async () => {
+  it('downgrades unmarked output on non-zero exit to completed-with-concerns', async () => {
+    // When the CLI exits non-zero but produced parseable output without a
+    // status marker (default "completed"), we soften to completed-with-concerns
+    // instead of 'failed' so the implement phase doesn't loop indefinitely on
+    // post-completion non-fatal CLI errors. Review gates still run.
     const mockProc = createMockProcess();
     vi.mocked(spawnMock).mockReturnValue(mockProc as never);
 
@@ -523,7 +583,7 @@ describe('CliAdapter.spawn() (#102)', () => {
     const result = await promise;
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.exitStatus).toBe('failed');
+      expect(result.value.exitStatus).toBe('completed-with-concerns');
       expect(result.value.cost).toBe(0.01);
     }
   });
@@ -666,7 +726,14 @@ describe('CliAdapter.spawn() (#102)', () => {
       containmentPolicy: DEFAULT_POLICY,
     });
 
-    expect(setupSpy).toHaveBeenCalledWith(tempDir, DEFAULT_POLICY, mockDef.timeoutMs, expect.any(Number), undefined);
+    expect(setupSpy).toHaveBeenCalledWith(
+      tempDir,
+      DEFAULT_POLICY,
+      mockDef.timeoutMs,
+      expect.any(Number),
+      undefined,
+      undefined,
+    );
 
     mockProc.stdout.emit('data', Buffer.from(JSON.stringify({ result: 'ok' })));
     mockProc.emit('close', 0);
@@ -814,7 +881,11 @@ describe('CliAdapter.spawn() (#102)', () => {
     }
   });
 
-  it('does not parse exit status from output on non-zero exit code (#329)', async () => {
+  it('preserves explicit DONE_WITH_CONCERNS marker when CLI exits non-zero (#329 update)', async () => {
+    // #329 originally distrusted worker self-report on non-zero exit. The newer
+    // policy trusts the marker but downgrades unmarked-completed output (see
+    // adjacent test). DONE_WITH_CONCERNS already signals concerns, so it stays.
+    // Review gates still catch real defects in either path.
     const mockProc = createMockProcess();
     vi.mocked(spawnMock).mockReturnValue(mockProc as never);
 
@@ -822,7 +893,7 @@ describe('CliAdapter.spawn() (#102)', () => {
     const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
 
     mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
-      result: 'Crashed\n**DONE_WITH_CONCERNS** — this should not matter',
+      result: 'Crashed\n**DONE_WITH_CONCERNS** — captured non-fatal error',
       cost_usd: 0.01,
     })));
     mockProc.emit('close', 1);
@@ -830,7 +901,7 @@ describe('CliAdapter.spawn() (#102)', () => {
     const result = await promise;
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value.exitStatus).toBe('failed');
+      expect(result.value.exitStatus).toBe('completed-with-concerns');
     }
   });
 

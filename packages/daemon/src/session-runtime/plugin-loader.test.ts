@@ -88,6 +88,96 @@ describe('readPluginsForContext file size cap', () => {
   });
 });
 
+describe('readPluginsForContext content cache', () => {
+  let pluginsDir: string;
+  let pluginDir: string;
+  const PLUGIN_ID = 'cache-plugin';
+
+  async function writePluginContent(version: string) {
+    await writeFile(join(pluginDir, 'skills', 'cache-skill.md'), `skill ${version}`);
+    await writeFile(join(pluginDir, 'agents', 'cache-agent.md'), `agent ${version}`);
+    await writeFile(join(pluginDir, 'prompt-injection.md'), `injection ${version}`);
+    await writeFile(join(pluginDir, 'mcps', 'cache.json'), JSON.stringify({
+      name: 'cache-mcp',
+      command: `cmd-${version}`,
+      args: [`arg-${version}`],
+      env: { CACHE_VERSION: version },
+    }));
+    await writeFile(join(pluginDir, 'gates', 'cache.sh'), `gate ${version}`);
+  }
+
+  beforeEach(async () => {
+    clearRegistryCache();
+    pluginsDir = join(tmpdir(), `plugin-loader-cache-test-${Date.now()}`);
+    pluginDir = join(pluginsDir, PLUGIN_ID);
+    await mkdir(join(pluginDir, 'skills'), { recursive: true });
+    await mkdir(join(pluginDir, 'agents'), { recursive: true });
+    await mkdir(join(pluginDir, 'mcps'), { recursive: true });
+    await mkdir(join(pluginDir, 'gates'), { recursive: true });
+    await writeFile(join(pluginsDir, 'registry.json'), JSON.stringify({
+      version: 1,
+      plugins: [{ id: PLUGIN_ID, name: 'Cache Plugin', tags: [] }],
+    }));
+    await writeFile(join(pluginDir, 'manifest.json'), JSON.stringify({
+      id: PLUGIN_ID, name: 'Cache Plugin', version: '1.0.0', description: 'Test',
+    }));
+    await writePluginContent('v1');
+  });
+
+  afterEach(async () => {
+    await rm(pluginsDir, { recursive: true, force: true });
+    clearRegistryCache();
+  });
+
+  it('reuses cached plugin file contents on repeated reads (#586)', async () => {
+    const orig = process.env['PLUGINS_DIR'];
+    process.env['PLUGINS_DIR'] = pluginsDir;
+    try {
+      const first = await readPluginsForContext([PLUGIN_ID], new Map());
+      await writePluginContent('v2');
+      first[0]!.skills[0]!.content = 'mutated';
+      first[0]!.mcpConfigs[0]!.args.push('mutated');
+
+      const second = await readPluginsForContext([PLUGIN_ID], new Map());
+
+      expect(second[0]?.promptInjection).toBe('injection v1');
+      expect(second[0]?.skills[0]?.content).toBe('skill v1');
+      expect(second[0]?.agents[0]?.content).toBe('agent v1');
+      expect(second[0]?.mcpConfigs[0]).toMatchObject({
+        name: 'cache-mcp',
+        command: 'cmd-v1',
+        args: ['arg-v1'],
+        env: { CACHE_VERSION: 'v1' },
+      });
+      expect(second[0]?.gates).toEqual(['gate v1']);
+    } finally {
+      if (orig === undefined) delete process.env['PLUGINS_DIR'];
+      else process.env['PLUGINS_DIR'] = orig;
+    }
+  });
+
+  it('clearRegistryCache invalidates cached plugin file contents', async () => {
+    const orig = process.env['PLUGINS_DIR'];
+    process.env['PLUGINS_DIR'] = pluginsDir;
+    try {
+      const first = await readPluginsForContext([PLUGIN_ID], new Map());
+      expect(first[0]?.skills[0]?.content).toBe('skill v1');
+
+      await writePluginContent('v2');
+      clearRegistryCache();
+      const second = await readPluginsForContext([PLUGIN_ID], new Map());
+
+      expect(second[0]?.promptInjection).toBe('injection v2');
+      expect(second[0]?.skills[0]?.content).toBe('skill v2');
+      expect(second[0]?.mcpConfigs[0]?.command).toBe('cmd-v2');
+      expect(second[0]?.gates).toEqual(['gate v2']);
+    } finally {
+      if (orig === undefined) delete process.env['PLUGINS_DIR'];
+      else process.env['PLUGINS_DIR'] = orig;
+    }
+  });
+});
+
 describe('readPluginsForContext mcpConfigs loading', () => {
   let pluginsDir: string;
   let pluginDir: string;

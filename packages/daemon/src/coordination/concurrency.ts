@@ -44,7 +44,7 @@ const TYPE_MINIMUMS: Record<AgentType, number> = {
   po: 1,
   planner: 0,
   'codebase-reviewer': 0,
-  tech_lead: 0,
+  'tech-lead': 0,
 };
 
 const TYPE_MAXIMUMS: Record<AgentType, number> = {
@@ -53,7 +53,7 @@ const TYPE_MAXIMUMS: Record<AgentType, number> = {
   reviewer: 1,
   worker: Infinity, // capped by maxAgents
   'codebase-reviewer': 1,
-  tech_lead: 1,
+  'tech-lead': 1,
 };
 
 // ---------------------------------------------------------------------------
@@ -71,7 +71,7 @@ export function evaluatePool(ctx: EvalContext): SpawnDecision[] {
     po: 0,
     planner: 0,
     'codebase-reviewer': 0,
-    tech_lead: 0,
+    'tech-lead': 0,
   };
   for (const claim of ctx.activeClaims) {
     if (isActiveClaimStatus(claim.status)) {
@@ -79,14 +79,27 @@ export function evaluatePool(ctx: EvalContext): SpawnDecision[] {
     }
   }
 
-  const totalActive = activeCounts.worker + activeCounts.reviewer + activeCounts.po + activeCounts.planner + activeCounts['codebase-reviewer'] + activeCounts.tech_lead;
+  const totalActive =
+    activeCounts.worker +
+    activeCounts.reviewer +
+    activeCounts.po +
+    activeCounts.planner +
+    activeCounts['codebase-reviewer'] +
+    activeCounts['tech-lead'];
   let remaining = ctx.maxAgents - totalActive;
   if (remaining <= 0) return [];
 
   const decisions: SpawnDecision[] = [];
 
   // 2. Spawn to meet per-type minimums (po: 1, reviewer: 1)
-  for (const agentType of (['po', 'reviewer', 'worker', 'planner', 'codebase-reviewer', 'tech_lead'] satisfies AgentType[])) {
+  for (const agentType of [
+    'po',
+    'reviewer',
+    'worker',
+    'planner',
+    'codebase-reviewer',
+    'tech-lead',
+  ] satisfies AgentType[]) {
     const min = TYPE_MINIMUMS[agentType];
     const max = TYPE_MAXIMUMS[agentType];
     const current = activeCounts[agentType];
@@ -113,7 +126,9 @@ export function evaluatePool(ctx: EvalContext): SpawnDecision[] {
     if (remaining <= 0) break;
 
     // Per-type max check for workers
-    const currentWorkers = activeCounts.worker + decisions.filter(d => d.agentType === 'worker').length;
+    const currentWorkers =
+      activeCounts.worker +
+      decisions.filter((d) => d.agentType === 'worker').length;
     if (currentWorkers >= TYPE_MAXIMUMS.worker) break;
 
     // Per-repo limit check (counts existing claims + new decisions)
@@ -124,7 +139,11 @@ export function evaluatePool(ctx: EvalContext): SpawnDecision[] {
       repoActiveCounts[item.repoKey] = repoCount + 1;
     }
 
-    decisions.push({ issueNumber: item.issueNumber, agentType: 'worker', batchItemId: null });
+    decisions.push({
+      issueNumber: item.issueNumber,
+      agentType: 'worker',
+      batchItemId: null,
+    });
     remaining--;
   }
 
@@ -134,7 +153,9 @@ export function evaluatePool(ctx: EvalContext): SpawnDecision[] {
     for (const item of readyItems) {
       if (remaining <= 0) break;
 
-      const currentWorkers = activeCounts.worker + decisions.filter(d => d.agentType === 'worker').length;
+      const currentWorkers =
+        activeCounts.worker +
+        decisions.filter((d) => d.agentType === 'worker').length;
       if (currentWorkers >= TYPE_MAXIMUMS.worker) break;
 
       // Per-repo limit check (same logic as dispatch queue above)
@@ -163,14 +184,14 @@ export function evaluatePool(ctx: EvalContext): SpawnDecision[] {
 
 /** Returns batch items whose dependencies are all terminal-satisfied and whose own status is 'pending'. */
 function getReadyBatchItems(batch: Batch) {
-  const statusById = new Map(batch.items.map(i => [i.id, i.status]));
+  const statusById = new Map(batch.items.map((i) => [i.id, i.status]));
 
-  return batch.items.filter(item => {
+  return batch.items.filter((item) => {
     // Only pending items can be spawned
     if (item.status !== 'pending') return false;
 
     // All dependencies must be terminal-satisfied
-    return item.dependencies.every(depId => {
+    return item.dependencies.every((depId) => {
       const depStatus = statusById.get(depId);
       return depStatus !== undefined && isTerminalSatisfied(depStatus);
     });

@@ -126,7 +126,11 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
       // Revert merge commit
       const revertResult = await git(['revert', '--no-edit', mergeCommit], mergeWorktreePath);
       if (!revertResult.ok) {
-        // Revert failed — integration branch is in corrupted state, needs human intervention
+        // Revert failed — integration branch is in corrupted state, needs human intervention.
+        // Best-effort: clean up partial merge/rebase state before parking for human review (#451).
+        // Both aborts are best-effort: only one (or neither) will be in-flight, the other is a no-op.
+        await git(['merge', '--abort'], mergeWorktreePath);
+        await git(['rebase', '--abort'], mergeWorktreePath);
         const phaseResult = await queue.updatePhase(entryId, 'reverted');
         if (!phaseResult.ok) return phaseResult;
         const statusResult = await queue.updateStatus(entryId, 'needs_human', `validation failed and revert failed: ${revertResult.error.message}`);
@@ -172,6 +176,8 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
             if (!phaseResult.ok) continue;
             const validationResult = await runValidation(entry.issueNumber, config.validationTimeoutMs);
             if (!validationResult.ok) {
+              const revertedPhaseResult = await queue.updatePhase(entry.id, 'reverted');
+              if (!revertedPhaseResult.ok) continue;
               const statusResult = await queue.updateStatus(entry.id, 'failed', validationResult.error.message);
               if (!statusResult.ok) continue;
             } else {
@@ -192,6 +198,8 @@ export function createMergeAgent(deps: MergeAgentDeps, config: MergeAgentConfig)
           // Re-run validation
           const validationResult = await runValidation(entry.issueNumber, config.validationTimeoutMs);
           if (!validationResult.ok) {
+            const phaseResult = await queue.updatePhase(entry.id, 'reverted');
+            if (!phaseResult.ok) continue;
             const statusResult = await queue.updateStatus(entry.id, 'failed', validationResult.error.message);
             if (!statusResult.ok) continue;
           } else {

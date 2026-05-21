@@ -42,7 +42,9 @@ If known issues are listed above, pay special attention to whether the implement
 ## Rules
 
 - Read the actual implementation artifacts. Do not rely on the diff alone — read full files to understand context.
-- Verify every acceptance criterion independently. Check each one.
-- A single missing acceptance criterion = not approved.
+- **Scope your review to what THIS diff is responsible for.** The diff implements the issue under review and the spec(s) it cites. If you discover spec-compliance gaps in *other* parts of the codebase that this diff does not touch and is not the implementer of — do NOT report them as findings against this review. Pre-existing bugs are out of scope. The fix worker for this diff cannot address 8 disparate issues across the daemon in a few cycles, and citing them blocks legitimate progress on the diff under review.
+- If you genuinely believe an out-of-scope gap is critical and worth filing, mention it ONCE in `summary` as "[for separate triage]" — do NOT add it to `findings`. Findings drive the fix loop and must be actionable on this diff.
+- Verify every acceptance criterion *that this diff is responsible for* independently. Check each one.
+- A single missing acceptance criterion *that this diff is responsible for* = not approved.
 - Do not evaluate code quality, style, or patterns — that is a different reviewer's job.
 - Do not suggest improvements beyond what the spec requires.

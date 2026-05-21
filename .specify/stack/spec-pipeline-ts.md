@@ -32,6 +32,8 @@ test_paths:
 
 **Context assembly per phase type.** A `buildPhaseContext` function reads the spec chain entries from disk, loads feedback from gate history, and assembles a typed context object for the target session or service. Each phase type has a known context shape — no generic context bag.
 
+**Artifact-only spec sessions.** `l2-designer` and `l3-generator` sessions write files in the workspace only. They never create branches, commits, pushes, labels, comments, or pull requests. The control plane invokes the Controlled Artifact Delivery helper after a successful session.
+
 ## Key Decisions
 
 **Location: Subdirectory of control-plane, not a separate package.** The L2 states this variant "IS PART OF" the Daemon Control Plane. Implemented as `packages/daemon/src/control-plane/spec-pipeline/` — a module within the control plane package, not a standalone service. This matches how built-in variants (feature, feature-simple, bug) are structured.
@@ -51,6 +53,8 @@ test_paths:
 **Feedback loop cap: Counter in gate history.** Each gate phase tracks iteration count in `RunState.gateHistory`. If a gate phase cycles through feedback more than `config.maxGateIterations` (default 5) times, transition to stuck. Prevents infinite design loops.
 
 **Variant selector: Label + body marker.** Work requests are routed to `spec-driven` when the issue has the `feature-pipeline` label and the body contains a spec chain reference (an L1 spec path). This keeps detection simple and visible — Operators control routing by adding or omitting the label.
+
+**Delivery handoff: PhaseArtifact on RunState.** After L2 and L3 authoring sessions, the control plane records the delivery branch, base branch, pull request number, changed paths, and status on the run before parking or advancing. Gate resume reads this record instead of inferring proposal identity from comments.
 
 ## Examples
 
@@ -103,6 +107,12 @@ interface ParkState {
 ```
 
 ```typescript
+// Spec sessions stop at file changes; daemon owns delivery.
+const result = await runtime.spawnSession('l2-designer', context, issueNumber);
+if (result.ok) await deliverPhaseArtifact(run, 'l2-design', workspaceCwd);
+```
+
+```typescript
 // Context assembly — reads spec files from chain, includes feedback
 async function buildL3Context(chain: SpecChain, feedback?: string): Promise<L3SessionContext> {
   const l1 = await readFile(chain.find(s => s.layer === 'l1')!.filePath, 'utf-8');
@@ -119,5 +129,6 @@ async function buildL3Context(chain: SpecChain, feedback?: string): Promise<L3Se
 - Spec chain file paths are relative to the repo root. When reading spec content for context assembly, resolve against the working directory. If the session is running in a worktree, the path must resolve correctly in that worktree — pass the worktree root as a parameter.
 - Park state is persisted in the RunState JSON file. If the daemon restarts, parked runs resume correctly because the park state survives. However, the Octokit ETag cache (in-memory) is lost — the first poll after restart will make unconditional API calls for all parked runs.
 - The `spec-driven` variant selector checks for both the `feature-pipeline` label and a spec chain reference in the body. If an Operator adds the label but forgets the spec reference, the variant selector falls through to the default variant. Log a warning when `feature-pipeline` is present but no spec reference is found.
-- L3 compliance failure with max retries transitions to stuck, but the L3 branch may still have an open PR. The stuck handler should comment on the PR explaining the block, not silently abandon it.
+- L3 compliance failure with max retries transitions to stuck, but the L3 delivery may still have an open review proposal. The stuck handler should comment on the proposal explaining the block, not silently abandon it.
 - Gate history grows indefinitely for runs with many feedback iterations. Cap gate history at `maxGateIterations + 1` entries and trim oldest entries on overflow. The history is only used for timestamp-since queries and iteration counting — old entries are not needed.
+- Do not reintroduce branch/commit/PR instructions into L2/L3 prompts. That violates STACK-AC-CONTROLLED-ARTIFACT-DELIVERY and can recreate duplicate proposal failures.

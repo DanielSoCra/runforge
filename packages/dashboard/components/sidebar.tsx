@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, GitFork, Activity, CircleDot, DollarSign, Users, Settings, Terminal, Zap, LogOut, Newspaper } from 'lucide-react';
+import { LayoutDashboard, GitFork, Activity, CircleDot, DollarSign, Users, Settings, Terminal, Zap, LogOut, Newspaper, Rocket } from 'lucide-react';
 import { signOut } from '@/actions/auth';
 
 const nav = [
@@ -11,6 +11,7 @@ const nav = [
   { href: '/runs', label: 'Runs', icon: Activity },
   { href: '/issues', label: 'Issues', icon: CircleDot },
   { href: '/repos', label: 'Repositories', icon: GitFork },
+  { href: '/releases', label: 'Releases', icon: Rocket },
   { href: '/command-center', label: 'Command Center', icon: Zap },
   { href: '/cost', label: 'Costs', icon: DollarSign },
   { href: '/team', label: 'Team', icon: Users },

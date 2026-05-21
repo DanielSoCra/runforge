@@ -15,7 +15,7 @@ describe('pnpm version consistency', () => {
     expect(pinnedVersion).toBeTruthy();
 
     // CI workflow should NOT specify an explicit version (relies on packageManager field)
-    const ciWorkflow = readFile('.github/workflows/auto-claude.yml');
+    const ciWorkflow = readFile('.github/workflows/ci.yml');
     expect(ciWorkflow).not.toMatch(/version:\s*latest/);
 
     // If CI specifies a version, it must match
@@ -28,5 +28,18 @@ describe('pnpm version consistency', () => {
     const cloudInit = readFile('infra/cloud-init.yml');
     expect(cloudInit).not.toMatch(/pnpm@latest/);
     expect(cloudInit).toContain(`pnpm@${pinnedVersion}`);
+  });
+
+  it('CI runs the workspace lint gate before typecheck and tests', () => {
+    const pkg = JSON.parse(readFile('package.json')) as {
+      scripts?: Record<string, string>;
+    };
+    expect(pkg.scripts?.lint).toBe('pnpm -r --if-present lint');
+
+    const ciWorkflow = readFile('.github/workflows/ci.yml');
+    expect(ciWorkflow).toContain('name: Lint');
+    expect(ciWorkflow).toContain('run: pnpm lint');
+    expect(ciWorkflow.indexOf('name: Lint')).toBeLessThan(ciWorkflow.indexOf('name: Typecheck'));
+    expect(ciWorkflow.indexOf('name: Lint')).toBeLessThan(ciWorkflow.indexOf('name: Test'));
   });
 });

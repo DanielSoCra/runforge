@@ -1,9 +1,48 @@
 // src/coordination/tech-lead/signal-digest.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { EventEmitter } from 'events';
+import { execFile } from 'child_process';
 import { mkdtemp, rm, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { assembleSignalDigest, computeDriftIndicators, scanDeferredWork, type DigestDeps, type DigestConfig } from './signal-digest.js';
+import {
+  assembleSignalDigest,
+  computeDriftIndicators,
+  scanDeferredWork,
+  runDependencyAudit,
+  type DigestDeps,
+  type DigestConfig,
+} from './signal-digest.js';
+
+vi.mock('child_process', () => ({
+  execFile: vi.fn(),
+}));
+
+const execFileMock = vi.mocked(execFile) as unknown as {
+  mockImplementationOnce: (fn: (...args: unknown[]) => unknown) => void;
+  mockReset: () => void;
+};
+
+function mockNpmAuditCallback(stdout: string, error: Error | null = null) {
+  const child = new EventEmitter();
+  execFileMock.mockImplementationOnce((...args: unknown[]) => {
+    const callback = args[3] as (
+      error: Error | null,
+      stdout: string,
+      stderr: string,
+    ) => void;
+    queueMicrotask(() => callback(error, stdout, ''));
+    return child;
+  });
+}
+
+function mockNpmAuditSpawnError(error = new Error('spawn failed')) {
+  const child = new EventEmitter();
+  execFileMock.mockImplementationOnce(() => {
+    queueMicrotask(() => child.emit('error', error));
+    return child;
+  });
+}
 
 function makeDeps(overrides: Partial<DigestDeps> = {}): DigestDeps {
   return {
@@ -32,6 +71,8 @@ let tmpDir: string;
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), 'tl-digest-'));
+  execFileMock.mockReset();
+  mockNpmAuditCallback(JSON.stringify({ vulnerabilities: {} }));
 });
 
 afterEach(async () => {
@@ -70,6 +111,18 @@ describe('assembleSignalDigest', () => {
     expect(digest.reviewFindings).toEqual([]);
   });
 
+  it('includes npm_audit as missing when dependency audit fails (#554)', async () => {
+    execFileMock.mockReset();
+    mockNpmAuditSpawnError(new Error('npm missing'));
+    const deps = makeDeps();
+    const config = makeConfig(tmpDir);
+
+    const digest = await assembleSignalDigest('scheduled', deps, config);
+
+    expect(digest.missingSources).toContain('npm_audit');
+    expect(digest.dependencyRisks).toEqual([]);
+  });
+
   it('caps entries per section', async () => {
     const findings = Array.from({ length: 60 }, (_, i) => ({
       recordId: `r${i}`,
@@ -85,6 +138,52 @@ describe('assembleSignalDigest', () => {
     const digest = await assembleSignalDigest('scheduled', deps, config);
 
     expect(digest.reviewFindings).toHaveLength(10);
+  });
+});
+
+describe('runDependencyAudit', () => {
+  it('parses npm audit vulnerabilities even when npm exits non-zero (#554)', async () => {
+    execFileMock.mockReset();
+    mockNpmAuditCallback(
+      JSON.stringify({
+        vulnerabilities: {
+          lodash: {
+            severity: 'high',
+            via: [{ url: 'https://github.com/advisories/GHSA-test' }],
+          },
+          malformed: {
+            severity: 'unknown',
+            via: [{ url: 'https://example.invalid/ignored' }],
+          },
+        },
+      }),
+      new Error('npm audit found vulnerabilities'),
+    );
+
+    const risks = await runDependencyAudit(tmpDir);
+
+    expect(risks).toEqual([
+      {
+        packageName: 'lodash',
+        currentVersion: 'unknown',
+        severity: 'high',
+        advisory: 'https://github.com/advisories/GHSA-test',
+      },
+    ]);
+  });
+
+  it('rejects malformed npm audit JSON (#554)', async () => {
+    execFileMock.mockReset();
+    mockNpmAuditCallback('not json');
+
+    await expect(runDependencyAudit(tmpDir)).rejects.toThrow();
+  });
+
+  it('rejects npm spawn errors (#554)', async () => {
+    execFileMock.mockReset();
+    mockNpmAuditSpawnError(new Error('spawn failed'));
+
+    await expect(runDependencyAudit(tmpDir)).rejects.toThrow('spawn failed');
   });
 });
 

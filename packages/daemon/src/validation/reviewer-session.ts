@@ -1,9 +1,14 @@
 // src/validation/reviewer-session.ts
 import { z } from 'zod';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
-import type { GateType, GateResult, ReviewFinding, DiscoveredIssue } from '../types.js';
+import type {
+  GateType,
+  GateResult,
+  ReviewFinding,
+  DiscoveredIssue,
+} from '../types.js';
 import { SessionError } from '../session-runtime/session-error.js';
-import type { SupabaseRunWriter } from '../supabase/run-writer.js';
+import type { RunWriter } from '../data/run-writer.js';
 
 export const DiscoveredIssueSchema = z.object({
   artifactPatterns: z.array(z.string()),
@@ -11,11 +16,13 @@ export const DiscoveredIssueSchema = z.object({
 });
 
 export const ReviewFindingsSchema = z.object({
-  findings: z.array(z.object({
-    severity: z.enum(['critical', 'important', 'minor']),
-    location: z.string(),
-    description: z.string(),
-  })),
+  findings: z.array(
+    z.object({
+      severity: z.enum(['critical', 'important', 'minor']),
+      location: z.string().optional().default('output'),
+      description: z.string(),
+    }),
+  ),
   summary: z.string(),
   approved: z.boolean(),
   discoveredIssues: z.array(DiscoveredIssueSchema).optional(),
@@ -25,13 +32,69 @@ export type ReviewFindings = z.infer<typeof ReviewFindingsSchema>;
 
 const jsonSchema = JSON.stringify(z.toJSONSchema(ReviewFindingsSchema));
 
+const VALID_SEVERITIES = new Set(['critical', 'important', 'minor']);
+const SEVERITY_MAP: Record<string, string> = {
+  high: 'critical',
+  severe: 'critical',
+  blocker: 'critical',
+  p0: 'critical',
+  error: 'critical',
+  medium: 'important',
+  moderate: 'important',
+  significant: 'important',
+  warning: 'important',
+  warn: 'important',
+  major: 'important',
+  p1: 'important',
+  low: 'minor',
+  info: 'minor',
+  informational: 'minor',
+  trivial: 'minor',
+  note: 'minor',
+  notice: 'minor',
+  suggestion: 'minor',
+  nitpick: 'minor',
+  nit: 'minor',
+  p2: 'minor',
+  p3: 'minor',
+  advisory: 'minor',
+  cosmetic: 'minor',
+};
+
+function normalizeSeverities(data: unknown): unknown {
+  if (data === null || typeof data !== 'object') return data;
+  const obj = data as Record<string, unknown>;
+  if (!Array.isArray(obj.findings)) return data;
+  return {
+    ...obj,
+    findings: obj.findings.map((f: unknown) => {
+      if (f === null || typeof f !== 'object') return f;
+      const finding = f as Record<string, unknown>;
+      const rawSev =
+        typeof finding.severity === 'string'
+          ? finding.severity.toLowerCase().trim()
+          : '';
+      if (VALID_SEVERITIES.has(rawSev)) return finding;
+      const mapped = SEVERITY_MAP[rawSev];
+      if (mapped) return { ...finding, severity: mapped };
+      // Unknown severity → coerce to 'minor' rather than failing the entire review.
+      // Reviewers occasionally invent labels; losing one finding to misclassification
+      // is better than discarding the whole batch and re-running the model.
+      console.warn(
+        `[reviewer] coerced unknown severity '${finding.severity}' → 'minor'`,
+      );
+      return { ...finding, severity: 'minor' };
+    }),
+  };
+}
+
 export function createReviewerGate(
   type: GateType,
   sessionType: 'reviewer-spec' | 'reviewer-quality' | 'reviewer-security',
   rubric: string,
   runtime: SessionRuntime,
   issueNumber: number,
-  runWriter?: SupabaseRunWriter,
+  runWriter?: RunWriter,
   runId?: string,
   diff?: string,
   specs?: string,
@@ -42,8 +105,14 @@ export function createReviewerGate(
     type,
     async execute(cwd: string): Promise<GateResult> {
       const variables: Record<string, string> = { rubric, cwd };
-      variables.diff = diff ?? '(diff unavailable — git diff failed or returned no output)';
-      variables.specs = specs || 'No spec content available for this review.';
+      variables.diff =
+        diff ?? '(diff unavailable — git diff failed or returned no output)';
+      // Only inject specs for reviewer-spec — reviewer-quality and reviewer-security
+      // templates declare only {{diff}}, {{rubric}}, and {{knownIssues}}; they have
+      // no {{specs}} placeholder so passing the variable is a silent no-op (#438).
+      if (sessionType === 'reviewer-spec') {
+        variables.specs = specs || 'No spec content available for this review.';
+      }
       variables.knownIssues = knowledgeContext || '';
 
       const sessionOpts = {
@@ -66,40 +135,104 @@ export function createReviewerGate(
         if (!result.ok) {
           // Propagate budget/rate-limit/containment signals immediately — never consume a retry attempt.
           // ARCH-AC-OPERATIONAL-SAFETY invariant: "rate limit handling never consumes a retry attempt."
-          if (result.error instanceof SessionError && (result.error.rateLimited || result.error.containmentBreach || result.error.message.startsWith('Budget exceeded'))) {
+          if (
+            result.error instanceof SessionError &&
+            (result.error.rateLimited ||
+              result.error.containmentBreach ||
+              result.error.message.startsWith('Budget exceeded'))
+          ) {
             return {
               gate: type,
               passed: false,
-              findings: [{ severity: 'critical', location: 'session', description: result.error.message }],
+              findings: [
+                {
+                  severity: 'critical',
+                  location: 'session',
+                  description: result.error.message,
+                },
+              ],
             };
           }
           if (attempt === 0) continue; // retry once
           return {
             gate: type,
             passed: false,
-            findings: [{ severity: 'critical', location: 'session', description: result.error.message }],
+            findings: [
+              {
+                severity: 'critical',
+                location: 'session',
+                description: result.error.message,
+              },
+            ],
           };
         }
 
         // Parse structured output — with --json-schema, the CLI stores the result
-        // in structured_output (not result/output). Fall back to the full object
-        // for backwards compatibility.
+        // in structured_output. Fall back to extracting JSON from the result text
+        // (model may follow prompt template and put JSON in a markdown code block
+        // instead of using structured output).
         const rawData = result.value.structuredData;
-        const structuredPayload =
-          rawData !== null && typeof rawData === 'object' && 'structured_output' in (rawData as object)
+        const so =
+          rawData !== null && typeof rawData === 'object'
             ? (rawData as Record<string, unknown>).structured_output
-            : rawData;
-        const parsed = ReviewFindingsSchema.safeParse(structuredPayload);
+            : undefined;
+        let structuredPayload: unknown;
+        if (so !== null && so !== undefined) {
+          // Preferred path: --json-schema produced structured_output
+          structuredPayload = so;
+        } else {
+          // Fallback: model followed prompt code block format and put JSON in result text.
+          // structured_output is null when the model produces markdown code block output
+          // instead of using the CLI's structured output mechanism.
+          const resultText =
+            typeof (rawData as Record<string, unknown>)?.result === 'string'
+              ? ((rawData as Record<string, unknown>).result as string)
+              : result.value.output;
+          const jsonMatch =
+            resultText.match(/```json\s*([\s\S]*?)```/s) ??
+            resultText.match(/(\{[\s\S]*\})/s);
+          if (jsonMatch?.[1]) {
+            try {
+              structuredPayload = JSON.parse(jsonMatch[1]);
+            } catch {
+              structuredPayload = rawData;
+            }
+          } else {
+            structuredPayload = rawData;
+          }
+        }
+        // Normalize severity values: model sometimes uses non-standard terms
+        // (e.g. "moderate" instead of "important", "high" instead of "critical").
+        const normalizedPayload = normalizeSeverities(structuredPayload);
+        const parsed = ReviewFindingsSchema.safeParse(normalizedPayload);
         if (!parsed.success) {
+          const subtype = (rawData as Record<string, unknown>)?.subtype;
+          const parseErr = parsed.error.issues
+            .map((i) => `${i.path.join('.')}: ${i.message}`)
+            .join('; ');
+          console.warn(
+            `[reviewer] structured output parse failed (attempt ${attempt + 1}, subtype=${subtype}): ${parseErr}`,
+          );
+          console.warn(
+            `[reviewer] structured_output value: ${(JSON.stringify(structuredPayload) ?? '<undefined>').slice(0, 4000)}`,
+          );
           if (attempt === 0) continue; // retry once
           return {
             gate: type,
             passed: false,
-            findings: [{ severity: 'critical', location: 'output', description: 'Reviewer produced invalid structured output' }],
+            findings: [
+              {
+                severity: 'critical',
+                location: 'output',
+                description: `Reviewer produced invalid structured output (subtype=${subtype}): ${parseErr}`,
+              },
+            ],
           };
         }
 
-        const hasCritical = parsed.data.findings.some((f) => f.severity === 'critical');
+        const hasCritical = parsed.data.findings.some(
+          (f) => f.severity === 'critical',
+        );
         return {
           gate: type,
           passed: parsed.data.approved && !hasCritical,
@@ -112,7 +245,13 @@ export function createReviewerGate(
       return {
         gate: type,
         passed: false,
-        findings: [{ severity: 'critical', location: 'session', description: 'Unexpected retry exhaustion' }],
+        findings: [
+          {
+            severity: 'critical',
+            location: 'session',
+            description: 'Unexpected retry exhaustion',
+          },
+        ],
       };
     },
   };

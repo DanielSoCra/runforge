@@ -58,12 +58,11 @@ export interface ProtocolOrchestrator {
 // ---------------------------------------------------------------------------
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms),
-    ),
-  ]);
+  let handle: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    handle = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise.finally(() => clearTimeout(handle)), timeoutPromise]);
 }
 
 export function createProtocolOrchestrator(

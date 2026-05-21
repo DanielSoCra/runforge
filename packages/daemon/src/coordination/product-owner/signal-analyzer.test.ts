@@ -16,6 +16,7 @@ function makeDeps(overrides: Partial<SnapshotDeps> = {}): SnapshotDeps {
     getActiveProposals: async () => [],
     getProposalHistory: async () => [],
     getIdeaInbox: async () => [],
+    getFindingsAwaitingApproval: async () => [],
     ...overrides,
   };
 }
@@ -26,6 +27,7 @@ function makeConfig(overrides: Partial<SnapshotConfig> = {}): SnapshotConfig {
     maxProposalEntries: 20,
     maxIdeaEntries: 10,
     maxDefaultEntries: 50,
+    maxFindingsEntries: 5,
     ...overrides,
   };
 }
@@ -130,5 +132,45 @@ STACK-AC-CONTROL-PLANE:
 
   it('returns empty array for empty content', () => {
     expect(computeSpecGaps('')).toEqual([]);
+  });
+
+  it('resolves the concierge L0 tree symmetrically with the auto-claude L0 tree', () => {
+    // Proves spec resolution is L0-agnostic. Either the AC tree or the
+    // concierge tree must walk equivalently when the operator queries gaps.
+    const traceabilityContent = `
+L0-CONCIERGE-VISION:
+  children: [FUNC-CONCIERGE-CORE, FUNC-CONCIERGE-AWARENESS]
+  status: draft
+
+FUNC-CONCIERGE-CORE:
+  children: [ARCH-CONCIERGE-RUNTIME]
+  status: draft
+
+FUNC-CONCIERGE-AWARENESS:
+  children: []
+  status: draft
+
+ARCH-CONCIERGE-RUNTIME:
+  parent: FUNC-CONCIERGE-CORE
+  children: [STACK-CONCIERGE-NODE]
+  status: draft
+
+STACK-CONCIERGE-NODE:
+  parent: ARCH-CONCIERGE-RUNTIME
+  children: []
+  code_paths:
+    - packages/concierge/
+  status: draft
+`;
+    const gaps = computeSpecGaps(traceabilityContent);
+    const core = gaps.find(g => g.specId === 'FUNC-CONCIERGE-CORE');
+    expect(core).toBeDefined();
+    expect(core!.hasL2).toBe(true);
+    expect(core!.hasL3).toBe(true);
+    expect(core!.isImplemented).toBe(true);
+
+    const awareness = gaps.find(g => g.specId === 'FUNC-CONCIERGE-AWARENESS');
+    expect(awareness).toBeDefined();
+    expect(awareness!.hasL2).toBe(false);
   });
 });

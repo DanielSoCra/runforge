@@ -1,11 +1,11 @@
 'use client';
 
-import { createClient } from '@/lib/supabase/client';
-
 export function SignOutButton() {
   async function handleSignOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
+    await fetch('/api/auth/sign-out', {
+      method: 'POST',
+      credentials: 'same-origin',
+    });
     window.location.href = '/login';
   }
 

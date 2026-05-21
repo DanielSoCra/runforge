@@ -6,6 +6,7 @@
   "controlPort": 3847,
   "pollIntervalMs": 30000,
   "maxConcurrentRuns": 1,
+  "maxRunsPerIssue": 20,
   "dailyBudget": 5,
   "perRunBudget": 2,
   "adapter": "cli",
@@ -18,6 +19,6 @@
     "gate1Commands": [
       "pnpm --filter @auto-claude/daemon run test"
     ],
-    "maxFixCycles": 2
+    "maxFixCycles": 4
   }
 }

@@ -5,6 +5,7 @@
   "packageManager": "pnpm@10.32.1",
   "scripts": {
     "dev:dashboard": "pnpm --filter @auto-claude/dashboard dev",
+    "lint": "pnpm -r --if-present lint",
     "test": "pnpm -r test",
     "test:daemon": "pnpm --filter @auto-claude/daemon test",
     "test:dashboard": "pnpm --filter @auto-claude/dashboard test",

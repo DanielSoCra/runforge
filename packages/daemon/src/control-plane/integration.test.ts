@@ -236,6 +236,50 @@ describe('integrateToStaging', () => {
     gitSpy.mockRestore();
   });
 
+  it('succeeds when called with mainRepoRoot while worktree has feature branch (regression #412)', async () => {
+    // Set up: staging branch in main repo, feature branch in a worktree.
+    // Bug #412: calling integrateToStaging with the worktree path fails because
+    // git refuses to checkout staging (already checked out in mainRepoRoot).
+    // Fix: always pass mainRepoRoot to integrateToStaging.
+    sh('git', ['checkout', '-b', 'staging'], repoDir);
+    sh('git', ['checkout', 'main'], repoDir);
+
+    // Create feature branch with a commit
+    sh('git', ['checkout', '-b', 'feature/412'], repoDir);
+    await writeFile(join(repoDir, 'fix412.ts'), 'export const fix = true;\n');
+    sh('git', ['add', 'fix412.ts'], repoDir);
+    sh('git', ['commit', '-m', 'feature 412'], repoDir);
+
+    // Check out staging in main repo (as the implement phase does)
+    sh('git', ['checkout', 'staging'], repoDir);
+
+    // Create a worktree on the feature branch (as the implement phase does after batch cleanup)
+    const worktreeDir = join(repoDir, 'workspaces', 'issue-412');
+    sh('git', ['worktree', 'add', worktreeDir, 'feature/412'], repoDir);
+
+    // BUG SCENARIO: calling with worktree path fails —
+    // git rejects checkout of staging because it's already checked out in mainRepoRoot
+    const bugResult = await integrateToStaging('feature/412', 'staging', worktreeDir);
+    expect(bugResult.ok).toBe(false);
+
+    // Release lock so we can retry with the correct path
+    releaseIntegrationLock();
+
+    // FIX: calling with mainRepoRoot succeeds
+    const fixResult = await integrateToStaging('feature/412', 'staging', repoDir);
+    expect(fixResult.ok).toBe(true);
+    if (!fixResult.ok) throw fixResult.error;
+    expect(fixResult.value.success).toBe(true);
+    expect(fixResult.value.conflicted).toBe(false);
+
+    // Verify staging has the merge
+    const log = spawnSync('git', ['log', '--oneline', 'staging'], { cwd: repoDir });
+    expect(log.stdout.toString()).toContain('integrate: feature/412');
+
+    // Clean up worktree
+    sh('git', ['worktree', 'remove', worktreeDir], repoDir);
+  });
+
   it('releases the lock after conflict detection', async () => {
     // Create staging with a conflicting file
     sh('git', ['checkout', '-b', 'staging'], repoDir);

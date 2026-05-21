@@ -1,6 +1,6 @@
 // src/implementation/task-graph.test.ts
 import { describe, it, expect } from 'vitest';
-import { validateTaskGraph, getUnitsByBatch, createSingleUnitGraph } from './task-graph.js';
+import { validateTaskGraph, getUnitsByBatch, createSingleUnitGraph, DEFAULT_VERIFICATION_COMMAND } from './task-graph.js';
 import type { TaskGraph, Unit } from '../types.js';
 
 const makeUnit = (id: string, batch: number, deps: string[] = []): Unit => ({
@@ -31,6 +31,24 @@ describe('validateTaskGraph', () => {
     const result = validateTaskGraph(graph);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error[0]?.message).toContain('Duplicate');
+  });
+
+  it('rejects unit IDs that are unsafe for worktree paths and branch names (#455)', () => {
+    const invalidIds = ['../src', '..', 'unit/name', 'unit\\name', 'unit name', 'unit.name', ''];
+
+    for (const id of invalidIds) {
+      const graph: TaskGraph = {
+        issueNumber: 1, featureBranch: 'f',
+        units: [makeUnit(id, 0)],
+      };
+
+      const result = validateTaskGraph(graph);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.some((error) => error.field === `units[${id}].id`)).toBe(true);
+      }
+    }
   });
 
   it('rejects non-sequential batch numbers', () => {
@@ -91,5 +109,26 @@ describe('createSingleUnitGraph', () => {
     const graph = createSingleUnitGraph(42, 'feature/42', 'Test', 'context');
     expect(graph.units).toHaveLength(1);
     expect(validateTaskGraph(graph).ok).toBe(true);
+  });
+
+  it('threads specContent into the unit when provided', () => {
+    const graph = createSingleUnitGraph(42, 'feature/42', 'Test', 'context', 'L1 spec body here');
+    expect(graph.units[0]!.specContent).toBe('L1 spec body here');
+  });
+
+  it('threads verificationCommand into the unit when provided', () => {
+    const graph = createSingleUnitGraph(42, 'feature/42', 'Test', 'context', '', 'pnpm test --filter foo');
+    expect(graph.units[0]!.verificationCommand).toBe('pnpm test --filter foo');
+  });
+
+  it('defaults specContent to empty string', () => {
+    const graph = createSingleUnitGraph(42, 'feature/42', 'Test', 'context');
+    expect(graph.units[0]!.specContent).toBe('');
+  });
+
+  it('defaults verificationCommand to DEFAULT_VERIFICATION_COMMAND (pnpm -r typecheck && pnpm -r test)', () => {
+    const graph = createSingleUnitGraph(42, 'feature/42', 'Test', 'context');
+    expect(graph.units[0]!.verificationCommand).toBe(DEFAULT_VERIFICATION_COMMAND);
+    expect(graph.units[0]!.verificationCommand).toBe('pnpm -r typecheck && pnpm -r test');
   });
 });

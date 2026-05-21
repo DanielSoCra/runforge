@@ -10,6 +10,15 @@ import { log } from './log.js';
 export interface CycleRunner {
   wrappedCycle: () => Promise<void>;
   shutdown: (signal: string) => Promise<void>;
+  getStatus: () => CycleRunnerStatus;
+}
+
+export interface CycleRunnerStatus {
+  inFlight: boolean;
+  shuttingDown: boolean;
+  lastStartedAt: number | null;
+  lastCompletedAt: number | null;
+  lastFailedAt: number | null;
 }
 
 export function createCycleRunner(
@@ -17,6 +26,9 @@ export function createCycleRunner(
 ): CycleRunner {
   let inFlight: Promise<void> | null = null;
   let shuttingDown = false;
+  let lastStartedAt: number | null = null;
+  let lastCompletedAt: number | null = null;
+  let lastFailedAt: number | null = null;
 
   const wrappedCycle = async (): Promise<void> => {
     if (shuttingDown) return;
@@ -25,9 +37,12 @@ export function createCycleRunner(
       return;
     }
     try {
+      lastStartedAt = Date.now();
       inFlight = cycleFn();
       await inFlight;
+      lastCompletedAt = Date.now();
     } catch (err) {
+      lastFailedAt = Date.now();
       log('error', `Cycle failed: ${String(err)}`);
     } finally {
       inFlight = null;
@@ -51,5 +66,13 @@ export function createCycleRunner(
     log('info', 'Shutdown complete');
   };
 
-  return { wrappedCycle, shutdown };
+  const getStatus = (): CycleRunnerStatus => ({
+    inFlight: inFlight !== null,
+    shuttingDown,
+    lastStartedAt,
+    lastCompletedAt,
+    lastFailedAt,
+  });
+
+  return { wrappedCycle, shutdown, getStatus };
 }

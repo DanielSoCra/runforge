@@ -1,4 +1,3 @@
-import { createClient } from '@/lib/supabase/server';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,11 +5,11 @@ import { Label } from '@/components/ui/label';
 import { updateGlobalSettings } from '@/actions/settings';
 import { PageError } from '@/components/page-error';
 import { GitHubConnectionsSection } from '@/components/github-connections-section';
-import { isAdmin } from '@/lib/auth';
+import { isDashboardAdmin } from '@/lib/auth/require-session';
+import { getDashboardStores } from '@/lib/data/stores';
 
 export default async function SettingsPage() {
-  const supabase = await createClient();
-  const admin = await isAdmin(supabase);
+  const admin = await isDashboardAdmin();
   if (!admin) {
     return (
       <div className="max-w-lg space-y-6">
@@ -19,12 +18,12 @@ export default async function SettingsPage() {
       </div>
     );
   }
-  const { data: settings, error: settingsError } = await supabase.from('global_settings').select('*').single();
-  if (settingsError && settingsError.code !== 'PGRST116') {
-    // PGRST116 = no rows — acceptable for first-run (defaults apply)
-    console.error('[settings] failed to load settings:', settingsError);
+  const settings = await getDashboardStores().settings.readGlobalSettings();
+  if (!settings.ok && settings.error !== 'not-found') {
+    console.error('[settings] failed to load settings:', settings.message);
     return <PageError />;
   }
+  const concurrencyLimit = settings.ok ? settings.value.concurrencyLimit : 3;
 
   return (
     <div className="max-w-lg space-y-6">
@@ -44,7 +43,7 @@ export default async function SettingsPage() {
                 type="number"
                 min="1"
                 max="20"
-                defaultValue={settings?.concurrency_limit ?? 3}
+                defaultValue={concurrencyLimit}
               />
             </div>
             <Button type="submit">Save Settings</Button>

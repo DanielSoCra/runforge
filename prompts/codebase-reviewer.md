@@ -49,9 +49,10 @@ Produce a JSON result with at most **{{maxIssues}}** verified findings:
   "category": "correctness",
   "findings": [
     {
+      "title": "Missing null check on config.repo",
       "severity": "important",
       "location": "src/path/file.ts:42",
-      "description": "Missing null check on config.repo — crashes in legacy mode when repo is undefined",
+      "description": "Crashes in legacy mode when repo is undefined — line 42 dereferences config.repo.owner without a null guard",
       "evidence": "Line 42 dereferences config.repo.owner without checking config.repo exists first. The legacy mode code path at line 148 shows config.repo can be null."
     }
   ],

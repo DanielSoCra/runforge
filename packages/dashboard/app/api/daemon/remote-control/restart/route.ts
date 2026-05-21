@@ -1,17 +1,29 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { requireAdmin } from '@/lib/auth';
+import {
+  getDashboardAuthError,
+  requireDashboardAdmin,
+} from '@/lib/auth/require-session';
 import { daemonFetch, DaemonConfigError } from '@/lib/daemon-fetch';
 
 export async function POST() {
-  const supabase = await createClient();
-  try { await requireAdmin(supabase); } catch {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  try {
+    await requireDashboardAdmin();
+  } catch (e) {
+    const error = getDashboardAuthError(e);
+    return NextResponse.json({ error: error.message }, { status: error.status });
   }
 
   try {
     const res = await daemonFetch('/remote-control/restart', { method: 'POST' });
-    const json = await res.json();
+    let json: unknown;
+    try {
+      json = await res.json();
+    } catch {
+      return NextResponse.json(
+        { error: `Daemon returned non-JSON response (HTTP ${res.status})` },
+        { status: 502 },
+      );
+    }
     return NextResponse.json(json, { status: res.status });
   } catch (e) {
     if (e instanceof DaemonConfigError) {

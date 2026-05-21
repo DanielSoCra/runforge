@@ -77,9 +77,26 @@ describe('createWebsitePhaseHandlers', () => {
 
   it('returns handlers for all 10 website phases', () => {
     const handlers = createWebsitePhaseHandlers(
-      makeConfig(), null, octokit, 'owner', 'repo', 10, null,
+      makeConfig(),
+      null,
+      octokit,
+      'owner',
+      'repo',
+      10,
+      null,
     );
-    const phases = ['init', 'intelligence', 'brand', 'design', 'seo', 'content', 'assets', 'build', 'qa', 'launch'] as const;
+    const phases = [
+      'init',
+      'intelligence',
+      'brand',
+      'design',
+      'seo',
+      'content',
+      'assets',
+      'build',
+      'qa',
+      'launch',
+    ] as const;
     for (const phase of phases) {
       expect(handlers[phase as keyof typeof handlers]).toBeTypeOf('function');
     }
@@ -89,7 +106,13 @@ describe('createWebsitePhaseHandlers', () => {
     it('returns success and removes checkpoint-paused label', async () => {
       mockShouldCheckpoint.mockReturnValue(false);
       const handlers = createWebsitePhaseHandlers(
-        makeConfig(), null, octokit, 'owner', 'repo', 10, null,
+        makeConfig(),
+        null,
+        octokit,
+        'owner',
+        'repo',
+        10,
+        null,
       );
       const result = await handlers.brand!(makeRun());
       expect(result).toBe('success');
@@ -105,7 +128,13 @@ describe('createWebsitePhaseHandlers', () => {
       mockShouldCheckpoint.mockReturnValue(true);
       mockFormatCheckpointComment.mockReturnValue('## Checkpoint');
       const handlers = createWebsitePhaseHandlers(
-        makeConfig(), null, octokit, 'owner', 'repo', 10, null,
+        makeConfig(),
+        null,
+        octokit,
+        'owner',
+        'repo',
+        10,
+        null,
       );
       const result = await handlers.brand!(makeRun());
       expect(result).toBe('budget-exceeded');
@@ -129,7 +158,7 @@ describe('createWebsitePhaseHandlers', () => {
       );
     });
 
-    it('saves start_from to supabase when supabase and repoId are provided', async () => {
+    it('saves start_from to the config store when repoId is provided', async () => {
       mockShouldCheckpoint.mockReturnValue(true);
       const mockUpdate = vi.fn().mockReturnValue({
         eq: vi.fn().mockReturnValue({
@@ -138,18 +167,24 @@ describe('createWebsitePhaseHandlers', () => {
           }),
         }),
       });
-      const mockSupabase = {
+      const mockConfigStore = {
         from: vi.fn(() => ({ update: mockUpdate })),
       } as any;
 
       const config = makeConfig();
       const handlers = createWebsitePhaseHandlers(
-        config, mockSupabase, octokit, 'owner', 'repo', 10, 'repo-123',
+        config,
+        mockConfigStore,
+        octokit,
+        'owner',
+        'repo',
+        10,
+        'repo-123',
       );
       // Use 'brand' phase — next phase should be 'design'
       await handlers.brand!(makeRun());
 
-      expect(mockSupabase.from).toHaveBeenCalledWith('repo_plugins');
+      expect(mockConfigStore.from).toHaveBeenCalledWith('repo_plugins');
       expect(mockUpdate).toHaveBeenCalledWith(
         expect.objectContaining({
           config: expect.objectContaining({ start_from: 'design' }),
@@ -157,24 +192,36 @@ describe('createWebsitePhaseHandlers', () => {
       );
     });
 
-    it('skips supabase update when supabase is null', async () => {
+    it('skips config update when the config store is null', async () => {
       mockShouldCheckpoint.mockReturnValue(true);
       const handlers = createWebsitePhaseHandlers(
-        makeConfig(), null, octokit, 'owner', 'repo', 10, 'repo-123',
+        makeConfig(),
+        null,
+        octokit,
+        'owner',
+        'repo',
+        10,
+        'repo-123',
       );
       // Should not throw
       const result = await handlers.brand!(makeRun());
       expect(result).toBe('budget-exceeded');
     });
 
-    it('skips supabase update when repoId is null', async () => {
+    it('skips config update when repoId is null', async () => {
       mockShouldCheckpoint.mockReturnValue(true);
-      const mockSupabase = { from: vi.fn() } as any;
+      const mockConfigStore = { from: vi.fn() } as any;
       const handlers = createWebsitePhaseHandlers(
-        makeConfig(), mockSupabase, octokit, 'owner', 'repo', 10, null,
+        makeConfig(),
+        mockConfigStore,
+        octokit,
+        'owner',
+        'repo',
+        10,
+        null,
       );
       await handlers.brand!(makeRun());
-      expect(mockSupabase.from).not.toHaveBeenCalled();
+      expect(mockConfigStore.from).not.toHaveBeenCalled();
     });
   });
 });

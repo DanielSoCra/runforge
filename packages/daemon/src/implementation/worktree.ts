@@ -1,6 +1,9 @@
+import { rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { git } from '../lib/git.js';
 import { ok, err, type Result } from '../lib/result.js';
 import { join } from 'path';
+import { isValidUnitId } from './task-graph.js';
 
 const WORKTREE_DIR = 'workspaces';
 
@@ -9,11 +12,20 @@ export async function createWorktree(
   baseBranch: string,
   repoRoot?: string,
 ): Promise<Result<string>> {
+  if (!isValidUnitId(unitId)) {
+    return err(new Error(`Invalid unit ID: ${unitId}`));
+  }
+
   const worktreePath = join(repoRoot ?? process.cwd(), WORKTREE_DIR, unitId);
   const branchName = `unit/${unitId}`;
 
-  // Clean up stale branch/worktree from previous run if it exists
+  // Clean up stale branch/worktree from previous run if it exists.
+  // git worktree remove only works for registered worktrees — if the directory
+  // exists but isn't registered (e.g. leftover from a spec phase), also delete it.
   await git(['worktree', 'remove', worktreePath, '--force'], repoRoot).catch(() => {});
+  if (existsSync(worktreePath)) {
+    await rm(worktreePath, { recursive: true, force: true });
+  }
   await git(['branch', '-D', branchName], repoRoot).catch(() => {});
 
   const result = await git(
@@ -29,6 +41,10 @@ export async function removeWorktree(
   unitId: string,
   repoRoot?: string,
 ): Promise<Result<void>> {
+  if (!isValidUnitId(unitId)) {
+    return err(new Error(`Invalid unit ID: ${unitId}`));
+  }
+
   const worktreePath = join(repoRoot ?? process.cwd(), WORKTREE_DIR, unitId);
 
   // Remove the worktree (--force handles dirty state)
@@ -48,6 +64,10 @@ export async function deleteUnitBranch(
   unitId: string,
   repoRoot?: string,
 ): Promise<Result<void>> {
+  if (!isValidUnitId(unitId)) {
+    return err(new Error(`Invalid unit ID: ${unitId}`));
+  }
+
   const branchName = `unit/${unitId}`;
   const result = await git(['branch', '-D', branchName], repoRoot);
   if (!result.ok) return err(result.error);
@@ -71,6 +91,10 @@ export async function getWorktreeDiffSize(
   baseBranch: string,
   repoRoot?: string,
 ): Promise<Result<number>> {
+  if (!isValidUnitId(unitId)) {
+    return err(new Error(`Invalid unit ID: ${unitId}`));
+  }
+
   const branchName = `unit/${unitId}`;
   const result = await git(['diff', '--stat', `${baseBranch}...${branchName}`], repoRoot);
   if (!result.ok) {
@@ -79,14 +103,26 @@ export async function getWorktreeDiffSize(
     return err(result.error);
   }
 
+  return ok(parseDiffStatSize(result.value));
+}
+
+export async function getBranchDiffSize(
+  baseBranch: string,
+  targetBranch: string,
+  repoRoot?: string,
+): Promise<Result<number>> {
+  const result = await git(['diff', '--stat', `${baseBranch}...${targetBranch}`], repoRoot);
+  if (!result.ok) return err(result.error);
+  return ok(parseDiffStatSize(result.value));
+}
+
+function parseDiffStatSize(diffStat: string): number {
   // Parse last line: " X files changed, Y insertions(+), Z deletions(-)"
-  const lines = result.value.split('\n').filter(Boolean);
+  const lines = diffStat.split('\n').filter(Boolean);
   const lastLine = lines[lines.length - 1] ?? '';
   const insertions = lastLine.match(/(\d+) insertion/);
   const deletions = lastLine.match(/(\d+) deletion/);
-  return ok(
-    (insertions ? Number(insertions[1]) : 0) + (deletions ? Number(deletions[1]) : 0),
-  );
+  return (insertions ? Number(insertions[1]) : 0) + (deletions ? Number(deletions[1]) : 0);
 }
 
 export async function mergeWorktree(
@@ -94,6 +130,10 @@ export async function mergeWorktree(
   targetBranch: string,
   repoRoot?: string,
 ): Promise<Result<void>> {
+  if (!isValidUnitId(unitId)) {
+    return err(new Error(`Invalid unit ID: ${unitId}`));
+  }
+
   const branchName = `unit/${unitId}`;
   const result = await git(
     ['merge', '--no-ff', branchName, '-m', `merge: unit ${unitId}`],

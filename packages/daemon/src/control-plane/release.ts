@@ -1,6 +1,7 @@
 // src/control-plane/release.ts
 import { readResults } from './results.js';
 import type { ResultsRecord } from '../types.js';
+import type { Octokit } from '@octokit/rest';
 
 export interface ReleaseNotes {
   title: string;
@@ -8,6 +9,24 @@ export interface ReleaseNotes {
   issueCount: number;
   totalCost: number;
 }
+
+export type ReleaseProposalResult =
+  | {
+      status: 'success';
+      prNumber: number;
+      prUrl: string;
+      issueCount: number;
+      totalCost: number;
+      title: string;
+      body: string;
+    }
+  | {
+      status: 'no-completed-work';
+      issueCount: 0;
+      totalCost: 0;
+      title: string;
+      body: string;
+    };
 
 export async function aggregateReleaseNotes(
   stateDir?: string,
@@ -45,5 +64,44 @@ export async function aggregateReleaseNotes(
     ].join('\n'),
     issueCount: completed.length,
     totalCost,
+  };
+}
+
+export async function createReleaseProposal(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  stagingBranch: string,
+  productionBranch: string,
+  stateDir?: string,
+): Promise<ReleaseProposalResult> {
+  const notes = await aggregateReleaseNotes(stateDir);
+  if (notes.issueCount === 0) {
+    return {
+      status: 'no-completed-work',
+      issueCount: 0,
+      totalCost: 0,
+      title: notes.title,
+      body: notes.body,
+    };
+  }
+
+  const pr = await octokit.pulls.create({
+    owner,
+    repo,
+    head: stagingBranch,
+    base: productionBranch,
+    title: notes.title,
+    body: notes.body,
+  });
+
+  return {
+    status: 'success',
+    prNumber: pr.data.number,
+    prUrl: pr.data.html_url,
+    issueCount: notes.issueCount,
+    totalCost: notes.totalCost,
+    title: notes.title,
+    body: notes.body,
   };
 }

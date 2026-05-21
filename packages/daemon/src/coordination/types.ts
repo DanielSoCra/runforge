@@ -3,7 +3,12 @@ import { z } from 'zod';
 
 // --- Proposal ---
 
-export const ProposalStatusSchema = z.enum(['proposed', 'approved', 'rejected', 'expired']);
+export const ProposalStatusSchema = z.enum([
+  'proposed',
+  'approved',
+  'rejected',
+  'expired',
+]);
 export type ProposalStatus = z.infer<typeof ProposalStatusSchema>;
 
 export const ProposalSchema = z.object({
@@ -25,20 +30,34 @@ export type Proposal = z.infer<typeof ProposalSchema>;
 
 // --- Batch ---
 
-export const BatchStatusSchema = z.enum(['planning', 'active', 'completed', 'cancelled']);
+export const BatchStatusSchema = z.enum([
+  'planning',
+  'active',
+  'completed',
+  'cancelled',
+]);
 export type BatchStatus = z.infer<typeof BatchStatusSchema>;
 
 export const BatchEventSchema = z.enum(['finalize', 'all_merged', 'cancel']);
 export type BatchEvent = z.infer<typeof BatchEventSchema>;
 
-export const batchTransitions: Record<BatchStatus, Partial<Record<BatchEvent, BatchStatus>>> = {
+export const batchTransitions: Record<
+  BatchStatus,
+  Partial<Record<BatchEvent, BatchStatus>>
+> = {
   planning: { finalize: 'active' },
   active: { all_merged: 'completed', cancel: 'cancelled' },
   completed: {},
   cancelled: {},
 };
 
-export const BatchItemStatusSchema = z.enum(['pending', 'in_progress', 'completed', 'skipped', 'failed']);
+export const BatchItemStatusSchema = z.enum([
+  'pending',
+  'in_progress',
+  'completed',
+  'skipped',
+  'failed',
+]);
 export type BatchItemStatus = z.infer<typeof BatchItemStatusSchema>;
 
 export const BatchItemSchema = z.object({
@@ -64,13 +83,37 @@ export type Batch = z.infer<typeof BatchSchema>;
 
 // --- WorkerClaim ---
 
-export const AgentTypeSchema = z.enum(['worker', 'reviewer', 'po', 'planner', 'codebase-reviewer', 'tech_lead']);
+const AgentTypeCanonicalSchema = z.enum([
+  'worker',
+  'reviewer',
+  'po',
+  'planner',
+  'codebase-reviewer',
+  'tech-lead',
+]);
+
+export const AgentTypeSchema = z.preprocess(
+  (value) => (value === 'tech_lead' ? 'tech-lead' : value),
+  AgentTypeCanonicalSchema,
+);
 export type AgentType = z.infer<typeof AgentTypeSchema>;
 
-export const ClaimStatusSchema = z.enum(['claimed', 'in_progress', 'paused', 'pr_opened', 'completed', 'failed']);
+export const ClaimStatusSchema = z.enum([
+  'claimed',
+  'in_progress',
+  'paused',
+  'pr_opened',
+  'completed',
+  'failed',
+]);
 export type ClaimStatus = z.infer<typeof ClaimStatusSchema>;
 
-export const ACTIVE_CLAIM_STATUSES: ClaimStatus[] = ['claimed', 'in_progress', 'paused', 'pr_opened'];
+export const ACTIVE_CLAIM_STATUSES: ClaimStatus[] = [
+  'claimed',
+  'in_progress',
+  'paused',
+  'pr_opened',
+];
 
 export const WorkerClaimSchema = z.object({
   id: z.string().uuid(),
@@ -90,10 +133,23 @@ export type WorkerClaim = z.infer<typeof WorkerClaimSchema>;
 
 // --- MergeQueueEntry ---
 
-export const MergePhaseSchema = z.enum(['queued', 'rebasing', 'merging', 'validating', 'reverted']);
+export const MergePhaseSchema = z.enum([
+  'queued',
+  'rebasing',
+  'merging',
+  'validating',
+  'reverted',
+]);
 export type MergePhase = z.infer<typeof MergePhaseSchema>;
 
-export const MergeStatusSchema = z.enum(['queued', 'merging', 'merged', 'failed', 'blocked', 'needs_human']);
+export const MergeStatusSchema = z.enum([
+  'queued',
+  'merging',
+  'merged',
+  'failed',
+  'blocked',
+  'needs_human',
+]);
 export type MergeStatus = z.infer<typeof MergeStatusSchema>;
 
 export const MergeQueueEntrySchema = z.object({

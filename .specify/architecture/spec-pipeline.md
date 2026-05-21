@@ -85,8 +85,8 @@ The Spec-Driven Pipeline Variant does not expose its own API. It is registered a
 1. The FSM enters the l2-design phase.
 2. The control plane assembles context: L0 vision, L1 spec content (read from the spec chain), existing L2 specs in the architecture directory (for pattern consistency), and any feedback from a prior l2-gate iteration.
 3. The control plane spawns an `l2-designer` session via Session Runtime.
-4. The session reads specs, self-brainstorms architectural approaches, writes the L2 spec file, updates traceability, creates a branch, and opens a review request (pull request with design summary).
-5. On session completion: the control plane appends the L2 spec reference to the spec chain in RunState, writes the review-pending label, and transitions to the l2-gate phase.
+4. The session reads specs, self-brainstorms architectural approaches, writes the L2 spec file, and updates traceability. It does not create branches, commits, labels, comments, or review proposals.
+5. On session completion: the control plane packages the changed artifacts through Controlled Artifact Delivery, appends the L2 spec reference and PhaseArtifact to RunState, writes the review-pending label, and transitions to the l2-gate phase.
 
 **L2 gate phase (gate type):**
 1. The FSM enters the l2-gate phase. The run is now parked.
@@ -100,8 +100,8 @@ The Spec-Driven Pipeline Variant does not expose its own API. It is registered a
 1. The FSM enters the l3-generate phase.
 2. The control plane assembles context: L1 spec, approved L2 spec (from the spec chain), existing L3 specs (for pattern consistency), and traceability map.
 3. The control plane spawns an `l3-generator` session via Session Runtime.
-4. The session generates L3 spec files, updates traceability with code paths and test paths, creates a branch, and opens a review request.
-5. On session completion: append the L3 spec reference to the spec chain, transition to l3-compliance.
+4. The session generates L3 spec files and updates traceability with code paths and test paths. It does not create branches, commits, labels, comments, or review proposals.
+5. On session completion: the control plane packages the changed artifacts through Controlled Artifact Delivery, appends the L3 spec reference and PhaseArtifact to RunState, and transitions to l3-compliance.
 
 **L3 compliance phase (session type: spec-compliance-reviewer):**
 1. The FSM enters the l3-compliance phase.
@@ -130,7 +130,7 @@ When a gate phase detects feedback, the FSM re-enters the preceding session phas
 2. The feedback content (extracted from work request comments and review comments posted since the last gate event).
 3. The deliverable reference (so the session can update rather than recreate).
 
-The session operates on the existing branch — it updates the spec file rather than creating a new one, pushes, and returns. The FSM then transitions back to the gate phase for re-evaluation.
+The session operates in the prepared workspace and updates the spec file rather than creating a new delivery proposal. After the session returns, the Control Plane updates the recorded PhaseArtifact and review proposal. The FSM then transitions back to the gate phase for re-evaluation.
 
 **Crash resumption for parked runs:**
 1. On startup, the control plane scans for incomplete RunStates as usual.

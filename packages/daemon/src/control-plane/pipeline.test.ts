@@ -5,6 +5,8 @@ import { getPipeline } from './fsm.js';
 import { StateManager } from './state.js';
 import { CostTracker } from '../session-runtime/cost.js';
 import type { RunState, PhaseEvent } from '../types.js';
+import type { PhaseLabelMirror } from './phase-labels.js';
+import { createFailureRecord } from './failure-routing.js';
 import { mkdtemp } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -25,7 +27,6 @@ const featureSimpleAllSuccess: PhaseHandlerMap = {
 
 const bugAllSuccess: PhaseHandlerMap = {
   detect: async () => 'success' as PhaseEvent,
-  diagnose: async () => 'success' as PhaseEvent,
   implement: async () => 'success' as PhaseEvent,
   review: async () => 'success' as PhaseEvent,
   integrate: async () => 'success' as PhaseEvent,
@@ -34,7 +35,20 @@ const bugAllSuccess: PhaseHandlerMap = {
   report: async () => 'success' as PhaseEvent,
 };
 
-const makeRun = (variant: 'feature' | 'feature-simple' | 'bug' = 'feature-simple'): RunState => ({
+const specDrivenAllSuccess: PhaseHandlerMap = {
+  detect: async () => 'success' as PhaseEvent,
+  'l2-design': async () => 'success' as PhaseEvent,
+  'l2-gate': async () => 'success' as PhaseEvent,
+  'l3-generate': async () => 'success' as PhaseEvent,
+  'l3-compliance': async () => 'success' as PhaseEvent,
+  implement: async () => 'success' as PhaseEvent,
+  review: async () => 'success' as PhaseEvent,
+  holdout: async () => 'success' as PhaseEvent,
+  integrate: async () => 'success' as PhaseEvent,
+  report: async () => 'success' as PhaseEvent,
+};
+
+const makeRun = (variant: 'feature' | 'feature-simple' | 'bug' | 'spec-driven' = 'feature-simple'): RunState => ({
   id: 'test-run-id',
   issueNumber: 1,
   title: 'Test',
@@ -77,6 +91,21 @@ describe('runPipeline', () => {
     const table = getPipeline('feature-simple');
     const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
     expect(result.outcome).toBe('complete');
+  });
+
+  it('mirrors feature-simple phase progress into workflow node state (#483)', async () => {
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+
+    const result = await runPipeline(run, table, featureSimpleAllSuccess, stateMgr, costTracker);
+
+    expect(result.outcome).toBe('complete');
+    expect(run.currentNodeId).toBe('report');
+    expect(run.activeNodeIds).toEqual([]);
+    expect(run.nodeStates?.detect?.status).toBe('succeeded');
+    expect(run.nodeStates?.classify?.status).toBe('succeeded');
+    expect(run.nodeStates?.implement?.status).toBe('succeeded');
+    expect(run.nodeStates?.report?.status).toBe('succeeded');
   });
 
   it('transitions to stuck after max retries on implement failure', async () => {
@@ -312,16 +341,10 @@ describe('runPipeline', () => {
   });
 
   it('syncs run.cost from costTracker after every phase (#132)', async () => {
-    // Simulate sessions recording costs during diagnose + implement + review phases.
+    // Simulate sessions recording costs during implement + review phases.
     // Before this fix, only implement costs were accumulated in run.cost.
     const handlers: PhaseHandlerMap = {
       detect: async () => 'success' as PhaseEvent,
-      classify: async () => 'success:simple' as PhaseEvent,
-      diagnose: async () => {
-        // Simulates runtime.spawnSession recording diagnosis cost
-        costTracker.recordCost(1, 0.50);
-        return 'success' as PhaseEvent;
-      },
       implement: async () => {
         // Simulates runtime.spawnSession recording implementation cost
         costTracker.recordCost(1, 2.00);
@@ -332,7 +355,6 @@ describe('runPipeline', () => {
         costTracker.recordCost(1, 0.75);
         return 'success' as PhaseEvent;
       },
-      holdout: async () => 'success' as PhaseEvent,
       integrate: async () => 'success' as PhaseEvent,
       deploy: async () => 'success' as PhaseEvent,
       test: async () => 'success' as PhaseEvent,
@@ -343,7 +365,7 @@ describe('runPipeline', () => {
     const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
     expect(result.outcome).toBe('complete');
     // run.cost must include ALL phase costs, not just implement
-    expect(run.cost).toBe(3.25); // 0.50 + 2.00 + 0.75
+    expect(run.cost).toBe(2.75); // 2.00 + 0.75
   });
 
   it('transitions to stuck on containment-breach event from handler (#208)', async () => {
@@ -356,6 +378,84 @@ describe('runPipeline', () => {
     const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
     expect(result.outcome).toBe('stuck');
     expect(run.phase).toBe('stuck');
+  });
+
+  it('records typed containment failures as human-required (#489)', async () => {
+    const handlers: PhaseHandlerMap = {
+      ...featureSimpleAllSuccess,
+      implement: async () => 'containment-breach' as PhaseEvent,
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('stuck');
+    expect(result.error).toContain('Confirmed containment violation');
+    expect(run.lastFailure?.kind).toBe('containment-violation');
+    expect(run.lastFailure?.humanActionRequired).toBe(true);
+    expect(run.repairHistory).toHaveLength(1);
+    expect(run.repairHistory?.[0]?.outcome).toBe('human-required');
+  });
+
+  it('retries repairable failures that would otherwise transition directly to stuck (#489)', async () => {
+    let detectCalls = 0;
+    const handlers: PhaseHandlerMap = {
+      ...featureSimpleAllSuccess,
+      detect: async (targetRun) => {
+        detectCalls++;
+        if (detectCalls === 1) {
+          targetRun.lastFailure = createFailureRecord({
+            kind: 'workspace-repair-needed',
+            phase: 'detect',
+            message: 'worktree registration is stale',
+            severity: 'blocking',
+            retryable: true,
+            repairAction: 'recreate-workspace',
+          });
+          return 'failure' as PhaseEvent;
+        }
+        return 'success' as PhaseEvent;
+      },
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('complete');
+    expect(detectCalls).toBe(2);
+    expect(run.lastFailure?.kind).toBe('workspace-repair-needed');
+    expect(run.repairHistory).toHaveLength(1);
+    expect(run.repairHistory?.[0]?.outcome).toBe('retrying');
+  });
+
+  it('escalates repairable failures after their bounded attempts are exhausted (#489)', async () => {
+    let detectCalls = 0;
+    const handlers: PhaseHandlerMap = {
+      ...featureSimpleAllSuccess,
+      detect: async (targetRun) => {
+        detectCalls++;
+        targetRun.lastFailure = createFailureRecord({
+          kind: 'workspace-repair-needed',
+          phase: 'detect',
+          message: 'worktree registration is stale',
+          severity: 'blocking',
+          retryable: true,
+          repairAction: 'recreate-workspace',
+        });
+        return 'failure' as PhaseEvent;
+      },
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker, {
+      maxAttempts: { detect: 2 },
+    });
+    expect(result.outcome).toBe('stuck');
+    expect(detectCalls).toBe(2);
+    expect(run.lastFailure?.kind).toBe('workspace-repair-needed');
+    expect(run.lastFailure?.attempt).toBe(2);
+    expect(run.repairHistory?.map((entry) => entry.outcome)).toEqual([
+      'retrying',
+      'terminal-stuck',
+    ]);
   });
 
   describe('handler existence validation', () => {
@@ -419,6 +519,34 @@ describe('runPipeline', () => {
     expect(attempts).toBe(1); // terminal — no retries
   });
 
+  // Regression for #449: spec-driven holdout.failure must route to implement (not stuck).
+  // Without the fix, the FSM had no transition for holdout:failure and pipeline.ts would
+  // force run.phase = 'stuck'. This test drives the full path through runPipeline.
+  it('spec-driven: holdout failure routes to implement retry, then completes (regression #449)', async () => {
+    let holdoutCalls = 0;
+    let implementCallsAfterHoldout = 0;
+    let holdoutDone = false;
+    const handlers: PhaseHandlerMap = {
+      ...specDrivenAllSuccess,
+      holdout: async () => {
+        holdoutCalls++;
+        if (holdoutCalls === 1) return 'failure' as PhaseEvent; // Type A: retry via implement
+        return 'success' as PhaseEvent;
+      },
+      implement: async () => {
+        if (holdoutDone) implementCallsAfterHoldout++;
+        else holdoutDone = holdoutCalls > 0; // first holdout failure has fired
+        return 'success' as PhaseEvent;
+      },
+    };
+    const run = makeRun('spec-driven');
+    const table = getPipeline('spec-driven');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('complete');
+    expect(run.phase).not.toBe('stuck');
+    expect(holdoutCalls).toBe(2); // failed once, then passed on retry
+  });
+
   it('calls runWriter.upsertRun on phase transitions', async () => {
     const upsertRun = vi.fn().mockResolvedValue(undefined);
     const runWriter = { upsertRun, writeCostEvent: vi.fn() } as any;
@@ -432,5 +560,139 @@ describe('runPipeline', () => {
     expect(firstCall[1]).toHaveProperty('current_phase');
     expect(firstCall[1]).toHaveProperty('phases');
     expect(Array.isArray(firstCall[1].phases)).toBe(true);
+  });
+
+  it('mirrors phase labels on transitions and clears them on completion (#469)', async () => {
+    const run = makeRun('feature-simple');
+    const handlers: PhaseHandlerMap = { ...featureSimpleAllSuccess };
+    const appliedPhases: string[] = [];
+    const phaseLabelMirror: PhaseLabelMirror = {
+      applyPhaseLabel: vi.fn((_issueNumber, phase, targetRun) => {
+        appliedPhases.push(phase);
+        targetRun.activePhaseLabel = `phase:${phase}`;
+      }),
+      clearPhaseLabels: vi.fn((_issueNumber, targetRun) => {
+        targetRun.activePhaseLabel = undefined;
+      }),
+      provisionLabels: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await runPipeline(
+      run,
+      getPipeline('feature-simple'),
+      handlers,
+      stateMgr,
+      costTracker,
+      undefined,
+      undefined,
+      phaseLabelMirror,
+    );
+
+    expect(result.outcome).toBe('complete');
+    expect(appliedPhases).toEqual(expect.arrayContaining([
+      'classify',
+      'implement',
+      'review',
+      'holdout',
+      'integrate',
+      'deploy',
+      'test',
+    ]));
+    expect(appliedPhases).not.toContain('report');
+    expect(phaseLabelMirror.clearPhaseLabels).toHaveBeenCalledWith(1, run);
+    expect(run.activePhaseLabel).toBeUndefined();
+  });
+
+  it('clears phase labels when a run transitions to stuck (#469)', async () => {
+    const run = makeRun('feature-simple');
+    const handlers: PhaseHandlerMap = {
+      ...featureSimpleAllSuccess,
+      implement: async () => 'failure' as PhaseEvent,
+    };
+    const phaseLabelMirror: PhaseLabelMirror = {
+      applyPhaseLabel: vi.fn((_issueNumber, phase, targetRun) => {
+        targetRun.activePhaseLabel = `phase:${phase}`;
+      }),
+      clearPhaseLabels: vi.fn((_issueNumber, targetRun) => {
+        targetRun.activePhaseLabel = undefined;
+      }),
+      provisionLabels: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await runPipeline(
+      run,
+      getPipeline('feature-simple'),
+      handlers,
+      stateMgr,
+      costTracker,
+      undefined,
+      undefined,
+      phaseLabelMirror,
+    );
+
+    expect(result.outcome).toBe('stuck');
+    expect(phaseLabelMirror.clearPhaseLabels).toHaveBeenCalledWith(1, run);
+    expect(run.activePhaseLabel).toBeUndefined();
+  });
+
+  // Cross-phase loop integration test (#437): drives the FSM through a real
+  // l3-compliance ↔ l3-generate cycle to prove the cap actually terminates.
+  // pipeline.ts's retry tracker only counts SELF-loops, so the cross-phase
+  // bound must come from run.l3ComplianceAttempts + the 'escalated' outcome.
+  // Without that, this test would run forever.
+  describe('l3-compliance ↔ l3-generate cross-phase loop is capped (#437)', () => {
+    it('loops at most MAX_L3_COMPLIANCE_ATTEMPTS times then routes to stuck', async () => {
+      let l3GenerateCalls = 0;
+      let l3ComplianceCalls = 0;
+      const seenFeedback: string[] = [];
+
+      const handlers: PhaseHandlerMap = {
+        // All other spec-driven phases need handlers for pre-flight validation,
+        // even though the run terminates in l3-compliance before reaching them.
+        detect: async () => 'success' as PhaseEvent,
+        'l2-design': async () => 'success' as PhaseEvent,
+        'l2-gate': async () => 'success' as PhaseEvent,
+        implement: async () => 'success' as PhaseEvent,
+        review: async () => 'success' as PhaseEvent,
+        holdout: async () => 'success' as PhaseEvent,
+        integrate: async () => 'success' as PhaseEvent,
+        report: async () => 'success' as PhaseEvent,
+
+        // The two phases under test:
+        'l3-generate': async (r) => {
+          l3GenerateCalls += 1;
+          seenFeedback.push(r.l3Feedback ?? '');
+          return 'success' as PhaseEvent;
+        },
+        'l3-compliance': async (r) => {
+          l3ComplianceCalls += 1;
+          // Simulate a noncompliance finding every time. Increment the
+          // cross-phase counter and stash feedback for the next l3-generate.
+          const nextAttempt = (r.l3ComplianceAttempts ?? 0) + 1;
+          r.l3Feedback = `attempt ${nextAttempt}: missing field X`.slice(0, 4000);
+          r.l3ComplianceAttempts = nextAttempt;
+          // Third failure escalates → stuck (matches phases.ts MAX cap of 3)
+          return nextAttempt >= 3 ? ('escalated' as PhaseEvent) : ('failure' as PhaseEvent);
+        },
+      };
+
+      const run = makeRun('spec-driven');
+      run.phase = 'l3-generate'; // start mid-pipeline
+      const table = getPipeline('spec-driven');
+      const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+
+      // FSM terminated rather than infinite-looping
+      expect(result.outcome).toBe('stuck');
+      expect(run.phase).toBe('stuck');
+
+      // Both phases ran exactly 3 times (initial + 2 retries before escalation)
+      expect(l3GenerateCalls).toBe(3);
+      expect(l3ComplianceCalls).toBe(3);
+
+      // Feedback flows from each compliance failure into the next l3-generate
+      expect(seenFeedback[0]).toBe(''); // first generate, no prior feedback
+      expect(seenFeedback[1]).toContain('attempt 1'); // sees first failure
+      expect(seenFeedback[2]).toContain('attempt 2'); // sees second failure
+    });
   });
 });
