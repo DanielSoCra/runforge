@@ -1,11 +1,17 @@
 'use server';
 
-import { createClient } from '@/lib/supabase/server';
-import { createServiceClient } from '@/lib/supabase/service';
-import { requireAdmin } from '@/lib/auth';
+import { requireDashboardAdmin } from '@/lib/auth/require-session';
+import { getDashboardStores } from '@/lib/data/stores';
 import { loadDashboardRegistry } from '@/lib/plugins/registry';
 import Anthropic from '@anthropic-ai/sdk';
-import { readFile, readdir, mkdir, writeFile, stat, realpath } from 'fs/promises';
+import {
+  mkdir,
+  readFile,
+  readdir,
+  realpath,
+  stat,
+  writeFile,
+} from 'fs/promises';
 import { join, resolve } from 'path';
 
 // SAFE_PATTERN prevents prompt injection by blocking shell metacharacters, spaces, and control
@@ -17,25 +23,21 @@ export async function togglePlugin(
   pluginId: string,
   active: boolean,
 ): Promise<{ ok?: true; error?: string }> {
-  const supabase = await createClient();
   // Plugin toggle is admin-only (viewers have read-only access)
-  await requireAdmin(supabase);
+  await requireDashboardAdmin();
   const registry = await loadDashboardRegistry();
-  if (!registry.plugins.find(p => p.id === pluginId)) {
+  if (!registry.plugins.find((p) => p.id === pluginId)) {
     return { error: `Unknown plugin: ${pluginId}` };
   }
   // Only update active + activated_at on conflict — never overwrite recommendation fields.
-  const { error } = await supabase.from('repo_plugins').upsert(
-    {
-      repo_id: repoId,
-      plugin_id: pluginId,
-      active,
-      activated_at: active ? new Date().toISOString() : null,
-    },
-    { onConflict: 'repo_id,plugin_id', ignoreDuplicates: false },
+  const result = await getDashboardStores().plugins.setPluginActivation(
+    repoId,
+    pluginId,
+    active,
+    active ? new Date() : null,
   );
-  if (error) {
-    console.error('[plugins] togglePlugin upsert failed:', error);
+  if (!result.ok) {
+    console.error('[plugins] togglePlugin upsert failed:', result.message);
     return { error: 'Failed to update plugin' };
   }
   return { ok: true };
@@ -44,28 +46,30 @@ export async function togglePlugin(
 export async function enableAllSuggested(
   repoId: string,
 ): Promise<{ succeeded: string[]; failed: string[]; error?: string }> {
-  const supabase = await createClient();
   // Admin-only — same enforcement as togglePlugin
-  await requireAdmin(supabase);
+  await requireDashboardAdmin();
+  const stores = getDashboardStores();
 
-  const { data: suggested, error: selectError } = await supabase
-    .from('repo_plugins')
-    .select('plugin_id')
-    .eq('repo_id', repoId)
-    .eq('recommended', true)
-    .eq('active', false);
-  if (selectError) {
-    console.error('[plugins] enableAllSuggested select failed:', selectError);
-    return { succeeded: [], failed: [], error: selectError.message };
+  const suggested = await stores.plugins.listRecommendedInactivePluginIds(
+    repoId,
+  );
+  if (!suggested.ok) {
+    console.error(
+      '[plugins] enableAllSuggested select failed:',
+      suggested.message,
+    );
+    return { succeeded: [], failed: [], error: suggested.message };
   }
 
-  const allIds = (suggested ?? []).map((r: { plugin_id: string }) => r.plugin_id);
+  const allIds = suggested.value;
   if (allIds.length === 0) return { succeeded: [], failed: [] };
 
   // Validate plugin IDs against registry in a single registry load
   const registry = await loadDashboardRegistry();
-  const validIds = allIds.filter(id => registry.plugins.find(p => p.id === id));
-  const invalidIds = allIds.filter(id => !validIds.includes(id));
+  const validIds = allIds.filter((id) =>
+    registry.plugins.find((p) => p.id === id),
+  );
+  const invalidIds = allIds.filter((id) => !validIds.includes(id));
 
   if (validIds.length === 0) return { succeeded: [], failed: invalidIds };
 
@@ -79,17 +83,17 @@ export async function enableAllSuggested(
 
   for (let i = 0; i < validIds.length; i++) {
     const pluginId = validIds[i];
-    const { error: upsertError } = await supabase.from('repo_plugins').upsert(
-      {
-        repo_id: repoId,
-        plugin_id: pluginId,
-        active: true,
-        activated_at: new Date(baseMs + i).toISOString(),
-      },
-      { onConflict: 'repo_id,plugin_id', ignoreDuplicates: false },
+    const result = await stores.plugins.setPluginActivation(
+      repoId,
+      pluginId,
+      true,
+      new Date(baseMs + i),
     );
-    if (upsertError) {
-      console.error(`[plugins] enableAllSuggested upsert failed for ${pluginId}:`, upsertError);
+    if (!result.ok) {
+      console.error(
+        `[plugins] enableAllSuggested upsert failed for ${pluginId}:`,
+        result.message,
+      );
       failed.push(pluginId);
     } else {
       succeeded.push(pluginId);
@@ -99,27 +103,31 @@ export async function enableAllSuggested(
   return { succeeded, failed };
 }
 
-export async function triggerRecommendation(repoId: string, repoOwner: string, repoName: string): Promise<void> {
-  const supabase = await createClient();
+export async function triggerRecommendation(
+  repoId: string,
+  repoOwner: string,
+  repoName: string,
+): Promise<void> {
   // Admin-only — same enforcement as togglePlugin
-  await requireAdmin(supabase);
+  await requireDashboardAdmin();
 
   // Validate before interpolating into LLM prompt
   if (!SAFE_PATTERN.test(repoOwner) || !SAFE_PATTERN.test(repoName)) {
-    console.warn('[plugins] triggerRecommendation: invalid repoOwner or repoName — aborting');
+    console.warn(
+      '[plugins] triggerRecommendation: invalid repoOwner or repoName — aborting',
+    );
     return;
   }
 
-  // Fire-and-forget: returns immediately, writes to DB asynchronously.
-  // Uses service-role client because the cookie-based client from the request
-  // becomes invalid once the server action response is sent (Next.js invalidates
-  // the async local storage context). See #278.
+  // Fire-and-forget: returns immediately, writes through the app-owned store
+  // asynchronously without relying on request-scoped auth clients.
   void (async () => {
     try {
-      // Note: serviceSupabase bypasses RLS; admin authorization was verified above.
-      const serviceSupabase = createServiceClient();
+      const stores = getDashboardStores();
       const registry = await loadDashboardRegistry();
-      const catalog = registry.plugins.map(p => `- ${p.id}: ${p.description} [${p.tags.join(', ')}]`).join('\n');
+      const catalog = registry.plugins
+        .map((p) => `- ${p.id}: ${p.description} [${p.tags.join(', ')}]`)
+        .join('\n');
 
       // TODO(I5): Use the repo's stored `model-provider` credential from api_keys.encrypted_value
       // once a decryption utility exists. For now falls back to process.env.ANTHROPIC_API_KEY.
@@ -127,15 +135,27 @@ export async function triggerRecommendation(repoId: string, repoOwner: string, r
       const response = await client.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 512,
-        messages: [{
-          role: 'user',
-          content: `You are recommending plugins for a software repository.\n\nRepository: ${repoOwner}/${repoName}\n\nAvailable plugins:\n${catalog}\n\nReturn JSON: { "recommendations": [{ "pluginId": string, "confidence": "high"|"medium"|"low", "reason": string }] }`,
-        }],
+        messages: [
+          {
+            role: 'user',
+            content: `You are recommending plugins for a software repository.\n\nRepository: ${repoOwner}/${repoName}\n\nAvailable plugins:\n${catalog}\n\nReturn JSON: { "recommendations": [{ "pluginId": string, "confidence": "high"|"medium"|"low", "reason": string }] }`,
+          },
+        ],
       });
 
-      const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
-      const cleaned = text.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
-      let parsed: { recommendations: Array<{ pluginId: string; confidence: string; reason: string }> };
+      const text =
+        response.content[0]?.type === 'text' ? response.content[0].text : '';
+      const cleaned = text
+        .replace(/^```(?:json)?\n?/m, '')
+        .replace(/\n?```$/m, '')
+        .trim();
+      let parsed: {
+        recommendations: Array<{
+          pluginId: string;
+          confidence: string;
+          reason: string;
+        }>;
+      };
       try {
         parsed = JSON.parse(cleaned) as typeof parsed;
       } catch {
@@ -143,15 +163,24 @@ export async function triggerRecommendation(repoId: string, repoOwner: string, r
       }
 
       for (const rec of parsed.recommendations) {
-        if (!registry.plugins.find(p => p.id === rec.pluginId)) continue;
-        await serviceSupabase.from('repo_plugins').upsert(
-          { repo_id: repoId, plugin_id: rec.pluginId, recommended: true,
-            recommendation_reason: `[${rec.confidence}] ${rec.reason}`, recommended_at: new Date().toISOString() },
-          { onConflict: 'repo_id,plugin_id' },
+        if (!registry.plugins.find((p) => p.id === rec.pluginId)) continue;
+        const result = await stores.plugins.recordPluginRecommendation(
+          repoId,
+          rec.pluginId,
+          `[${rec.confidence}] ${rec.reason}`,
         );
+        if (!result.ok) {
+          console.error(
+            `[plugins] triggerRecommendation upsert failed for ${rec.pluginId}:`,
+            result.message,
+          );
+        }
       }
     } catch (err) {
-      console.error('[plugins] triggerRecommendation background task failed:', err);
+      console.error(
+        '[plugins] triggerRecommendation background task failed:',
+        err,
+      );
     }
   })();
 }
@@ -165,8 +194,7 @@ export async function exportPlugin(
   pluginId: string,
   targetRepoPath: string,
 ): Promise<{ ok?: true; error?: string }> {
-  const supabase = await createClient();
-  await requireAdmin(supabase);
+  await requireDashboardAdmin();
 
   // Validate pluginId against SAFE_PATTERN before using in filesystem paths
   if (!SAFE_PATTERN.test(pluginId)) {
@@ -174,7 +202,7 @@ export async function exportPlugin(
   }
 
   const registry = await loadDashboardRegistry();
-  if (!registry.plugins.find(p => p.id === pluginId)) {
+  if (!registry.plugins.find((p) => p.id === pluginId)) {
     return { error: `Unknown plugin: ${pluginId}` };
   }
 
@@ -202,9 +230,9 @@ export async function exportPlugin(
   const allowedDirs = allowedDirsRaw.split(':').filter(Boolean);
   // Resolve allowlist entries too (handles symlinks like /tmp → /private/tmp on macOS)
   const resolvedAllowedDirs = await Promise.all(
-    allowedDirs.map(dir => realpath(dir).catch(() => dir)),
+    allowedDirs.map((dir) => realpath(dir).catch(() => dir)),
   );
-  const withinAllowed = resolvedAllowedDirs.some(dir => {
+  const withinAllowed = resolvedAllowedDirs.some((dir) => {
     const normalizedDir = dir.endsWith('/') ? dir : dir + '/';
     return realTarget === dir || realTarget.startsWith(normalizedDir);
   });
@@ -218,7 +246,7 @@ export async function exportPlugin(
   const destDir = join(realTarget, '.claude', 'plugins', pluginId, 'skills');
 
   const files = await readdir(skillsDir).catch(() => [] as string[]);
-  const mdFiles = files.filter(f => f.endsWith('.md'));
+  const mdFiles = files.filter((f) => f.endsWith('.md'));
 
   if (mdFiles.length === 0) {
     return { error: 'No skill documents found for this plugin' };
@@ -235,10 +263,15 @@ export async function exportPlugin(
       await writeFile(join(destDir, f), content, 'utf-8');
     }
   } catch (e) {
-    console.error(`[plugins] exportPlugin failed for repo ${repoId}, plugin ${pluginId}:`, e);
+    console.error(
+      `[plugins] exportPlugin failed for repo ${repoId}, plugin ${pluginId}:`,
+      e,
+    );
     return { error: 'Failed to export plugin' };
   }
 
-  console.log(`[plugins] Exported plugin ${pluginId} to ${destDir} for repo ${repoId}`);
+  console.log(
+    `[plugins] Exported plugin ${pluginId} to ${destDir} for repo ${repoId}`,
+  );
   return { ok: true };
 }
