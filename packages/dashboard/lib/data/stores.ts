@@ -188,6 +188,22 @@ export interface DashboardRepositoryListItem {
   } | null;
 }
 
+export interface DashboardRepositoryDetailItem {
+  id: string;
+  owner: string;
+  name: string;
+  enabled: boolean;
+  staging_branch: string;
+  production_branch: string;
+  budget_limit: number | null;
+  concurrency_limit: number;
+}
+
+export interface DashboardRepositoryCredentialMetadata {
+  key_type: DashboardRepoCredentialKind;
+  updated_at: string;
+}
+
 export interface DashboardRepositoryConnectionItem {
   id: string;
   display_name: string;
@@ -201,8 +217,16 @@ export interface DashboardRepositoryList {
   activeCostByRepoId: Record<string, number>;
 }
 
+export interface DashboardRepositoryDetail {
+  repo: DashboardRepositoryDetailItem;
+  credentials: DashboardRepositoryCredentialMetadata[];
+}
+
 interface DashboardRepositoryAccess {
   listRepositories(): Promise<StoreResult<DashboardRepositoryList>>;
+  readRepository(
+    repositoryId: string,
+  ): Promise<StoreResult<DashboardRepositoryDetail>>;
 }
 
 export interface DashboardGitHubConnection {
@@ -460,6 +484,42 @@ class DashboardRepositoryStore implements DashboardRepositoryAccess {
           status: connection.status,
         })),
         activeCostByRepoId,
+      });
+    });
+  }
+
+  async readRepository(repositoryId: string) {
+    return unavailableOnThrow(async () => {
+      const [repo] = await this.db
+        .select()
+        .from(repos)
+        .where(and(eq(repos.id, repositoryId), isNull(repos.deletedAt)))
+        .limit(1);
+      if (!repo) return notFound(`repository ${repositoryId} was not found`);
+
+      const credentials = await this.db
+        .select({
+          keyType: apiKeys.keyType,
+          updatedAt: apiKeys.updatedAt,
+        })
+        .from(apiKeys)
+        .where(eq(apiKeys.repoId, repositoryId));
+
+      return ok({
+        repo: {
+          id: repo.id,
+          owner: repo.owner,
+          name: repo.name,
+          enabled: repo.enabled,
+          staging_branch: repo.stagingBranch,
+          production_branch: repo.productionBranch,
+          budget_limit: repo.budgetLimit,
+          concurrency_limit: repo.concurrencyLimit,
+        },
+        credentials: credentials.map((credential) => ({
+          key_type: credential.keyType,
+          updated_at: credential.updatedAt.toISOString(),
+        })),
       });
     });
   }
