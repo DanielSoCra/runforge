@@ -1,5 +1,4 @@
-import { createClient } from '@/lib/supabase/server';
-import { requireUser } from '@/lib/auth';
+import { requireDashboardUser } from '@/lib/auth/require-session';
 import { Sidebar } from '@/components/sidebar';
 import { RealtimeProvider } from '@/components/realtime-provider';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -11,9 +10,8 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createClient();
   try {
-    await requireUser(supabase);
+    await requireDashboardUser();
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'An unexpected error occurred';
     return (

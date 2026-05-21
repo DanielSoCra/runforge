@@ -4,11 +4,6 @@
       "count": 19
     }
   },
-  "app/(dashboard)/layout.test.tsx": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 3
-    }
-  },
   "components/run-table.test.tsx": {
     "@typescript-eslint/no-explicit-any": {
       "count": 6
