@@ -1095,6 +1095,8 @@ STACK-AC-DATA-PLATFORM:
     - scripts/com.autoclaude.daemon.plist
     - .env.mac.example
     - .env.prod.example
+    - docs/running.md
+    - docs/hetzner-setup.md
   test_paths:
     - packages/db/**/*.test.ts
     - packages/dashboard/lib/data/**/*.test.ts

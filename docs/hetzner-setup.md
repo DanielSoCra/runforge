@@ -163,6 +163,32 @@ docker compose --env-file .env.prod --profile public logs -f daemon
 docker compose --env-file .env.prod --profile public restart dashboard
 ```
 
+### Back up Postgres
+
+Back up the app-owned database with `pg_dump`. Store `.env.prod` and especially `ENCRYPTION_KEY` with the backup; database credentials are encrypted and require the same key after restore.
+
+```bash
+mkdir -p backups
+docker compose --env-file .env.prod exec -T postgres sh -c \
+  'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' \
+  > "backups/autoclaude-$(date +%Y%m%d-%H%M%S).dump"
+```
+
+### Restore Postgres
+
+Restores overwrite the current database. Stop application consumers first, restore the dump, then start the stack again.
+
+```bash
+docker compose --env-file .env.prod --profile public stop dashboard briefing-summarizer
+# If this host also runs the containerized daemon profile:
+docker compose --env-file .env.prod --profile containerized-daemon stop daemon
+
+cat backups/autoclaude-YYYYMMDD-HHMMSS.dump | docker compose --env-file .env.prod exec -T postgres sh -c \
+  'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner'
+
+docker compose --env-file .env.prod --profile public up --build -d
+```
+
 ### Stop everything
 
 ```bash
