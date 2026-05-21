@@ -49,8 +49,42 @@ describe('buildDashboardAuthOptions', () => {
     });
 
     expect(options.socialProviders).toEqual({
-      github: { clientId: 'client-id', clientSecret: 'client-secret' },
+      github: expect.objectContaining({
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        mapProfileToUser: expect.any(Function),
+      }),
     });
+  });
+
+  it('maps GitHub login names into operator handles for invitation matching', async () => {
+    const options = buildDashboardAuthOptions({
+      db: {} as DashboardAuthDb,
+      env: {
+        BETTER_AUTH_SECRET: 'test-secret',
+        BETTER_AUTH_GITHUB_CLIENT_ID: 'client-id',
+        BETTER_AUTH_GITHUB_CLIENT_SECRET: 'client-secret',
+      },
+    });
+
+    const github = options.socialProviders?.github as {
+      mapProfileToUser(profile: { login: string; name: string }): { name: string };
+    };
+
+    expect(github.mapProfileToUser({ login: 'daniel', name: 'the Operator' })).toEqual({
+      name: 'daniel',
+    });
+  });
+
+  it('reconciles operator membership whenever Better Auth creates a session', () => {
+    const options = buildDashboardAuthOptions({
+      db: {} as DashboardAuthDb,
+      env: { BETTER_AUTH_SECRET: 'test-secret' },
+    });
+
+    expect(options.databaseHooks?.session?.create?.after).toEqual(
+      expect.any(Function),
+    );
   });
 
   it('fails closed when GitHub login configuration is partial', () => {

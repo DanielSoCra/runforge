@@ -1,15 +1,17 @@
-import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { isAuthDisabled } from '@/lib/auth';
+import { requireDashboardUser } from '@/lib/auth/require-session';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 export default async function LoginPage() {
-  if (isAuthDisabled()) redirect('/');
-
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (user) redirect('/');
+  let hasDashboardAccess = false;
+  try {
+    await requireDashboardUser();
+    hasDashboardAccess = true;
+  } catch {
+    hasDashboardAccess = false;
+  }
+  if (hasDashboardAccess) redirect('/');
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
