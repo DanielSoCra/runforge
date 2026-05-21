@@ -9,6 +9,7 @@ import {
   gte,
   inArray,
   isNull,
+  lt,
   sql,
 } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
@@ -23,7 +24,9 @@ import {
 import { readDatabaseUrl } from '../../../db/src/env';
 import {
   apiKeys,
+  activityEvents,
   authUsers,
+  briefings,
   costEvents,
   githubConnections,
   githubOrgs,
@@ -33,7 +36,10 @@ import {
   repos,
   runs,
   teamMembers,
+  type ActivityEvent,
+  type Briefing,
   type GlobalSettings,
+  type JsonValue,
   type Run,
 } from '../../../db/src/schema';
 
@@ -152,6 +158,48 @@ interface DashboardRunAccess {
   ): Promise<StoreResult<DashboardRunHistory>>;
   listCompletedRuns(limit?: number): Promise<StoreResult<DashboardRunRow[]>>;
   readRunDetail(runId: string): Promise<StoreResult<DashboardRunDetail>>;
+}
+
+export interface DashboardBriefing {
+  id: string;
+  status_line: string;
+  changes: JsonValue;
+  attention: JsonValue;
+  forecast: string;
+  signal_snapshot: Record<string, JsonValue>;
+  generated_at: string;
+}
+
+export interface DashboardBriefingRun {
+  id: string;
+  repo_owner: string;
+  repo_name: string;
+  issue_number: number;
+  issue_title: string;
+  current_phase: string | null;
+  outcome: Run['outcome'];
+  total_cost: number;
+  started_at: string;
+  phases: Run['phases'];
+}
+
+export interface DashboardActivityEvent {
+  id: string;
+  occurred_at: string;
+  event_type: ActivityEvent['eventType'];
+  severity: ActivityEvent['severity'];
+  summary: string;
+  links: JsonValue;
+}
+
+interface DashboardBriefingAccess {
+  readLatestBriefing(): Promise<StoreResult<DashboardBriefing>>;
+  listActiveRuns(): Promise<StoreResult<DashboardBriefingRun[]>>;
+  listAttentionRuns(): Promise<StoreResult<DashboardBriefingRun[]>>;
+  listActivityEvents(options: {
+    cursor?: string;
+    pageSize: number;
+  }): Promise<StoreResult<DashboardActivityEvent[]>>;
 }
 
 export interface DashboardIssueRepo {
@@ -419,6 +467,7 @@ export interface DashboardStores {
   settings: DashboardSettingsAccess;
   overview: DashboardOverviewAccess;
   runs: DashboardRunAccess;
+  briefings: DashboardBriefingAccess;
   issues: DashboardIssueAccess;
   repositories: DashboardRepositoryAccess;
   team: DashboardTeamAccess;
@@ -441,6 +490,7 @@ export function getDashboardStores(): DashboardStores {
       settings: new DashboardSettingsStore(db),
       overview: new DashboardOverviewStore(db),
       runs: new DashboardRunStore(db),
+      briefings: new DashboardBriefingStore(db),
       issues: new DashboardIssueStore(db),
       repositories: new DashboardRepositoryStore(db),
       team: new DashboardTeamStore(db),
@@ -534,6 +584,67 @@ class DashboardOverviewStore implements DashboardOverviewAccess {
         recentRuns: recentRuns.map(toDashboardRunRow),
         budgetByRepoId,
       });
+    });
+  }
+}
+
+class DashboardBriefingStore implements DashboardBriefingAccess {
+  constructor(private readonly db: DashboardDb) {}
+
+  async readLatestBriefing() {
+    return unavailableOnThrow(async () => {
+      const [row] = await this.db
+        .select()
+        .from(briefings)
+        .orderBy(desc(briefings.generatedAt))
+        .limit(1);
+
+      return row
+        ? ok(toDashboardBriefing(row))
+        : notFound('briefing was not found');
+    });
+  }
+
+  async listActiveRuns() {
+    return unavailableOnThrow(async () => {
+      const rows = await this.db
+        .select()
+        .from(runs)
+        .where(eq(runs.outcome, 'in-progress'))
+        .orderBy(asc(runs.startedAt));
+
+      return ok(rows.map(toDashboardBriefingRun));
+    });
+  }
+
+  async listAttentionRuns() {
+    return unavailableOnThrow(async () => {
+      const rows = await this.db
+        .select()
+        .from(runs)
+        .where(inArray(runs.outcome, ['stuck', 'escalated', 'failed']))
+        .orderBy(asc(runs.startedAt));
+
+      return ok(rows.map(toDashboardBriefingRun));
+    });
+  }
+
+  async listActivityEvents(options: { cursor?: string; pageSize: number }) {
+    return unavailableOnThrow(async () => {
+      const rows = options.cursor
+        ? await this.db
+            .select()
+            .from(activityEvents)
+            .where(lt(activityEvents.occurredAt, new Date(options.cursor)))
+            .orderBy(desc(activityEvents.occurredAt))
+            .limit(options.pageSize)
+        : await this.db
+            .select()
+            .from(activityEvents)
+            .orderBy(desc(activityEvents.occurredAt))
+            .limit(options.pageSize);
+
+      return ok(rows.map(toDashboardActivityEvent));
     });
   }
 }
@@ -1492,6 +1603,8 @@ function createDashboardDbClient() {
       apiKeys,
       authUsers,
       costEvents,
+      activityEvents,
+      briefings,
       githubConnections,
       githubOrgs,
       globalSettings,
@@ -1531,6 +1644,44 @@ function toDashboardRunRow(run: Run): DashboardRunRow {
     started_at: run.startedAt.toISOString(),
     completed_at: run.completedAt?.toISOString() ?? null,
     updated_at: run.updatedAt.toISOString(),
+  };
+}
+
+function toDashboardBriefing(row: Briefing): DashboardBriefing {
+  return {
+    id: row.id,
+    status_line: row.statusLine,
+    changes: row.changes,
+    attention: row.attention,
+    forecast: row.forecast,
+    signal_snapshot: row.signalSnapshot,
+    generated_at: row.generatedAt.toISOString(),
+  };
+}
+
+function toDashboardBriefingRun(run: Run): DashboardBriefingRun {
+  return {
+    id: run.id,
+    repo_owner: run.repoOwner,
+    repo_name: run.repoName,
+    issue_number: run.issueNumber,
+    issue_title: run.issueTitle,
+    current_phase: run.currentPhase,
+    outcome: run.outcome,
+    total_cost: run.totalCost,
+    started_at: run.startedAt.toISOString(),
+    phases: run.phases,
+  };
+}
+
+function toDashboardActivityEvent(row: ActivityEvent): DashboardActivityEvent {
+  return {
+    id: row.id,
+    occurred_at: row.occurredAt.toISOString(),
+    event_type: row.eventType,
+    severity: row.severity,
+    summary: row.summary,
+    links: row.links,
   };
 }
 
