@@ -1,4 +1,3 @@
-import { createClient } from '@/lib/supabase/server';
 import { notFound } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,21 +7,27 @@ import { Badge } from '@/components/ui/badge';
 import { upsertApiKey } from '@/actions/api-keys';
 import { enableRepo, disableRepo, deleteRepo, updateRepo } from '@/actions/repos';
 import { RepoTabNav } from '@/components/repo-tab-nav';
-import { isAdmin } from '@/lib/auth';
+import { isDashboardAdmin } from '@/lib/auth/require-session';
+import { getDashboardStores } from '@/lib/data/stores';
+import { PageError } from '@/components/page-error';
+
+export const dynamic = 'force-dynamic';
 
 export default async function RepoDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const supabase = await createClient();
-  const admin = await isAdmin(supabase);
-  const { data: repo } = await supabase.from('repos').select('*').eq('id', id).single();
-  if (!repo || repo.deleted_at) notFound();
+  const [admin, repositoryDetail] = await Promise.all([
+    isDashboardAdmin(),
+    getDashboardStores().repositories.readRepository(id),
+  ]);
+  if (!repositoryDetail.ok && repositoryDetail.error === 'not-found') return notFound();
+  if (!repositoryDetail.ok) {
+    console.error('[repo-detail] failed to load repository:', repositoryDetail.message);
+    return <PageError />;
+  }
 
-  const { data: keys } = await supabase.from('api_keys')
-    .select('key_type, updated_at')
-    .eq('repo_id', id);
-
-  const hasSourceControl = keys?.some(k => k.key_type === 'source-control');
-  const hasModelProvider = keys?.some(k => k.key_type === 'model-provider');
+  const { credentials: keys, repo } = repositoryDetail.value;
+  const hasSourceControl = keys.some(k => k.key_type === 'source-control');
+  const hasModelProvider = keys.some(k => k.key_type === 'model-provider');
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -108,7 +113,7 @@ export default async function RepoDetailPage({ params }: { params: Promise<{ id:
           </CardHeader>
           <CardContent className="space-y-4">
             {(['source-control', 'model-provider'] as const).map((type) => {
-              const key = keys?.find(k => k.key_type === type);
+              const key = keys.find(k => k.key_type === type);
               return (
                 <form key={type} action={upsertApiKey} className="space-y-2">
                   <input type="hidden" name="repo_id" value={repo.id} />
