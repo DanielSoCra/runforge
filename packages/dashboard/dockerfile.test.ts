@@ -33,4 +33,9 @@ describe('Dashboard Dockerfile', () => {
       'ENV ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000',
     );
   });
+
+  it('does not require retired Supabase build arguments (#626)', () => {
+    expect(DOCKERFILE).not.toContain('NEXT_PUBLIC_SUPABASE_URL');
+    expect(DOCKERFILE).not.toContain('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+  });
 });

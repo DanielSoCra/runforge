@@ -91,10 +91,8 @@ services:
     environment:
       AUTO_CLAUDE_DATABASE_URL: ${AUTO_CLAUDE_DOCKER_DATABASE_URL:?set AUTO_CLAUDE_DOCKER_DATABASE_URL in the selected env file}
       DAEMON_HOST: "0.0.0.0"
-      DAEMON_DATA_BACKEND: ${DAEMON_DATA_BACKEND:-supabase}
+      DAEMON_DATA_BACKEND: ${DAEMON_DATA_BACKEND:-postgres}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in the selected env file}
-      SUPABASE_URL: ${SUPABASE_URL}
-      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
     depends_on:
       migrate:
         condition: service_completed_successfully

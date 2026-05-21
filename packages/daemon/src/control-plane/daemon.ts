@@ -33,9 +33,6 @@ import {
   validateRuntimeSource,
 } from './runtime-source.js';
 import { RemoteControlManager } from './remote-control.js';
-import { getSupabaseClient } from '../supabase/client.js';
-import { SupabaseConfigReader } from '../supabase/config-reader.js';
-import { SupabaseRunWriter } from '../supabase/run-writer.js';
 import {
   createDbClient,
   createPostgresStores,
@@ -53,12 +50,10 @@ import {
 import { readDaemonDataBackendKind } from '../data/backend-kind.js';
 import {
   PostgresRepoDataSource,
-  SupabaseRepoDataSource,
   type RepoDataSource,
 } from '../data/repo-source.js';
 import {
   PostgresRunHistory,
-  SupabaseRunHistory,
   type RunHistoryReader,
   type RunMaintenance,
 } from '../data/run-history.js';
@@ -97,7 +92,10 @@ let dailyRunCountResetDate = new Date().toISOString().split('T')[0];
 
 export async function startDaemon(configPath: string): Promise<Result<void>> {
   // 0. Validate GITHUB_TOKEN — required for Octokit (labeling, commenting, notifications)
-  if (!process.env.GITHUB_TOKEN) {
+  if (
+    process.env.GITHUB_TOKEN === undefined ||
+    process.env.GITHUB_TOKEN === ''
+  ) {
     return err(
       new Error(
         'GITHUB_TOKEN environment variable is not set. The daemon requires a GitHub token to interact with issues and pull requests.',
@@ -176,19 +174,13 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   const stateMgr = new StateManager(stateDir);
   await stateMgr.initialize();
 
-  // Initialize data layer. Default preserves current behavior: Supabase DB mode
-  // when configured, otherwise legacy single-repo config mode. Postgres is
-  // opt-in while parity work is still landing.
-  let requestedDataBackend: ReturnType<typeof readDaemonDataBackendKind>;
+  // Initialize data layer. After data-platform cutover the daemon uses the
+  // project-owned Postgres stores only; missing or retired backends fail fast.
   try {
-    requestedDataBackend = readDaemonDataBackendKind();
+    readDaemonDataBackendKind();
   } catch (e) {
     return err(e instanceof Error ? e : new Error(String(e)));
   }
-  const supabase =
-    requestedDataBackend === 'postgres' || requestedDataBackend === 'legacy'
-      ? null
-      : getSupabaseClient();
   let configReader: ConfigReader | null = null;
   let runWriter: RunWriter | null = null;
   let repoSource: RepoDataSource | null = null;
@@ -196,57 +188,29 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   let runMaintenance: RunMaintenance | null = null;
   let postgresClient: ReturnType<typeof createDbClient> | null = null;
 
-  if (requestedDataBackend === 'postgres') {
-    try {
-      postgresClient = createDbClient({ maxConnections: 8 });
-      const stores = createPostgresStores(postgresClient.db, {
-        credentialKey: readCredentialKey(),
-      });
-      configReader = new PostgresConfigReader(
-        stores.settings,
-        stores.repos,
-        stores.plugins,
-      );
-      await configReader.start();
-      runWriter = new PostgresRunWriter(stores.runs, stores.costs);
-      repoSource = new PostgresRepoDataSource(stores.repos, stores.credentials);
-      const history = new PostgresRunHistory(stores.runs);
-      runHistory = history;
-      runMaintenance = history;
-    } catch (e) {
-      await postgresClient?.sql.end();
-      return err(e instanceof Error ? e : new Error(String(e)));
-    }
-  } else if (supabase) {
-    configReader = new SupabaseConfigReader(supabase);
-    await configReader.start(); // throws if unreachable — prevents silent misconfiguration
-    runWriter = new SupabaseRunWriter(supabase);
-    // During parity, Supabase may still own repo config/run history, but
-    // GitHub connection credentials are app-owned and never read via hosted RPC.
-    try {
-      postgresClient = createDbClient({ maxConnections: 4 });
-      const stores = createPostgresStores(postgresClient.db, {
-        credentialKey: readCredentialKey(),
-      });
-      repoSource = new SupabaseRepoDataSource(supabase, stores.credentials);
-    } catch (e) {
-      configReader.stop();
-      await postgresClient?.sql.end();
-      return err(e instanceof Error ? e : new Error(String(e)));
-    }
-    const history = new SupabaseRunHistory(supabase);
+  try {
+    postgresClient = createDbClient({ maxConnections: 8 });
+    const stores = createPostgresStores(postgresClient.db, {
+      credentialKey: readCredentialKey(),
+    });
+    configReader = new PostgresConfigReader(
+      stores.settings,
+      stores.repos,
+      stores.plugins,
+    );
+    await configReader.start();
+    runWriter = new PostgresRunWriter(stores.runs, stores.costs);
+    repoSource = new PostgresRepoDataSource(stores.repos, stores.credentials);
+    const history = new PostgresRunHistory(stores.runs);
     runHistory = history;
     runMaintenance = history;
-  } else if (requestedDataBackend === 'supabase') {
-    return err(
-      new Error(
-        'DAEMON_DATA_BACKEND=supabase requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY',
-      ),
-    );
+  } catch (e) {
+    await postgresClient?.sql.end();
+    return err(e instanceof Error ? e : new Error(String(e)));
   }
 
   const orphaned = await runMaintenance?.markInProgressRunsStuck();
-  if (orphaned && orphaned > 0) {
+  if (orphaned !== null && orphaned !== undefined && orphaned > 0) {
     console.log(
       `[daemon] Marked ${orphaned} orphaned in-progress runs as stuck`,
     );
@@ -285,7 +249,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
 
   // 3b. Start Knowledge Sync schedule (opt-in; no-op when knowledgeSync.enabled is false)
   let knowledgeSyncPoller: ReturnType<typeof setInterval> | null = null;
-  if (config.knowledgeSync?.enabled) {
+  if (config.knowledgeSync?.enabled === true) {
     const syncService = createKnowledgeSyncService(
       config.knowledgeSync,
       knowledgeStore,
@@ -682,7 +646,12 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       consecutiveStuckCount = 0;
     } else if (outcome === 'stuck') {
       consecutiveStuckCount++;
-      if (owner && repo) {
+      if (
+        owner !== undefined &&
+        owner !== '' &&
+        repo !== undefined &&
+        repo !== ''
+      ) {
         const key = issueKey(owner, repo, issueNumber);
         const prev = stuckBackoff.get(key);
         stuckBackoff.set(key, {
@@ -712,7 +681,12 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       );
     } else {
       // Success or other non-error outcome — clear backoff for this issue
-      if (owner && repo) {
+      if (
+        owner !== undefined &&
+        owner !== '' &&
+        repo !== undefined &&
+        repo !== ''
+      ) {
         stuckBackoff.delete(issueKey(owner, repo, issueNumber));
       }
       consecutiveStuckCount = 0;
@@ -725,11 +699,10 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     }
   };
 
-  // 5. Build RepoManager or legacy single-repo detector
+  // 5. Build RepoManager
   let repoManager: RepoManager | null = null;
-  let legacyDetector: WorkDetector | null = null;
 
-  if (repoSource) {
+  {
     // DB mode
     repoManager = new RepoManager(
       repoSource,
@@ -956,27 +929,6 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       await remoteControl.stop();
       return initResult;
     }
-  } else {
-    // Legacy mode: config.repo required
-    if (!config.repo) {
-      await remoteControl.stop();
-      return err(
-        new Error(
-          'No SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY set and no config.repo — cannot determine repos to poll',
-        ),
-      );
-    }
-    const legacyOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
-    legacyDetector = createWorkDetector(
-      legacyOctokit,
-      config.repo.owner,
-      config.repo.name,
-    );
-    void createPhaseLabelMirror(
-      legacyOctokit,
-      config.repo.owner,
-      config.repo.name,
-    ).provisionLabels();
   }
 
   // 6. Start control server
@@ -1078,7 +1030,12 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   for (const run of incompleteRuns) {
     const runOwner = run.repoOwner ?? config.repo?.owner;
     const runRepoName = run.repoName ?? config.repo?.name;
-    if (!runOwner || !runRepoName) {
+    if (
+      runOwner === undefined ||
+      runOwner === '' ||
+      runRepoName === undefined ||
+      runRepoName === ''
+    ) {
       console.warn(
         `[daemon] Skipping incomplete run #${run.issueNumber} — missing repo info`,
       );
@@ -1143,13 +1100,11 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
           );
     const table = getPipeline(run.variant);
 
-    const resumeDetector =
-      legacyDetector ??
-      createWorkDetector(
-        new Octokit({ auth: resumeToken }),
-        runOwner,
-        runRepoName,
-      );
+    const resumeDetector = createWorkDetector(
+      new Octokit({ auth: resumeToken }),
+      runOwner,
+      runRepoName,
+    );
     runPipeline(
       run,
       table,
@@ -1222,7 +1177,12 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       if (activeIssues.has(run.issueNumber)) continue; // already running
       const runOwner = run.repoOwner ?? config.repo?.owner;
       const runRepoName = run.repoName ?? config.repo?.name;
-      if (!runOwner || !runRepoName) {
+      if (
+        runOwner === undefined ||
+        runOwner === '' ||
+        runRepoName === undefined ||
+        runRepoName === ''
+      ) {
         console.warn(
           `[daemon] resumeParkedRuns: skipping run #${run.issueNumber} — missing repo info`,
         );
@@ -1355,9 +1315,11 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
             total_cost: run.cost,
           });
           if (result.outcome === 'stuck') {
-            const stuckDetector =
-              legacyDetector ??
-              createWorkDetector(runOctokit, runOwner, runRepoName);
+            const stuckDetector = createWorkDetector(
+              runOctokit,
+              runOwner,
+              runRepoName,
+            );
             await stuckDetector.markStuck(
               run.issueNumber,
               result.error ?? 'Unknown error',
@@ -1382,232 +1344,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     }
   }
 
-  // 7. Legacy polling loop (only used when repoManager is null AND coordinator is off)
-  let legacyPoller: ReturnType<typeof setInterval> | null = null;
-  let legacyPollInProgress = false;
-  if (legacyDetector && !config.coordination.useCoordinator) {
-    const detector = legacyDetector;
-    legacyPoller = setInterval(async () => {
-      if (legacyPollInProgress) return;
-      legacyPollInProgress = true;
-      try {
-        if (paused || draining || shuttingDown) return;
-        if (
-          activeRuns >=
-          (configReader?.getGlobalConfig()?.concurrencyLimit ??
-            config.maxConcurrentRuns)
-        )
-          return;
-        const sourceReady = await refreshRuntimeSourceForWork('work detection');
-        if (!sourceReady.ok) return;
-        costTracker.maybeResetDaily();
-        const claimedIssues = new Set<number>();
-        const workResult = await detector.detectReadyWork();
-        if (!workResult.ok) return;
-        const readyToProcess: WorkRequest[] = [];
-        for (const request of workResult.value) {
-          if (readyToProcess.length >= batchClassifierConfig.maxBatchSize)
-            break;
-          if (
-            activeRuns >=
-            (configReader?.getGlobalConfig()?.concurrencyLimit ??
-              config.maxConcurrentRuns)
-          )
-            break;
-          if (paused || draining || shuttingDown) break;
-          if (activeIssues.has(request.issueNumber)) continue;
-          if (
-            isBackedOff(
-              issueKey(
-                config.repo!.owner,
-                config.repo!.name,
-                request.issueNumber,
-              ),
-              config,
-            )
-          ) {
-            console.log(
-              `[daemon] Issue #${request.issueNumber} is in backoff — skipping`,
-            );
-            continue;
-          }
-          const claimResult = await detector.claimWork(request.issueNumber);
-          if (!claimResult.ok) continue;
-          claimedIssues.add(request.issueNumber);
-          activeIssues.add(request.issueNumber);
-          activeRuns++;
-          readyToProcess.push(request);
-        }
-        const preClassifiedReady = await preClassifyReadyWork(
-          runtime,
-          readyToProcess,
-          batchClassifierConfig,
-        );
-        for (const request of preClassifiedReady) {
-          processWorkRequest(
-            config,
-            '',
-            config.repo!.owner,
-            config.repo!.name,
-            request,
-            runtime,
-            coordinator,
-            costTracker,
-            stateMgr,
-            detector,
-            stateDir,
-            undefined,
-            undefined,
-            undefined,
-            repoRoot,
-            knowledgeStore,
-          )
-            .then((outcome) =>
-              handleRunOutcome(
-                outcome,
-                request.issueNumber,
-                config.repo!.owner,
-                config.repo!.name,
-              ),
-            )
-            .catch((e) =>
-              console.error(`Run failed for #${request.issueNumber}:`, e),
-            )
-            .finally(() => {
-              activeRuns--;
-              activeIssues.delete(request.issueNumber);
-            });
-        }
-
-        // Bug-fix detection — lower priority than ready work (#284)
-        if (paused || draining || shuttingDown) return;
-        if (
-          activeRuns >=
-          (configReader?.getGlobalConfig()?.concurrencyLimit ??
-            config.maxConcurrentRuns)
-        )
-          return;
-        const bugResult = await detector.detectBugFixWork();
-        if (
-          bugResult.ok &&
-          bugResult.value &&
-          !claimedIssues.has(bugResult.value.issueNumber) &&
-          !activeIssues.has(bugResult.value.issueNumber)
-        ) {
-          const bugRequest = bugResult.value;
-          const bugClaimResult = await detector.claimBugFixWork(
-            bugRequest.issueNumber,
-          );
-          if (bugClaimResult.ok) {
-            claimedIssues.add(bugRequest.issueNumber);
-            activeIssues.add(bugRequest.issueNumber);
-            activeRuns++;
-            processWorkRequest(
-              config,
-              '',
-              config.repo!.owner,
-              config.repo!.name,
-              bugRequest,
-              runtime,
-              coordinator,
-              costTracker,
-              stateMgr,
-              detector,
-              stateDir,
-              undefined,
-              undefined,
-              undefined,
-              repoRoot,
-              knowledgeStore,
-            )
-              .then((outcome) =>
-                handleRunOutcome(
-                  outcome,
-                  bugRequest.issueNumber,
-                  config.repo!.owner,
-                  config.repo!.name,
-                ),
-              )
-              .catch((e) =>
-                console.error(`Run failed for #${bugRequest.issueNumber}:`, e),
-              )
-              .finally(() => {
-                activeRuns--;
-                activeIssues.delete(bugRequest.issueNumber);
-              });
-          }
-        }
-
-        // Feature-pipeline detection — lowest priority (#282)
-        if (paused || draining || shuttingDown) return;
-        if (
-          activeRuns >=
-          (configReader?.getGlobalConfig()?.concurrencyLimit ??
-            config.maxConcurrentRuns)
-        )
-          return;
-        const fpResult = await detector.detectFeaturePipelineWork();
-        if (
-          fpResult.ok &&
-          fpResult.value &&
-          !claimedIssues.has(fpResult.value.issueNumber) &&
-          !activeIssues.has(fpResult.value.issueNumber)
-        ) {
-          const fpRequest = fpResult.value;
-          const fpClaimResult = await detector.claimFeaturePipelineWork(
-            fpRequest.issueNumber,
-            fpRequest.workType as FeaturePipelineWorkType,
-          );
-          if (fpClaimResult.ok) {
-            activeIssues.add(fpRequest.issueNumber);
-            activeRuns++;
-            processWorkRequest(
-              config,
-              '',
-              config.repo!.owner,
-              config.repo!.name,
-              fpRequest,
-              runtime,
-              coordinator,
-              costTracker,
-              stateMgr,
-              detector,
-              stateDir,
-              undefined,
-              undefined,
-              undefined,
-              repoRoot,
-              knowledgeStore,
-            )
-              .then((outcome) =>
-                handleRunOutcome(
-                  outcome,
-                  fpRequest.issueNumber,
-                  config.repo!.owner,
-                  config.repo!.name,
-                ),
-              )
-              .catch((e) =>
-                console.error(`Run failed for #${fpRequest.issueNumber}:`, e),
-              )
-              .finally(() => {
-                activeRuns--;
-                activeIssues.delete(fpRequest.issueNumber);
-              });
-          }
-        }
-
-        // Parked-run resume scan — after all normal work detection
-        await resumeParkedRuns().catch((e) =>
-          console.error('[daemon] resumeParkedRuns error:', e),
-        );
-      } finally {
-        legacyPollInProgress = false;
-      }
-    }, config.pollIntervalMs);
-  }
-
-  // 8. Drain mode + graceful shutdown
+  // 7. Drain mode + graceful shutdown
   const enterDrainMode = async () => {
     if (draining) return;
     draining = true;
@@ -1615,7 +1352,6 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       `[daemon] Entering drain mode — ${activeRuns} active run(s), waiting for completion`,
     );
     // Stop schedulers so no new background work starts
-    if (legacyPoller) clearInterval(legacyPoller);
     if (knowledgeSyncPoller) clearInterval(knowledgeSyncPoller);
     stopReviewScheduler();
     stopPOAgent?.();
@@ -1633,7 +1369,6 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log('Shutting down...');
-    if (legacyPoller) clearInterval(legacyPoller);
     if (knowledgeSyncPoller) clearInterval(knowledgeSyncPoller);
     stopHeartbeat();
     if (stopCoordinator) stopCoordinator();
@@ -1884,7 +1619,7 @@ async function processWorkRequest(
     phaseLabelMirror,
   );
   console.log(
-    `[daemon] Pipeline done for #${request.issueNumber}: ${result.outcome}${result.error ? ` — ${result.error}` : ''}`,
+    `[daemon] Pipeline done for #${request.issueNumber}: ${result.outcome}${result.error !== undefined && result.error !== '' ? ` — ${result.error}` : ''}`,
   );
 
   void runWriter?.upsertRun(run.id, {

@@ -17,6 +17,9 @@ const {
   mockNotify,
   mockRunWriter,
   mockConfigReader,
+  mockRepoSource,
+  mockRunHistory,
+  mockDbSqlEnd,
   mockLoadConfig,
   mockSelectVariant,
   phaseHandlerCalls,
@@ -65,13 +68,38 @@ const {
   mockServerStart: vi.fn(),
   mockRunPipeline: vi.fn(),
   mockNotify: vi.fn(),
-  mockRunWriter: { upsertRun: vi.fn() },
+  mockRunWriter: {
+    insertRun: vi.fn(),
+    upsertRun: vi.fn(),
+    writeCostEvent: vi.fn(),
+  },
   mockConfigReader: {
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn(),
     getGlobalConfig: vi.fn().mockReturnValue(null),
     getRepoConfig: vi.fn().mockReturnValue(null),
   },
+  mockRepoSource: {
+    listEnabledRepos: vi.fn().mockResolvedValue({
+      ok: true,
+      value: [
+        {
+          id: 'repo-id',
+          owner: 'test-owner',
+          name: 'test-repo',
+          poll_interval_ms: null,
+          connection_id: null,
+        },
+      ],
+    }),
+    upsertRepo: vi.fn().mockResolvedValue({ ok: true, value: 'repo-id' }),
+    resolveConnectionToken: vi.fn().mockResolvedValue(undefined),
+  },
+  mockRunHistory: {
+    countStuckRunsForIssue: vi.fn().mockResolvedValue(0),
+    markInProgressRunsStuck: vi.fn().mockResolvedValue(0),
+  },
+  mockDbSqlEnd: vi.fn().mockResolvedValue(undefined),
   mockLoadConfig: vi.fn(),
   mockSelectVariant: vi.fn(),
   phaseHandlerCalls: [] as unknown[][],
@@ -80,16 +108,14 @@ const {
     .mockReturnValue({ start: () => () => {}, getStatus: () => ({}) }),
   mockCreatePOAgent: vi.fn().mockReturnValue({
     start: vi.fn().mockReturnValue(vi.fn()),
-    submitIdea: vi
-      .fn()
-      .mockResolvedValue({
-        id: 'idea-1',
-        submittedBy: 'operator',
-        description: 'test',
-        status: 'pending',
-        proposalId: null,
-        createdAt: '2026-03-23T00:00:00Z',
-      }),
+    submitIdea: vi.fn().mockResolvedValue({
+      id: 'idea-1',
+      submittedBy: 'operator',
+      description: 'test',
+      status: 'pending',
+      proposalId: null,
+      createdAt: '2026-03-23T00:00:00Z',
+    }),
   }),
   mockCreateTechLeadScheduler: vi.fn().mockReturnValue({
     start: vi.fn().mockReturnValue(vi.fn()),
@@ -217,12 +243,21 @@ vi.mock('./runtime-source.js', () => ({
   validateRuntimeSource: (...args: unknown[]) =>
     mockValidateRuntimeSource(...args),
 }));
-vi.mock('../supabase/client.js', () => ({
-  getSupabaseClient: () => null,
+vi.mock('@auto-claude/db', () => ({
+  createDbClient: () => ({ db: {}, sql: { end: mockDbSqlEnd } }),
+  createPostgresStores: () => ({
+    settings: {},
+    repos: {},
+    plugins: {},
+    runs: {},
+    costs: {},
+    credentials: {},
+  }),
+  readCredentialKey: () => Buffer.alloc(32, 1),
 }));
-vi.mock('../supabase/config-reader.js', () => {
+vi.mock('../data/config-reader.js', () => {
   return {
-    SupabaseConfigReader: class {
+    PostgresConfigReader: class {
       start = mockConfigReader.start;
       stop = mockConfigReader.stop;
       getGlobalConfig = mockConfigReader.getGlobalConfig;
@@ -230,12 +265,31 @@ vi.mock('../supabase/config-reader.js', () => {
     },
   };
 });
-vi.mock('../supabase/run-writer.js', () => {
+vi.mock('../data/run-writer.js', () => {
   return {
-    SupabaseRunWriter: class {
+    PostgresRunWriter: class {
+      insertRun = mockRunWriter.insertRun;
       upsertRun = mockRunWriter.upsertRun;
+      writeCostEvent = mockRunWriter.writeCostEvent;
     },
     toDbOutcome: (o: string) => o,
+  };
+});
+vi.mock('../data/repo-source.js', () => {
+  return {
+    PostgresRepoDataSource: class {
+      listEnabledRepos = mockRepoSource.listEnabledRepos;
+      upsertRepo = mockRepoSource.upsertRepo;
+      resolveConnectionToken = mockRepoSource.resolveConnectionToken;
+    },
+  };
+});
+vi.mock('../data/run-history.js', () => {
+  return {
+    PostgresRunHistory: class {
+      countStuckRunsForIssue = mockRunHistory.countStuckRunsForIssue;
+      markInProgressRunsStuck = mockRunHistory.markInProgressRunsStuck;
+    },
   };
 });
 vi.mock('@octokit/rest', () => {
@@ -285,22 +339,20 @@ vi.mock('../coordination/tech-lead/proposal-store.js', () => ({
   },
 }));
 vi.mock('../coordination/tech-lead/signal-digest.js', () => ({
-  assembleSignalDigest: vi
-    .fn()
-    .mockResolvedValue({
-      id: 'digest-1',
-      trigger: 'scheduled',
-      reviewFindings: [],
-      runOutcomes: [],
-      driftIndicators: [],
-      deferredWork: [],
-      testHealth: [],
-      dependencyRisks: [],
-      activeProposals: [],
-      priorRejections: [],
-      missingSources: [],
-      assembledAt: '2026-03-23T00:00:00Z',
-    }),
+  assembleSignalDigest: vi.fn().mockResolvedValue({
+    id: 'digest-1',
+    trigger: 'scheduled',
+    reviewFindings: [],
+    runOutcomes: [],
+    driftIndicators: [],
+    deferredWork: [],
+    testHealth: [],
+    dependencyRisks: [],
+    activeProposals: [],
+    priorRejections: [],
+    missingSources: [],
+    assembledAt: '2026-03-23T00:00:00Z',
+  }),
 }));
 vi.mock('../coordination/tech-lead/proposal-lifecycle.js', () => ({
   isTerminalStatus: vi.fn().mockReturnValue(false),
@@ -323,7 +375,11 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
     requireExpectedRef: true,
     allowSelfRepair: false,
     onUnhealthy: 'pause',
-    ignoredDirtyPaths: ['state/', 'workspaces/', '.claude/scheduled_tasks.lock'],
+    ignoredDirtyPaths: [
+      'state/',
+      'workspaces/',
+      '.claude/scheduled_tasks.lock',
+    ],
   },
   branches: { staging: 'staging', production: 'main' },
   webhooks: [],
@@ -420,8 +476,7 @@ describe('daemon', () => {
     vi.useFakeTimers();
     // Ensure GITHUB_TOKEN is set for all tests (validated at daemon startup)
     process.env.GITHUB_TOKEN = 'ghp_test_token';
-    // Capture signal handlers — cast to any to avoid process.on overload complexity
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // Capture signal handlers.
     vi.spyOn(process, 'on').mockImplementation(((
       event: string,
       handler: () => Promise<void>,
@@ -450,7 +505,29 @@ describe('daemon', () => {
     mockOctokit.issues.removeLabel.mockResolvedValue(undefined);
     mockRemoteControl.stop.mockResolvedValue(undefined);
     mockCostTracker.getDailyCost.mockReturnValue(0);
+    mockRunWriter.insertRun.mockResolvedValue(undefined);
     mockRunWriter.upsertRun.mockResolvedValue(undefined);
+    mockRunWriter.writeCostEvent.mockResolvedValue(undefined);
+    mockConfigReader.start.mockResolvedValue(undefined);
+    mockConfigReader.stop.mockReturnValue(undefined);
+    mockConfigReader.getGlobalConfig.mockReturnValue(null);
+    mockConfigReader.getRepoConfig.mockReturnValue(null);
+    mockRepoSource.listEnabledRepos.mockResolvedValue(
+      ok([
+        {
+          id: 'repo-id',
+          owner: 'test-owner',
+          name: 'test-repo',
+          poll_interval_ms: null,
+          connection_id: null,
+        },
+      ]),
+    );
+    mockRepoSource.upsertRepo.mockResolvedValue(ok('repo-id'));
+    mockRepoSource.resolveConnectionToken.mockResolvedValue(undefined);
+    mockRunHistory.countStuckRunsForIssue.mockResolvedValue(0);
+    mockRunHistory.markInProgressRunsStuck.mockResolvedValue(0);
+    mockDbSqlEnd.mockResolvedValue(undefined);
     mockClassifyBatch.mockImplementation(
       async (_runtime: unknown, requests: Array<{ issueNumber: number }>) => ({
         results: requests.map((request) => ({
@@ -471,16 +548,14 @@ describe('daemon', () => {
     });
     mockCreatePOAgent.mockReturnValue({
       start: vi.fn().mockReturnValue(vi.fn()),
-      submitIdea: vi
-        .fn()
-        .mockResolvedValue({
-          id: 'idea-1',
-          submittedBy: 'operator',
-          description: 'test',
-          status: 'pending',
-          proposalId: null,
-          createdAt: '2026-03-23T00:00:00Z',
-        }),
+      submitIdea: vi.fn().mockResolvedValue({
+        id: 'idea-1',
+        submittedBy: 'operator',
+        description: 'test',
+        status: 'pending',
+        proposalId: null,
+        createdAt: '2026-03-23T00:00:00Z',
+      }),
     });
     mockCreateTechLeadScheduler.mockReturnValue({
       start: vi.fn().mockReturnValue(vi.fn()),
@@ -549,12 +624,20 @@ describe('daemon', () => {
       mockRemoteControl.stop,
       mockCostTracker.getDailyCost,
       mockCostTracker.maybeResetDaily,
+      mockRunWriter.insertRun,
       mockRunWriter.upsertRun,
+      mockRunWriter.writeCostEvent,
       mockClassifyBatch,
       mockConfigReader.start,
       mockConfigReader.stop,
       mockConfigReader.getGlobalConfig,
       mockConfigReader.getRepoConfig,
+      mockRepoSource.listEnabledRepos,
+      mockRepoSource.upsertRepo,
+      mockRepoSource.resolveConnectionToken,
+      mockRunHistory.countStuckRunsForIssue,
+      mockRunHistory.markInProgressRunsStuck,
+      mockDbSqlEnd,
       mockSelectVariant,
       mockCreateReviewScheduler,
       mockCreatePOAgent,
@@ -608,7 +691,7 @@ describe('daemon', () => {
       expect(mockStateMgr.initialize).toHaveBeenCalled();
     });
 
-    it('returns ok and starts control server in legacy mode', async () => {
+    it('returns ok and starts control server in Postgres mode', async () => {
       const { startDaemon } = await loadDaemon();
       const result = await startDaemon('config.json');
 
@@ -646,17 +729,14 @@ describe('daemon', () => {
       expect(mockRemoteControl.stop).toHaveBeenCalled();
     });
 
-    it('returns error in legacy mode when config.repo is missing and no supabase', async () => {
+    it('starts in Postgres mode when config.repo is missing', async () => {
       mockLoadConfig.mockResolvedValue(ok(makeConfig({ repo: undefined })));
 
       const { startDaemon } = await loadDaemon();
       const result = await startDaemon('config.json');
 
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.error.message).toContain('No SUPABASE_URL');
-      }
-      expect(mockRemoteControl.stop).toHaveBeenCalled();
+      expect(result.ok).toBe(true);
+      expect(mockServerStart).toHaveBeenCalled();
     });
 
     it('registers SIGTERM and SIGINT shutdown handlers', async () => {
@@ -721,7 +801,9 @@ describe('daemon', () => {
 
       expect(result.ok).toBe(false);
       if (!result.ok) {
-        expect(result.error.message).toContain('Runtime source preflight failed');
+        expect(result.error.message).toContain(
+          'Runtime source preflight failed',
+        );
       }
       expect(mockStateMgr.initialize).not.toHaveBeenCalled();
     });
@@ -2339,7 +2421,7 @@ describe('daemon', () => {
       expect(coordinator.start).toHaveBeenCalledTimes(1);
     });
 
-    it('does NOT start legacy poll loop when coordinator is enabled', async () => {
+    it('keeps DB repo polling active when coordinator is enabled', async () => {
       const config = makeConfig({
         coordination: { ...makeConfig().coordination, useCoordinator: true },
       });
@@ -2349,7 +2431,7 @@ describe('daemon', () => {
       const { startDaemon } = await loadDaemon();
       await startDaemon('config.json');
       await vi.advanceTimersByTimeAsync(60000);
-      expect(mockDetector.detectReadyWork).not.toHaveBeenCalled();
+      expect(mockDetector.detectReadyWork).toHaveBeenCalled();
     });
 
     it('does NOT start standalone PO agent when coordinator is enabled', async () => {
@@ -2808,7 +2890,6 @@ describe('daemon', () => {
       // deps is first arg to createTechLeadScheduler
       const calls = mockCreateTechLeadScheduler.mock.calls;
       expect(calls.length).toBeGreaterThan(0);
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       const deps = calls[0]![0] as {
         spawnTechLeadSession: (digest: unknown) => Promise<string>;
       };
