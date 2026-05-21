@@ -37,7 +37,7 @@ describe('docker-compose self-hosted Postgres runtime (#626)', () => {
     const completed = raw.match(/condition: service_completed_successfully/g) ?? [];
     expect(completed.length).toBeGreaterThanOrEqual(3);
     expect(raw).toContain('DAEMON_DATA_BACKEND: ${DAEMON_DATA_BACKEND:-supabase}');
-    expect(raw).toContain('BRIEFING_DATA_BACKEND: ${BRIEFING_DATA_BACKEND:-supabase}');
+    expect(raw).toContain('BRIEFING_DATA_BACKEND: ${BRIEFING_DATA_BACKEND:-postgres}');
   });
 
   it('does not pass the full application env file to postgres or migrate', () => {

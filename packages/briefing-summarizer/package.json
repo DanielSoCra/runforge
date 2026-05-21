@@ -11,8 +11,7 @@
   },
   "dependencies": {
     "@auto-claude/db": "workspace:*",
-    "@anthropic-ai/sdk": "^0.52.0",
-    "@supabase/supabase-js": "^2.49.4"
+    "@anthropic-ai/sdk": "^0.52.0"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
