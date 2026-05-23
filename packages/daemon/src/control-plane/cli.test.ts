@@ -98,7 +98,9 @@ describe('health command', () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const cli = createCli();
     await cli.parseAsync(['node', 'auto-claude', 'health', '-p', String(PORT)]);
-    expect(spy).toHaveBeenCalledWith(JSON.stringify({ ok: true }, null, 2));
+    expect(spy).toHaveBeenCalledWith(
+      JSON.stringify({ ok: true, degraded: false, lastConfigError: null }, null, 2),
+    );
     expect(process.exitCode).toBeUndefined();
     spy.mockRestore();
   });
