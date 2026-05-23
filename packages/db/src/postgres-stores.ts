@@ -858,13 +858,126 @@ function mapOperatorMembership(
   };
 }
 
+const UNREACHABLE_ERRNOS = new Set([
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'ENOTFOUND',
+  'ECONNRESET',
+  'EPIPE',
+]);
+
+/**
+ * Walk an error's `cause` chain (depth-capped, cycle-safe) and classify the
+ * driver failure. Picks the **deepest** layer that carries a non-empty `code`
+ * OR a non-default `name`/`constructor.name` (anything other than `'Error'`).
+ * Connection/timeout errnos and SQLSTATE class `08*` are `unreachable`
+ * (transient, retry-eligible); everything else — including opaque/no-code
+ * errors — is `rejected` (conservative: do not silently retry).
+ */
+export function classifyDriverError(err: unknown): {
+  category: 'unreachable' | 'rejected';
+  class: string;
+  code: string | null;
+  message: string;
+} {
+  const layers = collectErrorLayers(err);
+
+  // Choose the deepest informative layer.
+  let chosen: { class: string; code: string | null; message: string } | null =
+    null;
+  for (const layer of layers) {
+    if (layer.code !== null || layer.class !== 'Error') {
+      chosen = layer;
+    }
+  }
+  // Fall back to the outermost layer if nothing was informative.
+  const picked = chosen ?? layers[0] ?? {
+    class: 'Error',
+    code: null,
+    message: errorMessage(err),
+  };
+
+  const code = picked.code;
+  const isUnreachable =
+    code !== null &&
+    (UNREACHABLE_ERRNOS.has(code) || code.startsWith('08'));
+
+  return {
+    category: isUnreachable ? 'unreachable' : 'rejected',
+    class: picked.class,
+    code,
+    message: picked.message,
+  };
+}
+
+function collectErrorLayers(
+  err: unknown,
+): { class: string; code: string | null; message: string }[] {
+  const layers: { class: string; code: string | null; message: string }[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = err;
+  for (let depth = 0; depth < 10 && current != null; depth += 1) {
+    if (seen.has(current)) break;
+    seen.add(current);
+
+    layers.push({
+      class: errorClassName(current),
+      code: errorCode(current),
+      message: errorMessage(current),
+    });
+
+    if (current instanceof Error || typeof current === 'object') {
+      const next = (current as { cause?: unknown }).cause;
+      if (next === current) break;
+      current = next;
+    } else {
+      break;
+    }
+  }
+  return layers;
+}
+
+function errorClassName(error: unknown): string {
+  if (error instanceof Error) {
+    if (typeof error.name === 'string' && error.name.length > 0) {
+      return error.name;
+    }
+    return error.constructor?.name ?? 'Error';
+  }
+  if (error && typeof error === 'object') {
+    return error.constructor?.name ?? 'Object';
+  }
+  return 'Error';
+}
+
+function errorCode(error: unknown): string | null {
+  if (error && typeof error === 'object') {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'string' && code.length > 0) return code;
+    if (typeof code === 'number') return String(code);
+  }
+  return null;
+}
+
 async function unavailableOnThrow<T>(
   operation: () => Promise<StoreResult<T>>,
 ): Promise<StoreResult<T>> {
   try {
     return await operation();
   } catch (error) {
-    return unavailable(errorMessage(error));
+    const classified = classifyDriverError(error);
+    const base = errorMessage(error);
+    const message =
+      classified.code !== null
+        ? `${base} — ${classified.code}: ${classified.message}`
+        : classified.message !== base
+          ? `${base} — ${classified.message}`
+          : base;
+    return unavailable(message, classified.category, {
+      class: classified.class,
+      code: classified.code,
+      message: classified.message,
+    });
   }
 }
 
@@ -882,8 +995,16 @@ function denied(message: string): StoreResult<never> {
   return { ok: false, error: 'denied', message };
 }
 
-function unavailable(message: string): StoreResult<never> {
-  return { ok: false, error: 'unavailable', message };
+function unavailable(
+  message: string,
+  category: 'unreachable' | 'rejected' = 'rejected',
+  cause: { class: string; code: string | null; message: string } = {
+    class: 'StoreInvariant',
+    code: null,
+    message,
+  },
+): StoreResult<never> {
+  return { ok: false, error: 'unavailable', message, category, cause };
 }
 
 function errorMessage(error: unknown): string {

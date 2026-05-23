@@ -34,7 +34,7 @@ describe('ControlServer', () => {
     const res = await fetch(`http://127.0.0.1:${PORT}/health`);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toEqual({ ok: true });
+    expect(body).toEqual({ ok: true, degraded: false, lastConfigError: null });
   });
 
   it('GET /status returns daemon status', async () => {

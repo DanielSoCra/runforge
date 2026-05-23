@@ -48,7 +48,10 @@ export function createControlServer(
         json(res, 500, { error: 'read failed' });
       });
     } else if (method === 'GET' && url.pathname === '/health') {
-      json(res, 200, { ok: true });
+      // Shape mirrors the throwaway degraded server (degraded-server.ts) so
+      // both /health endpoints are uniform. The real server only binds
+      // post-recovery, so these are always literal constants here.
+      json(res, 200, { ok: true, degraded: false, lastConfigError: null });
     } else if (method === 'GET' && url.pathname === '/status') {
       json(res, 200, handlers.getStatus());
     } else if (method === 'POST' && url.pathname === '/pause') {

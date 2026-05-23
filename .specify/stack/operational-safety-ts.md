@@ -14,6 +14,9 @@ code_paths:
   - packages/daemon/src/session-runtime/session-error.ts
   - packages/daemon/src/control-plane/daemon.ts
   - packages/daemon/src/control-plane/pipeline.ts
+  - packages/daemon/src/control-plane/startup-retry.ts
+  - packages/daemon/src/control-plane/degraded-server.ts
+  - packages/daemon/src/data/config-reader.ts
 test_paths:
   - packages/daemon/src/session-runtime/cost.test.ts
   - packages/daemon/src/session-runtime/rate-limiter.test.ts
@@ -21,6 +24,9 @@ test_paths:
   - packages/daemon/src/session-runtime/session-error.test.ts
   - packages/daemon/src/control-plane/daemon.test.ts
   - packages/daemon/src/control-plane/pipeline.test.ts
+  - packages/daemon/src/control-plane/startup-retry.test.ts
+  - packages/daemon/src/control-plane/degraded-server.test.ts
+  - packages/daemon/src/data/config-reader.test.ts
 ---
 
 # STACK-AC-OPERATIONAL-SAFETY — Operational Safety Coordination (TypeScript)
@@ -46,6 +52,8 @@ test_paths:
 **Graceful shutdown: Flag + signal cascade.** The Daemon sets `shuttingDown = true` on SIGTERM/SIGINT, which prevents the polling loop from claiming new work. Active runs complete naturally up to the grace period. After the grace period, the Daemon calls `remoteControl.stop()` (SIGTERM to subprocess), flushes run state via `writeJsonSafe()`, and closes the HTTP server to release the port lock. The `finally` block in the run loop ensures `notifyRunEnd()` always fires, even on crash.
 
 **Cost tracking persistence across errors.** `SessionError` always carries the `cost` field. The Daemon records cost from both successful results and errors — cost accrues regardless of outcome. This prevents a failure mode where errored sessions consume budget but don't report it.
+
+**Startup configuration load: throwaway degraded server + bounded retry + blocking recovery.** Rather than reorder the large, tightly-coupled `startDaemon` body, bind a *throwaway* minimal observability server (`createDegradedServer`, answering only `/health` + `/status` with `{ ok: true, degraded: true, lastConfigError }`) on the control port immediately after the DB client + `configReader` are constructed, before any DB I/O. Then run a bounded inline retry of `configReader.tryFetch()` (default 5 attempts; backoff after attempts 1–4 of `1s, 2s, 4s, 8s` — no delay after the final attempt; env-tunable via `DAEMON_STARTUP_RETRY_MAX_ATTEMPTS` / `_BASE_MS` / `_MAX_DELAY_MS`). Inline attempts do **not** advance the escalation counter. On inline exhaustion, `startDaemon` `await`s `runDegradedUntilRecovered(...)`, a loop that polls `tryFetch()` at the config cadence and resolves only on success; while it blocks, the throwaway server keeps `/health` reachable. The first successful fetch (inline or background) resolves the await, the daemon `await degraded.handle.close()`s (releasing the port), and the **unchanged** normal startup runs linearly — re-binding the real control server at its original place. There is no recovery callback and no `completeStartup` extraction: the heavy startup body runs exactly once, after config is loaded, with its `Result` propagated normally. A categorical `rejected` Store outcome on **any** attempt is fatal: inline `rejected` → close degraded server, end DB client, `return err(...)`; background `rejected` → close degraded server, end DB client, `process.exit(1)` (startDaemon is blocked in the await and will not return). Degraded mode is for `unreachable` only. `runDegradedUntilRecovered` counts unrecovered `unreachable` polls against `config.maxConsecutiveStuck` (the existing `>=` comparator; no new threshold field) and fires a one-shot operator notification at the threshold, re-armed only after a clean recovery (`notifiedThisDegradation`). Because no work loop, crash-resume, or parked-resume is wired until the post-block normal startup, the daemon structurally cannot claim work while degraded.
 
 ## Examples
 
@@ -87,6 +95,17 @@ applyGlobalTransition(event: PhaseEvent): Phase | null {
 }
 ```
 
+```typescript
+// Throwaway degraded server up first, then bounded retry, then LINEAR normal startup.
+const degraded = createDegradedServer(port, host, () => degradedState);
+await degraded.start();
+const result = await runStartupRetry(() => configReader.tryFetch(), opts, onAttempt);
+if (result.kind === 'rejected') { await degraded.handle.close(); await pg.sql.end(); return err(...); }
+if (result.kind === 'exhausted') { await runDegradedUntilRecovered(configReader, degradedState, ...); }
+await degraded.handle.close();          // hand the port to the real server
+// ── existing startDaemon body runs UNCHANGED from here (configReader.start() is now timer-only) ──
+```
+
 ## Gotchas
 
 - `SessionError.cost` must always be populated. A zero-cost error is valid (e.g., rejected before spawn); a missing cost field is a bug. The Daemon's cost recording path must handle both `SessionResult` and `SessionError` without branching on type.
@@ -95,3 +114,7 @@ applyGlobalTransition(event: PhaseEvent): Phase | null {
 - `shuttingDown` and `paused` are separate flags. `shuttingDown` is irreversible within a process lifetime (the daemon is exiting). `paused` is reversible via the `/resume` endpoint. Both prevent new work claims, but only `paused` can be cleared.
 - The port-based instance lock means a crashed daemon may hold the port in TIME_WAIT for ~60 seconds. Set `SO_REUSEADDR` on the server socket to allow immediate restart. See STACK-AC-CONTROL-PLANE for the pattern.
 - Budget signals use `PhaseEvent` union types (`'budget-exceeded'`, `'per-run-budget-exceeded'`, `'rate-limited'`). Adding a new signal requires updating the `PhaseEvent` type, the pipeline's `applyGlobalTransition()`, and the Daemon's signal-handling switch. All three must stay in sync.
+- **The degraded server and the real server must never listen simultaneously.** The throwaway server holds the control port during the outage; `await degraded.handle.close()` (which drains in-flight requests and releases the listener) must complete before the normal startup binds the real server on the same port. Sequential `await` on the single-threaded event loop makes the close→bind handoff safe; if `close()` ever hangs, the real bind fails `EADDRINUSE` → `startDaemon` returns err → launchd respawns (acceptable).
+- **`start()` must become timer-only.** Once the bounded inline retry (or background recovery) has loaded config via `tryFetch`, the existing `configReader.start()` call in the normal startup body must NOT issue another initial fetch — otherwise a DB blip in the handoff window would throw and abort startup. Strip the `await this.fetch()` from `start()`; keep only the `setInterval`.
+- **Don't retry-and-degrade on categorical `rejected` errors.** A schema-missing or auth-failed result must short-circuit and exit with the underlying reason (inline → `err`, background → `process.exit(1)` after cleanup). Otherwise a permanent misconfiguration looks identical to a transient outage and silently consumes hours.
+- **Mutation refusal is structural in this design, not a guard.** Because the work loop / crash-resume / parked-resume are wired only in the post-degraded normal startup, the daemon cannot claim work while degraded. A one-line `isStartupDegraded()` check on the work-detection callback is cheap belt-and-suspenders but is not the load-bearing mechanism.

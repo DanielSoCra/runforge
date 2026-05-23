@@ -112,7 +112,7 @@ An autonomous system that runs 24/7, starts autonomous work with broad project a
 
 **Scenario: Auto-pause after consecutive failures**
 - Given multiple consecutive work requests have ended in "stuck" status
-- When the count exceeds the configured threshold
+- When the count reaches the configured threshold
 - Then the system auto-pauses and notifies the Operator
 
 ### Rate Limiting
@@ -159,6 +159,21 @@ An autonomous system that runs 24/7, starts autonomous work with broad project a
 - When it checks for orphaned work
 - Then it terminates any work still running without an active run
 
+**Scenario: Survive a transient outage of an operational data dependency during startup**
+- Given an operational data dependency the system reads while starting is temporarily unavailable
+- When the system is starting up
+- Then the system tolerates the outage for a bounded recovery window, makes its degraded startup state observable, refuses operations that depend on configuration not yet loaded, and resumes normal operation once the dependency returns — without requiring an Operator to restart the process
+
+**Scenario: Underlying cause of an operational data dependency failure is observable**
+- Given an operation against an operational data dependency has failed
+- When the failure is recorded or surfaced
+- Then the record names the underlying reason in operator-readable form, distinguishing categories the Operator must respond to differently (for example: dependency unreachable, denied access, mismatched stored shape)
+
+**Scenario: Repeated unrecovered startup degradation is escalated**
+- Given the system has remained in startup-degraded state for as many consecutive recovery attempts as the existing consecutive-failure escalation threshold
+- When that threshold is reached
+- Then the system notifies the Operator once on the configured channel rather than continuing silently, and does not re-notify until the degraded state has cleared at least once
+
 ### Secrets
 
 **Scenario: Startup credential resolution**
@@ -182,6 +197,9 @@ An autonomous system that runs 24/7, starts autonomous work with broad project a
 - Safety enforcement is structural, not instruction-only
 - State survives crashes without corruption
 - Identical repeated failures are detected and escalated, not retried endlessly
+- A transient outage of an operational data dependency during startup is observable, bounded, and self-recovering; an unrecovered startup outage is escalated to the Operator rather than left silent
+- Every operational data dependency failure record carries an Operator-readable underlying reason and a category distinct enough to choose a different response
+- While the system is in startup-degraded state, operations that depend on configuration not yet loaded are refused rather than served against defaults
 
 ## Constraints
 

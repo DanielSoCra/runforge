@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createControlServer } from './control-plane/server.js';
+import { formatStartupError } from './main.js';
 import { ok, err } from './lib/result.js';
 import type { Server } from 'http';
 
@@ -21,6 +22,46 @@ const handlers = {
 
 afterEach(() => {
   if (serverRef) { serverRef.close(); serverRef = undefined; }
+});
+
+describe('formatStartupError', () => {
+  it('prints the top-level message with no cause', () => {
+    expect(formatStartupError(new Error('boom'))).toBe('Failed to start: boom');
+  });
+
+  it('walks the cause chain and includes the driver code', () => {
+    const deepest = Object.assign(
+      new Error('connect ECONNREFUSED 127.0.0.1:5432'),
+      { code: 'ECONNREFUSED' },
+    );
+    const mid = new Error('postgres connection error', { cause: deepest });
+    const outer = new Error('startup config rejected', { cause: mid });
+
+    const out = formatStartupError(outer);
+    expect(out).toContain('Failed to start: startup config rejected');
+    expect(out).toContain('  caused by: postgres connection error');
+    expect(out).toContain(
+      '  caused by: [ECONNREFUSED] connect ECONNREFUSED 127.0.0.1:5432',
+    );
+  });
+
+  it('caps the chain at 5 layers', () => {
+    let current = new Error('layer-0');
+    for (let i = 1; i <= 8; i += 1) {
+      current = new Error(`layer-${i}`, { cause: current });
+    }
+    const out = formatStartupError(current);
+    // 1 "Failed to start" line + at most 5 "caused by" lines.
+    expect(out.split('\n')).toHaveLength(6);
+  });
+
+  it('terminates on a cyclic cause chain', () => {
+    const a = new Error('a') as Error & { cause?: unknown };
+    const b = new Error('b') as Error & { cause?: unknown };
+    a.cause = b;
+    b.cause = a;
+    expect(() => formatStartupError(a)).not.toThrow();
+  });
 });
 
 describe('main.ts callApi X-Requested-By header (#148)', () => {

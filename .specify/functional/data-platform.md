@@ -46,6 +46,11 @@ Auto-Claude keeps all of its operational records — which repositories are watc
 - When that information is absent from the project-owned data
 - Then the discrepancy is surfaced as an explicit, observable failure rather than silently degrading
 
+**Scenario: Store unreachability is distinguishable from store rejection**
+- Given an operation against the project-owned operational data has failed
+- When the failure is surfaced to the Operator
+- Then the surfaced record names whether the store was unreachable (transient, expected to recover) or rejected the operation (such as a stored-shape, authentication, or permission mismatch), and includes the underlying reason in Operator-readable form — so the Operator can choose between waiting for recovery and intervening on stored shape or access
+
 **Scenario: Hosted dependency removed after parity**
 - Given the project-owned data has reached verified parity and cutover is complete
 - When the transition is finalized

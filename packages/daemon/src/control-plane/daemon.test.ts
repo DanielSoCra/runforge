@@ -13,6 +13,8 @@ const {
   mockDetector,
   mockServer,
   mockServerStart,
+  mockDegradedStart,
+  mockDegradedClose,
   mockRunPipeline,
   mockNotify,
   mockRunWriter,
@@ -66,6 +68,8 @@ const {
     }),
   },
   mockServerStart: vi.fn(),
+  mockDegradedStart: vi.fn(),
+  mockDegradedClose: vi.fn(),
   mockRunPipeline: vi.fn(),
   mockNotify: vi.fn(),
   mockRunWriter: {
@@ -78,6 +82,9 @@ const {
     stop: vi.fn(),
     getGlobalConfig: vi.fn().mockReturnValue(null),
     getRepoConfig: vi.fn().mockReturnValue(null),
+    tryFetch: vi.fn().mockResolvedValue({ ok: true, value: undefined }),
+    isStartupDegraded: vi.fn().mockReturnValue(false),
+    getLastConfigError: vi.fn().mockReturnValue(null),
   },
   mockRepoSource: {
     listEnabledRepos: vi.fn().mockResolvedValue({
@@ -212,6 +219,14 @@ vi.mock('./server.js', () => ({
     start: mockServerStart,
   })),
 }));
+vi.mock('./degraded-server.js', () => ({
+  createDegradedServer: vi.fn(
+    (_port: number, _host: string, _getState: unknown) => ({
+      start: mockDegradedStart,
+      handle: { close: mockDegradedClose },
+    }),
+  ),
+}));
 vi.mock('./phases.js', () => ({
   createPhaseHandlers: (...args: unknown[]) => {
     phaseHandlerCalls.push(args);
@@ -262,6 +277,9 @@ vi.mock('../data/config-reader.js', () => {
       stop = mockConfigReader.stop;
       getGlobalConfig = mockConfigReader.getGlobalConfig;
       getRepoConfig = mockConfigReader.getRepoConfig;
+      tryFetch = mockConfigReader.tryFetch;
+      isStartupDegraded = mockConfigReader.isStartupDegraded;
+      getLastConfigError = mockConfigReader.getLastConfigError;
     },
   };
 });
@@ -496,6 +514,8 @@ describe('daemon', () => {
     mockSelectVariant.mockReturnValue('feature');
     mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
     mockServerStart.mockResolvedValue(ok(undefined));
+    mockDegradedStart.mockResolvedValue(ok(undefined));
+    mockDegradedClose.mockResolvedValue(undefined);
     mockNotify.mockResolvedValue(undefined);
     mockStateMgr.initialize.mockResolvedValue(undefined);
     mockStateMgr.saveRunState.mockResolvedValue(undefined);
@@ -512,6 +532,9 @@ describe('daemon', () => {
     mockConfigReader.stop.mockReturnValue(undefined);
     mockConfigReader.getGlobalConfig.mockReturnValue(null);
     mockConfigReader.getRepoConfig.mockReturnValue(null);
+    mockConfigReader.tryFetch.mockResolvedValue({ ok: true, value: undefined });
+    mockConfigReader.isStartupDegraded.mockReturnValue(false);
+    mockConfigReader.getLastConfigError.mockReturnValue(null);
     mockRepoSource.listEnabledRepos.mockResolvedValue(
       ok([
         {
@@ -612,6 +635,8 @@ describe('daemon', () => {
       mockRunPipeline,
       mockNotify,
       mockServerStart,
+      mockDegradedStart,
+      mockDegradedClose,
       mockLoadConfig,
       mockStateMgr.initialize,
       mockStateMgr.saveRunState,
@@ -752,6 +777,233 @@ describe('daemon', () => {
       await startDaemon('config.json');
 
       expect(mockRemoteControl.start).toHaveBeenCalled();
+    });
+  });
+
+  describe('degraded startup (DB-outage resilience)', () => {
+    const unreachable = {
+      ok: false as const,
+      error: {
+        category: 'unreachable' as const,
+        cause: {
+          class: 'PostgresError',
+          code: 'ECONNREFUSED',
+          message: 'connect ECONNREFUSED 127.0.0.1:5432',
+        },
+      },
+    };
+    const rejected = {
+      ok: false as const,
+      error: {
+        category: 'rejected' as const,
+        cause: {
+          class: 'PostgresError',
+          code: '28P01',
+          message: 'password authentication failed',
+        },
+      },
+    };
+    const okFetch = { ok: true as const, value: undefined };
+    const fastRecovery = { intervalMs: 5, delay: async () => {} };
+
+    it('proceeds with normal startup after one unreachable inline attempt then ok', async () => {
+      mockConfigReader.tryFetch
+        .mockResolvedValueOnce(unreachable)
+        .mockResolvedValue(okFetch);
+
+      const { startDaemon } = await loadDaemon();
+      const result = await startDaemon('config.json', {
+        startupRetry: { delay: async () => {} },
+        degradedRecovery: fastRecovery,
+      });
+
+      expect(result.ok).toBe(true);
+      // Normal startup ran: the real control server bound, degraded closed.
+      expect(mockServerStart).toHaveBeenCalled();
+      expect(mockDegradedStart).toHaveBeenCalled();
+      expect(mockDegradedClose).toHaveBeenCalled();
+    });
+
+    it('blocks in background retry then proceeds when recovery succeeds', async () => {
+      // All inline attempts (default maxAttempts) fail unreachable, then the
+      // first background poll succeeds.
+      mockConfigReader.tryFetch
+        .mockResolvedValueOnce(unreachable)
+        .mockResolvedValueOnce(unreachable)
+        .mockResolvedValueOnce(unreachable)
+        .mockResolvedValueOnce(unreachable)
+        .mockResolvedValueOnce(unreachable)
+        .mockResolvedValue(okFetch);
+
+      const { startDaemon } = await loadDaemon();
+      const result = await startDaemon('config.json', {
+        startupRetry: { maxAttempts: 5, delay: async () => {} },
+        degradedRecovery: fastRecovery,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(mockServerStart).toHaveBeenCalled();
+      expect(mockDegradedClose).toHaveBeenCalled();
+    });
+
+    it('fails loudly and cleans up on a rejected inline attempt', async () => {
+      mockConfigReader.tryFetch.mockResolvedValue(rejected);
+
+      const { startDaemon } = await loadDaemon();
+      const result = await startDaemon('config.json', {
+        startupRetry: { delay: async () => {} },
+        degradedRecovery: fastRecovery,
+      });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('startup config rejected');
+        expect(result.error.message).toContain('28P01');
+      }
+      // Degraded server closed, DB client ended, real server never bound.
+      expect(mockDegradedClose).toHaveBeenCalled();
+      expect(mockDbSqlEnd).toHaveBeenCalled();
+      expect(mockServerStart).not.toHaveBeenCalled();
+    });
+
+    it('returns the degraded start error and ends the DB client if the port is taken', async () => {
+      mockDegradedStart.mockResolvedValueOnce(err(new Error('Instance lock failed')));
+
+      const { startDaemon } = await loadDaemon();
+      const result = await startDaemon('config.json');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('Instance lock failed');
+      }
+      expect(mockDbSqlEnd).toHaveBeenCalled();
+      expect(mockServerStart).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('runDegradedUntilRecovered', () => {
+    const mkUnreachable = () => ({
+      ok: false as const,
+      error: {
+        category: 'unreachable' as const,
+        cause: {
+          class: 'PostgresError',
+          code: 'ECONNREFUSED',
+          message: 'connect ECONNREFUSED 127.0.0.1:5432',
+        },
+      },
+    });
+    const mkRejected = () => ({
+      ok: false as const,
+      error: {
+        category: 'rejected' as const,
+        cause: {
+          class: 'PostgresError',
+          code: '42P01',
+          message: 'relation does not exist',
+        },
+      },
+    });
+    const okFetch = { ok: true as const, value: undefined };
+
+    it('keeps /health observable while unreachable, then resolves on recovery', async () => {
+      const tryFetch = vi
+        .fn()
+        .mockResolvedValueOnce(mkUnreachable())
+        .mockResolvedValueOnce(mkUnreachable())
+        .mockResolvedValue(okFetch);
+      const reader = { tryFetch } as unknown as Parameters<
+        typeof runDegradedUntilRecovered
+      >[0];
+      const degradedState = { lastConfigError: null as unknown };
+      const handle = { close: vi.fn().mockResolvedValue(undefined) };
+      const pg = { sql: { end: vi.fn().mockResolvedValue(undefined) } };
+
+      const { runDegradedUntilRecovered } = await loadDaemon();
+
+      await runDegradedUntilRecovered(
+        reader,
+        degradedState as never,
+        handle,
+        pg,
+        { intervalMs: 1, delay: async () => {}, maxConsecutiveStuck: 3, webhooks: [] },
+      );
+
+      // The loop polled through both unreachable failures and then recovered
+      // on the 3rd poll. During the outage degradedState.lastConfigError was
+      // populated (this is what /health serves), proving observability while
+      // degraded. The recovery resolved the await without closing the server.
+      expect(tryFetch).toHaveBeenCalledTimes(3);
+      expect(degradedState.lastConfigError).not.toBeNull();
+      expect(handle.close).not.toHaveBeenCalled();
+    });
+
+    it('escalates once at maxConsecutiveStuck', async () => {
+      const tryFetch = vi
+        .fn()
+        .mockResolvedValueOnce(mkUnreachable())
+        .mockResolvedValueOnce(mkUnreachable())
+        .mockResolvedValueOnce(mkUnreachable())
+        .mockResolvedValueOnce(mkUnreachable())
+        .mockResolvedValue(okFetch);
+      const handle = { close: vi.fn().mockResolvedValue(undefined) };
+      const pg = { sql: { end: vi.fn().mockResolvedValue(undefined) } };
+
+      const { runDegradedUntilRecovered } = await loadDaemon();
+
+      await runDegradedUntilRecovered(
+        { tryFetch } as never,
+        { lastConfigError: null } as never,
+        handle,
+        pg,
+        {
+          intervalMs: 1,
+          delay: async () => {},
+          maxConsecutiveStuck: 3,
+          webhooks: ['hook'],
+        },
+      );
+
+      // Notified exactly once (at the 3rd consecutive failure), not re-fired
+      // on the 4th.
+      expect(mockNotify).toHaveBeenCalledTimes(1);
+      expect(mockNotify).toHaveBeenCalledWith(
+        ['hook'],
+        expect.objectContaining({ event: 'startup-degraded', phase: 'startup' }),
+      );
+    });
+
+    it('exits on a background rejected outcome after cleanup', async () => {
+      // Stub process.exit to throw a sentinel so the infinite loop terminates
+      // deterministically once exit(1) is reached.
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {
+        throw new Error('__exit__');
+      }) as never);
+      const tryFetch = vi.fn().mockResolvedValue(mkRejected());
+      const handle = { close: vi.fn().mockResolvedValue(undefined) };
+      const pg = { sql: { end: vi.fn().mockResolvedValue(undefined) } };
+
+      const { runDegradedUntilRecovered } = await loadDaemon();
+
+      await expect(
+        runDegradedUntilRecovered(
+          { tryFetch } as never,
+          { lastConfigError: null } as never,
+          handle,
+          pg,
+          {
+            intervalMs: 1,
+            delay: async () => {},
+            maxConsecutiveStuck: 3,
+            webhooks: [],
+          },
+        ),
+      ).rejects.toThrow('__exit__');
+
+      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(handle.close).toHaveBeenCalled();
+      expect(pg.sql.end).toHaveBeenCalled();
+      exitSpy.mockRestore();
     });
   });
 
