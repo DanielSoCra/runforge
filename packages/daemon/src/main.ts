@@ -1,3 +1,5 @@
+import { fileURLToPath } from 'node:url';
+
 import { Command } from 'commander';
 import { startDaemon } from './control-plane/daemon.js';
 import { processSingleIssue } from './control-plane/process-single.js';
@@ -15,7 +17,7 @@ program
   .action(async (options: { config: string }) => {
     const result = await startDaemon(options.config);
     if (!result.ok) {
-      console.error(`Failed to start: ${result.error.message}`);
+      console.error(formatStartupError(result.error));
       process.exit(1);
     }
   });
@@ -77,7 +79,59 @@ program
     await callApi(Number(options.port), 'GET', '/health');
   });
 
-program.parse();
+/**
+ * Format a startup failure, walking up to 5 `error.cause` layers so the
+ * underlying driver code (e.g. `ECONNREFUSED`, `28P01`) is visible instead of
+ * only the opaque outer message.
+ */
+export function formatStartupError(error: Error): string {
+  const lines = [`Failed to start: ${error.message}`];
+  const seen = new Set<unknown>([error]);
+  let current: unknown = (error as { cause?: unknown }).cause;
+  for (let depth = 0; depth < 5 && current != null; depth += 1) {
+    if (seen.has(current)) break;
+    seen.add(current);
+    const code = causeCode(current);
+    const message = causeMessage(current);
+    lines.push(`  caused by:${code !== null ? ` [${code}]` : ''} ${message}`);
+    if (typeof current === 'object') {
+      current = (current as { cause?: unknown }).cause;
+    } else {
+      break;
+    }
+  }
+  return lines.join('\n');
+}
+
+function causeCode(value: unknown): string | null {
+  if (value != null && typeof value === 'object') {
+    const code = (value as { code?: unknown }).code;
+    if (typeof code === 'string' && code.length > 0) return code;
+    if (typeof code === 'number') return String(code);
+  }
+  return null;
+}
+
+function causeMessage(value: unknown): string {
+  if (value instanceof Error) return value.message;
+  if (value != null && typeof value === 'object') {
+    const message = (value as { message?: unknown }).message;
+    if (typeof message === 'string') return message;
+  }
+  return String(value);
+}
+
+// Only parse argv when run as the CLI entrypoint, not when imported (tests).
+const isEntrypoint =
+  process.argv[1] !== undefined &&
+  fileURLToPath(import.meta.url) === process.argv[1];
+if (isEntrypoint) {
+  program.parseAsync().catch((e: unknown) => {
+    const error = e instanceof Error ? e : new Error(String(e));
+    console.error(formatStartupError(error));
+    process.exit(1);
+  });
+}
 
 async function callApi(port: number, method: string, path: string): Promise<void> {
   try {
