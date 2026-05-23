@@ -17,6 +17,8 @@ export type StoreUnavailable = {
   ok: false;
   error: 'unavailable';
   message: string;
+  category: 'unreachable' | 'rejected';
+  cause: { class: string; code: string | null; message: string };
 };
 export type StoreDenied = { ok: false; error: 'denied'; message: string };
 export type StoreNotFound = { ok: false; error: 'not-found'; message: string };

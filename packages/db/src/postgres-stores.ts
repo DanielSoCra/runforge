@@ -882,8 +882,16 @@ function denied(message: string): StoreResult<never> {
   return { ok: false, error: 'denied', message };
 }
 
-function unavailable(message: string): StoreResult<never> {
-  return { ok: false, error: 'unavailable', message };
+function unavailable(
+  message: string,
+  category: 'unreachable' | 'rejected' = 'rejected',
+  cause: { class: string; code: string | null; message: string } = {
+    class: 'StoreInvariant',
+    code: null,
+    message,
+  },
+): StoreResult<never> {
+  return { ok: false, error: 'unavailable', message, category, cause };
 }
 
 function errorMessage(error: unknown): string {
