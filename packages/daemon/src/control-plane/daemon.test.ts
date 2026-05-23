@@ -78,6 +78,9 @@ const {
     stop: vi.fn(),
     getGlobalConfig: vi.fn().mockReturnValue(null),
     getRepoConfig: vi.fn().mockReturnValue(null),
+    tryFetch: vi.fn().mockResolvedValue({ ok: true, value: undefined }),
+    isStartupDegraded: vi.fn().mockReturnValue(false),
+    getLastConfigError: vi.fn().mockReturnValue(null),
   },
   mockRepoSource: {
     listEnabledRepos: vi.fn().mockResolvedValue({
@@ -262,6 +265,9 @@ vi.mock('../data/config-reader.js', () => {
       stop = mockConfigReader.stop;
       getGlobalConfig = mockConfigReader.getGlobalConfig;
       getRepoConfig = mockConfigReader.getRepoConfig;
+      tryFetch = mockConfigReader.tryFetch;
+      isStartupDegraded = mockConfigReader.isStartupDegraded;
+      getLastConfigError = mockConfigReader.getLastConfigError;
     },
   };
 });
@@ -512,6 +518,9 @@ describe('daemon', () => {
     mockConfigReader.stop.mockReturnValue(undefined);
     mockConfigReader.getGlobalConfig.mockReturnValue(null);
     mockConfigReader.getRepoConfig.mockReturnValue(null);
+    mockConfigReader.tryFetch.mockResolvedValue({ ok: true, value: undefined });
+    mockConfigReader.isStartupDegraded.mockReturnValue(false);
+    mockConfigReader.getLastConfigError.mockReturnValue(null);
     mockRepoSource.listEnabledRepos.mockResolvedValue(
       ok([
         {
