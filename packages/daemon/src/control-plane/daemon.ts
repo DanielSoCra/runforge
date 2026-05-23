@@ -7,6 +7,16 @@ import { CostTracker } from '../session-runtime/cost.js';
 import { ImplementationCoordinator } from '../implementation/coordinator.js';
 import { StateManager } from './state.js';
 import { createControlServer } from './server.js';
+import {
+  createDegradedServer,
+  type DegradedServerHandle,
+  type DegradedState,
+} from './degraded-server.js';
+import {
+  runStartupRetry,
+  readStartupRetryOptions,
+  type StartupRetryOptions,
+} from './startup-retry.js';
 import { createReleaseProposal } from './release.js';
 import { RepoManager } from './repo-manager.js';
 import {
@@ -90,7 +100,22 @@ import {
 let dailyRunCount = 0;
 let dailyRunCountResetDate = new Date().toISOString().split('T')[0];
 
-export async function startDaemon(configPath: string): Promise<Result<void>> {
+// Mirrors the config-reader's DEFAULT_SYNC_INTERVAL_MS (60s). Used as the
+// background degraded-recovery poll cadence when no explicit opts are passed.
+const DEFAULT_SYNC_INTERVAL_MS = 60_000;
+
+export interface StartDaemonOptions {
+  startupRetry?: Partial<StartupRetryOptions>;
+  degradedRecovery?: {
+    intervalMs: number;
+    delay?: (ms: number) => Promise<void>;
+  };
+}
+
+export async function startDaemon(
+  configPath: string,
+  opts?: StartDaemonOptions,
+): Promise<Result<void>> {
   // 0. Validate GITHUB_TOKEN — required for Octokit (labeling, commenting, notifications)
   if (
     process.env.GITHUB_TOKEN === undefined ||
@@ -174,6 +199,21 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   const stateMgr = new StateManager(stateDir);
   await stateMgr.initialize();
 
+  // Validate the control host early (hoisted from the control-server step):
+  // the throwaway degraded server binds it during the startup-degraded window,
+  // so it must be a valid IPv4 address before any server.listen().
+  const envHost = process.env.DAEMON_HOST;
+  const daemonHost = envHost ?? config.controlHost;
+  const daemonHostSource =
+    envHost !== undefined ? 'DAEMON_HOST' : 'controlHost';
+  if (isIP(daemonHost) !== 4) {
+    return err(
+      new Error(
+        `Invalid ${daemonHostSource}: "${daemonHost}" — must be a valid IPv4 address`,
+      ),
+    );
+  }
+
   // Initialize data layer. After data-platform cutover the daemon uses the
   // project-owned Postgres stores only; missing or retired backends fail fast.
   try {
@@ -198,7 +238,6 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
       stores.repos,
       stores.plugins,
     );
-    await configReader.start();
     runWriter = new PostgresRunWriter(stores.runs, stores.costs);
     repoSource = new PostgresRepoDataSource(stores.repos, stores.credentials);
     const history = new PostgresRunHistory(stores.runs);
@@ -208,6 +247,112 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     await postgresClient?.sql.end();
     return err(e instanceof Error ? e : new Error(String(e)));
   }
+
+  // Phase C + D — degraded startup window. Bind a throwaway observability
+  // server on the control port, then run a bounded inline retry of the initial
+  // config fetch. On `rejected` (permanent misconfig) fail loudly; on
+  // `exhausted` (transient outage) block in a background-retry loop until the
+  // Data Service recovers. The real startup body below is UNCHANGED and runs
+  // linearly only once config has loaded.
+  const degradedState: DegradedState = { lastConfigError: null };
+  const degraded = createDegradedServer(
+    config.controlPort,
+    daemonHost,
+    () => degradedState,
+  );
+  const startResult = await degraded.start();
+  if (!startResult.ok) {
+    await postgresClient.sql.end();
+    return startResult;
+  }
+
+  // Temporary signal handlers: the daemon's normal SIGTERM/SIGINT handlers are
+  // only registered late in the (unchanged) startup body. A signal arriving
+  // during the possibly-long degraded block would otherwise skip cleanup, so
+  // we register temporary handlers that close the degraded server + end the DB
+  // client. They are removed at the port-handoff point (after degraded.close()).
+  const degradedSignalHandler = (): void => {
+    void (async () => {
+      await degraded.handle.close().catch(() => {});
+      await postgresClient!.sql.end().catch(() => {});
+      process.exit(0);
+    })();
+  };
+  process.on('SIGTERM', degradedSignalHandler);
+  process.on('SIGINT', degradedSignalHandler);
+
+  try {
+    const retryOptions: StartupRetryOptions = {
+      ...readStartupRetryOptions(process.env),
+      ...opts?.startupRetry,
+    };
+    const recovery = opts?.degradedRecovery ?? {
+      intervalMs: DEFAULT_SYNC_INTERVAL_MS,
+    };
+    const result = await runStartupRetry(
+      () => configReader!.tryFetch(),
+      retryOptions,
+      (attempt) => {
+        if (!('category' in attempt)) return; // outcome === 'ok'
+        degradedState.lastConfigError = {
+          category: attempt.category,
+          cause: attempt.cause,
+        };
+        console.log(
+          `[daemon] startup config fetch failed (attempt ${attempt.attempt}/${attempt.total}, ${attempt.category}, ${attempt.cause.code ?? 'no-code'}): ${attempt.cause.message}`,
+        );
+      },
+    );
+    if (result.kind === 'rejected') {
+      console.error(
+        `[daemon] FATAL startup config rejected: ${result.failure.cause.code ?? 'no-code'}: ${result.failure.cause.message}`,
+      );
+      await degraded.handle.close();
+      await postgresClient.sql.end();
+      process.off('SIGTERM', degradedSignalHandler);
+      process.off('SIGINT', degradedSignalHandler);
+      // Attach cause so main.ts formatStartupError prints the `caused by:` line.
+      return err(
+        new Error(
+          `startup config rejected: ${result.failure.cause.code ?? 'no-code'}: ${result.failure.cause.message}`,
+          { cause: result.failure.cause },
+        ),
+      );
+    }
+    if (result.kind === 'exhausted') {
+      console.warn(
+        `[daemon] startup config exhausted ${retryOptions.maxAttempts} attempts — entering startup-degraded mode; background retry continues`,
+      );
+      await runDegradedUntilRecovered(
+        configReader!,
+        degradedState,
+        degraded.handle,
+        postgresClient,
+        {
+          intervalMs: recovery.intervalMs,
+          delay: recovery.delay,
+          maxConsecutiveStuck: config.maxConsecutiveStuck,
+          webhooks: config.webhooks,
+        },
+      );
+    }
+    // Port handoff: release the control port for the real server below, and
+    // hand signal handling back to the normal startup body's handlers.
+    await degraded.handle.close();
+    process.off('SIGTERM', degradedSignalHandler);
+    process.off('SIGINT', degradedSignalHandler);
+  } catch (e) {
+    await degraded.handle.close().catch(() => {});
+    await postgresClient.sql.end().catch(() => {});
+    process.off('SIGTERM', degradedSignalHandler);
+    process.off('SIGINT', degradedSignalHandler);
+    return err(e instanceof Error ? e : new Error(String(e)));
+  }
+
+  // ---- existing startup body UNCHANGED from here ----
+  // start() is now timer-only (config already loaded by the inline/background
+  // tryFetch above), so it does not re-fetch.
+  await configReader.start();
 
   const orphaned = await runMaintenance?.markInProgressRunsStuck();
   if (orphaned !== null && orphaned !== undefined && orphaned > 0) {
@@ -931,18 +1076,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     }
   }
 
-  // 6. Start control server
-  const envHost = process.env.DAEMON_HOST;
-  const daemonHost = envHost ?? config.controlHost;
-  const daemonHostSource =
-    envHost !== undefined ? 'DAEMON_HOST' : 'controlHost';
-  if (isIP(daemonHost) !== 4) {
-    return err(
-      new Error(
-        `Invalid ${daemonHostSource}: "${daemonHost}" — must be a valid IPv4 address`,
-      ),
-    );
-  }
+  // 6. Start control server (daemonHost validated in Phase B, above)
   const { server, start } = createControlServer(
     config.controlPort,
     {
@@ -1390,6 +1524,66 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
   process.on('SIGINT', enterDrainMode);
 
   return ok(undefined);
+}
+
+/**
+ * Block until the Data Service recovers, polling `configReader.tryFetch()` at
+ * `opts.intervalMs`. While blocked, the throwaway degraded server keeps
+ * answering `/health`; no work is claimed (the work loop is wired only in the
+ * post-block normal startup). Resolves on the first successful fetch.
+ *
+ * - Each unrecovered `unreachable` poll advances the escalation counter; at
+ *   `opts.maxConsecutiveStuck` the Operator is notified once.
+ * - A `rejected` poll (permanent misconfig) closes the degraded server, ends
+ *   the DB client, and `process.exit(1)`s — startDaemon is awaiting and will
+ *   not return.
+ *
+ * Exported (and `delay`/`intervalMs` injectable) so it is unit-testable.
+ */
+export async function runDegradedUntilRecovered(
+  configReader: ConfigReader,
+  degradedState: DegradedState,
+  degradedHandle: DegradedServerHandle,
+  postgresClient: { sql: { end: () => Promise<void> } },
+  opts: {
+    intervalMs: number;
+    delay?: (ms: number) => Promise<void>;
+    maxConsecutiveStuck: number;
+    webhooks: string[];
+  },
+): Promise<void> {
+  const delay =
+    opts.delay ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  let consecutive = 0;
+  let notified = false;
+  for (;;) {
+    await delay(opts.intervalMs);
+    const r = await configReader.tryFetch();
+    if (r.ok) return; // recovered → resolve
+    degradedState.lastConfigError = r.error;
+    const { code, message } = r.error.cause;
+    if (r.error.category === 'rejected') {
+      console.error(
+        `[daemon] FATAL background config rejected: ${code ?? 'no-code'}: ${message}`,
+      );
+      await degradedHandle.close();
+      await postgresClient.sql.end();
+      process.exit(1);
+    }
+    consecutive += 1;
+    console.log(
+      `[daemon] startup config fetch failed (background, attempt ${consecutive}, unreachable, ${code ?? 'no-code'}): ${message}`,
+    );
+    if (consecutive >= opts.maxConsecutiveStuck && !notified) {
+      void notify(opts.webhooks, {
+        event: 'startup-degraded',
+        issueNumber: 0,
+        phase: 'startup',
+        message: `Daemon startup-degraded: Data Service unreachable after ${consecutive} background attempts (${code ?? 'no-code'}: ${message})`,
+      });
+      notified = true;
+    }
+  }
 }
 
 function shouldPauseForRuntimeSource(status: RuntimeSourceStatus): boolean {
