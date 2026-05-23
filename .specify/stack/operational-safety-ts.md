@@ -14,6 +14,8 @@ code_paths:
   - packages/daemon/src/session-runtime/session-error.ts
   - packages/daemon/src/control-plane/daemon.ts
   - packages/daemon/src/control-plane/pipeline.ts
+  - packages/daemon/src/control-plane/startup-retry.ts
+  - packages/daemon/src/control-plane/degraded-server.ts
   - packages/daemon/src/data/config-reader.ts
 test_paths:
   - packages/daemon/src/session-runtime/cost.test.ts
@@ -22,6 +24,8 @@ test_paths:
   - packages/daemon/src/session-runtime/session-error.test.ts
   - packages/daemon/src/control-plane/daemon.test.ts
   - packages/daemon/src/control-plane/pipeline.test.ts
+  - packages/daemon/src/control-plane/startup-retry.test.ts
+  - packages/daemon/src/control-plane/degraded-server.test.ts
   - packages/daemon/src/data/config-reader.test.ts
 ---
 
