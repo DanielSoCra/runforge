@@ -49,7 +49,7 @@ test_paths:
 
 **Cost tracking persistence across errors.** `SessionError` always carries the `cost` field. The Daemon records cost from both successful results and errors — cost accrues regardless of outcome. This prevents a failure mode where errored sessions consume budget but don't report it.
 
-**Startup configuration load: bounded inline retry, then degraded background-retry.** `startDaemon()` reorders to bring the control HTTP server up before the first configuration fetch so the degraded state is observable from process start; `startupDegraded = true` is the initial value, set before any retry runs. The initial `configReader.fetch()` is wrapped in a bounded retry (default 5 attempts with `1s, 2s, 4s, 8s, 16s` backoff, configurable via `DAEMON_STARTUP_RETRY_MAX_ATTEMPTS`, `DAEMON_STARTUP_RETRY_BASE_MS`, `DAEMON_STARTUP_RETRY_MAX_DELAY_MS`); inline attempts do **not** advance the escalation counter. On inline-retry exhaustion the daemon stays in `startupDegraded = true` rather than `process.exit(1)`; the control endpoint's `/health` and `/status` payloads include `{ degraded: true, lastConfigError: { category, code, message } }`, the work-claiming loop refuses to claim until `startupDegraded === false`, and a background timer keeps calling `fetchSafe()` at the existing poll interval. The first successful fetch (inline or background) clears the flag. A categorical `rejected` Store outcome on **any** attempt — inline or background — short-circuits to fatal: an inline `rejected` returns `err(...)` from `startDaemon()`; a background-phase `rejected` logs the underlying reason and calls `process.exit(1)` (the background timer cannot return a `Result` to the caller — `startDaemon` has long since resolved by then). Degraded mode is for `unreachable`, never for permanent failures, regardless of phase. The **same** `config.maxConsecutiveStuck` counter pattern used for stuck runs counts unrecovered **background-phase** fetch attempts (no new threshold field is introduced); once the count reaches the threshold (matching the existing `>=` comparator in stuck-run auto-pause), a one-shot operator notification fires on the configured channel and is re-armed only when `startupDegraded` has cleared at least once (`notifiedThisDegradation` boolean reset on clear).
+**Startup configuration load: throwaway degraded server + bounded retry + blocking recovery.** Rather than reorder the large, tightly-coupled `startDaemon` body, bind a *throwaway* minimal observability server (`createDegradedServer`, answering only `/health` + `/status` with `{ ok: true, degraded: true, lastConfigError }`) on the control port immediately after the DB client + `configReader` are constructed, before any DB I/O. Then run a bounded inline retry of `configReader.tryFetch()` (default 5 attempts; backoff after attempts 1–4 of `1s, 2s, 4s, 8s` — no delay after the final attempt; env-tunable via `DAEMON_STARTUP_RETRY_MAX_ATTEMPTS` / `_BASE_MS` / `_MAX_DELAY_MS`). Inline attempts do **not** advance the escalation counter. On inline exhaustion, `startDaemon` `await`s `runDegradedUntilRecovered(...)`, a loop that polls `tryFetch()` at the config cadence and resolves only on success; while it blocks, the throwaway server keeps `/health` reachable. The first successful fetch (inline or background) resolves the await, the daemon `await degraded.handle.close()`s (releasing the port), and the **unchanged** normal startup runs linearly — re-binding the real control server at its original place. There is no recovery callback and no `completeStartup` extraction: the heavy startup body runs exactly once, after config is loaded, with its `Result` propagated normally. A categorical `rejected` Store outcome on **any** attempt is fatal: inline `rejected` → close degraded server, end DB client, `return err(...)`; background `rejected` → close degraded server, end DB client, `process.exit(1)` (startDaemon is blocked in the await and will not return). Degraded mode is for `unreachable` only. `runDegradedUntilRecovered` counts unrecovered `unreachable` polls against `config.maxConsecutiveStuck` (the existing `>=` comparator; no new threshold field) and fires a one-shot operator notification at the threshold, re-armed only after a clean recovery (`notifiedThisDegradation`). Because no work loop, crash-resume, or parked-resume is wired until the post-block normal startup, the daemon structurally cannot claim work while degraded.
 
 ## Examples
 
@@ -92,18 +92,14 @@ applyGlobalTransition(event: PhaseEvent): Phase | null {
 ```
 
 ```typescript
-// Startup config load: bounded retry then degraded mode (shape, not literal code)
-for (let attempt = 0; attempt < maxAttempts; attempt++) {
-  const result = await configReader.tryFetch();
-  if (result.ok) { startupDegraded = false; break; }
-  if (result.error.category === 'rejected') return err(result.error);
-  await delay(backoff(attempt));
-}
-if (!configReader.hasLoaded()) {
-  startupDegraded = true;
-  startBackgroundRetry(configReader);
-}
-// Control server starts BEFORE the loop above so /health is observable from t=0.
+// Throwaway degraded server up first, then bounded retry, then LINEAR normal startup.
+const degraded = createDegradedServer(port, host, () => degradedState);
+await degraded.start();
+const result = await runStartupRetry(() => configReader.tryFetch(), opts, onAttempt);
+if (result.kind === 'rejected') { await degraded.handle.close(); await pg.sql.end(); return err(...); }
+if (result.kind === 'exhausted') { await runDegradedUntilRecovered(configReader, degradedState, ...); }
+await degraded.handle.close();          // hand the port to the real server
+// ── existing startDaemon body runs UNCHANGED from here (configReader.start() is now timer-only) ──
 ```
 
 ## Gotchas
@@ -114,6 +110,7 @@ if (!configReader.hasLoaded()) {
 - `shuttingDown` and `paused` are separate flags. `shuttingDown` is irreversible within a process lifetime (the daemon is exiting). `paused` is reversible via the `/resume` endpoint. Both prevent new work claims, but only `paused` can be cleared.
 - The port-based instance lock means a crashed daemon may hold the port in TIME_WAIT for ~60 seconds. Set `SO_REUSEADDR` on the server socket to allow immediate restart. See STACK-AC-CONTROL-PLANE for the pattern.
 - Budget signals use `PhaseEvent` union types (`'budget-exceeded'`, `'per-run-budget-exceeded'`, `'rate-limited'`). Adding a new signal requires updating the `PhaseEvent` type, the pipeline's `applyGlobalTransition()`, and the Daemon's signal-handling switch. All three must stay in sync.
-- **Startup ordering matters: the control HTTP server must `listen()` before the first `configReader.fetch()`.** Otherwise `/health` is unreachable exactly when the Operator needs it most — during a dependency outage. The instance-lock semantics of the control port (only-one-daemon) survive the reorder because the lock is acquired by `listen()` itself.
-- **Degraded-startup must refuse mutations, not just defer them.** Phases that depend on `getGlobalConfig()` or `getRepoConfig()` must read `daemon.startupDegraded` (or equivalent) and short-circuit, returning a categorical "configuration not yet loaded" outcome. Quietly using `DEFAULT_GLOBAL` would violate the fail-safe-default invariant — defaults are for the not-found store outcome only, never for an unreachable one.
-- **Don't use the `RECOVERABLE`-style retry pattern for categorical `rejected` errors.** A schema-missing or auth-failed result must short-circuit retry-and-degrade and exit with the underlying reason. Otherwise a permanent misconfiguration looks identical to a transient outage and silently consumes hours of crash-loop time.
+- **The degraded server and the real server must never listen simultaneously.** The throwaway server holds the control port during the outage; `await degraded.handle.close()` (which drains in-flight requests and releases the listener) must complete before the normal startup binds the real server on the same port. Sequential `await` on the single-threaded event loop makes the close→bind handoff safe; if `close()` ever hangs, the real bind fails `EADDRINUSE` → `startDaemon` returns err → launchd respawns (acceptable).
+- **`start()` must become timer-only.** Once the bounded inline retry (or background recovery) has loaded config via `tryFetch`, the existing `configReader.start()` call in the normal startup body must NOT issue another initial fetch — otherwise a DB blip in the handoff window would throw and abort startup. Strip the `await this.fetch()` from `start()`; keep only the `setInterval`.
+- **Don't retry-and-degrade on categorical `rejected` errors.** A schema-missing or auth-failed result must short-circuit and exit with the underlying reason (inline → `err`, background → `process.exit(1)` after cleanup). Otherwise a permanent misconfiguration looks identical to a transient outage and silently consumes hours.
+- **Mutation refusal is structural in this design, not a guard.** Because the work loop / crash-resume / parked-resume are wired only in the post-degraded normal startup, the daemon cannot claim work while degraded. A one-line `isStartupDegraded()` check on the work-detection callback is cheap belt-and-suspenders but is not the load-bearing mechanism.
