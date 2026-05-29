@@ -2624,6 +2624,36 @@ describe('daemon', () => {
     });
   });
 
+  describe('review scheduler workspace scoping (#692)', () => {
+    it('scopes the codebase-reviewer session to the repo root via workspacePath (not an empty temp dir)', async () => {
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      const [deps] = mockCreateReviewScheduler.mock.calls[0]!;
+
+      mockSpawnSession.mockResolvedValueOnce(
+        ok({
+          output: 'review output',
+          structuredData: null,
+          cost: 0.01,
+          pitfallMarkers: [],
+          exitStatus: 'success',
+        }),
+      );
+
+      await deps.spawnReviewSession('security', 5);
+
+      // Without workspacePath the CLI adapter falls back to an empty temp dir
+      // (the SEC-34 containment path in cli.ts), leaving the reviewer with no
+      // codebase to review. It must be scoped to the repo root.
+      expect(mockSpawnSession).toHaveBeenCalledWith(
+        'codebase-reviewer',
+        expect.objectContaining({ workspacePath: process.cwd() }),
+        0,
+      );
+    });
+  });
+
   describe('coordinator wiring (#345)', () => {
     it('does not instantiate coordinator when useCoordinator is false (default)', async () => {
       const { startDaemon } = await loadDaemon();

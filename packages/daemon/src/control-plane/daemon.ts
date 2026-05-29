@@ -423,6 +423,10 @@ export async function startDaemon(
         const result = await runtime.spawnSession(
           'codebase-reviewer',
           {
+            // Scope the proactive review to the repo root. Without a workspacePath
+            // the CLI adapter falls back to an empty temp dir (SEC-34 containment
+            // path), leaving the reviewer with no codebase to review (#692).
+            workspacePath: repoRoot,
             variables: {
               category,
               maxIssues: String(maxIssues),
