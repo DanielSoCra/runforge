@@ -18,13 +18,15 @@ All rules in `AGENTS.md` apply. This file adds Claude Code-specific behavior.
 
 This repo is auto-claude itself — an autonomous-by-design system. Per L0-AC-VISION and FUNC-AC-PIPELINE, the Operator's role is L1 spec authoring + production-release approval. **Everything below that is autonomous**, including:
 
-- Pushing to `dev` and any feature branch
-- Opening PRs against `dev` for visibility
+- Pushing to any feature branch (`codex/*`, `feature/*`, etc.)
+- Opening PRs against `main` for visibility
 - Closing issues, applying labels, posting comments via `gh`
 - Writing missing L3 specs via `l3-spec-guardian` when a stuck issue's only blocker is a missing L3 file
 - Retrying stuck items with different approaches rather than logging "correct conservative escalation"
-- Merging the daemon's autonomous-loop output to `origin/dev`
+- Merging the daemon's autonomous-loop output to `origin/main` via PR-gated merges (per the risk-class gate)
 
-**Do not** treat these as destructive shared-state operations requiring human confirmation. The harness exists precisely so they happen unattended. The only operations that genuinely need the Operator's approval are: (a) L1 spec content decisions, (b) production releases (merge dev → main, deploy), (c) destructive ops outside the pipeline's normal mutation set (force-push, branch deletion of unmerged work, etc.).
+**Branch model (single trunk, ratified 2026-05-29):** `main` is the trunk. The legacy `dev` integration branch is **retired** — autonomous work flows feature-branch → PR → `main`, gated by the risk-class / review gates (GREEN/YELLOW auto-merge once proven; ORANGE/RED → Operator decision). There is no `dev`. **"Production" is a deploy/release event from `main`** (tag/release + deploy), which remains the Operator-approved gate — *not* a branch merge.
+
+**Do not** treat these as destructive shared-state operations requiring human confirmation. The harness exists precisely so they happen unattended. The only operations that genuinely need the Operator's approval are: (a) L1 spec content decisions, (b) **production releases (deploy from `main`)**, (c) destructive ops outside the pipeline's normal mutation set (force-push, branch deletion of unmerged work, etc.).
 
 If a generic "ask before destructive shared-state op" instinct conflicts with the above, the L0/L1 specs and this section override the default.
