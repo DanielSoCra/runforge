@@ -5,8 +5,8 @@ type: roadmap-design
 topic: Unified auto-claude × cockpit — self-improving closed-loop SDLC where the human steers
 authors: the Operator (lead) + Claude (synthesis) + Codex (sparring)
 candidate_supersedes:  # NOT yet superseded. Supersession is ENACTED by the Phase-1 ledger (§7) after content migration + back-pointers — never by this frontmatter. This roadmap retires nothing itself.
-  - acme-platform archive/2026-05-20-parallel-session-raw:docs/superpowers/specs/2026-05-20-100x-solo-dev-architecture.md (system-architecture portions — Phase-1 ledger migrates, then marks)
-  - "2026-05-21 workflow-consolidation roadmap (Steps 0–4)" — UNVERIFIED candidate input; exact path/ref to be located by the Phase-1 ledger before any disposition
+  - acme-platform archive/2026-05-20-parallel-session-raw:docs/superpowers/specs/2026-05-20-100x-solo-dev-architecture.md (system-architecture portions, incl. its §7 "90-Tage Sequencing" — Phase-1 ledger migrates, then marks)
+  # RESOLVED by the Spec Reconciliation Ledger (2026-05-29): the "2026-05-21 consolidation roadmap (Steps 0–4)" is NOT a separate artifact — it = the 100x doc's §7 sequencing (above) + acme issue #451 ("AI Dev Workflow Consolidation" planning thread, re-anchored to this roadmap, NOT superseded).
 related:
   - knowledge-vault docs/superpowers/specs/2026-05-23-pm-cockpit-design.md (cockpit decision-lifecycle v1)
   - auto-claude .specify/functional/decision-escalation.md (FUNC-AC-DECISION-ESCALATION, L1, on dev)
