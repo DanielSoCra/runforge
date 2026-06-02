@@ -29,6 +29,11 @@ import { DecisionIndexManager } from './decision-escalation/manager.js';
 import { readDecisionIndexConfig } from './decision-escalation/config.js';
 import { decisionIdFor } from './decision-escalation/build-request.js';
 import {
+  bootReconcile,
+  supersedeIfMoot,
+  markOverdue,
+} from './decision-escalation/reconcile.js';
+import {
   classifyBatch,
   type BatchClassifierConfig,
 } from './batch-classifier.js';
@@ -216,6 +221,9 @@ export async function startDaemon(
     opts?.decisionManager ??
     new DecisionIndexManager(readDecisionIndexConfig(stateDir));
   await decisionManager.init();
+  // Boot reconcile: complete any in-flight outbox effects a prior crash left
+  // mid-flight. No-op when disabled; fail-safe (logs, never throws) when enabled.
+  await bootReconcile(decisionManager);
 
   // Validate the control host early (hoisted from the control-server step):
   // the throwaway degraded server binds it during the startup-degraded window,
@@ -876,6 +884,17 @@ export async function startDaemon(
       config.pollIntervalMs,
       async (repoId, owner, name, detector) => {
         if (paused || draining || shuttingDown) return;
+        // Overdue marking: mark past-expiry notified/viewed decisions stale (mark
+        // only — no delivery). Runs each tick BEFORE the concurrency/source-ready
+        // early-returns so a busy daemon still ages its pending decisions.
+        // Enabled-guarded + fail-safe (markOverdue never throws).
+        if (decisionManager.isEnabled()) {
+          try {
+            await markOverdue(decisionManager.ledger(), new Date());
+          } catch (e) {
+            console.error('[daemon] markOverdue error:', e);
+          }
+        }
         if (
           activeRuns >=
           (configReader?.getGlobalConfig()?.concurrencyLimit ??
@@ -1368,8 +1387,9 @@ export async function startDaemon(
         runRepoName,
       );
 
-      // Fetch current labels from GitHub
+      // Fetch current labels + state from GitHub
       let issueLabels: string[];
+      let issueState: string;
       try {
         const { data: issue } = await runOctokit.issues.get({
           owner: runOwner,
@@ -1379,10 +1399,37 @@ export async function startDaemon(
         issueLabels = (issue.labels ?? []).map((l) =>
           typeof l === 'string' ? l : (l.name ?? ''),
         );
+        issueState = issue.state ?? 'open';
       } catch (e) {
         console.warn(
           `[daemon] resumeParkedRuns: failed to fetch labels for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
         );
+        continue;
+      }
+
+      // Decision id for this park cycle (epoch defaults to 1 for runs parked
+      // before decisionEpoch existed). Shared by the moot-supersede and the
+      // answer/resume paths below.
+      const decisionId = decisionIdFor(
+        `issue-${run.issueNumber}`,
+        'l2-gate',
+        run.decisionEpoch ?? 1,
+      );
+
+      // Moot decision: the issue this parked run was awaiting was CLOSED
+      // out-of-band — its l2-gate decision can never be answered. Supersede the
+      // ledger row (guarded: missing/terminal rows are skipped, fail-safe) so it
+      // leaves the pending set, and skip the resume. We do NOT clear the parked
+      // run state here (that closed-issue cleanup lives elsewhere); we only
+      // settle the dangling decision.
+      if (issueState === 'closed' && decisionManager.isEnabled()) {
+        try {
+          await supersedeIfMoot(decisionManager.ledger(), decisionId);
+        } catch (e) {
+          console.warn(
+            `[daemon] resumeParkedRuns: supersede-on-moot for closed #${run.issueNumber} failed (continuing): ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
         continue;
       }
 
@@ -1394,14 +1441,8 @@ export async function startDaemon(
         `[daemon] resumeParkedRuns: resuming #${run.issueNumber} (${hasApproved ? 'l2-approved' : 'l2-rejected'})`,
       );
 
-      // Decision id for this park cycle (epoch defaults to 1 for runs parked
-      // before decisionEpoch existed). Used to record the operator's answer and
-      // later drive the ledger to `resumed`.
-      const decisionId = decisionIdFor(
-        `issue-${run.issueNumber}`,
-        'l2-gate',
-        run.decisionEpoch ?? 1,
-      );
+      // `decisionId` (computed above) records the operator's answer and later
+      // drives the ledger to `resumed`.
       // Approved takes precedence if (somehow) both labels are present.
       const rejectedResume = !hasApproved && hasRejected;
       const choice = hasApproved ? 'approve' : 'reject';

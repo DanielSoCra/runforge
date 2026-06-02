@@ -174,4 +174,53 @@ describe('DecisionLedger (real IndexWriter over temp sqlite)', () => {
     // reconcile drives the in-flight write_response effect (re-executed from absent)
     expect(t.writer.reader.get(r.decision_id)?.status).toBe('source_written');
   });
+
+  it('supersede(): drives source_superseded for a non-terminal row -> superseded', async () => {
+    const r = t.ledger.raise(makeRequest());
+    await t.ledger.notify(r.decision_id);
+    expect(t.ledger.supersede(r.decision_id)).toBe(true);
+    expect(t.writer.reader.get(r.decision_id)?.status).toBe('superseded');
+  });
+
+  it('supersede(): SKIPS (returns false, no throw) a terminal row', async () => {
+    const r = t.ledger.raise(makeRequest());
+    await t.ledger.notify(r.decision_id);
+    t.ledger.answer(r.decision_id, 'approve', 'operator');
+    await t.ledger.advanceToResumed(r.decision_id, 'requeue');
+    expect(t.writer.reader.get(r.decision_id)?.status).toBe('resumed');
+    expect(t.ledger.supersede(r.decision_id)).toBe(false);
+    expect(t.writer.reader.get(r.decision_id)?.status).toBe('resumed');
+  });
+
+  it('supersede(): SKIPS (returns false, no throw) a missing row', () => {
+    expect(t.writer.reader.get('issue-missing:l2-gate:1')).toBeUndefined();
+    expect(t.ledger.supersede('issue-missing:l2-gate:1')).toBe(false);
+  });
+
+  it('expireOverdue(): marks a past-expiry notified row stale (non-terminal)', async () => {
+    const r = t.ledger.raise(makeRequest({ expires_at: '2026-06-01T00:00:00.000Z' }));
+    await t.ledger.notify(r.decision_id);
+    const expired = t.ledger.expireOverdue(new Date('2026-06-02T00:00:00.000Z'));
+    expect(expired).toContain(r.decision_id);
+    const view = t.writer.reader.get(r.decision_id);
+    expect(view?.status).toBe('notified'); // non-terminal
+    expect(view?.stale).toBe(true);
+  });
+
+  it('expireOverdue(): skips a notified row that is not yet overdue', async () => {
+    const r = t.ledger.raise(makeRequest({ expires_at: '2026-06-09T00:00:00.000Z' }));
+    await t.ledger.notify(r.decision_id);
+    const expired = t.ledger.expireOverdue(new Date('2026-06-02T00:00:00.000Z'));
+    expect(expired).not.toContain(r.decision_id);
+    expect(t.writer.reader.get(r.decision_id)?.stale).toBe(false);
+  });
+
+  it('expireOverdue(): skips a past-expiry detected row (expire illegal from detected)', () => {
+    const r = t.ledger.raise(makeRequest({ expires_at: '2026-06-01T00:00:00.000Z' }));
+    expect(t.writer.reader.get(r.decision_id)?.status).toBe('detected');
+    const expired = t.ledger.expireOverdue(new Date('2026-06-02T00:00:00.000Z'));
+    expect(expired).not.toContain(r.decision_id);
+    expect(t.writer.reader.get(r.decision_id)?.stale).toBe(false);
+    expect(t.writer.reader.get(r.decision_id)?.status).toBe('detected');
+  });
 });

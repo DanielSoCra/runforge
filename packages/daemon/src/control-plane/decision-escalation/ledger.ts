@@ -131,4 +131,63 @@ export class DecisionLedger {
   reconcile(): ReturnType<IndexWriter['reconcile']> {
     return this.writer.reconcile();
   }
+
+  /**
+   * supersede — drive the §6.2 `source_superseded` event for a decision whose
+   * source went moot (its issue closed / run completed / it left the gate by
+   * another path). The guard lives HERE so every caller is fail-safe:
+   *   - missing row (`reader.get` -> undefined) -> SKIP (applying to a non-existent
+   *     decision throws `UnknownDecisionError`).
+   *   - terminal row (resumed/superseded/failed) -> SKIP (re-superseding a terminal
+   *     item throws `IllegalTransitionError`).
+   * `source_superseded` is legal from ANY non-terminal status (incl. `detected`),
+   * but the transition table REQUIRES a concrete `ctx.superseded_by`, so we pass a
+   * deterministic moot marker. Returns whether the supersede was applied.
+   */
+  supersede(decisionId: string, supersededBy?: string, now?: string): boolean {
+    const view = this.writer.reader.get(decisionId);
+    if (!view) return false; // missing -> skip
+    if (TERMINAL.has(view.status)) return false; // terminal -> skip
+    this.writer.applyEvent(decisionId, 'source_superseded', {
+      actor: 'daemon',
+      semanticKey: `${decisionId}:moot`,
+      now,
+      // the table requires a concrete superseded_by; a moot source has no real
+      // successor id, so use a deterministic marker (recorded on the row).
+      superseded_by: supersededBy ?? `${decisionId}:moot`,
+    });
+    return true;
+  }
+
+  /**
+   * expireOverdue — mark every past-`expires_at` item that is awaiting a human
+   * (`notified` or `viewed`) as stale via the §6.2 `expire` event. `expire` is
+   * legal ONLY from those two states (applying it from detected /
+   * answered_pending_source_write / source_written / resume_requested throws), so
+   * we read `expires_at` + `status` from the dashboard ranking (the `list()`
+   * `DecisionView` carries no `expires_at`) and filter to exactly those states.
+   * `expire` is NON-terminal (sets `stale`; the item stays answerable). The
+   * `semanticKey` is derived from `expires_at` so a re-sweep of the same overdue
+   * item replays as an idempotent no-op. Returns the ids it expired.
+   */
+  expireOverdue(now: Date): string[] {
+    const nowMs = now.getTime();
+    const nowIso = now.toISOString();
+    const expired: string[] = [];
+    // includeSuppressed so a muted/deferred (but still notified/viewed) overdue
+    // item is not silently skipped — staleness is independent of view-state.
+    for (const item of this.writer.reader.listRanked({ includeSuppressed: true })) {
+      if (item.status !== 'notified' && item.status !== 'viewed') continue;
+      if (!item.expires_at) continue;
+      if (new Date(item.expires_at).getTime() > nowMs) continue; // not yet overdue
+      this.writer.applyEvent(item.decision_id, 'expire', {
+        actor: 'daemon',
+        // deterministic per (id, expiry) so a re-sweep is an idempotent replay.
+        semanticKey: `${item.decision_id}:expire:${item.expires_at}`,
+        now: nowIso,
+      });
+      expired.push(item.decision_id);
+    }
+    return expired;
+  }
 }
