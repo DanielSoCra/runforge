@@ -8,36 +8,42 @@ import {
 
 /**
  * resume-consumer — the daemon-side recognition of the pm-cockpit answer write-back.
- * These tests pin the PARSING contract against the cockpit's actual byte format
- * (mirrored from pm-cockpit github-source-sink.ts / github-requeue-dispatcher.ts):
- *   - `**DecisionResponse**` comment with a ```json {decision_id, chosen_option,...}
- *     payload + an effect marker `<!-- pm-cockpit:effect:<id>:etag=<etag> -->`.
+ * These tests pin the PARSING contract against the cockpit's REAL byte format
+ * (mirrored from pm-cockpit github-source-sink.ts `renderAnswerComment` + the
+ * canonical `effectId(decisionId, kind, semanticKey)` = `<decision_id>:<kind>:<semantic_key>`
+ * in @pm/index idempotency.ts):
+ *   - an effect marker `<!-- pm-cockpit:effect:<decisionId>:write_response:<idemKey>:etag=<etag> -->`
+ *     — the decision_id binding is carried HERE, authoritatively.
+ *   - `**DecisionResponse**` followed by a fenced ```json payload that is MINIMAL:
+ *     `{"chosen_option":"approve"|"reject"}` (it does NOT carry decision_id /
+ *     answerer / answered_at / idempotency_key — those live in the marker / cockpit DB).
  *   - the decision-request body block marker `<!-- pm-cockpit:decision-request:v1 -->`.
  *   - the requeue comment marker `<!-- pm-cockpit:requeue:<effectId> -->`.
  *
- * The AUTHORITATIVE resume signal is the DecisionResponse comment whose JSON
- * decision_id matches the run's deterministic id — NOT the `answered`/`ready`
- * labels (those are discovery/cleanup hints only). A half-written answer (label
- * flipped, comment not yet posted, or vice-versa) must NOT resume.
+ * The AUTHORITATIVE resume signal is the DecisionResponse comment whose effect
+ * marker binds `pm-cockpit:effect:<decisionId>:write_response` — NOT the
+ * `answered`/`ready` labels (those are discovery/cleanup hints only). A half-written
+ * answer (label flipped, comment not yet posted, or vice-versa) must NOT resume.
  */
 
 const DECISION_ID = 'issue-100:l2-gate:1';
 
-/** Build the cockpit's DecisionResponse comment body for a chosen option. */
+/**
+ * Build the cockpit's REAL DecisionResponse comment body for a chosen option.
+ * Mirrors github-source-sink.ts: marker = effectMarker(effectId, etag) where
+ * effectId = `<decisionId>:write_response:<semanticKey>` (semanticKey =
+ * response_idempotency_key), then `**DecisionResponse**`, then a fenced ```json
+ * carrying ONLY `{ chosen_option }`.
+ */
 function decisionResponseComment(
   decisionId: string,
   chosenOption: string,
-  etag = 'etag-abc',
+  etag = 'sha256:etag-abc',
+  semanticKey = 'idem-key-1',
 ): string {
-  const effectId = `${decisionId}:write_response:${decisionId}:answer`;
+  const effectId = `${decisionId}:write_response:${semanticKey}`;
   const marker = `<!-- pm-cockpit:effect:${effectId}:etag=${etag} -->`;
-  const payload = JSON.stringify({
-    decision_id: decisionId,
-    chosen_option: chosenOption,
-    answerer: 'operator',
-    answered_at: '2026-06-02T00:00:00.000Z',
-    idempotency_key: `${decisionId}:answer`,
-  });
+  const payload = JSON.stringify({ chosen_option: chosenOption });
   return [marker, '**DecisionResponse**', '```json', payload, '```'].join('\n');
 }
 
@@ -100,6 +106,32 @@ describe('parseCockpitAnswer', () => {
       { body: decisionResponseComment(DECISION_ID, 'approve') },
     ];
     expect(parseCockpitAnswer(comments, DECISION_ID)?.choice).toBe('approve');
+  });
+
+  it('GROUND TRUTH: recognizes the EXACT live cockpit writeback (issue-3, minimal JSON, decision_id only in the marker)', () => {
+    // Byte-for-byte from DANIELSOCRAHANDLEZZ/pm-cockpit-selftest#3 (live).
+    const liveBody = [
+      '<!-- pm-cockpit:effect:issue-3:l2-gate:1:write_response:e2e-approve-1:etag=sha256:d7a8087139a57f7bda694297df63bcad6b29b24b3ab73864af732a0ba2ca3448 -->',
+      '**DecisionResponse**',
+      '```json',
+      '{"chosen_option":"approve"}',
+      '```',
+    ].join('\n');
+    const result = parseCockpitAnswer([{ body: liveBody }], 'issue-3:l2-gate:1');
+    expect(result).toEqual({ choice: 'approve', feedbackBody: liveBody });
+  });
+
+  it('does NOT match a different decision_id even when the minimal JSON is identical (marker binds the id)', () => {
+    // Two issues could both post `{"chosen_option":"approve"}`; only the marker
+    // disambiguates which run the answer belongs to.
+    const other = decisionResponseComment('issue-100:l2-gate:2', 'approve');
+    expect(parseCockpitAnswer([{ body: other }], DECISION_ID)).toBeNull();
+  });
+
+  it('does NOT match a prefix-overlapping decision_id (marker boundary is :write_response)', () => {
+    // `issue-100:l2-gate:1` must not match a marker for `issue-100:l2-gate:12`.
+    const longer = decisionResponseComment('issue-100:l2-gate:12', 'approve');
+    expect(parseCockpitAnswer([{ body: longer }], DECISION_ID)).toBeNull();
   });
 });
 

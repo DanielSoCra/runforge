@@ -3446,20 +3446,21 @@ describe('daemon', () => {
       let dir: string;
       let manager: DecisionIndexManager;
 
-      /** Build the cockpit's DecisionResponse comment for a decision_id + option. */
+      /**
+       * Build the cockpit's REAL DecisionResponse comment for a decision_id + option.
+       * Mirrors pm-cockpit github-source-sink.ts `renderAnswerComment`: the
+       * decision_id is bound ONLY in the effect marker
+       * (`pm-cockpit:effect:<decisionId>:write_response:<idemKey>:etag=<etag>`,
+       * effectId per @pm/index idempotency.ts), and the fenced JSON is MINIMAL —
+       * just `{ chosen_option }`, no decision_id/answerer/answered_at/idempotency_key.
+       */
       const decisionResponseComment = (
         decisionId: string,
         chosenOption: string,
       ): { body: string } => {
-        const effectId = `${decisionId}:write_response:${decisionId}:answer`;
-        const marker = `<!-- pm-cockpit:effect:${effectId}:etag=etag-abc -->`;
-        const payload = JSON.stringify({
-          decision_id: decisionId,
-          chosen_option: chosenOption,
-          answerer: 'operator',
-          answered_at: '2026-06-02T00:00:00.000Z',
-          idempotency_key: `${decisionId}:answer`,
-        });
+        const effectId = `${decisionId}:write_response:idem-${chosenOption}`;
+        const marker = `<!-- pm-cockpit:effect:${effectId}:etag=sha256:etag-abc -->`;
+        const payload = JSON.stringify({ chosen_option: chosenOption });
         return {
           body: [marker, '**DecisionResponse**', '```json', payload, '```'].join(
             '\n',
