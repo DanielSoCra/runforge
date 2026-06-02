@@ -217,13 +217,24 @@ export async function startDaemon(
   // here; injected into every phase-handler build site + resumeParkedRuns. When
   // the flag is off, init() is a no-op (no native import) and ledger() throws —
   // callers guard on isEnabled() so disabled deployments are unaffected.
-  const decisionManager =
-    opts?.decisionManager ??
-    new DecisionIndexManager(readDecisionIndexConfig(stateDir));
-  await decisionManager.init();
-  // Boot reconcile: complete any in-flight outbox effects a prior crash left
-  // mid-flight. No-op when disabled; fail-safe (logs, never throws) when enabled.
-  await bootReconcile(decisionManager);
+  //
+  // FIX 1: the whole construct + init + boot-reconcile sits inside the graceful
+  // boot try/catch so ANY throw here (config read, key generation on a bad
+  // stateDir, native import/open failure not already swallowed by init's own
+  // fail-closed catch) degrades via `return err(...)` instead of aborting boot
+  // with an unhandled exception. A flag-OFF daemon must boot exactly as before.
+  let decisionManager: DecisionIndexManager;
+  try {
+    decisionManager =
+      opts?.decisionManager ??
+      new DecisionIndexManager(readDecisionIndexConfig(stateDir));
+    await decisionManager.init();
+    // Boot reconcile: complete any in-flight outbox effects a prior crash left
+    // mid-flight. No-op when disabled; fail-safe (logs, never throws) when enabled.
+    await bootReconcile(decisionManager);
+  } catch (e) {
+    return err(e instanceof Error ? e : new Error(String(e)));
+  }
 
   // Validate the control host early (hoisted from the control-server step):
   // the throwaway degraded server binds it during the startup-degraded window,
@@ -1459,6 +1470,15 @@ export async function startDaemon(
       const rejectedResume = !hasApproved && hasRejected;
       const choice = hasApproved ? 'approve' : 'reject';
 
+      // FIX 2 (flag-OFF blocker): the rejected-resume routing change (extra
+      // listComments() call, l2Feedback capture, phase='l2-design', and clearing
+      // the l2Gate/l2MergeBlocked notification flags) is the NEW flag-ON behavior.
+      // origin/main resumes BOTH approved and rejected runs to phase='l2-gate'
+      // with no extra GitHub call and no notification-flag change. Gate the whole
+      // routing change behind isEnabled() so a flag-OFF daemon behaves EXACTLY
+      // like origin/main. The logic itself is correct for flag-ON — only gated.
+      const routeRejectedToL2Design = rejectedResume && decisionManager.isEnabled();
+
       // CRASH-SAFE ORDERING (1/2): record the operator's answer in the ledger
       // BEFORE mutating run state. answer() is answered-once (`.applied:false`
       // on replay — fine). FAIL-CLOSED: if the index is enabled but ledger()
@@ -1475,12 +1495,14 @@ export async function startDaemon(
         }
       }
 
-      // For a rejected resume, capture the rejection feedback and route the run
-      // BACK to l2-design directly (fix for the pre-existing dropped-feedback bug:
-      // we strip l2-rejected here, so the l2-gate handler would never see it and
-      // never capture feedback / route to l2-design). Approved resumes re-enter
-      // l2-gate unchanged.
-      if (rejectedResume) {
+      // For a rejected resume (FLAG ON ONLY), capture the rejection feedback and
+      // route the run BACK to l2-design directly (fix for the pre-existing
+      // dropped-feedback bug: we strip l2-rejected here, so the l2-gate handler
+      // would never see it and never capture feedback / route to l2-design).
+      // Approved resumes re-enter l2-gate unchanged. Flag OFF: skip entirely so
+      // there is no extra listComments() call and feedback is left untouched
+      // (matches origin/main).
+      if (routeRejectedToL2Design) {
         try {
           const comments = await runOctokit.issues.listComments({
             owner: runOwner,
@@ -1510,11 +1532,13 @@ export async function startDaemon(
         }
       }
 
-      // Reset run state. Approved -> re-enter l2-gate. Rejected -> route straight
-      // to l2-design (feedback already captured above) so the rework cycle runs;
-      // mirror the l2-gate rejection branch's notification resets so the next park
-      // re-notifies and re-emits a fresh decision.
-      if (rejectedResume) {
+      // Reset run state. FLAG ON + rejected -> route straight to l2-design
+      // (feedback already captured above) so the rework cycle runs; mirror the
+      // l2-gate rejection branch's notification resets so the next park
+      // re-notifies and re-emits a fresh decision. Otherwise (approved, OR flag
+      // OFF for either label) re-enter l2-gate unchanged — identical to
+      // origin/main: no phase divergence, notification flags untouched.
+      if (routeRejectedToL2Design) {
         run.phase = 'l2-design';
         run.l2GateNotified = false;
         run.l2MergeBlockedNotified = undefined;

@@ -731,6 +731,35 @@ describe('daemon', () => {
       expect(mockServerStart).toHaveBeenCalled();
     });
 
+    it('degrades gracefully (returns err, does not abort boot) when the decision-escalation block throws (FIX 1)', async () => {
+      // FIX 1: the decision-index construct/init/boot-reconcile block sits inside
+      // the graceful boot try/catch. A throw there (e.g. key generation on a
+      // read-only/full stateDir) must surface as a `return err(...)` Result, NOT
+      // as an unhandled exception that aborts daemon boot.
+      const throwingManager = {
+        isEnabled: () => true,
+        init: async () => {
+          throw new Error('stateDir not writable: EROFS');
+        },
+        close: async () => undefined,
+        ledger: () => {
+          throw new Error('decision index unavailable');
+        },
+      } as unknown as DecisionIndexManager;
+
+      const { startDaemon } = await loadDaemon();
+      const result = await startDaemon('config.json', {
+        decisionManager: throwingManager,
+      });
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('EROFS');
+      }
+      // Boot aborted gracefully before the control server bound.
+      expect(mockServerStart).not.toHaveBeenCalled();
+    });
+
     it('rejects hostname controlHost from config before starting control server (#248)', async () => {
       mockLoadConfig.mockResolvedValue(
         ok(makeConfig({ controlHost: 'my-server.local' })),
@@ -3060,15 +3089,17 @@ describe('daemon', () => {
       expect(saveOrder!).toBeLessThan(removeOrder!);
     });
 
-    it('resumes a parked run when l2-rejected label is present (routes to l2-design with feedback)', async () => {
-      // REGRESSION (pre-existing bug): resumeParkedRuns stripped l2-rejected
-      // BEFORE re-entry, but the l2-gate handler only captured rejection feedback
-      // + routed to l2-design when it SAW l2-rejected on re-fetch — so feedback was
-      // dropped on resume and the run silently re-parked instead of reworking.
-      // Fix (option b): resumeParkedRuns captures the rejection comment into
-      // run.l2Feedback AND sets run.phase='l2-design' directly. This test asserts
-      // the run lands at l2-design WITH feedback — not merely that runPipeline ran.
-      const parkedRun = makeParkedRun();
+    it('resumes a parked run when l2-rejected label is present (FLAG OFF => l2-gate, no feedback, matches origin/main)', async () => {
+      // FIX 2 (flag-OFF blocker): the rejected-resume routing change
+      // (listComments() + l2Feedback capture + phase='l2-design' + clearing the
+      // l2Gate/l2MergeBlocked notification flags) is gated behind
+      // decisionManager.isEnabled(). With the flag OFF (no decisionManager
+      // injected => default disabled) the behavior must be IDENTICAL to
+      // origin/main: a rejected resume re-enters phase='l2-gate', no extra
+      // listComments() call is made, l2Feedback is untouched, and l2GateNotified
+      // stays as it was. This test asserts the gated-OFF outcome — it REPLACES the
+      // earlier assertion that codified the ungated l2-design+feedback behavior.
+      const parkedRun = makeParkedRun(); // l2GateNotified: true
       mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
       mockOctokit.issues.get.mockResolvedValue({
         data: { labels: [{ name: 'l2-rejected' }] },
@@ -3087,43 +3118,19 @@ describe('daemon', () => {
       await vi.advanceTimersByTimeAsync(30000);
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(mockStateMgr.saveRunState).toHaveBeenCalledWith(
-        expect.objectContaining({
-          issueNumber: 100,
-          phase: 'l2-design',
-          pausedAtPhase: undefined,
-          l2Feedback: 'REJECTED: the proposal misses the caching layer requirement.',
-        }),
-      );
-      expect(mockRunPipeline).toHaveBeenCalled();
-    });
-
-    it('sanitizes {{placeholder}} patterns and caps length when capturing rejection feedback', async () => {
-      const parkedRun = makeParkedRun();
-      mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
-      mockOctokit.issues.get.mockResolvedValue({
-        data: { labels: [{ name: 'l2-rejected' }] },
-      });
-      mockOctokit.issues.listComments.mockResolvedValue({
-        data: [
-          { body: `REJECTED: ${'x'.repeat(5000)} {{inject}} done` },
-        ],
-      });
-      mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
-
-      const { startDaemon } = await loadDaemon();
-      await startDaemon('config.json');
-
-      await vi.advanceTimersByTimeAsync(30000);
-      await vi.advanceTimersByTimeAsync(0);
-
+      // Re-enters l2-gate (NOT l2-design); no feedback captured; notification
+      // flag untouched — exactly origin/main.
       const rejectedSave = mockStateMgr.saveRunState.mock.calls
         .map((c) => c[0] as Record<string, unknown>)
-        .find((s) => s.issueNumber === 100 && s.phase === 'l2-design');
+        .find((s) => s.issueNumber === 100);
       expect(rejectedSave).toBeDefined();
-      const feedback = rejectedSave?.l2Feedback as string;
-      expect(feedback).toHaveLength(4000);
-      expect(feedback).not.toContain('{{');
+      expect(rejectedSave?.phase).toBe('l2-gate');
+      expect(rejectedSave?.pausedAtPhase).toBeUndefined();
+      expect(rejectedSave?.l2Feedback).toBeUndefined();
+      expect(rejectedSave?.l2GateNotified).toBe(true);
+      // No extra GitHub round-trip when the flag is OFF.
+      expect(mockOctokit.issues.listComments).not.toHaveBeenCalled();
+      expect(mockRunPipeline).toHaveBeenCalled();
     });
 
     describe('decision-index enabled mode (real writer over temp sqlite)', () => {
@@ -3333,6 +3340,92 @@ describe('daemon', () => {
             (c[0] as Record<string, unknown>).pausedAtPhase === undefined,
         );
         expect(resetSaves).toHaveLength(0);
+      });
+
+      it('FLAG ON: l2-rejected resume routes to l2-design, captures feedback, and clears notification flags', async () => {
+        // FIX 2 (flag-ON path): the gated routing change fires only when the
+        // decision index is enabled. A rejected resume must capture the rejection
+        // comment into run.l2Feedback, route the run to phase='l2-design', and
+        // reset l2GateNotified / l2MergeBlockedNotified so the next park
+        // re-notifies. This is the correct new behavior — gated, not reverted.
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 9).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+
+        const parkedRun = makeParkedRun({ decisionEpoch: 1 }); // l2GateNotified: true
+        mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'l2-rejected' }] },
+        });
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [
+            { body: 'Looks good so far' },
+            { body: 'REJECTED: the proposal misses the caching layer requirement.' },
+          ],
+        });
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+        // Seed the ledger row at `notified` so answer('reject') can proceed.
+        await seedNotified(manager, 100);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        // Extra GitHub round-trip happens ONLY when enabled.
+        expect(mockOctokit.issues.listComments).toHaveBeenCalledWith(
+          expect.objectContaining({ issue_number: 100 }),
+        );
+        const rejectedSave = mockStateMgr.saveRunState.mock.calls
+          .map((c) => c[0] as Record<string, unknown>)
+          .find((s) => s.issueNumber === 100);
+        expect(rejectedSave).toBeDefined();
+        expect(rejectedSave?.phase).toBe('l2-design');
+        expect(rejectedSave?.pausedAtPhase).toBeUndefined();
+        expect(rejectedSave?.l2Feedback).toBe(
+          'REJECTED: the proposal misses the caching layer requirement.',
+        );
+        expect(rejectedSave?.l2GateNotified).toBe(false);
+        expect(rejectedSave?.l2MergeBlockedNotified).toBeUndefined();
+        expect(mockRunPipeline).toHaveBeenCalled();
+      });
+
+      it('FLAG ON: sanitizes {{placeholder}} patterns and caps length when capturing rejection feedback', async () => {
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 10).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+
+        const parkedRun = makeParkedRun({ decisionEpoch: 1 });
+        mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'l2-rejected' }] },
+        });
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [{ body: `REJECTED: ${'x'.repeat(5000)} {{inject}} done` }],
+        });
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+        await seedNotified(manager, 100);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        const rejectedSave = mockStateMgr.saveRunState.mock.calls
+          .map((c) => c[0] as Record<string, unknown>)
+          .find((s) => s.issueNumber === 100 && s.phase === 'l2-design');
+        expect(rejectedSave).toBeDefined();
+        const feedback = rejectedSave?.l2Feedback as string;
+        expect(feedback).toHaveLength(4000);
+        expect(feedback).not.toContain('{{');
       });
     });
 

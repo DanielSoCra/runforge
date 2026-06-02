@@ -64,8 +64,16 @@ function loadOrGenerateKey(stateDir: string): string {
 
 /**
  * Read the decision-escalation configuration from the environment, resolving all
- * paths absolute against `stateDir`. The protected key is generated+persisted on
- * first run only when neither an env key nor a key file is present.
+ * paths absolute against `stateDir`.
+ *
+ * Fail-closed invariant (FIX 1): when the flag is OFF this function does ZERO
+ * filesystem I/O. It returns a disabled config with an EMPTY `protectedKey`
+ * placeholder and never touches `stateDir` — so a flag-OFF daemon can never
+ * write `state/decision-protected.key`, and a read-only/full/permission-denied
+ * stateDir can never abort boot. The protected key is generated+persisted ONLY
+ * when the flag is ON and no explicit env key is supplied (key-file logic lives
+ * here, the one place these env vars are parsed); the daemon constructs the
+ * manager from this config inside a guarded boot block (see daemon.ts).
  */
 export function readDecisionIndexConfig(stateDir: string): DecisionIndexEnvConfig {
   const enabled = envEnabled(process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED);
@@ -77,6 +85,8 @@ export function readDecisionIndexConfig(stateDir: string): DecisionIndexEnvConfi
     stateDir,
     process.env.AUTO_CLAUDE_DECISION_PROTECTED_DIR ?? DEFAULT_PROTECTED_DIR,
   );
-  const protectedKey = loadOrGenerateKey(stateDir);
+  // Disabled => NO filesystem I/O at all. The key is only needed in the manager's
+  // enabled branch, so a placeholder/empty key is sufficient and keeps boot inert.
+  const protectedKey = enabled ? loadOrGenerateKey(stateDir) : '';
   return { enabled, dbPath, protectedKey, protectedDir };
 }
