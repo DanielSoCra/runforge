@@ -1,0 +1,198 @@
+{
+  "$ref": "#/definitions/DecisionRequest",
+  "definitions": {
+    "DecisionRequest": {
+      "type": "object",
+      "properties": {
+        "decision_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "protocol_version": {
+          "default": "1.0.0",
+          "type": "string",
+          "minLength": 1
+        },
+        "source_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_etag": {
+          "type": "string"
+        },
+        "source_event_id": {
+          "type": "string"
+        },
+        "deployment": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "worker_session_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "phase": {
+          "type": "string",
+          "minLength": 1
+        },
+        "risk_class": {
+          "type": "string",
+          "enum": [
+            "P0",
+            "P1",
+            "P2",
+            "P3"
+          ]
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context": {
+          "type": "string"
+        },
+        "options": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "detail": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "recommended_option": {
+          "type": "string"
+        },
+        "consequence_of_no_answer": {
+          "type": "string"
+        },
+        "reversibility": {
+          "type": "string",
+          "enum": [
+            "reversible",
+            "hard_to_reverse",
+            "external_effect"
+          ]
+        },
+        "expires_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "answer_schema": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "option"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "json"
+                },
+                "schema": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "kind",
+                "schema"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "resume_mode": {
+          "type": "string",
+          "enum": [
+            "mid_run",
+            "requeue"
+          ]
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trace_id": {
+          "type": "string"
+        },
+        "agent_version": {
+          "type": "string"
+        },
+        "skill_version": {
+          "type": "string"
+        },
+        "field_sensitivity": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "enum": [
+              "public",
+              "internal",
+              "phi",
+              "secret"
+            ]
+          }
+        }
+      },
+      "required": [
+        "decision_id",
+        "source_url",
+        "deployment",
+        "run_id",
+        "worker_session_id",
+        "phase",
+        "risk_class",
+        "question",
+        "context",
+        "options",
+        "consequence_of_no_answer",
+        "reversibility",
+        "expires_at",
+        "answer_schema",
+        "resume_mode",
+        "idempotency_key",
+        "field_sensitivity"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}
