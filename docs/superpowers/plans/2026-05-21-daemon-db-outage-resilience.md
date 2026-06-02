@@ -1,3 +1,5 @@
+> **🗄 HISTORICAL (2026-06-02).** Implementation-complete execution log, kept for provenance. The active design is `docs/superpowers/specs/2026-05-21-daemon-db-outage-resilience-design.md`; the canonical current specs live in `.specify/`. See `docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`. <!-- RECONCILIATION-LEDGER-BANNER -->
+
 # Daemon DB-Outage Resilience — Implementation Plan (option E′)
 
 > **For agentic workers:** REQUIRED SUB-SKILLS: `superpowers:subagent-driven-development` (or `executing-plans`) + `superpowers:test-driven-development`. Tasks are bite-sized; **Dependency notes** state ordering. Steps use `- [ ]` checkboxes.

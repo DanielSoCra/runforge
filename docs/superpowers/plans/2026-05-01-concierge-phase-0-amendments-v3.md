@@ -1,3 +1,5 @@
+> **🗄 HISTORICAL (2026-06-02).** Completed/superseded record, kept for provenance — superseded by the unified **L0-AC-VISION v5** (`.specify/L0-ac-vision.md`) + its L1 children. The canonical current specs live in `.specify/`. See `docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`. <!-- RECONCILIATION-LEDGER-BANNER -->
+
 # Concierge Phase 0 — Amendments v3 (Codex iter 3 — final)
 
 Apply v1 plan ⊕ v1 amendments ⊕ v2 amendments ⊕ this v3. After v3, the iteration converges; proceed to execution.

@@ -1,3 +1,5 @@
+> **🗄 HISTORICAL (2026-06-02).** Completed/superseded record, kept for provenance — superseded by the unified **L0-AC-VISION v5** (`.specify/L0-ac-vision.md`) + its L1 children. The canonical current specs live in `.specify/`. See `docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`. <!-- RECONCILIATION-LEDGER-BANNER -->
+
 # Concierge Phase 0 — Amendments After Codex Pair-Review (v1 → v2)
 
 This file lists the authoritative replacements for the v1 plan at `2026-05-01-concierge-phase-0.md`. Apply these during execution; the v1 plan is preserved for diff and audit.
