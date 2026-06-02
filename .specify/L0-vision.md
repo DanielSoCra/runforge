@@ -7,6 +7,8 @@ version: 1
 layer: 0
 ---
 
+> **ℹ Relationship note (2026-06-02).** The platform vision is now the unified, Operator-approved **L0-AC-VISION v5** (`.specify/L0-ac-vision.md`). This concierge vision is **retained as a distinct product vision** under that platform head — the relationship is expressed in prose in L0-AC-VISION, not via a `parent:` field. Note: the concierge *attention/inbox* L1s (FUNC-CONCIERGE-AWARENESS, FUNC-CONCIERGE-BOARD) are now **deprecated** in favor of the unified FUNC-AC-OPERATOR-LEARNING + FUNC-AC-FLEET; the remainder of the concierge tree stands. See `docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`.
+
 # L0-CONCIERGE-VISION — Concierge
 
 **Concierge** is a single conversational entry point — a Slack DM with a bot, served from the Operator's Mac mini — that turns intent into action across all his tools. It is an LLM agent with a fixed toolbox (auto-claude, knowledge-vault Obsidian vault, Slack, calendar, email, GitHub, web, observer) and a single mobile-friendly triage board for the small set of items that genuinely need human judgment.

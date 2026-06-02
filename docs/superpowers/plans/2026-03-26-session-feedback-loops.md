@@ -1,3 +1,5 @@
+> **🗄 HISTORICAL (2026-06-02).** Implementation-complete execution log, kept for provenance. The active design is `docs/superpowers/specs/2026-03-26-session-feedback-loops-design.md`; the canonical current specs live in `.specify/`. See `docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`. <!-- RECONCILIATION-LEDGER-BANNER -->
+
 # Session Feedback Loops Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

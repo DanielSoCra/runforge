@@ -2,10 +2,15 @@
 id: FUNC-CONCIERGE-BOARD
 type: functional
 domain: concierge
-status: draft
+status: deprecated
+deprecated_by: FUNC-AC-FLEET
+deprecation_date: 2026-06-02
+deprecation_reason: Triage/inbox surface folded into the unified platform's focus-gated decision inbox (FUNC-AC-FLEET) + behavioral-learning ranking (FUNC-AC-OPERATOR-LEARNING) per spec-reconciliation-ledger (2026-05-29).
 version: 1
 layer: 1
 ---
+
+> **⛔ DEPRECATED (2026-06-02).** The triage-board / decision-surface behavior specified here is now canonically covered by the unified platform specs **FUNC-AC-FLEET** (the single focus-gated cross-deployment decision inbox) and **FUNC-AC-OPERATOR-LEARNING** (learned ranking of what surfaces). Retained for history; the canonical specs in `.specify/` govern. See `docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`.
 
 # FUNC-CONCIERGE-BOARD — Triage Surface
 

@@ -1030,7 +1030,8 @@ FUNC-CONCIERGE-MEMORY:
 FUNC-CONCIERGE-BOARD:
   children: [ARCH-CONCIERGE-RUNTIME, ARCH-EVENT-BUS]
   related: [FUNC-AC-DASHBOARD]   # boundary documented in concierge-board.md spec
-  status: draft
+  status: deprecated
+  deprecated_by: FUNC-AC-FLEET   # focus-gated decision inbox + FUNC-AC-OPERATOR-LEARNING ranking (ledger 2026-05-29)
 
 FUNC-CONCIERGE-CHANNEL:
   children: [ARCH-CONCIERGE-RUNTIME]
@@ -1038,7 +1039,8 @@ FUNC-CONCIERGE-CHANNEL:
 
 FUNC-CONCIERGE-AWARENESS:
   children: [ARCH-EVENT-BUS]
-  status: draft
+  status: deprecated
+  deprecated_by: FUNC-AC-OPERATOR-LEARNING   # attention/relevance learning + FUNC-AC-FLEET inbox (ledger 2026-05-29)
 
 # --- Concierge L2 specs ---
 

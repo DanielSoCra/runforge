@@ -1,6 +1,8 @@
 ---
 date: 2026-05-29
-status: draft-for-review
+status: superseded
+superseded_by: .specify/L0-ac-vision.md  # unified L0-AC-VISION v5 + its L1 children (FUNC-AC-OPERATOR-LEARNING, -COMPLIANCE-GATE, -FLEET)
+superseded_date: 2026-06-02
 type: roadmap-design
 topic: Unified auto-claude × cockpit — self-improving closed-loop SDLC where the human steers
 authors: the Operator (lead) + Claude (synthesis) + Codex (sparring)
@@ -15,7 +17,9 @@ related:
 
 # Unified Cockpit Roadmap
 
-> **Status note:** this is a **roadmap design doc**, not a spec. It defines the path and the governance. The unified L0/L1 specs it calls for are authored in **Phase 1** (in `.specify/`), and this doc is superseded by them once they exist (per §7). **This doc supersedes nothing itself** — supersession of its `candidate_supersedes` inputs is *enacted by the Phase-1 Spec Reconciliation Ledger* (§7), only after their still-valid content is migrated and back-pointers added. Marking them superseded before migration would risk content loss — the exact failure §7 exists to prevent.
+> **⛔ SUPERSEDED (2026-06-02).** The unified L0/L1 specs this roadmap called for now exist and are **Operator-approved** in `.specify/`: **L0-AC-VISION v5** (`.specify/L0-ac-vision.md`) + its L1 children **FUNC-AC-OPERATOR-LEARNING**, **FUNC-AC-COMPLIANCE-GATE**, **FUNC-AC-FLEET** (PR #697, merged to `main`). Per §7, this doc is now superseded by them. It is retained for history and for its phased-roadmap / governance narrative; **the canonical specs in `.specify/` govern — do not act on this doc as a live instruction.** Supersession of this roadmap's own `candidate_supersedes` inputs is enacted by the Spec Reconciliation Ledger (`docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`).
+>
+> *(Original status note, for history: a roadmap design doc, not a spec; it defined the path and governance and was to be superseded by the unified L0/L1 once authored — which has now happened.)*
 
 ## 1. Goal
 
