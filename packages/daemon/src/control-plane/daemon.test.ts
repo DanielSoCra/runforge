@@ -141,8 +141,9 @@ const {
   knowledgeStoreCtorArgs: [] as unknown[],
   mockOctokit: {
     issues: {
-      get: vi.fn().mockResolvedValue({ data: { labels: [] } }),
+      get: vi.fn().mockResolvedValue({ data: { labels: [], state: 'open' } }),
       removeLabel: vi.fn().mockResolvedValue(undefined),
+      addLabels: vi.fn().mockResolvedValue(undefined),
       listComments: vi.fn().mockResolvedValue({ data: [] }),
     },
   },
@@ -527,8 +528,11 @@ describe('daemon', () => {
     mockStateMgr.saveRunState.mockResolvedValue(undefined);
     mockStateMgr.findIncompleteRuns.mockResolvedValue([]);
     mockStateMgr.findParkedRuns.mockResolvedValue([]);
-    mockOctokit.issues.get.mockResolvedValue({ data: { labels: [] } });
+    mockOctokit.issues.get.mockResolvedValue({
+      data: { labels: [], state: 'open' },
+    });
     mockOctokit.issues.removeLabel.mockResolvedValue(undefined);
+    mockOctokit.issues.addLabels.mockResolvedValue(undefined);
     mockOctokit.issues.listComments.mockResolvedValue({ data: [] });
     mockRemoteControl.stop.mockResolvedValue(undefined);
     mockCostTracker.getDailyCost.mockReturnValue(0);
@@ -651,6 +655,8 @@ describe('daemon', () => {
       mockStateMgr.findParkedRuns,
       mockOctokit.issues.get,
       mockOctokit.issues.removeLabel,
+      mockOctokit.issues.addLabels,
+      mockOctokit.issues.listComments,
       mockServer.close,
       mockRemoteControl.start,
       mockRemoteControl.stop,
@@ -3426,6 +3432,287 @@ describe('daemon', () => {
         const feedback = rejectedSave?.l2Feedback as string;
         expect(feedback).toHaveLength(4000);
         expect(feedback).not.toContain('{{');
+      });
+    });
+
+    // ----------------------------------------------------------------------
+    // SLICE 2: ANSWER -> RESUME consumer. The cockpit answers via a
+    // `**DecisionResponse**` comment (decision_id-matched) + `answered`/`ready`
+    // labels — NOT the legacy `l2-approved`/`l2-rejected` labels. These tests
+    // close the loop: the EXACT parked run re-enters, idempotently, with NO
+    // double-resume and NO duplicate run.
+    // ----------------------------------------------------------------------
+    describe('cockpit answer consumer (Slice 2)', () => {
+      let dir: string;
+      let manager: DecisionIndexManager;
+
+      /** Build the cockpit's DecisionResponse comment for a decision_id + option. */
+      const decisionResponseComment = (
+        decisionId: string,
+        chosenOption: string,
+      ): { body: string } => {
+        const effectId = `${decisionId}:write_response:${decisionId}:answer`;
+        const marker = `<!-- pm-cockpit:effect:${effectId}:etag=etag-abc -->`;
+        const payload = JSON.stringify({
+          decision_id: decisionId,
+          chosen_option: chosenOption,
+          answerer: 'operator',
+          answered_at: '2026-06-02T00:00:00.000Z',
+          idempotency_key: `${decisionId}:answer`,
+        });
+        return {
+          body: [marker, '**DecisionResponse**', '```json', payload, '```'].join(
+            '\n',
+          ),
+        };
+      };
+
+      const seedNotified = async (
+        m: DecisionIndexManager,
+        issueNumber: number,
+      ) => {
+        const req = buildL2GateRequest(
+          {
+            issueNumber,
+            variant: 'feature',
+            repoOwner: 'test-owner',
+            repoName: 'test-repo',
+          } as unknown as Parameters<typeof buildL2GateRequest>[0],
+          1,
+          'test-owner/test-repo',
+        );
+        const { decision_id } = m.ledger().raise(req);
+        await m.ledger().notify(decision_id);
+        return decision_id;
+      };
+
+      beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), 'daemon-cockpit-'));
+      });
+      afterEach(async () => {
+        await manager?.close();
+        rmSync(dir, { recursive: true, force: true });
+      });
+
+      it('HAPPY PATH: cockpit approve (answered label + DecisionResponse) re-enters the SAME run past l2-gate, no duplicate from ready', async () => {
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 20).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+
+        const parkedRun = makeParkedRun({ decisionEpoch: 1 });
+        mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+        // Cockpit state: answered + ready labels, NO legacy l2-approved label.
+        mockOctokit.issues.get.mockResolvedValue({
+          data: {
+            labels: [{ name: 'answered' }, { name: 'ready' }],
+            state: 'open',
+          },
+        });
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment('issue-100:l2-gate:1', 'approve')],
+        });
+        // The cockpit's `ready` label would normally be seen as fresh work — assert
+        // it is NOT claimed as a duplicate run (the issue is decision-owned).
+        mockDetector.detectReadyWork.mockResolvedValue(
+          ok([makeWorkRequest({ issueNumber: 100, labels: ['ready'] })]),
+        );
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+        const decisionId = await seedNotified(manager, 100);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        // NO duplicate run: detectReadyWork's claim must NOT have fired for #100.
+        expect(mockDetector.claimWork).not.toHaveBeenCalledWith(100);
+        // The SAME run re-entered: phase reset to l2-gate, pausedAtPhase cleared.
+        const resumedSave = mockStateMgr.saveRunState.mock.calls
+          .map((c) => c[0] as Record<string, unknown>)
+          .find((s) => s.issueNumber === 100 && s.pausedAtPhase === undefined);
+        expect(resumedSave).toBeDefined();
+        expect(resumedSave?.phase).toBe('l2-gate');
+        // approve synthesizes the l2-approved label so the l2-gate handler advances.
+        expect(mockOctokit.issues.addLabels).toHaveBeenCalledWith(
+          expect.objectContaining({ issue_number: 100, labels: ['l2-approved'] }),
+        );
+        // The ledger reached terminal resumed exactly once.
+        expect(manager.ledger().statusOf(decisionId)).toBe('resumed');
+        expect(mockRunPipeline).toHaveBeenCalled();
+      });
+
+      it('DOUBLE-DELIVERY: same answer seen across two ticks AND exposed to both pollers re-enters EXACTLY ONCE', async () => {
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 21).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+
+        // Fresh parked copy each scan (same epoch=1 -> same decision id) so two
+        // genuine resume attempts target the same ledger row.
+        mockStateMgr.findParkedRuns.mockImplementation(async () => [
+          makeParkedRun({ decisionEpoch: 1 }),
+        ]);
+        mockOctokit.issues.get.mockResolvedValue({
+          data: {
+            labels: [{ name: 'answered' }, { name: 'ready' }],
+            state: 'open',
+          },
+        });
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment('issue-100:l2-gate:1', 'approve')],
+        });
+        // Also expose the SAME issue to the new-work poll (the cockpit's ready label).
+        mockDetector.detectReadyWork.mockResolvedValue(
+          ok([makeWorkRequest({ issueNumber: 100, labels: ['ready'] })]),
+        );
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+        const decisionId = await seedNotified(manager, 100);
+
+        // Two full poll cycles (the answer is "delivered"/seen twice).
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        // EXACTLY ONE re-entry: the new-work poll never claimed #100, and the run
+        // re-entered the pipeline exactly once across both ticks.
+        expect(mockDetector.claimWork).not.toHaveBeenCalledWith(100);
+        const resumeReentries = mockRunPipeline.mock.calls.filter((c) => {
+          const run = c[0] as Record<string, unknown>;
+          return run.issueNumber === 100;
+        });
+        expect(resumeReentries).toHaveLength(1);
+        // Terminal resumed (recorded once; the replayed answer did not re-open it).
+        expect(manager.ledger().statusOf(decisionId)).toBe('resumed');
+      });
+
+      it('REJECT PATH: cockpit reject lands at l2-design with l2Feedback populated from the rejection comment', async () => {
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 22).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+
+        const parkedRun = makeParkedRun({ decisionEpoch: 1 });
+        mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'answered' }], state: 'open' },
+        });
+        const rejectComment = decisionResponseComment(
+          'issue-100:l2-gate:1',
+          'reject',
+        );
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [rejectComment],
+        });
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+        await seedNotified(manager, 100);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        const rejectedSave = mockStateMgr.saveRunState.mock.calls
+          .map((c) => c[0] as Record<string, unknown>)
+          .find((s) => s.issueNumber === 100 && s.pausedAtPhase === undefined);
+        expect(rejectedSave).toBeDefined();
+        expect(rejectedSave?.phase).toBe('l2-design');
+        // FEEDBACK CONTENT must reach l2-design (not merely that it routed there).
+        const feedback = rejectedSave?.l2Feedback as string;
+        expect(feedback).toBeDefined();
+        expect(feedback).toContain('"chosen_option":"reject"');
+        expect(rejectedSave?.l2GateNotified).toBe(false);
+        // reject does NOT synthesize an l2-approved label.
+        expect(mockOctokit.issues.addLabels).not.toHaveBeenCalledWith(
+          expect.objectContaining({ labels: ['l2-approved'] }),
+        );
+        expect(mockRunPipeline).toHaveBeenCalled();
+      });
+
+      it('NO-ANSWER: answered/ready labels present but NO matching DecisionResponse comment -> stays parked', async () => {
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 23).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+
+        const parkedRun = makeParkedRun({ decisionEpoch: 1 });
+        mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+        // Half-written cockpit state: labels flipped but no DecisionResponse yet,
+        // OR a response for a DIFFERENT epoch. Either way: do nothing.
+        mockOctokit.issues.get.mockResolvedValue({
+          data: {
+            labels: [{ name: 'answered' }, { name: 'ready' }],
+            state: 'open',
+          },
+        });
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment('issue-100:l2-gate:2', 'approve')], // wrong epoch
+        });
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+        const decisionId = await seedNotified(manager, 100);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        // Stays parked: no phase reset, no pipeline re-entry, ledger still notified.
+        const resetSaves = mockStateMgr.saveRunState.mock.calls.filter(
+          (c) =>
+            (c[0] as Record<string, unknown>).issueNumber === 100 &&
+            (c[0] as Record<string, unknown>).pausedAtPhase === undefined,
+        );
+        expect(resetSaves).toHaveLength(0);
+        expect(mockRunPipeline).not.toHaveBeenCalled();
+        expect(manager.ledger().statusOf(decisionId)).toBe('notified');
+      });
+
+      it('removes the ready label on a committed cockpit resume (closes the duplicate-work loop)', async () => {
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 24).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+
+        const parkedRun = makeParkedRun({ decisionEpoch: 1 });
+        mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+        mockOctokit.issues.get.mockResolvedValue({
+          data: {
+            labels: [{ name: 'answered' }, { name: 'ready' }],
+            state: 'open',
+          },
+        });
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment('issue-100:l2-gate:1', 'approve')],
+        });
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+        await seedNotified(manager, 100);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(mockOctokit.issues.removeLabel).toHaveBeenCalledWith(
+          expect.objectContaining({ name: 'ready', issue_number: 100 }),
+        );
       });
     });
 

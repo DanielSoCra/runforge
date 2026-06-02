@@ -148,6 +148,18 @@ export class DecisionLedger {
     return this.writer.reader.list().filter((d) => !TERMINAL.has(d.status));
   }
 
+  /**
+   * statusOf — the current status of a decision (incl. TERMINAL statuses like
+   * `resumed`/`superseded`/`failed`), or `undefined` for a missing row. Unlike
+   * `pending()` (which excludes terminal rows), this reads the raw row so the
+   * resume consumer can tell "already consumed this cockpit answer" (`resumed`)
+   * apart from "never answered" (`undefined`/`notified`). Keeps the writer's
+   * `reader` private — callers go through this thin facade.
+   */
+  statusOf(decisionId: string): string | undefined {
+    return this.writer.reader.get(decisionId)?.status;
+  }
+
   /** reconcile — boot-time/periodic crash recovery; completes in-flight effects. */
   reconcile(): ReturnType<IndexWriter['reconcile']> {
     return this.writer.reconcile();

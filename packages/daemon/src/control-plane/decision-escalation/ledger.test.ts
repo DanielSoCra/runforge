@@ -233,4 +233,24 @@ describe('DecisionLedger (real IndexWriter over temp sqlite)', () => {
     expect(t.writer.reader.get(r.decision_id)?.stale).toBe(false);
     expect(t.writer.reader.get(r.decision_id)?.status).toBe('detected');
   });
+
+  describe('statusOf()', () => {
+    it('returns undefined for a missing row', () => {
+      expect(t.ledger.statusOf('issue-999:l2-gate:1')).toBeUndefined();
+    });
+
+    it('returns the current status across the lifecycle, INCLUDING terminal resumed', async () => {
+      const r = t.ledger.raise(makeRequest());
+      expect(t.ledger.statusOf(r.decision_id)).toBe('detected');
+      await t.ledger.notify(r.decision_id);
+      expect(t.ledger.statusOf(r.decision_id)).toBe('notified');
+      t.ledger.answer(r.decision_id, 'approve', 'operator');
+      await t.ledger.advanceToResumed(r.decision_id, 'requeue');
+      // terminal — pending() EXCLUDES this, so statusOf must read the raw row.
+      expect(t.ledger.statusOf(r.decision_id)).toBe('resumed');
+      expect(
+        t.ledger.pending().find((d) => d.decision_id === r.decision_id),
+      ).toBeUndefined();
+    });
+  });
 });
