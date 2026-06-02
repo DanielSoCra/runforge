@@ -11,7 +11,7 @@ layer: 1
 
 ## Problem Statement
 
-The platform runs many deployments, and some of them are regulated: their codebases carry paths where a change can expose protected personal data, miscompute regulated billing, weaken an access boundary, or cross a safety line. For those deployments there is a duty — sometimes a legal one, always a trust one — that no such change reaches the shared mainline without the deployment's required compliance sign-off.
+The platform runs many deployments, and some of them are regulated: their codebases carry paths where a change can expose protected personal data, miscompute regulated billing, weaken an access boundary, or cross a safety line. For those deployments there is a duty — sometimes a legal one, always a trust one — that no such change reaches the shared mainline (where the deployment's changes are integrated) without the deployment's required compliance sign-off.
 
 Today the platform has reviewer roles that can read a change with a compliance lens and report what they find, but their findings are advice only. Nothing stops a change that touches a regulated-sensitive path from merging while a required compliance review is missing, incomplete, or has objected. As the platform widens its own autonomy — letting low-risk changes earn their way to autonomous merge — that advisory posture becomes the gap through which a non-compliant change ships unattended. The earned-trust ramp is exactly what makes an unenforced compliance lane dangerous: the more the platform merges on its own, the more a path that *should* have stopped at a human is one that now slides through.
 

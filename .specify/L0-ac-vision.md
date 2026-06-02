@@ -51,6 +51,7 @@ The deeper purpose is attention. **The human is the scarce resource.** Every rou
 - The learn-from-the-operator loop may reduce how often it asks the Operator **only** for decision-classes outside that always-escalate set; it can never learn its way past a hard boundary. The questions above are always escalated, no matter how predictable the Operator's behavior becomes.
 - Never deploys to production, and never graduates a deployment to wider autonomy, without the Operator's approval; trust widens only along the earned risk-class ramp.
 - Never acts on self-generated proposals without the Operator's approval — all work begins on the human's word.
+- Never proceeds past a deployment's cost circuit breaker or budget ceiling without escalating to the Operator; spend is bounded per deployment, and an approaching limit raises a decision rather than silently overspending or stalling.
 - Never autonomously *finalizes* specification content — the Operator approves it — and never authors or edits the vision (L0). The platform may draft, and the product owner may *suggest*, lower-layer specs under guardrails; deciding their content is always the Operator's.
 - Never modifies its own implementation or its own evaluation and approval criteria.
 - The coordinator never merges, never deploys, never alters a pipeline phase, and never edits the vision.

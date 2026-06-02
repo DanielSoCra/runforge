@@ -87,9 +87,9 @@ The Operator needs each project to be a self-describing **deployment** with its 
 - Given a capability version has been adopted
 - When the Operator chooses where it applies
 - Then the registry records which deployments run which version
-- And it is visible which deployments share a capability, so the blast radius of a change to it is known before it ships
+- And it is visible which deployments share a capability, so the full set of deployments a change to it would affect is known before it ships
 
-### Canary rollout
+### Staged rollout — a low-stakes deployment first
 
 **Scenario: A shared-substrate change ships to a low-stakes deployment first**
 - Given a change to a capability, instruction, or learned behavior is shared across deployments
@@ -97,13 +97,13 @@ The Operator needs each project to be a self-describing **deployment** with its 
 - Then it is applied first to a low-stakes deployment designated to receive changes before the rest
 - And it is not applied fleet-wide at the moment it is adopted
 
-**Scenario: A change promotes only after proving green**
+**Scenario: A change promotes only after proving healthy**
 - Given a shared change is in force on the low-stakes deployment
-- When that deployment's gates and outcomes stay green over the deployment's proving window
+- When that deployment's gates keep passing and its outcomes hold over the deployment's proving window
 - Then the change is promoted to the remaining deployments in their designated order
 - And until then the other deployments keep the version they were on
 
-**Scenario: A change that fails on the canary does not promote**
+**Scenario: A change that fails on the low-stakes deployment does not promote**
 - Given a shared change is in force on the low-stakes deployment
 - When it fails the deployment's gates or degrades its outcomes during the proving window
 - Then the change is not promoted to any other deployment
@@ -148,7 +148,7 @@ The Operator needs each project to be a self-describing **deployment** with its 
 - Each deployment classifies risk, gates compliance, bounds spend, and concentrates the Operator's attention on its irreducibly-human work using only its own profile; differences between deployments are explained by their profiles, not by special-casing.
 - Autonomy widens for one deployment and one risk class at a time, only on the Operator's approval; widening one deployment never widens another.
 - Deployments are isolated by default; the inbox is the only cross-deployment surface, and items from non-focused deployments interrupt only when they meet the Operator's threshold and otherwise accrue without being lost.
-- No shared change reaches the full fleet without first proving green on a low-stakes deployment; a shared change that fails on that deployment never promotes, and the Operator is told why.
+- No shared change reaches the full fleet without first proving healthy on a low-stakes deployment; a shared change that fails on that deployment never promotes, and the Operator is told why.
 - Every deployment stays within its own budget; nearing the limit produces a decision, never a silent overspend or silent stall.
 - A bad shared capability version and a bad learned bias are both reversible across the entire fleet, leaving no deployment on the bad version or behavior, with the reversal recorded so it is not silently re-applied.
 
@@ -160,7 +160,7 @@ The Operator needs each project to be a self-describing **deployment** with its 
 - Deployments are isolated by default; one deployment's routine activity must never surface inside another, and the cross-deployment inbox is the only exception.
 - An item from a non-focused deployment must never be silently dropped; it either interrupts because it meets the Operator's threshold or accrues for later, and cross-deployment priority must always be explainable, never a hidden global ranking.
 - The platform adopts capabilities only as identified versions recorded in the registry; it never acts on live, unversioned edits to shared capabilities or instructions.
-- A change to shared substrate must reach a low-stakes deployment before any higher-stakes deployment and must never be applied fleet-wide in a single step; promotion to the rest is conditional on the canary staying green.
+- A change to shared substrate must reach a low-stakes deployment before any higher-stakes deployment and must never be applied fleet-wide in a single step; promotion to the rest is conditional on the low-stakes deployment continuing to pass its gates.
 - Each deployment's spend is bounded by its own budget independently of the others; a deployment may not exceed its budget without an Operator decision.
 - A promoted shared capability version and an adopted learned behavior must both be reversible fleet-wide to a prior known-good state; sensitive knowledge is never auto-promoted, and every rollback is recorded so a withdrawn version or behavior is not silently re-applied.
 - This capability coordinates the fleet; it never merges, never deploys, never alters a pipeline phase, and never edits or authors specifications or the vision — those boundaries hold across every deployment.
