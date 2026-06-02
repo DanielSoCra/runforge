@@ -2,10 +2,15 @@
 id: FUNC-CONCIERGE-AWARENESS
 type: functional
 domain: concierge
-status: draft
+status: deprecated
+deprecated_by: FUNC-AC-OPERATOR-LEARNING
+deprecation_date: 2026-06-02
+deprecation_reason: Event-awareness / relevance-surfacing folded into the unified platform's behavioral-learning + fleet inbox specs per spec-reconciliation-ledger (2026-05-29).
 version: 1
 layer: 1
 ---
+
+> **⛔ DEPRECATED (2026-06-02).** The event-awareness / relevance-surfacing behavior specified here is now canonically covered by the unified platform specs **FUNC-AC-OPERATOR-LEARNING** (attention/relevance learning) and **FUNC-AC-FLEET** (focus-gated cross-deployment inbox). Retained for history; the canonical specs in `.specify/` govern. See `docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`.
 
 # FUNC-CONCIERGE-AWARENESS — Activity Awareness
 
