@@ -47,6 +47,7 @@ import {
 } from './spec-pipeline/delivery.js';
 import type { DecisionIndexManager } from './decision-escalation/manager.js';
 import { buildL2GateRequest } from './decision-escalation/build-request.js';
+import { GitHubBlockPublisher } from './decision-escalation/github-block-notifier.js';
 
 // Serializes git operations on the shared repoRoot across concurrent pipeline runs.
 // Currently protects detect (which modifies checkout state via git checkout).
@@ -93,8 +94,13 @@ export function createPhaseHandlers(
   knowledgeStore?: KnowledgeStore,
   phaseLabelMirror?: PhaseLabelMirror,
   decisionManager?: DecisionIndexManager,
+  decisionPublisher?: GitHubBlockPublisher,
 ): PhaseHandlerMap {
   const repo = repoName;
+  // Lazily constructed only when the decision index is enabled — a disabled
+  // deployment never builds it (flag-OFF behavior stays byte-identical).
+  const resolveDecisionPublisher = (): GitHubBlockPublisher =>
+    decisionPublisher ?? new GitHubBlockPublisher();
   const detector = createWorkDetector(octokit, owner, repo);
   const featureBranch = `feature/${workRequest.issueNumber}`;
   // Workspace isolation: sessions run in a worktree, not the daemon's own directory.
@@ -560,6 +566,12 @@ export function createPhaseHandlers(
         }
         run.l2GateNotified = false;
         run.l2MergeBlockedNotified = undefined;
+        // A rework cycle starts a NEW decision epoch (new deterministic id), so the
+        // next park must re-publish a fresh block. Clear the published flag here
+        // (enabled-only, so a flag-OFF feedback path stays byte-identical).
+        if (decisionManager?.isEnabled() === true) {
+          run.decisionBlockPublished = false;
+        }
         return 'feedback';
       }
       // Neither approved nor rejected — park the run
@@ -596,23 +608,66 @@ export function createPhaseHandlers(
         }
         run.decisionEpoch = (run.decisionEpoch ?? 0) + 1;
         run.l2GateNotified = true;
-
-        // Emit the DecisionRequest (additive, flag-gated). raise() is idempotent
-        // on the deterministic id and notify() no-ops past `detected`, so this is
-        // safe across re-scans. FAIL-CLOSED: a ledger() throw (enabled-but-broken)
-        // stays parked + logs; it must NOT crash the gate handler.
+        // A fresh park starts a fresh emission attempt for THIS epoch. Only touch
+        // the flag when the index is enabled so a flag-OFF park stays byte-identical
+        // to pre-Slice-1 behavior (no new RunState field written). The rework path
+        // also clears it (a new epoch must re-publish).
         if (decisionManager?.isEnabled() === true) {
-          try {
-            const ledger = decisionManager.ledger();
-            const { decision_id } = ledger.raise(
-              buildL2GateRequest(run, run.decisionEpoch, `${owner}/${repo}`),
-            );
+          run.decisionBlockPublished = false;
+        }
+      }
+
+      // Emit the DecisionRequest to the cockpit inbox (additive, flag-gated).
+      // This is the single physical wire daemon -> cockpit: raise the request,
+      // EMBED its canonical block into the gate issue BODY + apply the decision
+      // label (the surface the cockpit's issue-poller actually reads), THEN notify
+      // the local index lifecycle. The order is deliberate (raise -> publish ->
+      // notify): notify advances detected->notified, and we only claim the local
+      // row is notified once the cockpit-facing block is durably published.
+      //
+      // RETRYABLE (no latch-out): this runs on EVERY parked scan until the block
+      // is confirmed published (`run.decisionBlockPublished`), NOT once-only —
+      // so a transient GitHub/ledger failure is retried next tick instead of
+      // being lost behind the `l2GateNotified` one-shot guard. The deterministic
+      // decision_id + idempotent body embed make repeated raise/publish/notify
+      // safe (raise is idempotent on the id, ensure() is a no-op when the body is
+      // already identical, notify() no-ops past `detected`).
+      //
+      // FAIL-CLOSED: any ledger throw OR a non-posted publish leaves the run
+      // parked, does NOT mark the block published, and does NOT notify — it must
+      // never crash the gate handler.
+      if (
+        decisionManager?.isEnabled() === true &&
+        run.decisionEpoch !== undefined &&
+        run.decisionBlockPublished !== true
+      ) {
+        try {
+          const ledger = decisionManager.ledger();
+          const request = buildL2GateRequest(
+            run,
+            run.decisionEpoch,
+            `${owner}/${repo}`,
+          );
+          const { decision_id } = ledger.raise(request);
+          const published = await resolveDecisionPublisher().ensure({
+            request,
+            octokit,
+            owner,
+            repo,
+            issueNumber: workRequest.issueNumber,
+          });
+          if (published.posted) {
             await ledger.notify(decision_id);
-          } catch (e) {
+            run.decisionBlockPublished = true;
+          } else {
             console.warn(
-              `[l2-gate] decision-index raise/notify failed (failing closed, run stays parked): ${e instanceof Error ? e.message : String(e)}`,
+              `[l2-gate] decision block not published for #${workRequest.issueNumber} (${published.reason ?? 'unknown'}) — staying parked, will retry`,
             );
           }
+        } catch (e) {
+          console.warn(
+            `[l2-gate] decision-index raise/publish/notify failed (failing closed, run stays parked): ${e instanceof Error ? e.message : String(e)}`,
+          );
         }
       }
       return 'success';

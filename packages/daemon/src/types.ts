@@ -361,6 +361,13 @@ export interface RunState {
   l2Feedback?: string;
   /** Monotonic epoch bumped on each fresh l2-gate park; seeds the deterministic decision_id (issue-<n>:l2-gate:<epoch>). */
   decisionEpoch?: number;
+  /**
+   * True once the current epoch's DecisionRequest block has been durably embedded
+   * in the gate issue body + the decision label applied (the cockpit-facing wire).
+   * Gates the retryable publish step so a confirmed publish is not repeated; reset
+   * to false on a fresh park / rework cycle so the new epoch's block is re-emitted.
+   */
+  decisionBlockPublished?: boolean;
   /** Compliance findings from the most recent l3-compliance failure, fed back into l3-generate. */
   l3Feedback?: string;
   /** Counter for l3-compliance failure attempts (every failure path); capped to prevent infinite cross-phase loop. */

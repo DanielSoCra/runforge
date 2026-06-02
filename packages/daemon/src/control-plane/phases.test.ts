@@ -288,6 +288,7 @@ function createHandlers(
   repoRoot?: string,
   phaseLabelMirror?: PhaseLabelMirror,
   decisionManager?: import('./decision-escalation/manager.js').DecisionIndexManager,
+  decisionPublisher?: import('./decision-escalation/github-block-notifier.js').GitHubBlockPublisher,
 ) {
   const config = makeConfig(configOverrides);
   const mockCoordinator = { implement: vi.fn() } as any;
@@ -308,6 +309,7 @@ function createHandlers(
       undefined,
       phaseLabelMirror,
       decisionManager,
+      decisionPublisher,
     ),
     coordinator: mockCoordinator,
     config,
@@ -2547,12 +2549,16 @@ describe('createPhaseHandlers', () => {
         isEnabled: () => true,
         ledger: () => ({ raise, notify }),
       } as unknown as import('./decision-escalation/manager.js').DecisionIndexManager;
+      // Inject a publisher stub: notify happens only AFTER a confirmed publish
+      // (raise -> publish -> notify ordering).
+      const ensure = vi.fn().mockResolvedValue({ posted: true });
       const { handlers } = createHandlers(
         {},
         undefined,
         undefined,
         undefined,
         enabled,
+        { ensure } as unknown as import('./decision-escalation/github-block-notifier.js').GitHubBlockPublisher,
       );
       const run = makeRun({ issueNumber: 42 });
       const result = await handlers['l2-gate']!(run);
@@ -2588,6 +2594,146 @@ describe('createPhaseHandlers', () => {
       expect(run.pausedAtPhase).toBe('l2-gate');
       expect(run.l2GateNotified).toBe(true);
       expect(run.decisionEpoch).toBe(1);
+    });
+
+    describe('decision-block transport (Slice 1: daemon -> cockpit inbox)', () => {
+      function makeEnabledManager() {
+        const raise = vi
+          .fn()
+          .mockReturnValue({ decision_id: 'issue-42:l2-gate:1', outcome: 'admitted' });
+        const notify = vi.fn().mockResolvedValue({ applied: true, status: 'notified' });
+        const manager = {
+          isEnabled: () => true,
+          ledger: () => ({ raise, notify }),
+        } as unknown as import('./decision-escalation/manager.js').DecisionIndexManager;
+        return { manager, raise, notify };
+      }
+
+      it('FLAG ON: edits the gate issue BODY with the block AND adds the decision label, then notifies', async () => {
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'ready' }], body: 'Human issue body.' },
+        });
+        const { manager, raise, notify } = makeEnabledManager();
+        const ensure = vi.fn().mockResolvedValue({ posted: true });
+        const { handlers } = createHandlers(
+          {},
+          undefined,
+          undefined,
+          undefined,
+          manager,
+          { ensure } as unknown as import('./decision-escalation/github-block-notifier.js').GitHubBlockPublisher,
+        );
+        const run = makeRun({ issueNumber: 42 });
+        const result = await handlers['l2-gate']!(run);
+        expect(result).toBe('success');
+        // raise -> publish(ensure) -> notify ordering, all with the same id
+        expect(raise).toHaveBeenCalledTimes(1);
+        expect(ensure).toHaveBeenCalledTimes(1);
+        const ensureArg = ensure.mock.calls[0]![0];
+        expect(ensureArg.request.decision_id).toBe('issue-42:l2-gate:1');
+        expect(ensureArg.issueNumber).toBe(42);
+        expect(notify).toHaveBeenCalledWith('issue-42:l2-gate:1');
+        expect(run.decisionBlockPublished).toBe(true);
+      });
+
+      it('FLAG OFF: never touches the publisher (behavior identical to today)', async () => {
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'ready' }], body: 'Human issue body.' },
+        });
+        const ensure = vi.fn();
+        const disabled = {
+          isEnabled: () => false,
+          ledger: vi.fn(),
+        } as unknown as import('./decision-escalation/manager.js').DecisionIndexManager;
+        const { handlers } = createHandlers(
+          {},
+          undefined,
+          undefined,
+          undefined,
+          disabled,
+          { ensure } as unknown as import('./decision-escalation/github-block-notifier.js').GitHubBlockPublisher,
+        );
+        const run = makeRun();
+        const result = await handlers['l2-gate']!(run);
+        expect(result).toBe('success');
+        expect(ensure).not.toHaveBeenCalled();
+        expect(run.decisionBlockPublished).toBeUndefined();
+      });
+
+      it('RETRYABLE: a failed publish does NOT notify and is retried on the next scan (no latch-out)', async () => {
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'ready' }], body: 'Human issue body.' },
+        });
+        const { manager, notify } = makeEnabledManager();
+        const ensure = vi
+          .fn()
+          .mockResolvedValueOnce({ posted: false, reason: 'write_failed' })
+          .mockResolvedValueOnce({ posted: true });
+        const { handlers } = createHandlers(
+          {},
+          undefined,
+          undefined,
+          undefined,
+          manager,
+          { ensure } as unknown as import('./decision-escalation/github-block-notifier.js').GitHubBlockPublisher,
+        );
+        const run = makeRun({ issueNumber: 42 });
+
+        // First scan: publish fails -> not notified, not marked published, stays parked.
+        await handlers['l2-gate']!(run);
+        expect(run.pausedAtPhase).toBe('l2-gate');
+        expect(notify).not.toHaveBeenCalled();
+        expect(run.decisionBlockPublished).toBeFalsy();
+
+        // Second scan (re-park of the SAME run): publish retried and now succeeds.
+        await handlers['l2-gate']!(run);
+        expect(ensure).toHaveBeenCalledTimes(2);
+        expect(notify).toHaveBeenCalledWith('issue-42:l2-gate:1');
+        expect(run.decisionBlockPublished).toBe(true);
+      });
+
+      it('IDEMPOTENT: once published, a re-scan does not re-publish or re-notify', async () => {
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'ready' }], body: 'Human issue body.' },
+        });
+        const { manager, notify } = makeEnabledManager();
+        const ensure = vi.fn().mockResolvedValue({ posted: true });
+        const { handlers } = createHandlers(
+          {},
+          undefined,
+          undefined,
+          undefined,
+          manager,
+          { ensure } as unknown as import('./decision-escalation/github-block-notifier.js').GitHubBlockPublisher,
+        );
+        const run = makeRun({ issueNumber: 42 });
+        await handlers['l2-gate']!(run); // publishes
+        await handlers['l2-gate']!(run); // re-scan
+        expect(ensure).toHaveBeenCalledTimes(1);
+        expect(notify).toHaveBeenCalledTimes(1);
+      });
+
+      it('FAIL-CLOSED: publisher throwing leaves the run parked and does not crash the handler', async () => {
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'ready' }], body: 'Human issue body.' },
+        });
+        const { manager, notify } = makeEnabledManager();
+        const ensure = vi.fn().mockRejectedValue(new Error('boom'));
+        const { handlers } = createHandlers(
+          {},
+          undefined,
+          undefined,
+          undefined,
+          manager,
+          { ensure } as unknown as import('./decision-escalation/github-block-notifier.js').GitHubBlockPublisher,
+        );
+        const run = makeRun({ issueNumber: 42 });
+        const result = await handlers['l2-gate']!(run);
+        expect(result).toBe('success');
+        expect(run.pausedAtPhase).toBe('l2-gate');
+        expect(notify).not.toHaveBeenCalled();
+        expect(run.decisionBlockPublished).toBeFalsy();
+      });
     });
   });
 
