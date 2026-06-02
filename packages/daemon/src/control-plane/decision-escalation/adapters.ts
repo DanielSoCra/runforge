@@ -36,6 +36,17 @@ import type {
 } from '@auto-claude/decision-index';
 
 /**
+ * Opt-in toggle for the v1 LogNotifier's console line. OFF by default so a
+ * flag-ON daemon with no real publisher wired does not spam one log line per
+ * notify (verdict fix_before_flag_on / adapters.ts). Set
+ * AUTO_CLAUDE_DECISION_LOG_NOTIFY=1/true/yes to surface it for debugging.
+ */
+const LOG_NOTIFY_ENABLED = ((): boolean => {
+  const v = process.env.AUTO_CLAUDE_DECISION_LOG_NOTIFY?.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+})();
+
+/**
  * Notifier that logs only (delivery deferred to S1 — Slack/email/dashboard push).
  * `notify` records the ping and reports `sent`; `probe` reports `applied` for any
  * effect id we have already notified (idempotent re-send is acceptable). Mirrors
@@ -47,10 +58,17 @@ export class LogNotifier implements Notifier {
 
   async notify(args: NotifyArgs): Promise<'sent' | 'failed'> {
     this.calls.push(args);
-    // v1: log only. A real adapter would deliver here.
-    console.log(
-      `[decision-escalation] notify decision=${args.decision_id} channel=${args.channel} effect=${args.effectId}`,
-    );
+    // v1: log only. A real adapter would deliver here. The console line is the
+    // ONLY observable effect of this stub, and a flag-ON daemon with no real
+    // publisher wired would emit one line PER decision PER notify — pure log
+    // noise. Gate it behind an opt-in so it is silent by default (verdict
+    // fix_before_flag_on / adapters.ts LogNotifier). Set
+    // AUTO_CLAUDE_DECISION_LOG_NOTIFY=1 to surface the line for debugging.
+    if (LOG_NOTIFY_ENABLED) {
+      console.log(
+        `[decision-escalation] notify decision=${args.decision_id} channel=${args.channel} effect=${args.effectId}`,
+      );
+    }
     this.applied.add(args.effectId);
     return 'sent';
   }
@@ -86,8 +104,20 @@ export class RecordingSourceSink implements SourceSink {
     _sourceLocator: string,
     expectedSourceEtag?: string | null,
   ): Promise<CurrentEtagResult> {
-    // CRITICAL: positively confirm equal so the fail-closed resume guard dispatches
-    // (an `unknown`/non-equal result defers and strands the row at source_written).
+    // ┌─ TRACKED S1 GUARD — SOURCE-FRESHNESS PROBE IS INERT IN v1 ─────────────────┐
+    // │ This unconditionally returns `equal`, so outbox.runResume()'s fail-closed   │
+    // │ source-freshness guard ALWAYS dispatches. Combined with build-request.ts    │
+    // │ NOT setting `source_etag`, the guard is effectively DISABLED. SAFE today     │
+    // │ ONLY because no real GitHub SourceSink ships (this sink records in-memory;   │
+    // │ the live executor is the label/comment path).                               │
+    // │ BEFORE a real SourceSink lands, this MUST be replaced by a real fetch+compare│
+    // │ AND build-request.ts MUST set a concrete `source_etag` (BOTH together) — a   │
+    // │ real sink with this stub or a null source_etag would SILENTLY resume on a    │
+    // │ stale/tampered source. See the mirror note in build-request.ts.             │
+    // │ ALSO before that real sink: a real WriteResult.failed.error MUST be          │
+    // │ sanitized to a non-content operational message (outbox records it verbatim   │
+    // │ into outbox.last_error + audit detail_json).                                 │
+    // └──────────────────────────────────────────────────────────────────────────────┘
     return { status: 'equal', currentSourceEtag: expectedSourceEtag ?? undefined };
   }
 

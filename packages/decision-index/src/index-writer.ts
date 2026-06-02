@@ -83,23 +83,37 @@ export interface CreateIndexWriterOptions {
  */
 export function createIndexWriter(opts: CreateIndexWriterOptions): IndexWriter {
   const db = openDb({ path: opts.dbPath });
-  if (!opts.skipMigrate) migrate(db);
-  const protectedStore = new ProtectedStoreImpl({ key: opts.protectedKey, dir: opts.protectedDir, db });
-  const quarantine = new SqliteQuarantine(db);
-  return new IndexWriter({
-    db,
-    protectedStore,
-    quarantine,
-    notifier: opts.notifier,
-    sourceSink: opts.sourceSink,
-    resumeDispatcher: opts.resumeDispatcher,
-    clock: opts.clock,
-    channel: opts.channel,
-    maxAttempts: opts.maxAttempts,
-    // CRITICAL 1: mint the per-process generation here so every IndexWriter built
-    // by the factory has a stable owner token for the life of the process.
-    generation: opts.generation ?? randomUUID(),
-  });
+  // HANDLE-LEAK FIX (verdict fix_before_flag_on / index-writer.ts:84): openDb()
+  // has already acquired the sqlite handle. If migrate() or the ProtectedStore
+  // ctor (e.g. a bad-length protectedKey) throws, the handle would leak — the
+  // caller catches higher up but never sees `db`. Close db.$client before
+  // rethrowing so a broken-config boot path frees the connection.
+  try {
+    if (!opts.skipMigrate) migrate(db);
+    const protectedStore = new ProtectedStoreImpl({ key: opts.protectedKey, dir: opts.protectedDir, db });
+    const quarantine = new SqliteQuarantine(db);
+    return new IndexWriter({
+      db,
+      protectedStore,
+      quarantine,
+      notifier: opts.notifier,
+      sourceSink: opts.sourceSink,
+      resumeDispatcher: opts.resumeDispatcher,
+      clock: opts.clock,
+      channel: opts.channel,
+      maxAttempts: opts.maxAttempts,
+      // CRITICAL 1: mint the per-process generation here so every IndexWriter built
+      // by the factory has a stable owner token for the life of the process.
+      generation: opts.generation ?? randomUUID(),
+    });
+  } catch (err) {
+    try {
+      db.$client.close();
+    } catch {
+      /* already closed / nothing to free */
+    }
+    throw err;
+  }
 }
 
 export interface WorkerSessionMeta {

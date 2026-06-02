@@ -93,9 +93,19 @@ describe("no plaintext-derived hash for a sensitive answer (Finding C3)", () => 
     expect(r.applied).toBe(true);
 
     const resp = t.db.select().from(decisionResponses).all()[0]!;
-    const canonical = `{"answer_ref":${JSON.stringify(SENSITIVE_REF)},"answer_value":null}`;
-    const fallbackSha = createHash("sha256").update(canonical).digest("hex");
-    expect(resp.response_hash).toBe(hmac(canonical));
-    expect(resp.response_hash).not.toBe(fallbackSha);
+    // CONFLICT-BYPASS FIX: the response_hash is now the keyed HMAC over the
+    // LOGICAL answer identity ({answer_value:<validate_value>}) — NOT the volatile
+    // answer_ref — so a phi replay (fresh ref each redaction) still matches. Here
+    // validate_value is `{}`, canonicalized to {"answer_value":{}}. The C3
+    // contract this test guards is UNCHANGED: the stored hash is the keyed HMAC,
+    // never a bare SHA fallback (and never derived from the volatile ref).
+    const logicalCanonical = `{"answer_value":{}}`;
+    const refFallbackSha = createHash("sha256")
+      .update(`{"answer_ref":${JSON.stringify(SENSITIVE_REF)},"answer_value":null}`)
+      .digest("hex");
+    expect(resp.response_hash).toBe(hmac(logicalCanonical));
+    // not a bare SHA of the logical canonical, and not derived from the ref.
+    expect(resp.response_hash).not.toBe(createHash("sha256").update(logicalCanonical).digest("hex"));
+    expect(resp.response_hash).not.toBe(refFallbackSha);
   });
 });

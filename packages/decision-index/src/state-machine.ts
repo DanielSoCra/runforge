@@ -137,6 +137,37 @@ function hashPayload(
 }
 
 /**
+ * LOGICAL answer-identity payload for the answered-once `response_hash`
+ * (conflict-bypass fix / codex-confirmed). The response_hash MUST be a STABLE,
+ * logical identity of the answer so a genuine replay matches and a real conflict
+ * (different content) does not — it must NEVER depend on the volatile
+ * `answer_ref` (ProtectedStore.put mints a FRESH ulid every call, so a phi/secret
+ * answer replayed yields a different ref and would otherwise look like a
+ * conflict). Identity rules:
+ *   - option answer            -> { chosen_option }
+ *   - json non-sensitive       -> { answer_value }
+ *   - json phi/secret          -> { answer_value: <validate_value> } i.e. the
+ *       PLAINTEXT-EQUIVALENT logical value. It is hashed ONLY via the injected
+ *       keyed HMAC (hashPayload's `hashFn`), so the stored hash is an opaque MAC,
+ *       never plaintext / a guessable SHA-of-plaintext. The plaintext-equivalent
+ *       arrives in `validate_value` (the writer sets it on every redaction); it
+ *       is used for hashing+validation only and is NEVER stored.
+ * Both validateAnswer() (the WRITE) and apply()'s block (2a) (the CONFLICT CHECK)
+ * route through THIS function so their hashes are byte-identical by construction.
+ */
+function logicalAnswerPayload(answer: AnswerPayload): unknown {
+  if (answer.chosen_option !== undefined) {
+    return { chosen_option: answer.chosen_option };
+  }
+  const sensitive = answer.answer_sensitivity === "phi" || answer.answer_sensitivity === "secret";
+  if (sensitive) {
+    // hash the plaintext-equivalent logical value (keyed-HMAC'd), NOT the ref.
+    return { answer_value: answer.validate_value ?? null };
+  }
+  return { answer_value: answer.answer_value ?? null };
+}
+
+/**
  * C1 — derive the REDACTED, non-sensitive payload the sink may post back. A
  * phi/secret answer yields `null` (only the answer_ref is stored; the sink posts
  * an acknowledgement, never plaintext). A non-sensitive option answer yields the
@@ -196,7 +227,7 @@ export function validateAnswer(
     if (!options.some((o) => o.id === answer.chosen_option)) {
       throw new AnswerRejectedError(`chosen_option '${answer.chosen_option}' not in options[]`);
     }
-    return { responseHash: hashPayload({ chosen_option: answer.chosen_option }, hashFn, sensitive) };
+    return { responseHash: hashPayload(logicalAnswerPayload(answer), hashFn, sensitive) };
   }
 
   // kind === "json".
@@ -238,17 +269,14 @@ export function validateAnswer(
     }
   }
 
-  // Hash over the redacted payload only (ref + non-sensitive value). For a
-  // sensitive answer, only the ref is present, so no plaintext is hashed.
+  // Hash the LOGICAL answer identity (NOT the volatile answer_ref): the
+  // plaintext-equivalent for a sensitive answer (keyed-HMAC'd, never stored) or
+  // the answer_value for a non-sensitive one. This makes the answered-once
+  // response_hash STABLE across replays (a fresh ProtectedStore ref per redaction
+  // must not look like a conflict) while a different logical answer still
+  // produces a different hash. See logicalAnswerPayload().
   return {
-    responseHash: hashPayload(
-      {
-        answer_ref: answer.answer_ref ?? null,
-        answer_value: sensitive ? null : answer.answer_value ?? null,
-      },
-      hashFn,
-      sensitive,
-    ),
+    responseHash: hashPayload(logicalAnswerPayload(answer), hashFn, sensitive),
   };
 }
 
@@ -291,21 +319,42 @@ export function apply(db: Db, decisionId: string, event: TransitionEvent, ctx: A
     const state = loadState(tx, decisionId);
     const key = transitionKey(event, ctx.semanticKey);
 
-    // (1) idempotent replay guard
+    // (1) idempotent replay guard.
+    //
+    // CONFLICT-BYPASS FIX (verdict fix_before_flag_on / state-machine.ts:301,
+    // codex-confirmed): for `answer_submitted` this transition-key guard MUST NOT
+    // short-circuit. The production caller (daemon ledger.answer) keys BOTH
+    // semanticKey AND response_idempotency_key on `<decisionId>:answer` — derived
+    // from decision_id only, INDEPENDENT of chosen_option. So a SECOND human
+    // answer that FLIPS chosen_option arrives on the SAME transition_key. If we
+    // returned {applied:false} here, that conflicting decision would be silently
+    // dropped (the replay guard masking the answered-once conflict). Instead we
+    // fall through to block (2a), the single source of truth for answer
+    // replay-vs-conflict: it compares (response_idempotency_key, response_hash)
+    // against the stored response — SAME payload => idempotent no-op (correct
+    // retry), DIFFERENT payload => AnsweredOnceConflictError (the invariant). The
+    // candidateHash in (2a) is byte-identical to validateAnswer()'s stored hash
+    // for option and json/sensitive answers, so a genuine replay still no-ops.
+    // A rejected/invalid answer returns before step (4) and writes NO
+    // applied_transitions, so a present answer key always implies a present
+    // decision_responses row — (2a)'s existing-row gate cannot double-advance.
+    // For EVERY OTHER event the immediate transition-key replay no-op is kept.
     const already = tx
       .select()
       .from(appliedTransitions)
       .where(eq(appliedTransitions.transition_key, key))
       .all()
       .filter((r) => r.decision_id === decisionId);
-    if (already.length > 0) {
+    if (already.length > 0 && event !== "answer_submitted") {
       return { applied: false, status: state.status, effects: [] };
     }
 
     // (2a) DB-enforced answered-once guard runs BEFORE the state guard for the
     // answer path, so a second distinct answer that arrives after the item has
     // already advanced is rejected as a conflict (the invariant) rather than as
-    // an illegal transition. A same-key+hash repeat is an idempotent no-op.
+    // an illegal transition. A same-key+hash repeat is an idempotent no-op. This
+    // is ALSO the replay path for a same-transition_key re-apply (see the fix
+    // note above): a repeated identical answer matches key+hash and no-ops here.
     if (event === "answer_submitted") {
       const a = ctx.answer;
       if (!a) throw new AnswerRejectedError("answer_submitted requires ctx.answer");
@@ -318,21 +367,15 @@ export function apply(db: Db, decisionId: string, event: TransitionEvent, ctx: A
         const prev = existing[0]!;
         const sensitive =
           a.answer_sensitivity === "phi" || a.answer_sensitivity === "secret";
-        const candidateHash =
-          a.chosen_option !== undefined
-            ? hashPayload({ chosen_option: a.chosen_option }, ctx.responseHash, sensitive)
-            : hashPayload(
-                {
-                  answer_ref: a.answer_ref ?? null,
-                  answer_value: sensitive ? null : a.answer_value ?? null,
-                },
-                ctx.responseHash,
-                sensitive,
-              );
+        // Compare the LOGICAL answer hash (via logicalAnswerPayload — never the
+        // volatile answer_ref), byte-identical to validateAnswer()'s stored hash.
+        const candidateHash = hashPayload(logicalAnswerPayload(a), ctx.responseHash, sensitive);
         if (
           prev.response_idempotency_key === a.response_idempotency_key &&
           prev.response_hash === candidateHash
         ) {
+          // genuine replay (same key + same logical answer) -> idempotent no-op,
+          // even when the freshly-minted answer_ref differs.
           return { applied: false, status: state.status, effects: [] };
         }
         throw new AnsweredOnceConflictError(decisionId);

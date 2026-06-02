@@ -64,6 +64,32 @@ describe('readDecisionIndexConfig', () => {
     expect(cfg.dbPath).toBe(abs);
   });
 
+  // FIX (verdict fix_before_flag_on / .env.prod.example): env paths are resolved
+  // AGAINST stateDir (which is itself `…/state`). The example files must use BARE
+  // names — a leading `state/` would double-resolve to `…/state/state/…`, whose
+  // parent openDb() never creates. These assertions pin both:
+  //  (a) the CORRECT (bare) example value resolves directly under stateDir; and
+  //  (b) the BUGGY `state/…` value demonstrably double-prefixes (regression guard
+  //      so a future edit re-introducing `state/` in the examples is caught).
+  it('bare example names resolve directly under stateDir (the fixed .env.example values)', () => {
+    process.env.AUTO_CLAUDE_DECISION_INDEX_PATH = 'decision-index.sqlite';
+    process.env.AUTO_CLAUDE_DECISION_PROTECTED_DIR = 'decision-protected/';
+    const cfg = readDecisionIndexConfig(stateDir);
+    expect(cfg.dbPath).toBe(join(stateDir, 'decision-index.sqlite'));
+    expect(cfg.protectedDir).toBe(join(stateDir, 'decision-protected'));
+    // NOT double-prefixed.
+    expect(cfg.dbPath).not.toContain(join('state', 'state'));
+  });
+
+  it('a leading state/ prefix double-resolves to state/state/… (why bare names are required)', () => {
+    // stateDir basename is `state` so a `state/…` value resolves to `state/state/…`.
+    const stateLike = join(tmpdir(), 'state');
+    process.env.AUTO_CLAUDE_DECISION_INDEX_PATH = 'state/decision-index.sqlite';
+    const cfg = readDecisionIndexConfig(stateLike);
+    expect(cfg.dbPath).toBe(join(stateLike, 'state', 'decision-index.sqlite'));
+    expect(cfg.dbPath).toContain(join('state', 'state'));
+  });
+
   it('defaults the protected dir to state/decision-protected (absolute)', () => {
     const cfg = readDecisionIndexConfig(stateDir);
     expect(cfg.protectedDir).toBe(join(stateDir, 'decision-protected'));

@@ -185,6 +185,47 @@ describe("DecisionResponse", () => {
     });
     expect(r.answer).toEqual({ foo: "bar" });
   });
+
+  // FIX (verdict fix_before_flag_on / decision-response.ts:8): the schema used
+  // z.object() (allows extras) + at-least-one refine, so a {both} payload was
+  // valid-but-ambiguous and unknown extras passed silently. Harden to
+  // z.strictObject() + XOR (exactly one of chosen_option / answer).
+  it("REJECTS a payload carrying BOTH chosen_option and answer (XOR)", () => {
+    expect(() =>
+      DecisionResponseSchema.parse({
+        decision_id: "01HXYZABCDEFGHJKMNPQRSTVWX",
+        chosen_option: "yes",
+        answer: { foo: "bar" },
+        answerer: "daniel",
+        answered_at: "2026-05-27T10:00:00.000Z",
+        idempotency_key: "idem-3",
+      }),
+    ).toThrow();
+  });
+
+  it("REJECTS a payload carrying NEITHER chosen_option nor answer", () => {
+    expect(() =>
+      DecisionResponseSchema.parse({
+        decision_id: "01HXYZABCDEFGHJKMNPQRSTVWX",
+        answerer: "daniel",
+        answered_at: "2026-05-27T10:00:00.000Z",
+        idempotency_key: "idem-4",
+      }),
+    ).toThrow();
+  });
+
+  it("REJECTS unknown extra top-level fields (strictObject)", () => {
+    expect(() =>
+      DecisionResponseSchema.parse({
+        decision_id: "01HXYZABCDEFGHJKMNPQRSTVWX",
+        chosen_option: "yes",
+        answerer: "daniel",
+        answered_at: "2026-05-27T10:00:00.000Z",
+        idempotency_key: "idem-5",
+        injected: "surprise",
+      }),
+    ).toThrow();
+  });
 });
 
 describe("committed JSON Schema matches freshly generated", () => {

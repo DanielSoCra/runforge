@@ -616,6 +616,39 @@ export class Outbox {
   }
 
   /**
+   * STRANDING FIX (verdict fix_before_flag_on, outbox.ts ~740): a CLAIMED
+   * (`executing`) row whose adapter await THROWS/REJECTS — vs. returning a
+   * structured `failed` — must never be left stuck `executing`. Same-process
+   * reconcile skips current-generation `executing` rows by design (they look like
+   * a live in-flight claim), so an un-caught adapter throw would strand the row
+   * until process restart. Treat a thrown adapter exactly like a structured
+   * transient failure: recordFailure() bumps the attempt and releases the claim
+   * back to `reserved` (or, on exhaustion, drives the decision terminal `failed`)
+   * — then RE-THROW so the caller/daemon tick still sees the error. The DB row is
+   * settled BEFORE the throw propagates, so no row is ever orphaned `executing`.
+   */
+  private async dispatchClaimed<T>(
+    id: string,
+    decisionId: string,
+    label: string,
+    adapterCall: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await adapterCall();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Record the attempt + release/terminal the claim defensively. If THIS
+      // itself throws (a SQLite-level failure), the original error still wins.
+      try {
+        this.recordFailure(id, decisionId, `${label} threw: ${msg}`);
+      } catch {
+        // best-effort settle; surface the original adapter error below.
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Run one effect end-to-end: reserve -> execute (deterministic id) -> commit.
    * Returns the resulting status + any follow-on effects.
    */
@@ -742,7 +775,9 @@ export class Outbox {
     }
 
     if (kind === "notify") {
-      const out = await this.notifier.notify({ decision_id: decisionId, channel: this.channel, effectId: id });
+      const out = await this.dispatchClaimed(id, decisionId, "notify", () =>
+        this.notifier.notify({ decision_id: decisionId, channel: this.channel, effectId: id }),
+      );
       if (out === "failed") {
         const f = this.recordFailure(id, decisionId, "notify failed");
         return { status: f.status, kind, outcome: "failed", effects: [] };
@@ -753,17 +788,19 @@ export class Outbox {
 
     if (kind === "write_response") {
       const resp = this.responseRow(decisionId);
-      const res = await this.sourceSink.writeResponse({
-        decision_id: decisionId,
-        responseRef: this.responseKey(decisionId) ?? decisionId,
-        expectedSourceEtag: item.source_etag,
-        effectId: id,
-        sourceLocator: item.source_url,
-        responsePayloadJson: resp.responsePayloadJson,
-        answerRef: resp.answerRef,
-        // a protected (phi/secret) answer has no postable payload — only a ref.
-        hasProtectedAnswer: resp.responsePayloadJson === null && resp.answerRef !== null,
-      });
+      const res = await this.dispatchClaimed(id, decisionId, "writeResponse", () =>
+        this.sourceSink.writeResponse({
+          decision_id: decisionId,
+          responseRef: this.responseKey(decisionId) ?? decisionId,
+          expectedSourceEtag: item.source_etag,
+          effectId: id,
+          sourceLocator: item.source_url,
+          responsePayloadJson: resp.responsePayloadJson,
+          answerRef: resp.answerRef,
+          // a protected (phi/secret) answer has no postable payload — only a ref.
+          hasProtectedAnswer: resp.responsePayloadJson === null && resp.answerRef !== null,
+        }),
+      );
       if (res.status === "precondition_failed") {
         // Record the CONCRETE current source etag as superseded_by (no fabricated
         // `${old}-changed`): a real, verifiable etag drives the supersession.
@@ -799,7 +836,9 @@ export class Outbox {
     // edit. A source_changed result supersedes (with the concrete etag) and never
     // resumes; an unknown/error probe defers (leaves the row reserved) — we never
     // resume on uncertainty (mirrors slice-1's fail-closed `unknown` handling).
-    const fresh = await this.sourceSink.currentEtag(item.source_url, item.source_etag);
+    const fresh = await this.dispatchClaimed(id, decisionId, "currentEtag", () =>
+      this.sourceSink.currentEtag(item.source_url, item.source_etag),
+    );
     // IMPORTANT 3 — a `source_changed` result supersedes ONLY with a CONCRETE
     // currentSourceEtag. A source_changed with NO concrete etag is unverifiable;
     // we must NOT fabricate `${old}-changed`. Demote it to the fail-closed
@@ -824,14 +863,16 @@ export class Outbox {
       .from(workerSessions)
       .where(eq(workerSessions.decision_id, decisionId))
       .all()[0];
-    const res = await this.resumeDispatcher.resume({
-      decision_id: decisionId,
-      mode: kind === "requeue" ? "requeue" : "mid_run",
-      effectId: id,
-      wake_command: ws?.wake_command ?? null,
-      requeue_command: ws?.requeue_command ?? null,
-      work_request_ref: ws?.work_request_ref ?? null,
-    });
+    const res = await this.dispatchClaimed(id, decisionId, "resume", () =>
+      this.resumeDispatcher.resume({
+        decision_id: decisionId,
+        mode: kind === "requeue" ? "requeue" : "mid_run",
+        effectId: id,
+        wake_command: ws?.wake_command ?? null,
+        requeue_command: ws?.requeue_command ?? null,
+        work_request_ref: ws?.work_request_ref ?? null,
+      }),
+    );
 
     if (res === "acked") {
       // A4: a confirmed resume/requeue lands DIRECTLY in terminal `resumed`

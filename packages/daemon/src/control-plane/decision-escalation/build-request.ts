@@ -102,6 +102,19 @@ export function buildL2GateRequest(
     `Pipeline variant: ${run.variant}; decision epoch: ${epoch}.`,
   ].join(' ');
 
+  // ┌─ TRACKED S1 GUARD — SOURCE-FRESHNESS PLUMBING IS INERT IN v1 ───────────────┐
+  // │ `source_etag` is deliberately NOT set on the request below. Combined with    │
+  // │ RecordingSourceSink.currentEtag() (adapters.ts) unconditionally returning    │
+  // │ {status:'equal'}, the outbox.runResume() source-freshness guard ALWAYS takes │
+  // │ the `equal` branch — i.e. it is INERT. SAFE today ONLY because no real       │
+  // │ GitHub SourceSink ships (the live executor is the label/comment path; this   │
+  // │ sink only records in-memory).                                                │
+  // │ BEFORE wiring a real SourceSink, BOTH sites MUST land TOGETHER:              │
+  // │   1. set a concrete `source_etag` HERE (the gate issue body block etag), AND │
+  // │   2. implement a real currentEtag() that fetches + compares (adapters.ts).   │
+  // │ Wiring a real sink while leaving `source_etag` null would SILENTLY PASS the  │
+  // │ guard on a stale/tampered source. See the mirror note in adapters.ts.        │
+  // └──────────────────────────────────────────────────────────────────────────────┘
   const request = {
     decision_id: decisionId,
     source_url: opts.sourceUrl ?? issueUrlFor(run),

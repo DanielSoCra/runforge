@@ -1,5 +1,6 @@
 import {
   DecisionRequestSchema,
+  PROTOCOL_VERSION,
   assertFullyClassified,
   IncompleteClassificationError,
   isProtected,
@@ -60,6 +61,30 @@ export function ingest(
     throw new NotAdmittedError("DecisionRequest failed schema validation", []);
   }
   const request = parsed.data;
+
+  // PROTOCOL-VERSION GUARD (verdict fix_before_flag_on / decision-request.ts:35).
+  // The schema admits ANY non-empty `protocol_version` (z.string().min(1)) so a
+  // mis-versioned producer would be stored under the wrong contract. We enforce
+  // equality HERE rather than via z.literal() in the schema: the committed
+  // DecisionRequest JSON-Schema artifact is byte-pinned (regenerate-and-diff
+  // test) and shared field-for-field with pm-cockpit, so tightening the zod type
+  // would fork that artifact. An OMITTED version still defaults to
+  // PROTOCOL_VERSION (the daemon's own build-request path omits it) and passes.
+  // A concrete mismatch is QUARANTINED content-free (the version string is
+  // operational, never PHI) and NOT admitted — drift is surfaced, not absorbed.
+  if (request.protocol_version !== PROTOCOL_VERSION) {
+    deps.quarantine.record({
+      decision_id: request.decision_id,
+      reason: "protocol_version_mismatch",
+      // path NAMES only; the actual version value is operational but we keep the
+      // quarantine record minimal/content-free per the §5.1 contract.
+      missingPaths: ["protocol_version"],
+    });
+    throw new NotAdmittedError(
+      `DecisionRequest protocol_version mismatch (expected ${PROTOCOL_VERSION}); quarantined`,
+      ["protocol_version"],
+    );
+  }
 
   const fs = request.field_sensitivity as Record<string, SensitivityClass>;
 

@@ -136,9 +136,33 @@ describe("sensitive JSON answer leaves no plaintext-derived hash (Finding 3)", (
   it("answered-once idempotency holds across a replay of the same PHI answer", () => {
     const r1 = answerPhi("resp-1");
     expect(r1.applied).toBe(true);
-    // replay same key + same answer -> idempotent no-op, still exactly one row
+    // replay same key + same answer -> idempotent no-op, still exactly one row.
+    // (Each redaction mints a FRESH protected ref, so this proves the
+    // response_hash is the STABLE logical-value HMAC, NOT the volatile ref.)
     const r2 = answerPhi("resp-1");
     expect(r2.applied).toBe(false);
+    expect(t.db.select().from(decisionResponses).all()).toHaveLength(1);
+  });
+
+  it("CONFLICT detected for a DIFFERENT PHI answer under the SAME key (not masked by the fresh-ref replay path)", async () => {
+    const { AnsweredOnceConflictError } = await import("../src/state-machine.js");
+    const r1 = answerPhi("resp-1");
+    expect(r1.applied).toBe(true);
+    // a SECOND, DIFFERENT phi answer under the SAME idempotency key must raise the
+    // answered-once conflict — the logical-value HMAC differs even though the ref
+    // is volatile, so the conflict-bypass fix surfaces it instead of dropping it.
+    expect(() =>
+      writer.applyEvent(id, "answer_submitted", {
+        semanticKey: "resp-1",
+        answer: {
+          response_idempotency_key: "resp-1",
+          answer_value: { patient: "Jane Roe", dob: "1990-09-09", note: "diagnosis Y" },
+          answer_sensitivity: "phi",
+          answerer: "daniel",
+          answered_at: NOW,
+        },
+      }),
+    ).toThrow(AnsweredOnceConflictError);
     expect(t.db.select().from(decisionResponses).all()).toHaveLength(1);
   });
 
