@@ -126,9 +126,26 @@ FUNC-AC-RUNTIME-SOURCE-ISOLATION:
   status: draft
 
 FUNC-AC-DECISION-ESCALATION:
+  children: [ARCH-AC-DECISION-ESCALATION]
   status: approved
 
-# --- Unified-cockpit L1s (Phase 1 act-2; draft — pending Operator approval) ---
+ARCH-AC-DECISION-ESCALATION:
+  parent: FUNC-AC-DECISION-ESCALATION
+  children: [STACK-AC-DECISION-ESCALATION-STORE, STACK-AC-DECISION-ESCALATION-EMITTER]
+  status: draft
+
+# code_paths/test_paths are added to these STACK entries when the implementation
+# lands the files (the path-existence validator requires real files). The target
+# paths are recorded in each L3 spec's frontmatter until then.
+STACK-AC-DECISION-ESCALATION-STORE:
+  parent: ARCH-AC-DECISION-ESCALATION
+  status: draft  # → packages/decision-protocol/, packages/decision-index/ (fold)
+
+STACK-AC-DECISION-ESCALATION-EMITTER:
+  parent: ARCH-AC-DECISION-ESCALATION
+  status: draft  # → packages/daemon/src/control-plane/decision-escalation/ (wiring)
+
+# --- Unified-cockpit L1s (Phase 1 act-2; approved + canonical on main, PR #697) ---
 
 FUNC-AC-OPERATOR-LEARNING:
   status: approved
