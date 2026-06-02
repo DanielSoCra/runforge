@@ -359,6 +359,8 @@ export interface RunState {
   l2GateNotified?: boolean;
   l2MergeBlockedNotified?: boolean;
   l2Feedback?: string;
+  /** Monotonic epoch bumped on each fresh l2-gate park; seeds the deterministic decision_id (issue-<n>:l2-gate:<epoch>). */
+  decisionEpoch?: number;
   /** Compliance findings from the most recent l3-compliance failure, fed back into l3-generate. */
   l3Feedback?: string;
   /** Counter for l3-compliance failure attempts (every failure path); capped to prevent infinite cross-phase loop. */
