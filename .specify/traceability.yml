@@ -134,16 +134,26 @@ ARCH-AC-DECISION-ESCALATION:
   children: [STACK-AC-DECISION-ESCALATION-STORE, STACK-AC-DECISION-ESCALATION-EMITTER]
   status: draft
 
-# code_paths/test_paths are added to these STACK entries when the implementation
-# lands the files (the path-existence validator requires real files). The target
-# paths are recorded in each L3 spec's frontmatter until then.
+# code_paths/test_paths wired in once the implementation landed the files (the
+# path-existence validator requires real files). Paths mirror each L3 spec's
+# frontmatter.
 STACK-AC-DECISION-ESCALATION-STORE:
   parent: ARCH-AC-DECISION-ESCALATION
-  status: draft  # → packages/decision-protocol/, packages/decision-index/ (fold)
+  code_paths:
+    - packages/decision-protocol/
+    - packages/decision-index/
+  test_paths:
+    - packages/decision-protocol/**/*.test.ts
+    - packages/decision-index/**/*.test.ts
+  status: approved
 
 STACK-AC-DECISION-ESCALATION-EMITTER:
   parent: ARCH-AC-DECISION-ESCALATION
-  status: draft  # → packages/daemon/src/control-plane/decision-escalation/ (wiring)
+  code_paths:
+    - packages/daemon/src/control-plane/decision-escalation/
+  test_paths:
+    - packages/daemon/src/control-plane/decision-escalation/**/*.test.ts
+  status: approved
 
 # --- Unified-cockpit L1s (Phase 1 act-2; approved + canonical on main, PR #697) ---
 
