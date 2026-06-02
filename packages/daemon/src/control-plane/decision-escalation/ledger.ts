@@ -178,7 +178,7 @@ export class DecisionLedger {
     // item is not silently skipped — staleness is independent of view-state.
     for (const item of this.writer.reader.listRanked({ includeSuppressed: true })) {
       if (item.status !== 'notified' && item.status !== 'viewed') continue;
-      if (!item.expires_at) continue;
+      if (item.expires_at == null || item.expires_at === '') continue;
       if (new Date(item.expires_at).getTime() > nowMs) continue; // not yet overdue
       this.writer.applyEvent(item.decision_id, 'expire', {
         actor: 'daemon',

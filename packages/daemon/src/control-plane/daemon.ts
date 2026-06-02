@@ -1480,9 +1480,10 @@ export async function startDaemon(
             .reverse()
             .find(
               (c) =>
-                c.body?.includes('REJECTED') || c.body?.includes('l2-rejected'),
+                c.body != null &&
+                (c.body.includes('REJECTED') || c.body.includes('l2-rejected')),
             );
-          if (rejectionComment?.body) {
+          if (rejectionComment?.body != null && rejectionComment.body !== '') {
             // Sanitize identically to the l2-gate handler: strip {{placeholder}}
             // template patterns (prompt-injection defense) and cap length.
             const MAX_FEEDBACK_LENGTH = 4000;
