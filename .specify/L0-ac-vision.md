@@ -2,7 +2,7 @@
 id: L0-AC-VISION
 type: vision
 domain: auto-claude
-status: draft
+status: approved
 version: 5
 layer: 0
 ---

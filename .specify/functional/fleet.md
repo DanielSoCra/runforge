@@ -2,7 +2,7 @@
 id: FUNC-AC-FLEET
 type: functional
 domain: auto-claude
-status: draft
+status: approved
 version: 1
 layer: 1
 ---
