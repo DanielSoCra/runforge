@@ -131,6 +131,25 @@ FUNC-AC-DECISION-ESCALATION:
 
 ARCH-AC-DECISION-ESCALATION:
   parent: FUNC-AC-DECISION-ESCALATION
+  children: [STACK-AC-DECISION-ESCALATION-STORE, STACK-AC-DECISION-ESCALATION-EMITTER]
+  status: draft
+
+STACK-AC-DECISION-ESCALATION-STORE:
+  parent: ARCH-AC-DECISION-ESCALATION
+  code_paths:
+    - packages/decision-protocol/
+    - packages/decision-index/
+  test_paths:
+    - packages/decision-protocol/**/*.test.ts
+    - packages/decision-index/**/*.test.ts
+  status: draft
+
+STACK-AC-DECISION-ESCALATION-EMITTER:
+  parent: ARCH-AC-DECISION-ESCALATION
+  code_paths:
+    - packages/daemon/src/control-plane/decision-escalation/
+  test_paths:
+    - packages/daemon/src/control-plane/decision-escalation/**/*.test.ts
   status: draft
 
 # --- Unified-cockpit L1s (Phase 1 act-2; approved + canonical on main, PR #697) ---
