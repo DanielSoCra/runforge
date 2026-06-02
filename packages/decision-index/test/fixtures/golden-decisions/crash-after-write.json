@@ -1,0 +1,63 @@
+{
+  "decision_id": "01HCRASHWRITE00000000000008",
+  "protocol_version": "1.0.0",
+  "source_url": "https://github.com/acme/repo/issues/1",
+  "source_etag": "etag-1",
+  "source_event_id": "evt-1",
+  "deployment": "acme-platform",
+  "run_id": "run-1",
+  "worker_session_id": "ws-1",
+  "phase": "implementation",
+  "risk_class": "P1",
+  "question": "Proceed with the change?",
+  "context": "context here",
+  "options": [
+    {
+      "id": "yes",
+      "label": "Proceed"
+    },
+    {
+      "id": "no",
+      "label": "Abort"
+    }
+  ],
+  "recommended_option": "no",
+  "consequence_of_no_answer": "Run stays paused.",
+  "reversibility": "hard_to_reverse",
+  "expires_at": "2026-06-01T00:00:00.000Z",
+  "answer_schema": {
+    "kind": "option"
+  },
+  "resume_mode": "mid_run",
+  "idempotency_key": "idem-1",
+  "trace_id": "trace-1",
+  "agent_version": "1.0.0",
+  "skill_version": "0.1.0",
+  "field_sensitivity": {
+    "decision_id": "internal",
+    "protocol_version": "internal",
+    "source_url": "internal",
+    "source_etag": "internal",
+    "source_event_id": "internal",
+    "deployment": "internal",
+    "run_id": "internal",
+    "worker_session_id": "internal",
+    "phase": "internal",
+    "risk_class": "internal",
+    "question": "internal",
+    "context": "internal",
+    "options[].id": "internal",
+    "options[].label": "internal",
+    "options[].detail": "internal",
+    "recommended_option": "internal",
+    "consequence_of_no_answer": "internal",
+    "reversibility": "internal",
+    "expires_at": "internal",
+    "answer_schema": "internal",
+    "resume_mode": "internal",
+    "idempotency_key": "internal",
+    "trace_id": "internal",
+    "agent_version": "internal",
+    "skill_version": "internal"
+  }
+}
