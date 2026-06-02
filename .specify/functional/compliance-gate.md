@@ -31,8 +31,8 @@ Compounding the problem, deployments differ in what they must check. One deploym
 - When a change touches one or more of those paths
 - Then the change is marked as requiring compliance review and is held back from the shared mainline until the deployment's required compliance reviews have all passed
 
-**Scenario: Required reviews are drawn from the deployment's persona-set**
-- Given a deployment that has configured a compliance persona-set in its profile
+**Scenario: Required reviews are drawn from the deployment's compliance review set**
+- Given a deployment that has configured a compliance review set in its profile
 - When a regulated-sensitive change is detected
 - Then exactly the lenses the deployment requires for the paths that change touched are demanded — a deployment with several lenses requires all that apply; a deployment with a lighter set requires fewer; a deployment with none requires none
 
@@ -72,7 +72,7 @@ Compounding the problem, deployments differ in what they must check. One deploym
 - Then the override requires an explicit reason, the override and its reason are recorded as part of the change's compliance record, and the change proceeds only on that recorded decision
 
 **Scenario: A deployment requiring no compliance review is not gated**
-- Given a deployment whose profile configures no compliance persona-set
+- Given a deployment whose profile configures no compliance review set
 - When any change is produced for it
 - Then the compliance gate adds no hold — the change proceeds on the platform's other gates alone
 
@@ -94,9 +94,9 @@ Compounding the problem, deployments differ in what they must check. One deploym
 ## Constraints
 
 - The gate is **fail-closed**: the default outcome on any uncertainty — unknown verdict, unavailable reviewer, unrecognized path, incomplete configuration — is to hold the change for a human, never to release it.
-- The compliance persona-set is a **per-deployment property** held in the deployment's profile, not a platform-wide fixed list; the same platform behavior yields a full set for a high-regulation deployment, a light set for a low-regulation one, and none for an unregulated one.
+- The compliance review set is a **per-deployment property** held in the deployment's profile, not a platform-wide fixed list; the same platform behavior yields a full set for a high-regulation deployment, a light set for a low-regulation one, and none for an unregulated one.
 - Regulated-sensitive paths — at minimum those touching protected data, regulated billing, access boundaries, and safety lines — are detected from the deployment's profile, and detection forcing the required review happens **by construction**: the gate must not depend on a reviewer remembering to look or on a change being voluntarily flagged.
-- The compliance gate is an **enforced gate, not advice**: a blocking verdict prevents the merge; it does not merely annotate it. This holds even when every other gate (verification, risk-class) is green.
+- The compliance gate is an **enforced gate, not advice**: a blocking verdict prevents the merge; it does not merely annotate it. This holds even when every other check the platform runs has passed.
 - A compliance block can only be cleared by all required reviews passing or by an explicit, recorded Operator decision; the platform never clears a compliance block on its own, and never auto-promotes a regulated-sensitive change to autonomous merge.
 - An Operator override, where a deployment permits one, must be explicit, reasoned, and recorded; a deployment may configure that certain lenses or path classes are non-overridable.
 - The gate decides only whether a change may proceed toward the shared mainline on compliance grounds; it never merges, never deploys, never edits a specification, and never alters another pipeline phase.

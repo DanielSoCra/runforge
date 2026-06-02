@@ -11,7 +11,7 @@ layer: 1
 
 ## Problem Statement
 
-The Operator is the scarce resource. Every decision the platform escalates costs a slice of his attention, and a great many of those decisions are predictable: he approves the same low-risk change-classes every time, he always dismisses a particular kind of finding, he re-ranks the inbox the same way each morning, and he edits a suggested specification toward the same shape before approving it. Today the platform asks about all of these with equal weight and surfaces them in a fixed order, so the Operator keeps paying attention to choices he has effectively already made — and the genuinely novel decision sits in the same undifferentiated queue as a dozen routine ones.
+The Operator is the scarce resource. Every decision the platform escalates costs a slice of his attention, and a great many of those decisions are predictable: he approves the same low-risk change-classes every time, he always dismisses a particular kind of finding, he re-ranks the inbox the same way each morning, and he edits a suggested specification toward the same shape before approving it. Today the platform asks about all of these with equal weight and surfaces them in a fixed order, so the Operator keeps paying attention to choices he has effectively already made — and the genuinely novel decision sits in the same undifferentiated backlog as a dozen routine ones.
 
 The platform already promises to *ask less over time*. It learns one way through the skills and instructions the Operator improves; it must also learn from the Operator's own behavior — which decision-classes he consistently approves or takes the recommendation on, what he consistently dismisses, how he orders his attention, and how he reshapes what is proposed to him. What the platform can confidently predict, it should stop asking about, and what the Operator clearly cares about most, it should surface first. But this learning sits directly against the platform's hardest boundary: it must make the Operator's attention go further **without ever deciding on his behalf the things only he may decide**, and without ever becoming an opaque bias he cannot see, question, or undo.
 
@@ -121,7 +121,7 @@ This capability is the behavioral-learning loop: it observes the Operator's deci
 - Then the platform returns that decision-class to asking as it did before any learning, discards the learned bias, and resumes observing from a clean state
 - And the reset is honored immediately, for that class, without affecting unrelated learning
 
-**Scenario: A bad learned bias is reversible across the fleet**
+**Scenario: A bad learned bias is reversible wherever it took effect**
 - Given a learned preference proves wrong or harmful after it took effect
 - When it is reverted
 - Then the revert can be applied wherever that preference was in effect, and the platform falls back to the prior, more cautious behavior

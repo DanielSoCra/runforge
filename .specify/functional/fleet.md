@@ -30,7 +30,7 @@ The Operator needs each project to be a self-describing **deployment** with its 
 
 **Scenario: Registering a project as a deployment**
 - Given the Operator wants the platform to run a new project
-- When they register it in the Fleet Registry with its profile — the repositories it owns, its risk-classification rules, its compliance reviewer set, its automatable/strained/irreducibly-human map, its budget, where its changes may land first, and the path by which its changes are released to production
+- When they register it in the registry with its profile — the repositories it owns, its risk-classification rules, its compliance reviewer set, its automatable/strained/irreducibly-human map, its budget, where its changes may land first, and the path by which its changes are released to production
 - Then the platform runs that project as a deployment using only that profile
 - And no change to the platform itself is required to add the project
 
@@ -75,18 +75,18 @@ The Operator needs each project to be a self-describing **deployment** with its 
 - When the Operator views their ordering
 - Then each item shows why it is ranked where it is, and there is no hidden global ranking the Operator cannot inspect
 
-### Capability ingress
+### Adopting an improved shared capability
 
 **Scenario: An updated capability is adopted as a version**
-- Given a reusable capability or instruction has been improved at the Capability Source
+- Given a reusable capability or instruction has been improved at its shared-capability source
 - When the platform adopts it
-- Then it is taken in as a specific, identified version recorded in the Fleet Registry
+- Then it is taken in as a specific, identified version recorded in the registry
 - And a deployment runs against a known capability version, never against whatever happens to be edited live
 
 **Scenario: A capability version is bound per deployment**
 - Given a capability version has been adopted
 - When the Operator chooses where it applies
-- Then the Fleet Registry records which deployments run which version
+- Then the registry records which deployments run which version
 - And it is visible which deployments share a capability, so the blast radius of a change to it is known before it ships
 
 ### Canary rollout
