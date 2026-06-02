@@ -287,6 +287,7 @@ function createHandlers(
   workReq?: WorkRequest,
   repoRoot?: string,
   phaseLabelMirror?: PhaseLabelMirror,
+  decisionManager?: import('./decision-escalation/manager.js').DecisionIndexManager,
 ) {
   const config = makeConfig(configOverrides);
   const mockCoordinator = { implement: vi.fn() } as any;
@@ -306,6 +307,7 @@ function createHandlers(
       undefined,
       undefined,
       phaseLabelMirror,
+      decisionManager,
     ),
     coordinator: mockCoordinator,
     config,
@@ -2496,6 +2498,96 @@ describe('createPhaseHandlers', () => {
       expect(result).toBe('failure');
       expect(mockOctokit.issues.addLabels).not.toHaveBeenCalled();
       expect(mockOctokit.issues.createComment).not.toHaveBeenCalled();
+    });
+
+    it('bumps decisionEpoch ONLY on a fresh park (not on re-scan)', async () => {
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'ready' }] },
+      });
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      expect(run.decisionEpoch).toBeUndefined();
+      await handlers['l2-gate']!(run); // fresh park
+      expect(run.decisionEpoch).toBe(1);
+      // a re-scan of the already-parked run keeps the same epoch
+      await handlers['l2-gate']!(run);
+      expect(run.decisionEpoch).toBe(1);
+    });
+
+    it('does not touch the ledger when the manager is disabled', async () => {
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'ready' }] },
+      });
+      const ledger = vi.fn();
+      const disabled = {
+        isEnabled: () => false,
+        ledger,
+      } as unknown as import('./decision-escalation/manager.js').DecisionIndexManager;
+      const { handlers } = createHandlers(
+        {},
+        undefined,
+        undefined,
+        undefined,
+        disabled,
+      );
+      const result = await handlers['l2-gate']!(makeRun());
+      expect(result).toBe('success');
+      expect(ledger).not.toHaveBeenCalled();
+    });
+
+    it('raises and notifies a DecisionRequest on a fresh park when enabled', async () => {
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'ready' }] },
+      });
+      const raise = vi
+        .fn()
+        .mockReturnValue({ decision_id: 'issue-42:l2-gate:1', outcome: 'admitted' });
+      const notify = vi.fn().mockResolvedValue({ applied: true, status: 'notified' });
+      const enabled = {
+        isEnabled: () => true,
+        ledger: () => ({ raise, notify }),
+      } as unknown as import('./decision-escalation/manager.js').DecisionIndexManager;
+      const { handlers } = createHandlers(
+        {},
+        undefined,
+        undefined,
+        undefined,
+        enabled,
+      );
+      const run = makeRun({ issueNumber: 42 });
+      const result = await handlers['l2-gate']!(run);
+      expect(result).toBe('success');
+      expect(raise).toHaveBeenCalledTimes(1);
+      // raise gets a schema-valid request with the deterministic id for epoch 1
+      const req = raise.mock.calls[0]?.[0] as { decision_id: string };
+      expect(req.decision_id).toBe('issue-42:l2-gate:1');
+      expect(notify).toHaveBeenCalledWith('issue-42:l2-gate:1');
+    });
+
+    it('fails closed (parks, returns success) when the ledger throws on a fresh park', async () => {
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'ready' }] },
+      });
+      const enabled = {
+        isEnabled: () => true,
+        ledger: () => {
+          throw new Error('decision index unavailable');
+        },
+      } as unknown as import('./decision-escalation/manager.js').DecisionIndexManager;
+      const { handlers } = createHandlers(
+        {},
+        undefined,
+        undefined,
+        undefined,
+        enabled,
+      );
+      const run = makeRun();
+      // Handler must not throw — it stays parked and returns success.
+      const result = await handlers['l2-gate']!(run);
+      expect(result).toBe('success');
+      expect(run.pausedAtPhase).toBe('l2-gate');
+      expect(run.l2GateNotified).toBe(true);
+      expect(run.decisionEpoch).toBe(1);
     });
   });
 

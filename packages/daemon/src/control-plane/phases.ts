@@ -45,6 +45,8 @@ import {
   type ArtifactReconcileStatus,
   type DeliverableSpecPhase,
 } from './spec-pipeline/delivery.js';
+import type { DecisionIndexManager } from './decision-escalation/manager.js';
+import { buildL2GateRequest } from './decision-escalation/build-request.js';
 
 // Serializes git operations on the shared repoRoot across concurrent pipeline runs.
 // Currently protects detect (which modifies checkout state via git checkout).
@@ -90,6 +92,7 @@ export function createPhaseHandlers(
   activePlugins?: Array<{ id: string; activatedAt: string }>,
   knowledgeStore?: KnowledgeStore,
   phaseLabelMirror?: PhaseLabelMirror,
+  decisionManager?: DecisionIndexManager,
 ): PhaseHandlerMap {
   const repo = repoName;
   const detector = createWorkDetector(octokit, owner, repo);
@@ -564,7 +567,11 @@ export function createPhaseHandlers(
         `[l2-gate] No L2 decision yet for #${workRequest.issueNumber} — parking`,
       );
       run.pausedAtPhase = 'l2-gate';
-      // First park: add label and post comment
+      // First park: bump the decision epoch (a fresh review cycle), add label,
+      // post comment, and — when the decision index is enabled — raise+notify a
+      // DecisionRequest. The epoch bump happens ONLY on a fresh park (guarded by
+      // l2GateNotified) so per-tick re-scans of an already-parked run keep the
+      // same epoch (and therefore the same deterministic decision id).
       if (!run.l2GateNotified) {
         try {
           await octokit.issues.addLabels({
@@ -587,7 +594,26 @@ export function createPhaseHandlers(
         } catch (e) {
           console.error(`[l2-gate] Failed to notify:`, e);
         }
+        run.decisionEpoch = (run.decisionEpoch ?? 0) + 1;
         run.l2GateNotified = true;
+
+        // Emit the DecisionRequest (additive, flag-gated). raise() is idempotent
+        // on the deterministic id and notify() no-ops past `detected`, so this is
+        // safe across re-scans. FAIL-CLOSED: a ledger() throw (enabled-but-broken)
+        // stays parked + logs; it must NOT crash the gate handler.
+        if (decisionManager?.isEnabled() === true) {
+          try {
+            const ledger = decisionManager.ledger();
+            const { decision_id } = ledger.raise(
+              buildL2GateRequest(run, run.decisionEpoch, `${owner}/${repo}`),
+            );
+            await ledger.notify(decision_id);
+          } catch (e) {
+            console.warn(
+              `[l2-gate] decision-index raise/notify failed (failing closed, run stays parked): ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+        }
       }
       return 'success';
     },

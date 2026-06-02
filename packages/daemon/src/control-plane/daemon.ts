@@ -25,6 +25,9 @@ import {
   type FeaturePipelineWorkType,
 } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
+import { DecisionIndexManager } from './decision-escalation/manager.js';
+import { readDecisionIndexConfig } from './decision-escalation/config.js';
+import { decisionIdFor } from './decision-escalation/build-request.js';
 import {
   classifyBatch,
   type BatchClassifierConfig,
@@ -110,6 +113,12 @@ export interface StartDaemonOptions {
     intervalMs: number;
     delay?: (ms: number) => Promise<void>;
   };
+  /**
+   * Override the decision-escalation index manager (tests inject a manager backed
+   * by a real writer over a temp sqlite, or a throwing stub for fail-closed
+   * coverage). Production constructs one from `readDecisionIndexConfig(stateDir)`.
+   */
+  decisionManager?: DecisionIndexManager;
 }
 
 export async function startDaemon(
@@ -198,6 +207,15 @@ export async function startDaemon(
   const stateDir = 'state';
   const stateMgr = new StateManager(stateDir);
   await stateMgr.initialize();
+
+  // 2b. Decision-escalation index (optional, flag-gated). Constructed + init'd
+  // here; injected into every phase-handler build site + resumeParkedRuns. When
+  // the flag is off, init() is a no-op (no native import) and ledger() throws —
+  // callers guard on isEnabled() so disabled deployments are unaffected.
+  const decisionManager =
+    opts?.decisionManager ??
+    new DecisionIndexManager(readDecisionIndexConfig(stateDir));
+  await decisionManager.init();
 
   // Validate the control host early (hoisted from the control-server step):
   // the throwaway degraded server binds it during the startup-degraded window,
@@ -923,6 +941,7 @@ export async function startDaemon(
             repoRoot,
             knowledgeStore,
             repoManager,
+            decisionManager,
           )
             .then((outcome) =>
               handleRunOutcome(outcome, request.issueNumber, owner, name),
@@ -979,6 +998,7 @@ export async function startDaemon(
               repoRoot,
               knowledgeStore,
               repoManager,
+              decisionManager,
             )
               .then((outcome) =>
                 handleRunOutcome(outcome, bugRequest.issueNumber, owner, name),
@@ -1036,6 +1056,7 @@ export async function startDaemon(
               repoRoot,
               knowledgeStore,
               repoManager,
+              decisionManager,
             )
               .then((outcome) =>
                 handleRunOutcome(outcome, fpRequest.issueNumber, owner, name),
@@ -1074,6 +1095,7 @@ export async function startDaemon(
     const initResult = await repoManager.initialize();
     if (!initResult.ok) {
       configReader?.stop();
+      await decisionManager.close();
       await postgresClient?.sql.end();
       await remoteControl.stop();
       return initResult;
@@ -1147,6 +1169,7 @@ export async function startDaemon(
   if (!serverResult.ok) {
     repoManager?.stop();
     configReader?.stop();
+    await decisionManager.close();
     await postgresClient?.sql.end();
     await remoteControl.stop();
     return serverResult;
@@ -1235,6 +1258,7 @@ export async function startDaemon(
             configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins,
             knowledgeStore,
             phaseLabelMirror,
+            decisionManager,
           );
     const table = getPipeline(run.variant);
 
@@ -1370,8 +1394,70 @@ export async function startDaemon(
         `[daemon] resumeParkedRuns: resuming #${run.issueNumber} (${hasApproved ? 'l2-approved' : 'l2-rejected'})`,
       );
 
+      // Decision id for this park cycle (epoch defaults to 1 for runs parked
+      // before decisionEpoch existed). Used to record the operator's answer and
+      // later drive the ledger to `resumed`.
+      const decisionId = decisionIdFor(
+        `issue-${run.issueNumber}`,
+        'l2-gate',
+        run.decisionEpoch ?? 1,
+      );
+      // Approved takes precedence if (somehow) both labels are present.
+      const rejectedResume = !hasApproved && hasRejected;
+      const choice = hasApproved ? 'approve' : 'reject';
+
+      // CRASH-SAFE ORDERING (1/2): record the operator's answer in the ledger
+      // BEFORE mutating run state. answer() is answered-once (`.applied:false`
+      // on replay — fine). FAIL-CLOSED: if the index is enabled but ledger()
+      // throws (broken), skip this run this tick (stay parked) rather than
+      // advancing on unconfirmed state.
+      if (decisionManager.isEnabled()) {
+        try {
+          decisionManager.ledger().answer(decisionId, choice, 'operator');
+        } catch (e) {
+          console.warn(
+            `[daemon] resumeParkedRuns: decision-index answer failed for #${run.issueNumber} (failing closed, staying parked): ${e instanceof Error ? e.message : String(e)}`,
+          );
+          continue;
+        }
+      }
+
+      // For a rejected resume, capture the rejection feedback and route the run
+      // BACK to l2-design directly (fix for the pre-existing dropped-feedback bug:
+      // we strip l2-rejected here, so the l2-gate handler would never see it and
+      // never capture feedback / route to l2-design). Approved resumes re-enter
+      // l2-gate unchanged.
+      if (rejectedResume) {
+        try {
+          const comments = await runOctokit.issues.listComments({
+            owner: runOwner,
+            repo: runRepoName,
+            issue_number: run.issueNumber,
+            per_page: 20,
+          });
+          const rejectionComment = [...(comments.data ?? [])]
+            .reverse()
+            .find(
+              (c) =>
+                c.body?.includes('REJECTED') || c.body?.includes('l2-rejected'),
+            );
+          if (rejectionComment?.body) {
+            // Sanitize identically to the l2-gate handler: strip {{placeholder}}
+            // template patterns (prompt-injection defense) and cap length.
+            const MAX_FEEDBACK_LENGTH = 4000;
+            run.l2Feedback = rejectionComment.body
+              .replace(/\{\{[\w-]+\}\}/g, '')
+              .slice(0, MAX_FEEDBACK_LENGTH);
+          }
+        } catch (e) {
+          console.warn(
+            `[daemon] resumeParkedRuns: failed to fetch rejection comment for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+
       // Remove gate labels (best-effort) — both awaiting and rejected must be cleared
-      // to prevent the l2-gate handler from immediately seeing l2-rejected on resume
+      // to prevent the l2-gate handler from immediately re-triggering on resume.
       for (const label of ['awaiting-l2-review', 'l2-rejected']) {
         try {
           await runOctokit.issues.removeLabel({
@@ -1385,10 +1471,35 @@ export async function startDaemon(
         }
       }
 
-      // Reset run state to re-enter l2-gate phase
-      run.phase = 'l2-gate';
+      // Reset run state. Approved -> re-enter l2-gate. Rejected -> route straight
+      // to l2-design (feedback already captured above) so the rework cycle runs;
+      // mirror the l2-gate rejection branch's notification resets so the next park
+      // re-notifies and re-emits a fresh decision.
+      if (rejectedResume) {
+        run.phase = 'l2-design';
+        run.l2GateNotified = false;
+        run.l2MergeBlockedNotified = undefined;
+      } else {
+        run.phase = 'l2-gate';
+      }
       run.pausedAtPhase = undefined;
       await stateMgr.saveRunState(run);
+
+      // CRASH-SAFE ORDERING (2/2): only AFTER the run-state requeue is committed
+      // do we drive the ledger to terminal `resumed` via the real effect chain
+      // (write_response -> requeue -> resumed). Never direct-apply resume_ack.
+      // FAIL-CLOSED: a ledger() throw here logs but does not roll back the already
+      // -committed requeue (the run is correctly advancing); boot reconcile will
+      // complete any in-flight effect.
+      if (decisionManager.isEnabled()) {
+        try {
+          await decisionManager.ledger().advanceToResumed(decisionId, 'requeue');
+        } catch (e) {
+          console.warn(
+            `[daemon] resumeParkedRuns: decision-index advanceToResumed failed for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
 
       // Re-enter pipeline
       activeIssues.add(run.issueNumber);
@@ -1430,6 +1541,7 @@ export async function startDaemon(
               configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins,
               knowledgeStore,
               phaseLabelMirror,
+              decisionManager,
             );
       const table = getPipeline(run.variant);
 
@@ -1515,6 +1627,7 @@ export async function startDaemon(
     stopTechLeadScheduler?.();
     repoManager?.stop();
     configReader?.stop();
+    await decisionManager.close();
     await postgresClient?.sql.end();
     await remoteControl.stop();
     await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -1679,6 +1792,7 @@ async function processWorkRequest(
   repoRoot?: string,
   knowledgeStore?: KnowledgeStore,
   repoManager?: RepoManager | null,
+  decisionManager?: DecisionIndexManager,
 ): Promise<string> {
   const today = new Date().toISOString().split('T')[0];
   if (today !== dailyRunCountResetDate) {
@@ -1800,6 +1914,7 @@ async function processWorkRequest(
           repoConfig?.activePlugins,
           knowledgeStore,
           phaseLabelMirror,
+          decisionManager,
         );
   const table = getPipeline(variant);
 
