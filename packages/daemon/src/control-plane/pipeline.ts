@@ -1,5 +1,5 @@
 // src/control-plane/pipeline.ts
-import type { Phase, PhaseEvent, RunState } from '../types.js';
+import type { FailureRecord, Phase, PhaseEvent, RunState } from '../types.js';
 import {
   transition,
   isTerminal,
@@ -20,6 +20,7 @@ import {
 } from './run-state-migration.js';
 import {
   classifyPhaseFailure,
+  createFailureRecord,
   recordFailureHistory,
   shouldRetryFailure,
 } from './failure-routing.js';
@@ -44,6 +45,43 @@ const DEFAULT_MAX_ATTEMPTS: Record<string, number> = {
   test: 3,
   deploy: 2,
 };
+
+/**
+ * Build a diagnostic FailureRecord for a phase that routed to `stuck` via a
+ * non-`failure`/non-`containment-breach` event (today: `escalated`).
+ *
+ * Without this, `escalated → stuck` transitions never produced a failureRecord
+ * or `lastError`, so the terminal PipelineResult carried `error: undefined` and
+ * the daemon logged the opaque "Unknown error" (#2). We prefer the precise gate
+ * finding the handler recorded on `run.lastFailure` (#1b) and fall back to a
+ * generic-but-descriptive escalation message when the handler left none.
+ */
+function buildEscalationFailureRecord(
+  run: RunState,
+  phase: Phase,
+  event: PhaseEvent,
+): FailureRecord {
+  // #1b: the review handler records the real gate finding on run.lastFailure.
+  // Reuse it verbatim so the surfaced error is the actual blocking reason.
+  const handlerRecorded = run.lastFailure;
+  if (handlerRecorded && handlerRecorded.phase === phase) {
+    return handlerRecorded;
+  }
+  const reason =
+    event === 'per-run-budget-exceeded'
+      ? `Phase ${phase} hit the per-run budget (cost $${run.cost.toFixed(2)} ≥ budget $${run.perRunBudget.toFixed(2)})`
+      : `Phase ${phase} escalated (${event}) — automated repair attempts were exhausted (no handler diagnostic recorded)`;
+  return createFailureRecord({
+    kind: event === 'per-run-budget-exceeded' ? 'budget-unavailable' : 'human-required',
+    phase,
+    message: reason,
+    severity: 'blocking',
+    retryable: false,
+    repairAction: 'request-human',
+    humanActionRequired: true,
+    maxAttempts: 1,
+  });
+}
 
 function buildPhaseRecords(run: RunState): PhaseRecord[] {
   return Object.entries(run.phaseCompletions)
@@ -119,6 +157,7 @@ export async function runPipeline(
       // Per-run budget exceeded → stuck (prevents one issue consuming entire daily budget)
       // Daily budget exceeded → paused (resumes on daily reset)
       const isPerRun = budget.reason === 'per-run-budget-exceeded';
+      const phaseBeforeBudgetStop = run.phase;
       run.phase = isPerRun ? 'stuck' : 'paused';
       if (isPerRun) phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
       await stateMgr.saveRunState(run);
@@ -126,7 +165,13 @@ export async function runPipeline(
         current_phase: run.phase,
         phases: buildPhaseRecords(run),
       });
-      return { outcome: isPerRun ? 'stuck' : 'paused', run };
+      if (isPerRun) {
+        // Surface a real reason so the daemon never logs "Unknown error" for a
+        // budget-driven stuck (#2 diagnosability — same symptom as escalation).
+        lastError = `Per-run budget exhausted before phase "${phaseBeforeBudgetStop}" (cost $${run.cost.toFixed(2)} ≥ budget $${run.perRunBudget.toFixed(2)})`;
+        return { outcome: 'stuck', run, error: lastError };
+      }
+      return { outcome: 'paused', run };
     }
 
     // Get the handler for the current phase
@@ -236,16 +281,20 @@ export async function runPipeline(
         markWorkflowNodeCompleted(run, workflow, executingPhase, event);
       run.phase = globalNext;
       if (globalNext === 'stuck') {
-        if (failureRecord) {
-          recordFailureHistory(
-            run,
-            failureRecord,
-            failureRecord.humanActionRequired
-              ? 'human-required'
-              : 'terminal-stuck',
-          );
-          lastError = failureRecord.message;
-        }
+        // failureRecord is only built for failure/containment-breach. Other
+        // global events that route to stuck (per-run-budget-exceeded) must still
+        // produce a diagnostic so the result is never empty ("Unknown error").
+        const globalStuckRecord =
+          failureRecord ??
+          buildEscalationFailureRecord(run, executingPhase, event);
+        recordFailureHistory(
+          run,
+          globalStuckRecord,
+          globalStuckRecord.humanActionRequired
+            ? 'human-required'
+            : 'terminal-stuck',
+        );
+        lastError = globalStuckRecord.message;
         phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
       }
       await stateMgr.saveRunState(run);
@@ -361,15 +410,19 @@ export async function runPipeline(
     if (run.phase === 'stuck') {
       if (workflow)
         markWorkflowNodeCompleted(run, workflow, executingPhase, event);
-      if (failureRecord) {
-        recordFailureHistory(
-          run,
-          failureRecord,
-          failureRecord.humanActionRequired
-            ? 'human-required'
-            : 'terminal-stuck',
-        );
-      }
+      // `failureRecord` is only built for failure/containment-breach events.
+      // Other events that route to stuck (today: `escalated`) must still
+      // produce a diagnostic record + lastError so the terminal result is never
+      // empty — otherwise the daemon logs "Unknown error" (#2).
+      const stuckRecord =
+        failureRecord ??
+        buildEscalationFailureRecord(run, executingPhase, event);
+      recordFailureHistory(
+        run,
+        stuckRecord,
+        stuckRecord.humanActionRequired ? 'human-required' : 'terminal-stuck',
+      );
+      lastError = stuckRecord.message;
       phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
     } else {
       if (workflow)

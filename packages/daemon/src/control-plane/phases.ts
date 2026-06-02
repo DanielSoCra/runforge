@@ -1106,6 +1106,9 @@ export function createPhaseHandlers(
           complexity: run.classificationComplexity,
           specContent,
           baseBranch: config.branches.staging,
+          // #4: feed back findings from the prior review cycle so re-implement
+          // is not blind to what the reviewer flagged.
+          reviewFindings: run.reviewFindings,
         },
       );
       if (!result.ok) {
@@ -1334,11 +1337,47 @@ export function createPhaseHandlers(
         maxFixCycles: config.validation.maxFixCycles,
       });
       if (!result.passed) {
+        // Human-readable "[gate] description" lines for every failing gate.
+        // Shared by #1b (lastFailure message) and #4 (run.reviewFindings).
+        const findingLines = result.gateResults
+          .filter((g) => !g.passed)
+          .flatMap((g) =>
+            g.findings.length > 0
+              ? g.findings.map((f) => `[${g.gate}] ${f.description}`)
+              : [`[${g.gate}] gate failed (no findings reported)`],
+          );
+
+        // #4: stash the findings on the run so the next implement cycle can
+        // consume them (re-implement is otherwise blind to what review flagged).
+        run.reviewFindings = findingLines.length > 0 ? findingLines : undefined;
+
+        // #1b: On escalation, record the REAL gate finding(s) on run.lastFailure
+        // so the pipeline surfaces the actual blocking reason (e.g. the failed
+        // gate-1 command) instead of "Unknown error". Falls back to a
+        // descriptive message if no findings parsed.
+        const recordEscalationFailure = (reason: string): void => {
+          const findingSummary = findingLines.slice(0, 5).join('; ');
+          const message = findingSummary
+            ? `Review escalated (${reason}): ${findingSummary}`
+            : `Review escalated (${reason}): review gates could not be satisfied`;
+          run.lastFailure = createFailureRecord({
+            kind: 'human-required',
+            phase: 'review',
+            message,
+            severity: 'blocking',
+            retryable: false,
+            repairAction: 'request-human',
+            humanActionRequired: true,
+            maxAttempts: 1,
+          });
+        };
+
         if (result.escalated) {
           console.error(
             `[review] Escalated (${result.escalationReason ?? 'unknown'}):`,
             JSON.stringify(result.gateResults),
           );
+          recordEscalationFailure(result.escalationReason ?? 'unknown');
           return 'escalated';
         }
         // Track review failures across implement→review loop iterations.
@@ -1361,6 +1400,7 @@ export function createPhaseHandlers(
             `[review] Max fix cycles (${config.validation.maxFixCycles}) reached, escalating:`,
             JSON.stringify(result.gateResults),
           );
+          recordEscalationFailure('max-fix-cycles');
           return 'escalated';
         }
         console.error(
@@ -1370,6 +1410,9 @@ export function createPhaseHandlers(
         return 'failure';
       }
       console.log(`[review] Passed (${result.fixCycles} fix cycles)`);
+      // #4: clear consumed findings once review passes so they don't bleed into
+      // an unrelated later cycle.
+      run.reviewFindings = undefined;
       return 'success';
     },
 

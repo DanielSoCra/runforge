@@ -361,6 +361,12 @@ export interface RunState {
   l2Feedback?: string;
   /** Compliance findings from the most recent l3-compliance failure, fed back into l3-generate. */
   l3Feedback?: string;
+  /**
+   * Review gate findings from the most recent failed review cycle, fed back
+   * into the next implement attempt so re-implement is not blind to what the
+   * reviewer flagged (#4). Each entry is a human-readable "[gate] description".
+   */
+  reviewFindings?: string[];
   /** Counter for l3-compliance failure attempts (every failure path); capped to prevent infinite cross-phase loop. */
   l3ComplianceAttempts?: number;
   activePhaseLabel?: string;
