@@ -16,11 +16,7 @@
  * emits a runtime require of the native package — the only runtime load is the
  * manager's dynamic import inside its enabled branch.
  */
-import type {
-  IndexWriter,
-  ApplyResult,
-  DecisionView,
-} from '@auto-claude/decision-index';
+import type { IndexWriter, DecisionView } from '@auto-claude/decision-index';
 import type { ResumeMode } from '@auto-claude/decision-protocol';
 
 /** Terminal statuses are excluded from the pending read (mirrors TERMINAL_STATUSES). */
@@ -28,6 +24,16 @@ const TERMINAL: ReadonlySet<string> = new Set(['resumed', 'superseded', 'failed'
 
 /** Result of a notify attempt: `applied=false` when status-guarded to a no-op. */
 export interface NotifyResult {
+  applied: boolean;
+  status: string;
+}
+
+/**
+ * Result of an answer attempt: `applied=false` when the writer replays an
+ * answered-once no-op, OR when the row is missing (`status:'unknown'`). `status`
+ * is a plain string (not `ItemStatus`) precisely so a missing row has a value.
+ */
+export interface AnswerResult {
   applied: boolean;
   status: string;
 }
@@ -69,10 +75,24 @@ export class DecisionLedger {
    * `answered_pending_source_write`. Answered-once is enforced by the writer: a
    * second identical answer replays as a no-op (`applied=false`); a conflicting
    * one throws `AnsweredOnceConflictError`.
+   *
+   * MISSING-ROW GUARD (mirrors `notify`/`advanceToResumed`/`supersede`): applying
+   * an event to an absent decision throws `UnknownDecisionError`. The index is an
+   * ADDITIVE record — the GitHub-label requeue is the v1 source of truth for
+   * resume — so a missing row (raise never landed: index broken/disabled at park,
+   * now enabled at resume) must be a no-op, NOT a throw that would fail-close and
+   * strand the run parked forever. Returns `{applied:false, status:'unknown'}`.
    */
-  answer(decisionId: string, chosenOption: string, answerer: string, now?: string): ApplyResult {
+  answer(
+    decisionId: string,
+    chosenOption: string,
+    answerer: string,
+    now?: string,
+  ): AnswerResult {
+    const view = this.writer.reader.get(decisionId);
+    if (!view) return { applied: false, status: 'unknown' };
     const answeredAt = now ?? new Date().toISOString();
-    return this.writer.applyEvent(decisionId, 'answer_submitted', {
+    const res = this.writer.applyEvent(decisionId, 'answer_submitted', {
       actor: answerer,
       // semanticKey keys the transition; the response idempotency key is its
       // natural value so a re-applied answer is deduped on the same key.
@@ -85,6 +105,7 @@ export class DecisionLedger {
         answered_at: answeredAt,
       },
     });
+    return { applied: res.applied, status: res.status };
   }
 
   /**

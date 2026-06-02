@@ -3035,6 +3035,31 @@ describe('daemon', () => {
       expect(mockRunPipeline).toHaveBeenCalled();
     });
 
+    it('persists the requeue (saveRunState) BEFORE removing gate labels (crash-safe ordering)', async () => {
+      // REGRESSION: label removal is a remote, irreversible mutation. If it ran
+      // before the durable save and the process crashed in between, the run would
+      // restart still parked but with no trigger label -> stuck forever. Save must
+      // commit first; a crash after save leaves the (now-unparked) run unaffected.
+      const parkedRun = makeParkedRun();
+      mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'l2-approved' }, { name: 'awaiting-l2-review' }] },
+      });
+      mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const saveOrder = mockStateMgr.saveRunState.mock.invocationCallOrder[0];
+      const removeOrder = mockOctokit.issues.removeLabel.mock.invocationCallOrder[0];
+      expect(saveOrder).toBeDefined();
+      expect(removeOrder).toBeDefined();
+      expect(saveOrder!).toBeLessThan(removeOrder!);
+    });
+
     it('resumes a parked run when l2-rejected label is present (routes to l2-design with feedback)', async () => {
       // REGRESSION (pre-existing bug): resumeParkedRuns stripped l2-rejected
       // BEFORE re-entry, but the l2-gate handler only captured rejection feedback
@@ -3216,6 +3241,64 @@ describe('daemon', () => {
           .pending()
           .find((d) => d.decision_id === decisionId);
         expect(stillPending).toBeUndefined();
+      });
+
+      it('requeues even when the ledger row is MISSING (answer no-ops; additive index never blocks resume)', async () => {
+        // The index is additive — the GitHub-label requeue is the v1 source of
+        // truth. If raise never landed (index broken/disabled at park, enabled at
+        // resume), answer() on the absent row must no-op, NOT throw-and-fail-closed
+        // and strand the run. The label-driven requeue must still fire.
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 5).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+
+        const parkedRun = makeParkedRun({ decisionEpoch: 1 });
+        mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'l2-approved' }] },
+        });
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+        // INTENTIONALLY do not seed a ledger row (simulate raise-never-landed).
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        // Not stuck: the requeue committed (phase reset) and the pipeline re-entered.
+        expect(mockStateMgr.saveRunState).toHaveBeenCalledWith(
+          expect.objectContaining({
+            issueNumber: 100,
+            phase: 'l2-gate',
+            pausedAtPhase: undefined,
+          }),
+        );
+        expect(mockRunPipeline).toHaveBeenCalled();
+      });
+
+      it('runs a periodic reconcile each tick (recovers crash-stranded in-flight effects)', async () => {
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 6).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+        mockStateMgr.findParkedRuns.mockResolvedValue([]);
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+        // Spy AFTER init so the boot reconcile is excluded — we assert the TICK
+        // sweep, which is what recovers a crash that happened post-boot.
+        const reconcileSpy = vi.spyOn(manager.ledger(), 'reconcile');
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(reconcileSpy).toHaveBeenCalled();
       });
 
       it('stays parked (fail-closed) when enabled but the ledger is broken', async () => {

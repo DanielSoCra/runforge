@@ -125,6 +125,16 @@ describe('DecisionLedger (real IndexWriter over temp sqlite)', () => {
     expect(t.writer.reader.get(r.decision_id)?.status).toBe('notified');
   });
 
+  it('answer(): a MISSING row is a no-op (returns applied:false/status:unknown, never throws)', () => {
+    // The index is additive — the GitHub-label requeue is the v1 source of truth.
+    // A missing row (raise never landed) must NOT throw UnknownDecisionError (which
+    // would fail-close and strand the run parked); it returns a no-op, like notify.
+    expect(t.writer.reader.get('issue-nope:l2-gate:1')).toBeUndefined();
+    const res = t.ledger.answer('issue-nope:l2-gate:1', 'approve', 'operator');
+    expect(res.applied).toBe(false);
+    expect(res.status).toBe('unknown');
+  });
+
   it('answered-once: a second distinct answer is a no-op (does not double-answer)', async () => {
     const req = makeRequest();
     const r = t.ledger.raise(req);

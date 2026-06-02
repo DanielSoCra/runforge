@@ -884,11 +884,23 @@ export async function startDaemon(
       config.pollIntervalMs,
       async (repoId, owner, name, detector) => {
         if (paused || draining || shuttingDown) return;
-        // Overdue marking: mark past-expiry notified/viewed decisions stale (mark
-        // only — no delivery). Runs each tick BEFORE the concurrency/source-ready
-        // early-returns so a busy daemon still ages its pending decisions.
-        // Enabled-guarded + fail-safe (markOverdue never throws).
+        // Decision-index tick maintenance (enabled-guarded + fail-safe). Runs each
+        // tick BEFORE the concurrency/source-ready early-returns so a busy daemon
+        // still ages and recovers its pending decisions.
         if (decisionManager.isEnabled()) {
+          // Periodic reconcile drives any in-flight effect forward. bootReconcile
+          // runs ONCE at startup, so a crash between the resume requeue's save and
+          // its advanceToResumed (or any other mid-effect crash) would otherwise
+          // strand a row non-terminal until the next restart. The per-tick sweep
+          // drains it across subsequent ticks. reconcile() is idempotent (it
+          // probes effects), so a no-op tick is cheap.
+          try {
+            await decisionManager.ledger().reconcile();
+          } catch (e) {
+            console.error('[daemon] tick reconcile error:', e);
+          }
+          // Overdue marking: mark past-expiry notified/viewed decisions stale
+          // (mark only — no delivery). markOverdue never throws.
           try {
             await markOverdue(decisionManager.ledger(), new Date());
           } catch (e) {
@@ -1498,21 +1510,6 @@ export async function startDaemon(
         }
       }
 
-      // Remove gate labels (best-effort) — both awaiting and rejected must be cleared
-      // to prevent the l2-gate handler from immediately re-triggering on resume.
-      for (const label of ['awaiting-l2-review', 'l2-rejected']) {
-        try {
-          await runOctokit.issues.removeLabel({
-            owner: runOwner,
-            repo: runRepoName,
-            issue_number: run.issueNumber,
-            name: label,
-          });
-        } catch {
-          /* label may not exist — ignore */
-        }
-      }
-
       // Reset run state. Approved -> re-enter l2-gate. Rejected -> route straight
       // to l2-design (feedback already captured above) so the rework cycle runs;
       // mirror the l2-gate rejection branch's notification resets so the next park
@@ -1525,7 +1522,29 @@ export async function startDaemon(
         run.phase = 'l2-gate';
       }
       run.pausedAtPhase = undefined;
+      // DURABLE COMMIT: persist the requeue BEFORE the (irreversible, remote)
+      // gate-label removal. If we removed labels first and crashed before this
+      // save, the run would restart still parked but with the trigger label gone
+      // -> stuck forever, feedback lost. Save-first makes restart re-resume
+      // idempotently (answer is answered-once; the requeue replays).
       await stateMgr.saveRunState(run);
+
+      // Remove gate labels (best-effort) AFTER the durable save — both awaiting
+      // and rejected must be cleared so the l2-gate handler does not immediately
+      // re-trigger on resume. A crash after save but before removal is harmless:
+      // the run is no longer parked, so the stale labels are never re-read.
+      for (const label of ['awaiting-l2-review', 'l2-rejected']) {
+        try {
+          await runOctokit.issues.removeLabel({
+            owner: runOwner,
+            repo: runRepoName,
+            issue_number: run.issueNumber,
+            name: label,
+          });
+        } catch {
+          /* label may not exist — ignore */
+        }
+      }
 
       // CRASH-SAFE ORDERING (2/2): only AFTER the run-state requeue is committed
       // do we drive the ledger to terminal `resumed` via the real effect chain
