@@ -19,7 +19,7 @@ Today the platform can tell whether a change touched a regulated-sensitive path,
 
 - **Operator** — the human who decides any change the platform holds for them, and who explicitly grants a deployment the autonomy to handle a given risk level on its own
 - **Control Plane** — sorts each completed change by its risk to the shared mainline, requires the checks that risk level demands, holds the change until they pass, and either lets it proceed or routes it to the Operator as a decision
-- **Reviewer** — an independent examination of a change, performed by the platform rather than the Operator, that returns a clear pass-or-block verdict; required for the second risk level before a change may proceed without the Operator
+- **Reviewer** — the platform's independent, heterogeneous quality review (the never-self-certifying review owned by FUNC-AC-QUALITY), performed by the platform rather than the Operator, that returns a clear pass-or-block verdict; required for the yellow risk level before a change may proceed without the Operator. This is distinct from the **Compliance Reviewer** below — one judges quality, the other the regulatory lens
 - **Compliance Reviewer** — the deployment's regulatory lens, defined in FUNC-AC-COMPLIANCE-GATE, whose verdict composes with and can override this decision
 - **Worker** — the autonomous run that produced the change and is waiting on the decision; it cannot send a change to the shared mainline until the decision clears it
 

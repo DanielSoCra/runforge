@@ -140,6 +140,7 @@ FUNC-AC-FLEET:
   status: approved
 
 FUNC-AC-MERGE-DECISION:
+  related: [FUNC-AC-COMPLIANCE-GATE, FUNC-AC-FLEET, FUNC-AC-DECISION-ESCALATION, FUNC-AC-QUALITY]
   status: draft
 
 # --- Auto-Claude Plugins L2 spec ---
