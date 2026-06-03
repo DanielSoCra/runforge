@@ -201,6 +201,12 @@ export const ConfigSchema = z.object({
       name: z.string().min(1),
     })
     .optional(),
+  // Local path the pipeline worktrees branches off (`git worktree add` needs a
+  // git repo to run from). Default = the daemon's cwd, which is the historical
+  // contract (launch the daemon from inside a checkout of the target repo). Set
+  // this when the cwd is NOT a target checkout (e.g. a container): the daemon
+  // clones config.repo into this path on startup. See ensureWorkspaceRepo.
+  workspaceRoot: z.string().optional(),
   controlPort: z.number().int().min(1024).max(65535).default(3847),
   controlHost: z
     .string()

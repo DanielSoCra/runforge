@@ -26,6 +26,7 @@ import {
   type FeaturePipelineWorkType,
 } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
+import { ensureWorkspaceRepo } from './workspace-bootstrap.js';
 import { DecisionIndexManager } from './decision-escalation/manager.js';
 import { readDecisionIndexConfig } from './decision-escalation/config.js';
 import { decisionIdFor } from './decision-escalation/build-request.js';
@@ -449,7 +450,13 @@ export async function startDaemon(
     DEFAULT_POLICIES,
     gotchasPath,
   );
-  const repoRoot = process.cwd();
+  // Resolve the worktree base. Native: cwd is already the target checkout
+  // (unchanged). Container / fresh host: cwd is not a git repo → clone
+  // config.repo into config.workspaceRoot. Without this the detect phase's
+  // `git worktree add` fails with "not a git repository" and every run stucks.
+  const repoRoot = await ensureWorkspaceRepo(config, {
+    log: (m) => console.log(m),
+  });
   // maxDiffLines: 2000 — real features (multi-file specs, e.g., knowledge-sync, multi-provider)
   // routinely produce 500–1500 line diffs. The historical 300 ceiling silently failed any
   // substantive feature implementation. Review gates remain the safety net for bad large diffs.
