@@ -760,6 +760,36 @@ describe('createPhaseHandlers', () => {
       );
     });
 
+    it('passes accumulated review findings to coordinator so re-implement is not blind (#4)', async () => {
+      const { handlers, coordinator } = createHandlers();
+      coordinator.implement.mockResolvedValue({
+        ok: true,
+        value: { success: true, totalCost: 1.0 },
+      });
+      // Simulate a run that already failed review once — the review handler
+      // recorded the findings on run.reviewFindings before routing back to
+      // implement. Re-implement must receive them.
+      const run = makeRun({
+        reviewFindings: [
+          '[deterministic] gate1 command failed: 1 test red',
+          '[quality] function too long',
+        ],
+      });
+      await handlers.implement!(run);
+      expect(coordinator.implement).toHaveBeenCalledWith(
+        expect.anything(),
+        'feature/42',
+        undefined,
+        undefined,
+        expect.objectContaining({
+          reviewFindings: [
+            '[deterministic] gate1 command failed: 1 test red',
+            '[quality] function too long',
+          ],
+        }),
+      );
+    });
+
     it('clears handoff notes from RunState after successful implementation (#121)', async () => {
       const { handlers, coordinator } = createHandlers();
       coordinator.implement.mockResolvedValue({
@@ -1211,6 +1241,113 @@ describe('createPhaseHandlers', () => {
       const { handlers } = createHandlers();
       const result = await handlers.review!(makeRun());
       expect(result).toBe('failure');
+    });
+
+    it('records gate findings on run.reviewFindings when routing back to implement (#4)', async () => {
+      // Producer side of #4: a non-escalating review failure must stash the
+      // findings on the run so the next implement cycle can consume them.
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({
+        passed: false,
+        gateResults: [
+          {
+            gate: 'deterministic',
+            passed: false,
+            findings: [
+              {
+                severity: 'critical',
+                location: 'pnpm test',
+                description: 'NewFeature.test.ts > does X: expected true',
+              },
+            ],
+          },
+        ],
+        fixCycles: 0,
+        escalated: false,
+      });
+      const run = makeRun();
+      const { handlers } = createHandlers();
+      const result = await handlers.review!(run);
+      expect(result).toBe('failure');
+      expect(run.reviewFindings).toBeDefined();
+      expect(run.reviewFindings?.join('\n')).toContain(
+        'NewFeature.test.ts > does X',
+      );
+    });
+
+    it('records the real gate finding on run.lastFailure when escalating (#1b)', async () => {
+      // Repro: on escalation the review handler must surface the actual gate-1
+      // finding so the pipeline can propagate a non-empty error (not "Unknown
+      // error"). Without this, run.lastFailure stays undefined and the stuck
+      // result carries no diagnostic text.
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({
+        passed: false,
+        gateResults: [
+          {
+            gate: 'deterministic',
+            passed: false,
+            findings: [
+              {
+                severity: 'critical',
+                location: 'pnpm test',
+                description:
+                  'gate1 command "pnpm --filter @auto-claude/daemon run test" failed: 1 test failed',
+              },
+            ],
+          },
+        ],
+        fixCycles: 3,
+        escalated: true,
+        escalationReason: 'max-cycles-exceeded',
+      });
+      const run = makeRun();
+      const { handlers } = createHandlers();
+      const result = await handlers.review!(run);
+      expect(result).toBe('escalated');
+      expect(run.lastFailure).toBeDefined();
+      expect(run.lastFailure?.phase).toBe('review');
+      expect(run.lastFailure?.message).toContain('1 test failed');
+      expect(run.lastFailure?.message).not.toBe('Unknown error');
+    });
+
+    it('records lastFailure on max-fix-cycles escalation without a fixHandler (#1b)', async () => {
+      // The "no fixHandler" path: runReview returns passed:false without
+      // escalated, the handler counts fixAttempts and escalates after
+      // maxFixCycles. lastFailure must still carry the gate finding.
+      setupReviewMocks();
+      mockRunReview.mockResolvedValue({
+        passed: false,
+        gateResults: [
+          {
+            gate: 'deterministic',
+            passed: false,
+            findings: [
+              {
+                severity: 'critical',
+                location: 'pnpm test',
+                description: 'pre-existing red test in unrelated module',
+              },
+            ],
+          },
+        ],
+        fixCycles: 0,
+        escalated: false,
+      });
+      // Seed fixAttempts so this review call is the final (maxFixCycles=3) one:
+      // 2 prior review attempts → this 3rd attempt hits the cap and escalates.
+      const run = makeRun({
+        fixAttempts: [
+          { phase: 'review', attempt: 1, errorHash: 'x' },
+          { phase: 'review', attempt: 2, errorHash: 'x' },
+        ],
+      });
+      const { handlers } = createHandlers();
+      const result = await handlers.review!(run);
+      expect(result).toBe('escalated');
+      expect(run.lastFailure).toBeDefined();
+      expect(run.lastFailure?.phase).toBe('review');
+      expect(run.lastFailure?.message).toContain('pre-existing red test');
     });
   });
 

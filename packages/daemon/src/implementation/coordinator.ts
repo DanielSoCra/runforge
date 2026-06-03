@@ -58,28 +58,50 @@ export class ImplementationCoordinator {
       diagnosisDetail?: string;
       activePlugins?: Array<{ id: string; activatedAt: string }>;
       baseBranch?: string;
+      /**
+       * Review gate findings from a prior failed review cycle. Appended to the
+       * implement context so the re-implement attempt addresses what the
+       * reviewer flagged instead of repeating the same work blind (#4).
+       */
+      reviewFindings?: string[];
     },
   ): Promise<Result<ImplementResult>> {
     // 1. Get task graph
     let graph: TaskGraph;
+    // #4: fold prior review findings into the request body so re-implement
+    // addresses what the reviewer flagged instead of repeating the same work
+    // blind. Threaded via the request (not just the formatted context) so BOTH
+    // the simple (createSingleUnitGraph) and standard/complex (decompose) paths
+    // see them — decompose re-formats `request` internally. Empty/absent
+    // findings (first attempt) leave the request unchanged.
+    const reviewFindings = options?.reviewFindings ?? [];
+    const effectiveRequest: WorkRequest =
+      reviewFindings.length > 0
+        ? {
+            ...request,
+            body: `${request.body}\n\n## Prior review findings to address\n${reviewFindings
+              .map((f) => `- ${f}`)
+              .join('\n')}`,
+          }
+        : request;
     const workRequestContext = formatUserIssueContent({
-      issueNumber: request.issueNumber,
-      title: request.title,
-      body: request.body,
+      issueNumber: effectiveRequest.issueNumber,
+      title: effectiveRequest.title,
+      body: effectiveRequest.body,
     });
 
     if (options?.complexity === 'simple' || !options?.complexity) {
       graph = createSingleUnitGraph(
-        request.issueNumber,
+        effectiveRequest.issueNumber,
         featureBranch,
-        request.title,
+        effectiveRequest.title,
         workRequestContext,
         options?.specContent ?? '',
         // verification command: leave to createSingleUnitGraph's default
       );
     } else {
       const decomposeResult = await decompose(
-        request,
+        effectiveRequest,
         featureBranch,
         this.runtime,
         options.specContent ?? '',

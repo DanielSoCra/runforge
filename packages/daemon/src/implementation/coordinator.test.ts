@@ -7,6 +7,7 @@ import { git } from '../lib/git.js';
 import { ok } from '../lib/result.js';
 import { SessionError } from '../session-runtime/session-error.js';
 import type { WorkRequest, SessionResult } from '../types.js';
+import type { SessionRuntime } from '../session-runtime/runtime.js';
 
 // Mock the worktree module so tests don't need real git worktrees
 vi.mock('./worktree.js', () => ({
@@ -190,6 +191,82 @@ describe('ImplementationCoordinator', () => {
       undefined,
       undefined,
     );
+  });
+
+  it('folds prior review findings into the simple-complexity worker task (#4)', async () => {
+    const runtime = createMockRuntime(failResult);
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'simple',
+      reviewFindings: [
+        '[deterministic] gate1 command failed: NewFeature.test.ts red',
+        '[quality] function too long',
+      ],
+    });
+    const task = runtime.spawnSession.mock.calls[0]?.[1]?.variables.task as string;
+    expect(task).toContain('Prior review findings to address');
+    expect(task).toContain('NewFeature.test.ts red');
+    expect(task).toContain('function too long');
+  });
+
+  it('folds prior review findings into the decompose (standard/complex) path (#4)', async () => {
+    // Regression guard for Codex finding #1: decompose re-formats `request`
+    // internally, so findings must be threaded via the request body — not just
+    // the simple-path context — or non-simple re-implements stay blind.
+    const spawnSession = vi
+      .fn()
+      // decompose (coordinator) session
+      .mockResolvedValueOnce(
+        ok({
+          output: 'decomposed',
+          structuredData: {
+            units: [
+              {
+                id: 'unit-1',
+                title: 'Unit 1',
+                specIds: [],
+                specContent: '',
+                expectedArtifacts: [],
+                dependencies: [],
+                batchNumber: 0,
+                verificationCommand: '',
+                context: 'implement',
+              },
+            ],
+          },
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed',
+        } as SessionResult),
+      )
+      // worker session
+      .mockResolvedValueOnce(ok(successResult));
+    const runtime = {
+      spawnSession,
+      getCostTracker: vi.fn(),
+    } as unknown as SessionRuntime;
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'standard',
+      specContent: 'spec',
+      reviewFindings: ['[deterministic] gate1 command failed: red test in moduleZ'],
+    });
+    // The coordinator/decompose session (first call) must receive the findings
+    // in its workRequest variable.
+    const decomposeCall = spawnSession.mock.calls[0];
+    const workRequestVar = decomposeCall?.[1]?.variables.workRequest as string;
+    expect(workRequestVar).toContain('Prior review findings to address');
+    expect(workRequestVar).toContain('red test in moduleZ');
+  });
+
+  it('leaves request unchanged when no review findings are present (#4)', async () => {
+    const runtime = createMockRuntime(failResult);
+    const coord = new ImplementationCoordinator(runtime, '/tmp/repo', 300, 0);
+    await coord.implement(mockWorkRequest, 'feature/42', undefined, undefined, {
+      complexity: 'simple',
+    });
+    const task = runtime.spawnSession.mock.calls[0]?.[1]?.variables.task as string;
+    expect(task).not.toContain('Prior review findings to address');
   });
 
   it('uses default verification command for simple-complexity worker', async () => {

@@ -140,6 +140,11 @@ describe('runPipeline', () => {
     const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
     expect(result.outcome).toBe('stuck');
     expect(run.phase).toBe('stuck');
+    // #2 diagnosability: budget-driven stuck must carry a real error, not be
+    // logged as "Unknown error" downstream.
+    expect(result.error).toBeDefined();
+    expect(result.error).not.toBe('Unknown error');
+    expect(result.error).toMatch(/budget/i);
   });
 
   it('pauses on budget-exceeded event from handler', async () => {
@@ -163,6 +168,11 @@ describe('runPipeline', () => {
     const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
     expect(result.outcome).toBe('stuck');
     expect(run.phase).toBe('stuck');
+    // #2 diagnosability: the per-run-budget event path must also surface a real
+    // error instead of falling through to "Unknown error".
+    expect(result.error).toBeDefined();
+    expect(result.error).not.toBe('Unknown error');
+    expect(result.error).toMatch(/budget/i);
   });
 
   it('saves state after each phase transition', async () => {
@@ -456,6 +466,81 @@ describe('runPipeline', () => {
       'retrying',
       'terminal-stuck',
     ]);
+  });
+
+  it('propagates a non-empty error when the review handler escalates to stuck (#2)', async () => {
+    // Repro for the "Unknown error" stuck failure mode: a handler that returns
+    // `escalated` routes review -> stuck via advancePhase, but the pipeline
+    // previously never built a lastError, so result.error was undefined and the
+    // daemon logged "Unknown error".
+    const handlers: PhaseHandlerMap = {
+      ...featureSimpleAllSuccess,
+      review: async (targetRun) => {
+        // Mirror what the real review handler does on escalation: record the
+        // gate finding on run.lastFailure so the pipeline can surface it.
+        targetRun.lastFailure = createFailureRecord({
+          kind: 'human-required',
+          phase: 'review',
+          message:
+            'Review gate "deterministic" failed: 1 pre-existing test failed',
+          severity: 'blocking',
+          retryable: false,
+          repairAction: 'request-human',
+          humanActionRequired: true,
+        });
+        return 'escalated' as PhaseEvent;
+      },
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('stuck');
+    expect(run.phase).toBe('stuck');
+    expect(result.error).toBeDefined();
+    expect(result.error).not.toBe('Unknown error');
+    expect(result.error).toContain('pre-existing test failed');
+  });
+
+  it('falls back to a generic escalation message when the handler set no lastFailure (#2)', async () => {
+    // Even if a handler escalates without recording lastFailure, the terminal
+    // result must carry a non-empty, descriptive error (never undefined).
+    const handlers: PhaseHandlerMap = {
+      ...featureSimpleAllSuccess,
+      review: async () => 'escalated' as PhaseEvent,
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('stuck');
+    expect(result.error).toBeDefined();
+    expect(result.error).not.toBe('Unknown error');
+    expect(result.error).toMatch(/escalat/i);
+  });
+
+  it('records escalation as a repair-history entry for diagnosability (#2)', async () => {
+    const handlers: PhaseHandlerMap = {
+      ...featureSimpleAllSuccess,
+      review: async (targetRun) => {
+        targetRun.lastFailure = createFailureRecord({
+          kind: 'human-required',
+          phase: 'review',
+          message: 'Review gate "deterministic" failed: spurious red test',
+          severity: 'blocking',
+          retryable: false,
+          repairAction: 'request-human',
+          humanActionRequired: true,
+        });
+        return 'escalated' as PhaseEvent;
+      },
+    };
+    const run = makeRun('feature-simple');
+    const table = getPipeline('feature-simple');
+    const result = await runPipeline(run, table, handlers, stateMgr, costTracker);
+    expect(result.outcome).toBe('stuck');
+    expect(run.repairHistory?.length).toBeGreaterThanOrEqual(1);
+    expect(run.repairHistory?.[run.repairHistory.length - 1]?.failure.phase).toBe(
+      'review',
+    );
   });
 
   describe('handler existence validation', () => {
