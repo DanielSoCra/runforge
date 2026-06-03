@@ -397,6 +397,7 @@ export class SessionRuntime {
   private scopeRegistry: ScopeRegistry;
   private providerRegistry: ProviderRegistry;
   private useProviderRegistry: boolean;
+  private skipPermissions: boolean;
 
   constructor(
     config: Config,
@@ -411,6 +412,23 @@ export class SessionRuntime {
     this.scopeRegistry = buildScopeRegistry(config.agentScopes ?? {});
     this.providerRegistry = ProviderRegistry.fromConfig(config);
     this.useProviderRegistry = config.providers !== undefined;
+    // Trust/permission bypass for autonomous, externally-sandboxed workers.
+    // Gated behind config.autonomous OR the AUTO_CLAUDE_SKIP_PERMISSIONS env so
+    // a container deployment can flip it without re-baking the image, while
+    // interactive/native runs stay off by default. Resolved once at construction
+    // and passed into the adapter on every spawn (legacy + provider-fallback
+    // paths). The daemon's PreToolUse containment hooks still gate every tool
+    // call — see CliAdapter.buildArgs / setupHooks.
+    this.skipPermissions =
+      config.autonomous === true ||
+      process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'] === '1';
+    if (this.skipPermissions) {
+      console.log(
+        '[runtime] Autonomous mode: workers clear the CLI workspace-trust gate ' +
+          '(per-worktree trust seeding; --dangerously-skip-permissions when non-root). ' +
+          'PreToolUse containment hooks remain active on every tool call.',
+      );
+    }
   }
 
   async spawnSession(
@@ -500,6 +518,7 @@ export class SessionRuntime {
         containmentPolicy: DEFAULT_POLICY,
         mcpConfigs: assembled.mcpConfigs,
         directoryScope,
+        skipPermissions: this.skipPermissions,
       };
       const result = this.useProviderRegistry
         ? await this.spawnWithProviderFallback(

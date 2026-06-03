@@ -38,6 +38,8 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     dailyBudget: 50,
     perRunBudget: 10,
     adapter: 'cli',
+    autonomous: false,
+    remoteControl: { enabled: false },
     providers: undefined,
     runtimeSource: {
       enabled: true,

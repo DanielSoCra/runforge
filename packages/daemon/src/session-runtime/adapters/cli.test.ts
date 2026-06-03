@@ -70,6 +70,27 @@ describe('CliAdapter', () => {
     expect(args).toContain(schema);
   });
 
+  it('omits --dangerously-skip-permissions by default (interactive/native gate off)', () => {
+    const adapter = new CliAdapter();
+    const args = adapter.buildArgs(mockDef, 'prompt');
+    expect(args).not.toContain('--dangerously-skip-permissions');
+  });
+
+  it('omits --dangerously-skip-permissions when skipPermissions is explicitly false', () => {
+    const adapter = new CliAdapter();
+    const args = adapter.buildArgs(mockDef, 'prompt', undefined, undefined, false);
+    expect(args).not.toContain('--dangerously-skip-permissions');
+  });
+
+  it('includes --dangerously-skip-permissions when skipPermissions gate is on (autonomous/container)', () => {
+    const adapter = new CliAdapter();
+    const args = adapter.buildArgs(mockDef, 'prompt', undefined, undefined, true);
+    expect(args).toContain('--dangerously-skip-permissions');
+    // Coexists with the normal flags — it's an additive trust bypass, not a replacement.
+    expect(args).toContain('-p');
+    expect(args).toContain('--allowedTools');
+  });
+
   it('builds safe environment without secrets', () => {
     process.env['API_SECRET'] = 'should-not-leak';
     const adapter = new CliAdapter();

@@ -522,6 +522,73 @@ describe('SessionRuntime', () => {
     );
   });
 
+  it('does NOT pass skipPermissions when neither config.autonomous nor env is set (interactive default)', async () => {
+    const prev = process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'];
+    delete process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'];
+    try {
+      const interactive = new SessionRuntime(testConfig, costTracker);
+      mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '', cost: 0.01 } });
+      await interactive.spawnSession(
+        'worker',
+        { variables: WORKER_VARS, workspacePath: '/tmp/ws' },
+        99,
+      );
+      expect(mockSpawn).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.any(String),
+        expect.objectContaining({ skipPermissions: false }),
+      );
+    } finally {
+      if (prev !== undefined) process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'] = prev;
+    }
+  });
+
+  it('passes skipPermissions=true when config.autonomous is set', async () => {
+    const prev = process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'];
+    delete process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'];
+    try {
+      const autonomous = new SessionRuntime(
+        { ...testConfig, autonomous: true } as Config,
+        costTracker,
+      );
+      mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '', cost: 0.01 } });
+      await autonomous.spawnSession(
+        'worker',
+        { variables: WORKER_VARS, workspacePath: '/tmp/ws' },
+        99,
+      );
+      expect(mockSpawn).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.any(String),
+        expect.objectContaining({ skipPermissions: true }),
+      );
+    } finally {
+      if (prev !== undefined) process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'] = prev;
+    }
+  });
+
+  it('passes skipPermissions=true when AUTO_CLAUDE_SKIP_PERMISSIONS=1 even if config.autonomous is false', async () => {
+    const prev = process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'];
+    process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'] = '1';
+    try {
+      const envGated = new SessionRuntime(testConfig, costTracker);
+      mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '', cost: 0.01 } });
+      await envGated.spawnSession(
+        'worker',
+        { variables: WORKER_VARS, workspacePath: '/tmp/ws' },
+        99,
+      );
+      expect(mockSpawn).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.any(String),
+        expect.objectContaining({ skipPermissions: true }),
+      );
+    } finally {
+      if (prev !== undefined) process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'] = prev;
+      else delete process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'];
+    }
+  });
+
   it('passes resolved directory scope to adapter.spawn', async () => {
     mockSpawn.mockResolvedValueOnce({
       ok: true,
