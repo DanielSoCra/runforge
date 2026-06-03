@@ -354,6 +354,39 @@ const DEFAULT_AGENT_DEFS: Record<SessionType, AgentDefinition> = {
   },
 };
 
+/**
+ * Applies the optional pilot runaway envelope (`config.workerCaps`) to a
+ * resolved agent definition. Worker-only safety clamp:
+ *
+ * - Only definitions whose resolved `name === 'worker'` are clamped. This keys
+ *   on the *resolved* def name, NOT the spawnSession `type`, so a non-worker
+ *   per-spawn `agentDef` override (e.g. the `spec-implementer` pipeline def with
+ *   maxTurns:80) routed through this method is left untouched.
+ * - The clamp is `min(config, default)`: config can only LOWER maxTurns/timeoutMs,
+ *   never raise them. This makes `workerCaps` a one-way tightening of the envelope.
+ * - Returns the original def unchanged when no cap applies (no allocation on the
+ *   common path); otherwise returns a shallow clone — the frozen DEFAULT_AGENT_DEFS
+ *   and pipeline defs are never mutated.
+ */
+export function clampWorkerCaps(
+  def: AgentDefinition,
+  caps: Config['workerCaps'],
+): AgentDefinition {
+  if (!caps || def.name !== 'worker') return def;
+
+  const maxTurns =
+    caps.maxTurns !== undefined
+      ? Math.min(def.maxTurns, caps.maxTurns)
+      : def.maxTurns;
+  const timeoutMs =
+    caps.timeoutMs !== undefined
+      ? Math.min(def.timeoutMs, caps.timeoutMs)
+      : def.timeoutMs;
+
+  if (maxTurns === def.maxTurns && timeoutMs === def.timeoutMs) return def;
+  return { ...def, maxTurns, timeoutMs };
+}
+
 export class SessionRuntime {
   private adapter: ProviderAdapter;
   private costTracker: CostTracker;
@@ -389,10 +422,16 @@ export class SessionRuntime {
     runId?: string,
   ): Promise<Result<SessionResult>> {
     // 1. Look up agent definition
-    const def = options?.agentDef ?? DEFAULT_AGENT_DEFS[type];
-    if (!def) {
+    const baseDef = options?.agentDef ?? DEFAULT_AGENT_DEFS[type];
+    if (!baseDef) {
       return err(new Error(`No agent definition for session type: ${type}`));
     }
+    // Apply the optional pilot runaway envelope (config.workerCaps). Clamping
+    // here — before budget reservation, prompt assembly, and adapter.spawn —
+    // covers BOTH the legacy CLI adapter and the multi-provider fallback path,
+    // since they each receive this resolved `def`. The clamp is worker-only and
+    // can only LOWER caps (min), never raise them.
+    const def = clampWorkerCaps(baseDef, this.config.workerCaps);
 
     // 2. Reserve budget — fail-safe guard clause (STACK-AC-OPERATIONAL-SAFETY)
     const costAttributionIssueNumbers = normalizeCostAttributionIssueNumbers(

@@ -205,6 +205,18 @@ export const ConfigSchema = z.object({
       samplingRate: 0.1,
       minSamplingRate: 0.01,
     }),
+  // Optional per-deployment runaway envelope for the `worker` session type.
+  // A watched single-issue pilot sets this to LOWER the hardcoded worker
+  // defaults (maxTurns:50, timeoutMs:3h) without changing the global defaults
+  // for other deployments. SessionRuntime applies these as a clamp
+  // (min(config, default)): config can only tighten the envelope, never raise
+  // it. Absent = no change. Worker-only by design — see runtime.ts clampWorkerCaps.
+  workerCaps: z
+    .object({
+      maxTurns: z.number().int().positive().optional(),
+      timeoutMs: z.number().int().positive().optional(),
+    })
+    .optional(),
   maxConsecutiveStuck: z.number().int().min(1).default(30),
   gracePeriodMs: z.number().int().default(30000),
   maxRunsPerIssue: z.number().int().min(1).default(3),

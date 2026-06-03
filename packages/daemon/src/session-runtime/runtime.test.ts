@@ -165,6 +165,118 @@ describe('SessionRuntime', () => {
     expect(calledDef.allowedTools).not.toContain('Bash');
   });
 
+  describe('workerCaps clamp (runaway envelope)', () => {
+    // Default worker def is maxTurns:50, timeoutMs:10_800_000 (3h). A watched
+    // pilot config must be able to LOWER these without touching the global
+    // defaults for other deployments. The clamp is min(config, default): config
+    // can only tighten, never raise.
+    const lastDef = () =>
+      mockSpawn.mock.calls[mockSpawn.mock.calls.length - 1]![0];
+
+    it('clamps the worker def to the pilot caps from config', async () => {
+      mockSpawn.mockResolvedValueOnce({
+        ok: true,
+        value: { output: '{}', cost: 0.01 },
+      });
+      const capped = new SessionRuntime(
+        { ...testConfig, workerCaps: { maxTurns: 15, timeoutMs: 1_200_000 } } as Config,
+        costTracker,
+      );
+      await capped.spawnSession('worker', { variables: WORKER_VARS }, 1);
+      const def = lastDef();
+      expect(def.maxTurns).toBe(15);
+      expect(def.timeoutMs).toBe(1_200_000);
+    });
+
+    it('does NOT raise the worker def above the global default', async () => {
+      mockSpawn.mockResolvedValueOnce({
+        ok: true,
+        value: { output: '{}', cost: 0.01 },
+      });
+      const loose = new SessionRuntime(
+        { ...testConfig, workerCaps: { maxTurns: 999, timeoutMs: 999_999_999 } } as Config,
+        costTracker,
+      );
+      await loose.spawnSession('worker', { variables: WORKER_VARS }, 1);
+      const def = lastDef();
+      // min(999, 50) and min(huge, 3h) — clamp can only lower.
+      expect(def.maxTurns).toBe(50);
+      expect(def.timeoutMs).toBe(10_800_000);
+    });
+
+    it('leaves the worker default untouched when no workerCaps configured', async () => {
+      mockSpawn.mockResolvedValueOnce({
+        ok: true,
+        value: { output: '{}', cost: 0.01 },
+      });
+      await runtime.spawnSession('worker', { variables: WORKER_VARS }, 1);
+      const def = lastDef();
+      expect(def.maxTurns).toBe(50);
+      expect(def.timeoutMs).toBe(10_800_000);
+    });
+
+    it('applies a partial cap (maxTurns only) and leaves timeout at default', async () => {
+      mockSpawn.mockResolvedValueOnce({
+        ok: true,
+        value: { output: '{}', cost: 0.01 },
+      });
+      const partial = new SessionRuntime(
+        { ...testConfig, workerCaps: { maxTurns: 15 } } as Config,
+        costTracker,
+      );
+      await partial.spawnSession('worker', { variables: WORKER_VARS }, 1);
+      const def = lastDef();
+      expect(def.maxTurns).toBe(15);
+      expect(def.timeoutMs).toBe(10_800_000);
+    });
+
+    it('does NOT clamp non-worker session types (e.g. product-owner)', async () => {
+      mockSpawn.mockResolvedValueOnce({
+        ok: true,
+        value: { output: '{}', cost: 0.01 },
+      });
+      const capped = new SessionRuntime(
+        { ...testConfig, workerCaps: { maxTurns: 1, timeoutMs: 1 } } as Config,
+        costTracker,
+      );
+      await capped.spawnSession('product-owner', { variables: {} }, 1);
+      const def = lastDef();
+      // product-owner default is maxTurns:10 — must be unaffected by workerCaps.
+      expect(def.maxTurns).toBe(10);
+    });
+
+    it('does NOT raise a per-spawn agentDef override for spec-implementer (maxTurns:80)', async () => {
+      mockSpawn.mockResolvedValueOnce({
+        ok: true,
+        value: { output: '{}', cost: 0.01 },
+      });
+      const capped = new SessionRuntime(
+        { ...testConfig, workerCaps: { maxTurns: 15, timeoutMs: 1_200_000 } } as Config,
+        costTracker,
+      );
+      const specImplementerDef = {
+        name: 'spec-implementer',
+        description: 'pipeline impl',
+        systemPrompt: '',
+        allowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep'],
+        maxTurns: 80,
+        timeoutMs: 900_000,
+        budgetCap: 10,
+      };
+      await capped.spawnSession(
+        'worker',
+        { variables: WORKER_VARS },
+        1,
+        { agentDef: specImplementerDef },
+      );
+      const def = lastDef();
+      // The guard keys on the resolved def's name, not the spawnSession type:
+      // a non-worker agentDef (spec-implementer) must NOT be clamped.
+      expect(def.maxTurns).toBe(80);
+      expect(def.timeoutMs).toBe(900_000);
+    });
+  });
+
   it('does not define a reporter agent — reports are generated directly (#54)', async () => {
     // The reporter prompt template and agent definition were dead code:
     // phases.ts calls formatReport() directly, no session is spawned.
