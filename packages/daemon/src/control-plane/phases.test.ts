@@ -859,7 +859,8 @@ describe('createPhaseHandlers', () => {
       const { handlers } = createHandlers();
       const result = await handlers.review!(makeRun());
       expect(result).toBe('success');
-      expect(mockCreateGate1).toHaveBeenCalledWith(['vitest run']);
+      // 2nd arg: baseline opts — undefined when baselinePreexistingFailures is off (default)
+      expect(mockCreateGate1).toHaveBeenCalledWith(['vitest run'], undefined);
     });
 
     it('returns failure when gates fail', async () => {
@@ -1110,6 +1111,7 @@ describe('createPhaseHandlers', () => {
         validation: {
           gate1Commands: ['test'],
           maxFixCycles: 5,
+          baselinePreexistingFailures: false,
           staticAnalysis: {
             maxComplexity: 15,
             maxFunctionLength: 50,

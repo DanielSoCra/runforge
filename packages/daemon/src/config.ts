@@ -255,6 +255,11 @@ export const ConfigSchema = z.object({
           'eslint --max-warnings 0 src/',
         ]),
       maxFixCycles: z.number().int().min(1).default(3),
+      // When true, gate1 treats a command that ALSO fails on the pristine base
+      // checkout as pre-existing and does not block — only NEW failures block.
+      // Default false = strict (first failure blocks). Enable for self-targeted
+      // runs where the repo's own suite may already be red (#3). See createGate1.
+      baselinePreexistingFailures: z.boolean().default(false),
       holdoutCommand: z
         .string()
         .refine(
@@ -316,6 +321,7 @@ export const ConfigSchema = z.object({
         'eslint --max-warnings 0 src/',
       ],
       maxFixCycles: 3,
+      baselinePreexistingFailures: false,
       staticAnalysis: {
         maxComplexity: 15,
         maxFunctionLength: 50,

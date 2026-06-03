@@ -22,7 +22,19 @@ export function validateGate1Command(cmd: string): string | null {
   return null;
 }
 
-export function createGate1(commands: string[]): Gate {
+export interface Gate1Options {
+  /**
+   * When set, a command that fails post-change is re-run on this pristine base
+   * checkout. If it ALSO fails there, the failure is pre-existing (not a
+   * regression this run introduced) and does NOT block the gate — only NEW
+   * failures block. Off (undefined) = strict: the first failure blocks, byte-
+   * identical to the historical behavior. Used for self-targeted runs where the
+   * repo's own suite may already be red (#3 / config.validation.baselinePreexistingFailures).
+   */
+  baselineCwd?: string;
+}
+
+export function createGate1(commands: string[], opts?: Gate1Options): Gate {
   return {
     type: 'deterministic',
     async execute(cwd: string): Promise<GateResult> {
@@ -39,16 +51,34 @@ export function createGate1(commands: string[]): Gate {
           return { gate: 'deterministic', passed: false, findings };
         }
         const result = await runCommand('/bin/sh', ['-c', cmd], { cwd, timeoutMs: 120_000 });
-        if (!result.ok) {
-          findings.push({
-            severity: 'critical',
-            location: cmd,
-            description: result.error.message,
+        if (result.ok) continue;
+
+        // Command failed. In baseline mode, a command that also fails on the
+        // pristine base is pre-existing — skip it so a flaky/red base test can't
+        // stuck self-targeted runs. The base run reuses the same validated cmd.
+        if (opts?.baselineCwd !== undefined) {
+          const baseline = await runCommand('/bin/sh', ['-c', cmd], {
+            cwd: opts.baselineCwd,
+            timeoutMs: 120_000,
           });
-          return { gate: 'deterministic', passed: false, findings };
+          if (!baseline.ok) {
+            console.log(
+              `[gate1] '${cmd}' fails post-change AND on base — pre-existing, not blocking (${result.error.message.split('\n')[0]})`,
+            );
+            continue;
+          }
+          console.log(
+            `[gate1] '${cmd}' passes on base but fails post-change — NEW failure, blocking`,
+          );
         }
+        findings.push({
+          severity: 'critical',
+          location: cmd,
+          description: result.error.message,
+        });
+        return { gate: 'deterministic', passed: false, findings };
       }
-      return { gate: 'deterministic', passed: true, findings: [] };
+      return { gate: 'deterministic', passed: true, findings };
     },
   };
 }

@@ -1360,7 +1360,15 @@ export function createPhaseHandlers(
         }
       }
 
-      const gate1 = createGate1(config.validation.gate1Commands);
+      const gate1 = createGate1(
+        config.validation.gate1Commands,
+        // Baseline mode (opt-in): re-run a failing command on the pristine base
+        // checkout (mainRepoRoot, unmodified — worktrees branch off it) so
+        // pre-existing failures don't stuck self-targeted runs. Off = strict.
+        config.validation.baselinePreexistingFailures
+          ? { baselineCwd: mainRepoRoot }
+          : undefined,
+      );
       const gate2 = createReviewerGate(
         'spec-compliance',
         'reviewer-spec',

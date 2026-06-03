@@ -45,6 +45,71 @@ describe('createGate1', () => {
     expect(mockRunCommand).toHaveBeenCalledTimes(1);
   });
 
+  describe('baseline mode (baselineCwd)', () => {
+    it('does NOT block a failure that also fails on the base (pre-existing)', async () => {
+      mockRunCommand
+        // post-change run in workspace: fails
+        .mockResolvedValueOnce({ ok: false, error: new Error('vitest failed (1): 1 failed') })
+        // baseline run on base checkout: ALSO fails -> pre-existing
+        .mockResolvedValueOnce({ ok: false, error: new Error('vitest failed (1): 1 failed') });
+
+      const gate = createGate1(['vitest run'], { baselineCwd: '/base' });
+      const result = await gate.execute('/workspace');
+
+      expect(result.passed).toBe(true);
+      expect(result.findings).toHaveLength(0);
+      // ran the command twice: workspace then base
+      expect(mockRunCommand).toHaveBeenNthCalledWith(1, '/bin/sh', ['-c', 'vitest run'], {
+        cwd: '/workspace',
+        timeoutMs: 120_000,
+      });
+      expect(mockRunCommand).toHaveBeenNthCalledWith(2, '/bin/sh', ['-c', 'vitest run'], {
+        cwd: '/base',
+        timeoutMs: 120_000,
+      });
+    });
+
+    it('BLOCKS a failure that passes on the base (new regression)', async () => {
+      mockRunCommand
+        // post-change: fails
+        .mockResolvedValueOnce({ ok: false, error: new Error('tsc failed (1): type error') })
+        // baseline: passes -> the change introduced it
+        .mockResolvedValueOnce({ ok: true, value: '' });
+
+      const gate = createGate1(['tsc --noEmit'], { baselineCwd: '/base' });
+      const result = await gate.execute('/workspace');
+
+      expect(result.passed).toBe(false);
+      expect(result.findings[0]?.severity).toBe('critical');
+      expect(result.findings[0]?.location).toBe('tsc --noEmit');
+    });
+
+    it('continues past a pre-existing failure to catch a later new failure', async () => {
+      mockRunCommand
+        .mockResolvedValueOnce({ ok: false, error: new Error('cmd A failed') }) // A post-change fail
+        .mockResolvedValueOnce({ ok: false, error: new Error('cmd A failed') }) // A base fail -> skip
+        .mockResolvedValueOnce({ ok: false, error: new Error('cmd B failed') }) // B post-change fail
+        .mockResolvedValueOnce({ ok: true, value: '' }); // B base pass -> block
+
+      const gate = createGate1(['cmd A', 'cmd B'], { baselineCwd: '/base' });
+      const result = await gate.execute('/workspace');
+
+      expect(result.passed).toBe(false);
+      expect(result.findings[0]?.location).toBe('cmd B');
+      expect(mockRunCommand).toHaveBeenCalledTimes(4);
+    });
+
+    it('without baselineCwd stays strict (no base re-run, first failure blocks)', async () => {
+      mockRunCommand.mockResolvedValueOnce({ ok: false, error: new Error('fail') });
+
+      const gate = createGate1(['vitest run']); // no opts
+      const result = await gate.execute('/workspace');
+
+      expect(result.passed).toBe(false);
+      expect(mockRunCommand).toHaveBeenCalledTimes(1); // never re-ran on a base
+    });
+  });
+
   it('captures error message in finding description', async () => {
     const errorMessage = 'eslint failed (1): 3 errors found';
     mockRunCommand.mockResolvedValue({ ok: false, error: new Error(errorMessage) });

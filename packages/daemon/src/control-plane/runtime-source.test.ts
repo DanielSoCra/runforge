@@ -55,6 +55,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     validation: {
       gate1Commands: [],
       maxFixCycles: 3,
+      baselinePreexistingFailures: false,
       staticAnalysis: {
         maxComplexity: 15,
         maxFunctionLength: 50,
