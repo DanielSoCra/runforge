@@ -17,5 +17,10 @@ export interface ProviderAdapter {
     mcpConfigs?: McpConfig[];
     directoryScope?: DirectoryScope;
     provider?: ProviderDefinition;
+    // Pass --dangerously-skip-permissions to clear the workspace-trust gate for
+    // autonomous, externally-sandboxed (container) workers. Gated upstream in
+    // SessionRuntime (config.autonomous || AUTO_CLAUDE_SKIP_PERMISSIONS=1).
+    // Adapters that don't model a trust gate (e.g. codex-cli) may ignore it.
+    skipPermissions?: boolean;
   }): Promise<Result<SessionResult>>;
 }

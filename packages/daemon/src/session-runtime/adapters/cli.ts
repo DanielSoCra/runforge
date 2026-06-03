@@ -17,6 +17,17 @@ import {
   unregisterManagedProcess,
   killProcessGroup,
 } from '../managed-processes.js';
+import { seedClaudeProjectTrust } from '../claude-project-trust.js';
+
+/**
+ * The Claude CLI refuses --dangerously-skip-permissions under root/sudo. The
+ * daemon image runs as root, so we must NOT pass that flag there (it's fatal) —
+ * trust seeding clears the workspace gate instead. For non-root sandboxes the
+ * flag remains the documented bypass and composes with the trust seed.
+ */
+function isRoot(): boolean {
+  return typeof process.getuid === 'function' && process.getuid() === 0;
+}
 
 export class CliAdapter implements ProviderAdapter {
   buildArgs(
@@ -24,6 +35,7 @@ export class CliAdapter implements ProviderAdapter {
     prompt: string,
     jsonSchema?: string,
     provider?: ProviderDefinition,
+    skipPermissions?: boolean,
   ): string[] {
     const args = [
       '-p', prompt,
@@ -39,6 +51,22 @@ export class CliAdapter implements ProviderAdapter {
     }
     if (jsonSchema) {
       args.push('--json-schema', jsonSchema);
+    }
+    // Permission bypass for autonomous, externally-sandboxed workers (the
+    // container IS the sandbox). GATED: only when the caller turns the gate on —
+    // interactive/native runs leave it off so the operator keeps the normal
+    // permission prompts. It composes with the daemon's PreToolUse containment
+    // hooks: Claude Code evaluates hooks (and deny rules) BEFORE the
+    // permission-mode check, so a hook can still block a tool call (exit 2)
+    // under bypass mode (see setupHooks() + generate-containment-script.ts).
+    //
+    // The CLI REFUSES this flag under root/sudo (fatal), and the daemon image
+    // runs as root — so we suppress it there. Workspace trust is cleared the
+    // root-safe way instead, by seeding the per-project trust entry before
+    // spawn() (seedClaudeProjectTrust). Under a non-root sandbox the flag is
+    // still the documented bypass.
+    if (skipPermissions === true && !isRoot()) {
+      args.push('--dangerously-skip-permissions');
     }
     return args;
   }
@@ -120,7 +148,12 @@ export class CliAdapter implements ProviderAdapter {
     // Containment hook — only when a policy is provided
     if (policy) {
       const containmentPath = join(tmpdir(), `containment-hook-${process.pid}-${now}.mjs`);
-      writeFileSync(containmentPath, generateContainmentScript(policy), { mode: 0o755 });
+      // Bind absolute-path normalization to the worker's workspace, NOT the
+      // daemon's process.cwd(). Critical under --dangerously-skip-permissions:
+      // the PreToolUse hook is then the containment boundary, and without the
+      // right project root, absolute paths normalize against the wrong base and
+      // bypass blocked-pattern checks (SEC-2).
+      writeFileSync(containmentPath, generateContainmentScript(policy, cwd), { mode: 0o755 });
       scriptPaths.push(containmentPath);
       preToolUseHooks.push({
         matcher: '',
@@ -269,6 +302,7 @@ export class CliAdapter implements ProviderAdapter {
       mcpConfigs?: McpConfig[];
       directoryScope?: DirectoryScope;
       provider?: ProviderDefinition;
+      skipPermissions?: boolean;
     },
   ): Promise<Result<SessionResult>> {
     const args = this.buildArgs(
@@ -276,6 +310,7 @@ export class CliAdapter implements ProviderAdapter {
       prompt,
       options?.jsonSchema,
       options?.provider,
+      options?.skipPermissions,
     );
     const sessionStartTime = Date.now();
     const extraEnv: Record<string, string> = {
@@ -306,6 +341,24 @@ export class CliAdapter implements ProviderAdapter {
       options?.mcpConfigs,
       options?.directoryScope,
     );
+
+    // Autonomous/container gate: clear the CLI "Workspace not trusted" gate for
+    // this worker's (dynamic) cwd the root-safe way. The daemon owns/created
+    // effectiveCwd (a worktree or a daemon temp dir), and the PreToolUse hooks
+    // installed just above remain the containment boundary. Best-effort: a seed
+    // failure shouldn't crash the spawn — the CLI will surface the trust error
+    // itself if the seed truly didn't take.
+    if (options?.skipPermissions === true) {
+      try {
+        await seedClaudeProjectTrust(effectiveCwd);
+      } catch (e) {
+        console.warn(
+          `[cli-adapter] workspace-trust seed failed for ${effectiveCwd}: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    }
 
     return new Promise((resolve) => {
       const chunks: Buffer[] = [];

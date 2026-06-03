@@ -404,6 +404,8 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
   dailyBudget: 50,
   perRunBudget: 10,
   adapter: 'cli' as const,
+  autonomous: false,
+  remoteControl: { enabled: false },
   runtimeSource: {
     enabled: true,
     requireClean: true,
@@ -855,11 +857,22 @@ describe('daemon', () => {
       exitSpy.mockRestore();
     });
 
-    it('starts RemoteControlManager', async () => {
+    it('starts RemoteControlManager when remoteControl.enabled is true (opt-in)', async () => {
+      mockLoadConfig.mockResolvedValue(
+        ok(makeConfig({ remoteControl: { enabled: true } })),
+      );
       const { startDaemon } = await loadDaemon();
       await startDaemon('config.json');
 
       expect(mockRemoteControl.start).toHaveBeenCalled();
+    });
+
+    it('does NOT start RemoteControlManager by default (off in autonomous container)', async () => {
+      // makeConfig() defaults remoteControl.enabled to false.
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      expect(mockRemoteControl.start).not.toHaveBeenCalled();
     });
   });
 

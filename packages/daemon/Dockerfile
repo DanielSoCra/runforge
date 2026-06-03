@@ -33,6 +33,25 @@ COPY packages/decision-protocol/ ./packages/decision-protocol/
 COPY packages/daemon/src/ ./packages/daemon/src/
 COPY packages/daemon/tsconfig.json ./packages/daemon/
 
+# Bake the runtime governance + prompt + fitness assets into the image so the
+# daemon boots with NO runtime mounts. These are repo-tracked, non-secret
+# operational files — unlike creds, which the operator mounts (NEVER baked).
+#   - prompts/        : validatePromptContracts() (daemon.ts) + every worker /
+#                       reviewer session read prompts/*.md. PROMPTS_DIR (below)
+#                       points the daemon at this baked copy.
+#   - FACTORY_RULES.md: governance doc; loadGovernanceContext() requires it at
+#                       <documentPath> resolved from cwd (/app/packages/daemon)
+#                       or the repo-root fallback.
+#   - fitness/        : fitness-function shell scripts referenced by the daemon.
+COPY prompts/ ./packages/daemon/prompts/
+COPY FACTORY_RULES.md ./packages/daemon/FACTORY_RULES.md
+COPY fitness/ ./packages/daemon/fitness/
+
+# Point prompt resolution at the baked copy regardless of process.cwd(). Without
+# this, daemon.ts/runtime.ts fall back to join(import.meta.dirname,'../../../../prompts'),
+# which resolves to /app/prompts in-container — where nothing is copied.
+ENV PROMPTS_DIR=/app/packages/daemon/prompts
+
 # Run from the daemon package dir: process.cwd() resolves state/, prompts/, etc.
 WORKDIR /app/packages/daemon
 RUN mkdir -p state/runs

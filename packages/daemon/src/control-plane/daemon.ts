@@ -214,6 +214,33 @@ export async function startDaemon(
     return err(e instanceof Error ? e : new Error(String(e)));
   }
 
+  // 1e. Autonomous/container gate: clear the CLI "Workspace not trusted" gate
+  // for the daemon's OWN cwd (static) the root-safe way. This covers
+  // control-plane claude invocations that run in the daemon cwd (e.g. proactive
+  // reviews scoped to the repo root, and `claude remote-control` when an
+  // operator opts in) — none of which can use --dangerously-skip-permissions
+  // (remote-control has no such flag, and the daemon runs as root). Per-worker
+  // worktree trust is seeded separately in the CLI adapter before each spawn.
+  const skipPermissions =
+    config.autonomous === true ||
+    process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'] === '1';
+  if (skipPermissions) {
+    try {
+      const { seedClaudeProjectTrust } =
+        await import('../session-runtime/claude-project-trust.js');
+      await seedClaudeProjectTrust(process.cwd());
+      console.log(
+        `[daemon] Workspace trust seeded for daemon cwd ${process.cwd()} (autonomous mode).`,
+      );
+    } catch (e) {
+      console.warn(
+        `[daemon] Workspace-trust seed for daemon cwd failed: ${
+          e instanceof Error ? e.message : String(e)
+        }`,
+      );
+    }
+  }
+
   // 2. Initialize state
   const stateDir = 'state';
   const stateMgr = new StateManager(stateDir);
@@ -455,9 +482,22 @@ export async function startDaemon(
       .catch((e) => console.warn('[knowledge-sync] startup cycle error:', e));
   }
 
-  // 3c. Start Remote Control
+  // 3c. Start Remote Control — opt-in. It's an interactive claude.ai feature
+  // (needs a trusted workspace + interactive login, no permission-bypass flag)
+  // and is not part of the autonomous worker loop. Default off so a root
+  // container doesn't crash-loop on the trust gate; operators enable it via
+  // config.remoteControl.enabled or AUTO_CLAUDE_REMOTE_CONTROL=1.
   const remoteControl = new RemoteControlManager();
-  remoteControl.start();
+  const remoteControlEnabled =
+    config.remoteControl?.enabled === true ||
+    process.env['AUTO_CLAUDE_REMOTE_CONTROL'] === '1';
+  if (remoteControlEnabled) {
+    remoteControl.start();
+  } else {
+    console.log(
+      '[daemon] Remote Control disabled (opt-in: config.remoteControl.enabled or AUTO_CLAUDE_REMOTE_CONTROL=1).',
+    );
+  }
 
   // 3c. Start Review Scheduler
   const reviewScheduler = createReviewScheduler(

@@ -214,6 +214,15 @@ export const ConfigSchema = z.object({
   dailyBudget: z.number().positive().default(50),
   perRunBudget: z.number().positive().default(10),
   adapter: z.enum(['cli', 'sdk']).default('cli'),
+  // Autonomous, externally-sandboxed execution (the container IS the sandbox).
+  // When true, the CLI adapter passes --dangerously-skip-permissions so workers
+  // clear the "Workspace not trusted" gate for dynamic worktree cwds. The
+  // daemon's PreToolUse containment hooks still fire and can block tool calls
+  // (Claude Code evaluates hooks before the permission-mode check), so this is
+  // a trust bypass, NOT a containment bypass. Off by default — interactive /
+  // native runs keep the normal trust + permission prompts. Can also be turned
+  // on via the AUTO_CLAUDE_SKIP_PERMISSIONS=1 env (see runtime.ts).
+  autonomous: z.boolean().default(false),
   providers: ProvidersConfigSchema.optional(),
   // Per-agent-role model/provider overrides, keyed by resolved AgentDefinition
   // name. Applied at spawn time by applyRoleModel (runtime.ts) onto the base def
@@ -366,6 +375,14 @@ export const ConfigSchema = z.object({
     })
     .default({ documentPath: 'FACTORY_RULES.md', maxPrLinesChanged: 2000 }),
   agentScopes: z.record(z.string(), DirectoryScopeSchema).default({}),
+  // Claude.ai Remote Control (interactive control-plane feature). It spawns a
+  // long-lived `claude remote-control` subprocess that requires a trusted
+  // workspace AND an interactive claude.ai login, and exposes no permission
+  // bypass flag. Not needed for the autonomous worker loop, and in a root
+  // container it crash-loops on the trust gate — so it is OFF by default and an
+  // operator opts in explicitly. Can also be forced on via
+  // AUTO_CLAUDE_REMOTE_CONTROL=1 (see daemon.ts).
+  remoteControl: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
   activePlugins: z.array(z.string()).default([]),
   knowledge: z
     .object({
