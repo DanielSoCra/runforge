@@ -17,6 +17,8 @@
   "packageManager": "pnpm@10.32.1",
   "dependencies": {
     "@auto-claude/db": "workspace:*",
+    "@auto-claude/decision-index": "workspace:*",
+    "@auto-claude/decision-protocol": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@octokit/rest": "^21.0.0",
     "commander": "^13.0.0",
@@ -28,6 +30,7 @@
   "devDependencies": {
     "@types/micromatch": "^4.0.10",
     "@types/node": "^25.5.0",
+    "ajv": "^8.20.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
