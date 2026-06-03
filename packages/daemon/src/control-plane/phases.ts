@@ -205,6 +205,38 @@ export function createPhaseHandlers(
     }
   };
 
+  /**
+   * Merge a phase proposal PR (squash). The operator's gate approval authorizes
+   * the merge, so the daemon performs it rather than waiting for a manual merge.
+   * Returns a failure reason (never throws) so the caller can re-park gracefully
+   * when the PR is genuinely un-mergeable (conflicts / required checks).
+   */
+  const mergeL2Proposal = async (
+    prNumber: number | undefined,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> => {
+    if (prNumber === undefined) {
+      return { ok: false, reason: 'no proposal PR recorded' };
+    }
+    try {
+      await octokit.pulls.merge({
+        owner,
+        repo,
+        pull_number: prNumber,
+        merge_method: 'squash',
+      });
+      console.log(
+        `[l2-gate] auto-merged L2 proposal PR #${prNumber} on approval`,
+      );
+      return { ok: true };
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      console.warn(
+        `[l2-gate] auto-merge of L2 proposal PR #${prNumber} failed: ${reason}`,
+      );
+      return { ok: false, reason };
+    }
+  };
+
   const reconcileDeliveredArtifact = async (
     run: RunState,
     phase: DeliverableSpecPhase,
@@ -489,33 +521,52 @@ export function createPhaseHandlers(
 
       if (labels.includes('l2-approved')) {
         console.log(`[l2-gate] L2 approved for #${workRequest.issueNumber}`);
-        const reconciled = await reconcileDeliveredArtifact(run, 'l2-design');
+        let reconciled = await reconcileDeliveredArtifact(run, 'l2-design');
         if (reconciled.kind === 'event') return reconciled.event;
         if (reconciled.status !== 'merged') {
-          run.pausedAtPhase = 'l2-gate';
-          if (run.l2MergeBlockedNotified !== true) {
-            const artifactUrl =
-              run.phaseArtifacts?.['l2-design']?.pullRequestUrl;
-            const proposalLine =
-              artifactUrl !== undefined && artifactUrl.length > 0
-                ? `\n\nProposal: ${artifactUrl}`
-                : '';
-            try {
-              await octokit.issues.createComment({
-                owner,
-                repo,
-                issue_number: workRequest.issueNumber,
-                body:
-                  `## L2 Proposal Not Merged\n\nThe \`l2-approved\` label is present, ` +
-                  `but L3 generation starts only after the recorded L2 proposal is merged into ` +
-                  `\`${config.branches.staging}\`.${proposalLine}`,
-              });
-            } catch (e) {
-              console.warn(`[l2-gate] Failed to notify merge block:`, e);
-            }
-            run.l2MergeBlockedNotified = true;
+          // Approval authorizes the merge: the operator approved the L2 spec at
+          // the gate, so auto-merge the recorded proposal PR and re-reconcile.
+          // Without this the run re-parks forever waiting for a manual merge (#49).
+          const merged = await mergeL2Proposal(
+            run.phaseArtifacts?.['l2-design']?.pullRequestNumber,
+          );
+          if (merged.ok) {
+            reconciled = await reconcileDeliveredArtifact(run, 'l2-design');
+            if (reconciled.kind === 'event') return reconciled.event;
           }
-          return 'success';
+          if (reconciled.status !== 'merged') {
+            // Genuinely cannot proceed (no PR recorded, or merge blocked by
+            // conflicts / required checks) — re-park with an actionable message.
+            run.pausedAtPhase = 'l2-gate';
+            if (run.l2MergeBlockedNotified !== true) {
+              const artifactUrl =
+                run.phaseArtifacts?.['l2-design']?.pullRequestUrl;
+              const proposalLine =
+                artifactUrl !== undefined && artifactUrl.length > 0
+                  ? `\n\nProposal: ${artifactUrl}`
+                  : '';
+              const reasonLine = merged.ok
+                ? ''
+                : `\n\nAuto-merge failed: ${merged.reason}`;
+              try {
+                await octokit.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: workRequest.issueNumber,
+                  body:
+                    `## L2 Proposal Not Merged\n\nThe \`l2-approved\` label is present, ` +
+                    `but the L2 proposal could not be auto-merged into ` +
+                    `\`${config.branches.staging}\`. Resolve any conflicts or failing ` +
+                    `checks and merge it, then re-apply \`l2-approved\`.` +
+                    `${reasonLine}${proposalLine}`,
+                });
+              } catch (e) {
+                console.warn(`[l2-gate] Failed to notify merge block:`, e);
+              }
+              run.l2MergeBlockedNotified = true;
+            }
+            return 'success';
+          }
         }
         run.pausedAtPhase = undefined;
         run.l2MergeBlockedNotified = undefined;
