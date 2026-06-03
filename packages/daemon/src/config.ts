@@ -38,6 +38,45 @@ const ProvidersConfigSchema = z.object({
   definitions: z.record(z.string(), ProviderDefinitionSchema),
 });
 
+const ProviderBindingSchema = z.object({
+  preferred: z.string().min(1).optional(),
+  fallback: z.array(z.string().min(1)).default([]),
+});
+
+// Per-agent-role model selection. Maps a resolved AgentDefinition name
+// (e.g. 'worker', 'l2-designer', 'spec-implementer', 'batch-classifier') onto
+// an override applied at spawn time by applyRoleModel (runtime.ts). Every field
+// is optional, but at least one must be set — an empty entry is meaningless and
+// is rejected so config typos surface at load. provider/providerBinding only
+// take effect when config.providers is configured (multi-provider routing);
+// the superRefine below fails fast if a role names a provider while providers
+// is absent, because the legacy single-CliAdapter path silently ignores them.
+const RoleModelSchema = z
+  .object({
+    provider: z.string().min(1).optional(),
+    providerBinding: ProviderBindingSchema.optional(),
+    model: z.string().min(1).optional(),
+    modelTier: ModelTierSchema.optional(),
+  })
+  .refine(
+    (rm) =>
+      rm.provider !== undefined ||
+      rm.providerBinding !== undefined ||
+      rm.model !== undefined ||
+      rm.modelTier !== undefined,
+    { message: 'roleModels entry must set at least one field' },
+  )
+  .refine(
+    (rm) =>
+      rm.providerBinding === undefined ||
+      rm.providerBinding.preferred !== undefined ||
+      (rm.providerBinding.fallback?.length ?? 0) > 0,
+    {
+      message:
+        'roleModels providerBinding must set preferred and/or a non-empty fallback',
+    },
+  );
+
 const RuntimeSourceConfigSchema = z
   .object({
     enabled: z.boolean().default(true),
@@ -59,6 +98,99 @@ const RuntimeSourceConfigSchema = z
     onUnhealthy: 'pause',
     ignoredDirtyPaths: ['state/', 'workspaces/', '.claude/scheduled_tasks.lock'],
   });
+
+// Shapes used by validateRoleModelProviders. Typed structurally rather than via
+// z.infer to avoid a forward reference to ConfigSchema's own inferred type from
+// inside its superRefine.
+type RoleModelShape = z.infer<typeof RoleModelSchema>;
+interface RoleModelValidationInput {
+  providers?: { definitions: Record<string, { model?: string }> };
+  roleModels?: Record<string, RoleModelShape>;
+}
+
+/**
+ * Cross-field validation for `roleModels`:
+ *  - Every provider name referenced by a role (provider / providerBinding.preferred
+ *    / providerBinding.fallback[]) must be a registered provider key.
+ *  - Fail fast if any role names a provider/providerBinding while `config.providers`
+ *    is undefined — the legacy single-CliAdapter path silently drops provider fields,
+ *    so the role would never actually route to the intended (e.g. Codex) provider.
+ *  - Reject the silent-override trap: a role that sets BOTH its own `model` AND a
+ *    `provider` whose definition pins its own `model`. The adapters resolve
+ *    `provider.model ?? def.modelOverride`, so the provider's model would silently
+ *    win and the role's `model` would be a no-op (codex sparring flagged this).
+ *    Surfacing it at config load forces an explicit choice.
+ */
+function validateRoleModelProviders(
+  config: RoleModelValidationInput,
+  ctx: z.RefinementCtx,
+): void {
+  const roleModels = config.roleModels;
+  if (!roleModels) return;
+  const names = config.providers
+    ? new Set(Object.keys(config.providers.definitions))
+    : undefined;
+
+  for (const [role, rm] of Object.entries(roleModels)) {
+    const refs: Array<{ name: string; path: (string | number)[] }> = [];
+    if (rm.provider !== undefined) {
+      refs.push({ name: rm.provider, path: ['roleModels', role, 'provider'] });
+    }
+    if (rm.providerBinding?.preferred !== undefined) {
+      refs.push({
+        name: rm.providerBinding.preferred,
+        path: ['roleModels', role, 'providerBinding', 'preferred'],
+      });
+    }
+    (rm.providerBinding?.fallback ?? []).forEach((name, index) => {
+      refs.push({
+        name,
+        path: ['roleModels', role, 'providerBinding', 'fallback', index],
+      });
+    });
+
+    if (refs.length === 0) continue;
+
+    if (!names) {
+      // Fail-fast: a role names a provider but no providers block exists.
+      ctx.addIssue({
+        code: 'custom',
+        path: ['roleModels', role],
+        message: `roleModels.${role} names a provider but config.providers is not configured — the legacy adapter cannot route it. Add a providers block.`,
+      });
+      continue;
+    }
+
+    for (const ref of refs) {
+      if (!names.has(ref.name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ref.path,
+          message: `roleModels.${role} must reference a registered provider: ${ref.name}`,
+        });
+      }
+    }
+
+    // Silent-override trap: role pins its own `model` AND selects a provider whose
+    // def also pins a `model`. The selected provider is `providerBinding.preferred`
+    // when set, else the `provider` shorthand. provider.model wins in the adapter,
+    // so the role's `model` would be silently ignored.
+    if (rm.model !== undefined) {
+      const selectedProvider = rm.providerBinding?.preferred ?? rm.provider;
+      const providerDef =
+        selectedProvider !== undefined
+          ? config.providers?.definitions[selectedProvider]
+          : undefined;
+      if (providerDef?.model !== undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['roleModels', role, 'model'],
+          message: `roleModels.${role}.model ("${rm.model}") would be ignored: provider "${selectedProvider}" pins its own model ("${providerDef.model}") which wins in the adapter. Drop one of the two.`,
+        });
+      }
+    }
+  }
+}
 
 // zod v4 requires .default() on nested objects to include explicit values
 // matching the inner field defaults. Keep these in sync when changing defaults.
@@ -83,6 +215,11 @@ export const ConfigSchema = z.object({
   perRunBudget: z.number().positive().default(10),
   adapter: z.enum(['cli', 'sdk']).default('cli'),
   providers: ProvidersConfigSchema.optional(),
+  // Per-agent-role model/provider overrides, keyed by resolved AgentDefinition
+  // name. Applied at spawn time by applyRoleModel (runtime.ts) onto the base def
+  // — model -> modelOverride, plus modelTier/provider/providerBinding. Default
+  // {} = today's behavior (no role is rerouted). See RoleModelSchema.
+  roleModels: z.record(z.string(), RoleModelSchema).default({}),
   runtimeSource: RuntimeSourceConfigSchema,
   branches: z
     .object({
@@ -326,36 +463,42 @@ export const ConfigSchema = z.object({
     }),
 }).superRefine((config, ctx) => {
   const providers = config.providers;
-  if (!providers) return;
+  if (providers) {
+    const names = new Set(Object.keys(providers.definitions));
+    if (!names.has(providers.defaultProvider)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['providers', 'defaultProvider'],
+        message: `defaultProvider must reference a registered provider: ${providers.defaultProvider}`,
+      });
+    }
 
-  const names = new Set(Object.keys(providers.definitions));
-  if (!names.has(providers.defaultProvider)) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['providers', 'defaultProvider'],
-      message: `defaultProvider must reference a registered provider: ${providers.defaultProvider}`,
+    for (const [name, definition] of Object.entries(providers.definitions)) {
+      if (definition.name !== name) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['providers', 'definitions', name, 'name'],
+          message: `provider definition name must match registry key: ${name}`,
+        });
+      }
+    }
+
+    providers.fallbackChain.forEach((name, index) => {
+      if (!names.has(name)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['providers', 'fallbackChain', index],
+          message: `fallback provider must reference a registered provider: ${name}`,
+        });
+      }
     });
   }
 
-  for (const [name, definition] of Object.entries(providers.definitions)) {
-    if (definition.name !== name) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['providers', 'definitions', name, 'name'],
-        message: `provider definition name must match registry key: ${name}`,
-      });
-    }
-  }
-
-  providers.fallbackChain.forEach((name, index) => {
-    if (!names.has(name)) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['providers', 'fallbackChain', index],
-        message: `fallback provider must reference a registered provider: ${name}`,
-      });
-    }
-  });
+  // roleModels validation runs regardless of whether `providers` is set: the
+  // fail-fast rule fires precisely when a role names a provider while
+  // `providers` is absent (the legacy single-CliAdapter path silently ignores
+  // provider fields, so the chosen provider would never be reached).
+  validateRoleModelProviders(config, ctx);
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

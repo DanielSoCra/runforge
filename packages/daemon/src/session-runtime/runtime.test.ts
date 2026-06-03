@@ -1,6 +1,11 @@
 // src/session-runtime/runtime.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { SessionRuntime, loadPromptTemplate } from './runtime.js';
+import {
+  SessionRuntime,
+  loadPromptTemplate,
+  applyRoleModel,
+} from './runtime.js';
+import type { AgentDefinition } from '../types.js';
 import { CostTracker } from './cost.js';
 import { RateLimiter } from './rate-limiter.js';
 import type { Config } from '../config.js';
@@ -1092,6 +1097,168 @@ describe('SessionRuntime', () => {
 
     expect(result.ok).toBe(true);
   });
+
+  describe('roleModels override (per-role model selection)', () => {
+    // Shared providers block: claude-default (claude-cli) + codex-xhigh
+    // (codex-cli). Routing l2-designer to codex-xhigh must pick the
+    // CodexCliAdapter at the single spawnSession call-site.
+    const providersBlock = {
+      defaultProvider: 'claude-default',
+      fallbackChain: [] as string[],
+      definitions: {
+        'claude-default': {
+          name: 'claude-default',
+          adapterClass: 'process-based' as const,
+          providerKind: 'claude-cli' as const,
+          supportedModelTiers: [
+            'standard-capability' as const,
+            'higher-capability' as const,
+          ],
+          required: false,
+          cliTool: 'claude',
+          executionFlags: [] as string[],
+          env: {},
+        },
+        'codex-xhigh': {
+          name: 'codex-xhigh',
+          adapterClass: 'process-based' as const,
+          providerKind: 'codex-cli' as const,
+          supportedModelTiers: ['higher-capability' as const],
+          required: false,
+          cliTool: 'codex',
+          model: 'gpt-5.5',
+          executionFlags: ['exec'],
+          env: {},
+        },
+      },
+    };
+
+    // l2-designer prompt contract (knowledge/prompt-contracts.ts) requires these
+    // vars; feedback has a default.
+    const L2_VARS = {
+      issueNumber: '1',
+      issueTitle: 't',
+      issueBody: 'b',
+      specContent: '',
+      owner: 'o',
+      repo: 'r',
+      feedback: '',
+    };
+
+    it('routes a role to a codex provider when roleModels overrides it (changes the chosen adapter)', async () => {
+      const claudeSpawn = vi.fn().mockResolvedValue(
+        ok({
+          output: 'claude',
+          structuredData: {},
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed' as const,
+        }),
+      );
+      const codexSpawn = vi.fn().mockResolvedValue(
+        ok({
+          output: 'codex',
+          structuredData: {},
+          cost: 0,
+          pitfallMarkers: [],
+          exitStatus: 'completed' as const,
+        }),
+      );
+      // Record which providerKind each spawn was routed to.
+      const routedKinds: string[] = [];
+      mockCreateProviderAdapter.mockImplementation((provider) => {
+        routedKinds.push(provider.providerKind);
+        return {
+          spawn:
+            provider.providerKind === 'codex-cli' ? codexSpawn : claudeSpawn,
+        };
+      });
+
+      const routedRuntime = new SessionRuntime(
+        {
+          ...testConfig,
+          providers: providersBlock,
+          roleModels: {
+            'l2-designer': { provider: 'codex-xhigh' },
+          },
+        } as Config,
+        costTracker,
+      );
+
+      const result = await routedRuntime.spawnSession(
+        'l2-designer',
+        { variables: L2_VARS },
+        700,
+      );
+
+      expect(result.ok).toBe(true);
+      // The override routed l2-designer to the codex-cli provider, not claude.
+      expect(codexSpawn).toHaveBeenCalledTimes(1);
+      expect(claudeSpawn).not.toHaveBeenCalled();
+      expect(routedKinds).toEqual(['codex-cli']);
+    });
+
+    it('leaves a role on its default claude provider when no roleModels entry exists', async () => {
+      const claudeSpawn = vi.fn().mockResolvedValue(
+        ok({
+          output: 'claude',
+          structuredData: {},
+          cost: 0.1,
+          pitfallMarkers: [],
+          exitStatus: 'completed' as const,
+        }),
+      );
+      mockCreateProviderAdapter.mockImplementation((provider) => ({
+        spawn: claudeSpawn,
+        _kind: provider.providerKind,
+      }));
+
+      const routedRuntime = new SessionRuntime(
+        {
+          ...testConfig,
+          providers: providersBlock,
+          roleModels: {},
+        } as Config,
+        costTracker,
+      );
+
+      const result = await routedRuntime.spawnSession(
+        'l2-designer',
+        { variables: L2_VARS },
+        701,
+      );
+
+      expect(result.ok).toBe(true);
+      // No override -> resolves to defaultProvider (claude-default).
+      const resolvedProvider =
+        mockCreateProviderAdapter.mock.calls[0]![0];
+      expect(resolvedProvider.providerKind).toBe('claude-cli');
+    });
+
+    it('applies the roleModels override BEFORE clampWorkerCaps (model-first, then clamp)', async () => {
+      // roleModels sets the worker model; workerCaps lowers maxTurns. The def
+      // reaching the adapter must reflect BOTH: opus model AND clamped turns.
+      mockSpawn.mockResolvedValueOnce({
+        ok: true,
+        value: { output: '{}', cost: 0.01 },
+      });
+      const routedRuntime = new SessionRuntime(
+        {
+          ...testConfig,
+          workerCaps: { maxTurns: 15 },
+          roleModels: { worker: { model: 'claude-opus-4-8' } },
+        } as Config,
+        costTracker,
+      );
+
+      await routedRuntime.spawnSession('worker', { variables: WORKER_VARS }, 702);
+      const def = mockSpawn.mock.calls[mockSpawn.mock.calls.length - 1]![0];
+      // applyRoleModel set modelOverride; clampWorkerCaps then lowered maxTurns.
+      expect(def.modelOverride).toBe('claude-opus-4-8');
+      expect(def.maxTurns).toBe(15);
+      expect(def.name).toBe('worker');
+    });
+  });
 });
 
 describe('loadPromptTemplate', () => {
@@ -1374,5 +1541,108 @@ These are reference examples; I will not execute them.
       expect(result.error).toBeInstanceOf(SessionError);
       expect((result.error as SessionError).containmentBreach).toBe(true);
     }
+  });
+});
+
+describe('applyRoleModel', () => {
+  const baseDef: AgentDefinition = Object.freeze({
+    name: 'l2-designer',
+    description: 'd',
+    systemPrompt: 's',
+    allowedTools: ['Read'],
+    modelOverride: 'claude-sonnet-4-6',
+    maxTurns: 30,
+    timeoutMs: 1000,
+    budgetCap: 2,
+  });
+
+  it('returns the def unchanged when there is no entry for the role', () => {
+    const out = applyRoleModel(baseDef, baseDef.name, {});
+    expect(out).toBe(baseDef);
+  });
+
+  it('returns the def unchanged when roleModels is undefined', () => {
+    const out = applyRoleModel(baseDef, baseDef.name, undefined);
+    expect(out).toBe(baseDef);
+  });
+
+  it('maps model -> modelOverride and sets modelTier/provider/providerBinding', () => {
+    const out = applyRoleModel(baseDef, 'l2-designer', {
+      'l2-designer': {
+        model: 'gpt-5.5',
+        modelTier: 'higher-capability',
+        provider: 'codex-xhigh',
+        providerBinding: { preferred: 'codex-xhigh', fallback: ['claude-default'] },
+      },
+    });
+    expect(out.modelOverride).toBe('gpt-5.5');
+    expect(out.modelTier).toBe('higher-capability');
+    expect(out.provider).toBe('codex-xhigh');
+    expect(out.providerBinding).toEqual({
+      preferred: 'codex-xhigh',
+      fallback: ['claude-default'],
+    });
+  });
+
+  it('clones the def — never mutates the frozen base', () => {
+    const out = applyRoleModel(baseDef, 'l2-designer', {
+      'l2-designer': { model: 'gpt-5.5' },
+    });
+    expect(out).not.toBe(baseDef);
+    expect(baseDef.modelOverride).toBe('claude-sonnet-4-6');
+  });
+
+  it('preserves the def name (so a later clampWorkerCaps keys correctly)', () => {
+    const workerDef: AgentDefinition = Object.freeze({
+      ...baseDef,
+      name: 'worker',
+    });
+    const out = applyRoleModel(workerDef, 'worker', {
+      worker: { model: 'claude-opus-4-8' },
+    });
+    expect(out.name).toBe('worker');
+  });
+
+  it('keys on the resolved def name — overrides pipeline spec-implementer', () => {
+    const specImplementer: AgentDefinition = Object.freeze({
+      name: 'spec-implementer',
+      description: 'pipeline',
+      systemPrompt: '',
+      allowedTools: ['Read', 'Write'],
+      maxTurns: 80,
+      timeoutMs: 900_000,
+      budgetCap: 10,
+    });
+    const out = applyRoleModel(specImplementer, specImplementer.name, {
+      'spec-implementer': { provider: 'codex-xhigh', model: 'gpt-5.5' },
+    });
+    expect(out.provider).toBe('codex-xhigh');
+    expect(out.modelOverride).toBe('gpt-5.5');
+    // Non-model fields untouched.
+    expect(out.maxTurns).toBe(80);
+  });
+
+  it('keys on the resolved def name — overrides inline batch-classifier', () => {
+    const batchClassifier: AgentDefinition = Object.freeze({
+      name: 'batch-classifier',
+      description: 'inline',
+      systemPrompt: '',
+      allowedTools: ['Read'],
+      modelOverride: 'claude-haiku-4-5-20251001',
+      maxTurns: 1,
+      timeoutMs: 1000,
+      budgetCap: 0.5,
+    });
+    const out = applyRoleModel(batchClassifier, batchClassifier.name, {
+      'batch-classifier': { modelTier: 'higher-capability' },
+    });
+    expect(out.modelTier).toBe('higher-capability');
+  });
+
+  it('does not touch a role whose name does not match the entry key', () => {
+    const out = applyRoleModel(baseDef, 'l2-designer', {
+      worker: { model: 'claude-opus-4-8' },
+    });
+    expect(out).toBe(baseDef);
   });
 });

@@ -483,6 +483,7 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
   retryBackoffMaxMs: 1_800_000,
   governance: { documentPath: 'FACTORY_RULES.md', maxPrLinesChanged: 2000 },
   agentScopes: {},
+  roleModels: {},
   activePlugins: [],
   repo: { owner: 'test-owner', name: 'test-repo' },
   ...overrides,

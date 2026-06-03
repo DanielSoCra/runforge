@@ -313,6 +313,210 @@ describe('ConfigSchema', () => {
   });
 });
 
+describe('roleModels (per-agent-role model selection)', () => {
+  // A minimal valid providers block reused across the routing tests. claude-default
+  // is a claude-cli provider; codex-xhigh is a codex-cli provider for the
+  // "route a role to Codex" path.
+  const providers = {
+    defaultProvider: 'claude-default',
+    fallbackChain: [] as string[],
+    definitions: {
+      'claude-default': {
+        name: 'claude-default',
+        adapterClass: 'process-based' as const,
+        providerKind: 'claude-cli' as const,
+        supportedModelTiers: ['standard-capability', 'higher-capability'],
+        cliTool: 'claude',
+      },
+      'codex-xhigh': {
+        name: 'codex-xhigh',
+        adapterClass: 'process-based' as const,
+        providerKind: 'codex-cli' as const,
+        supportedModelTiers: ['higher-capability'],
+        cliTool: 'codex',
+        model: 'gpt-5.5',
+        executionFlags: ['exec'],
+      },
+    },
+  };
+
+  it('defaults roleModels to {} when absent', () => {
+    const result = ConfigSchema.safeParse(validConfig);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.roleModels).toEqual({});
+    }
+  });
+
+  it('accepts a model-only roleModel without providers configured', () => {
+    // A model-only (or modelTier-only) entry is honored by the legacy CliAdapter
+    // via def.modelOverride — no providers block required.
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      roleModels: { worker: { model: 'claude-opus-4-8' } },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.roleModels.worker?.model).toBe('claude-opus-4-8');
+    }
+  });
+
+  it('accepts a modelTier-only roleModel without providers configured', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      roleModels: { classifier: { modelTier: 'higher-capability' } },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an empty roleModel entry (no field set)', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      roleModels: { worker: {} },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a roleModel whose providerBinding is empty (no preferred/fallback)', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      providers,
+      roleModels: { worker: { providerBinding: {} } },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts a roleModel routing a role to a registered provider (provider-only, no model conflict)', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      providers,
+      roleModels: {
+        // codex-xhigh pins its own model, so the role must NOT also set model.
+        'l2-designer': { provider: 'codex-xhigh' },
+        worker: { model: 'claude-opus-4-8' },
+      },
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.roleModels['l2-designer']?.provider).toBe(
+        'codex-xhigh',
+      );
+    }
+  });
+
+  it('rejects the silent-override trap: role.model set AND selected provider pins its own model', () => {
+    // codex-xhigh has model: 'gpt-5.5'. Adapter resolves provider.model ??
+    // def.modelOverride, so the role's model would be silently ignored.
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      providers,
+      roleModels: {
+        'l2-designer': { provider: 'codex-xhigh', model: 'claude-opus-4-8' },
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects the silent-override trap via providerBinding.preferred too', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      providers,
+      roleModels: {
+        'l2-designer': {
+          providerBinding: { preferred: 'codex-xhigh' },
+          model: 'claude-opus-4-8',
+        },
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts role.model + provider when the provider def does NOT pin a model', () => {
+    // claude-default has no model field, so the role's model is honored.
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      providers,
+      roleModels: {
+        worker: { provider: 'claude-default', model: 'claude-opus-4-8' },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts a roleModel with a providerBinding referencing registered providers', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      providers,
+      roleModels: {
+        'l2-designer': {
+          providerBinding: {
+            preferred: 'codex-xhigh',
+            fallback: ['claude-default'],
+          },
+        },
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a roleModel.provider that is not a registered provider', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      providers,
+      roleModels: { worker: { provider: 'nonexistent' } },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a roleModel.providerBinding.preferred that is not registered', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      providers,
+      roleModels: {
+        worker: { providerBinding: { preferred: 'nonexistent' } },
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a roleModel.providerBinding.fallback entry that is not registered', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      providers,
+      roleModels: {
+        worker: {
+          providerBinding: {
+            preferred: 'claude-default',
+            fallback: ['nonexistent'],
+          },
+        },
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('fail-fast: rejects a roleModel that names a provider while providers is undefined', () => {
+    // The legacy single-CliAdapter path silently ignores def.provider/
+    // providerBinding, so Codex would never be reached. Fail at config load
+    // rather than silently degrade.
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      roleModels: { worker: { provider: 'codex-xhigh' } },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('fail-fast: rejects a roleModel.providerBinding while providers is undefined', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      roleModels: {
+        worker: { providerBinding: { preferred: 'codex-xhigh' } },
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
 describe('zod v4 compatibility', () => {
   it('uses zod v4 (major version alignment with dashboard)', () => {
     // Regression: daemon used zod v3 while dashboard used v4 (#113)
