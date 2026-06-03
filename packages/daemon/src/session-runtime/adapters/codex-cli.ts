@@ -11,6 +11,11 @@ import type {
 } from '../../types.js';
 import { SessionError } from '../session-error.js';
 import type { ProviderAdapter } from './types.js';
+import {
+  registerManagedProcess,
+  unregisterManagedProcess,
+  killProcessGroup,
+} from '../managed-processes.js';
 
 export class CodexCliAdapter implements ProviderAdapter {
   buildArgs(
@@ -61,16 +66,16 @@ export class CodexCliAdapter implements ProviderAdapter {
     return new Promise((resolve) => {
       const chunks: Buffer[] = [];
       const errChunks: Buffer[] = [];
-      const proc = spawn(command, args, { cwd, env });
+      // detached: child leads its own process group so the timeout AND the
+      // operator force-kill can group-signal (`kill -pid`) the codex CLI and its
+      // tool subprocesses together.
+      const proc = spawn(command, args, { cwd, env, detached: true });
+      registerManagedProcess(proc);
 
       let timedOut = false;
       const timer = setTimeout(() => {
         timedOut = true;
-        try {
-          proc.kill('SIGTERM');
-        } catch {
-          // already exited
-        }
+        killProcessGroup(proc, 'SIGTERM');
       }, def.timeoutMs);
 
       proc.stdout.on('data', (d: Buffer) => chunks.push(d));
@@ -78,6 +83,7 @@ export class CodexCliAdapter implements ProviderAdapter {
 
       proc.on('close', (code) => {
         clearTimeout(timer);
+        unregisterManagedProcess(proc);
         if (tempCwd) {
           try {
             rmSync(tempCwd, { recursive: true, force: true });
@@ -117,6 +123,7 @@ export class CodexCliAdapter implements ProviderAdapter {
 
       proc.on('error', (e) => {
         clearTimeout(timer);
+        unregisterManagedProcess(proc);
         if (tempCwd) {
           try {
             rmSync(tempCwd, { recursive: true, force: true });

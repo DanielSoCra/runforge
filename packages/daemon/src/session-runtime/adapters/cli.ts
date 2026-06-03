@@ -12,6 +12,11 @@ import { generateContainmentScript } from '../generate-containment-script.js';
 import { generateTimeoutHookScript } from '../timeout-hook-script.js';
 import { SessionError } from '../session-error.js';
 import { generateScopeHookScript, makeCliPermissionDenyEntries } from '../scope-enforcement.js';
+import {
+  registerManagedProcess,
+  unregisterManagedProcess,
+  killProcessGroup,
+} from '../managed-processes.js';
 
 export class CliAdapter implements ProviderAdapter {
   buildArgs(
@@ -312,17 +317,25 @@ export class CliAdapter implements ProviderAdapter {
         {
         cwd: effectiveCwd,
         env,
+        // detached: child leads its own process group so the timeout AND the
+        // operator force-kill (SIGUSR2 → killAllManagedProcessGroups) can signal
+        // the whole group (`kill -pid`), reaping the CLI's tool subprocesses too.
+        detached: true,
         },
       );
+      // Track in the shared registry so the operator force-kill path can reach
+      // this child. Unregistered on close/error below.
+      registerManagedProcess(proc);
 
       let timedOut = false;
       let killTimer: ReturnType<typeof setTimeout> | undefined;
       const SIGTERM_GRACE_MS = 5_000;
       const timer = setTimeout(() => {
         timedOut = true;
-        try { proc.kill('SIGTERM'); } catch { /* already exited */ }
+        // Group-kill (negative pid) so tool subprocesses die with the CLI.
+        killProcessGroup(proc, 'SIGTERM');
         killTimer = setTimeout(() => {
-          try { proc.kill('SIGKILL'); } catch { /* already exited */ }
+          killProcessGroup(proc, 'SIGKILL');
         }, SIGTERM_GRACE_MS);
       }, def.timeoutMs);
 
@@ -332,6 +345,7 @@ export class CliAdapter implements ProviderAdapter {
       proc.on('close', (code) => {
         clearTimeout(timer);
         if (killTimer) clearTimeout(killTimer);
+        unregisterManagedProcess(proc);
         if (hookPaths) this.cleanupHooks(hookPaths);
         if (tempCwd) { try { rmSync(tempCwd, { recursive: true, force: true }); } catch { /* best-effort */ } }
         const stdout = Buffer.concat(chunks).toString();
@@ -407,6 +421,7 @@ export class CliAdapter implements ProviderAdapter {
       proc.on('error', (e) => {
         clearTimeout(timer);
         if (killTimer) clearTimeout(killTimer);
+        unregisterManagedProcess(proc);
         if (hookPaths) this.cleanupHooks(hookPaths);
         if (tempCwd) { try { rmSync(tempCwd, { recursive: true, force: true }); } catch { /* best-effort */ } }
         const partialStdout = Buffer.concat(chunks).toString();

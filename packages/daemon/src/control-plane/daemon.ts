@@ -4,6 +4,7 @@ import { Octokit } from '@octokit/rest';
 import { loadConfig, type Config } from '../config.js';
 import { SessionRuntime } from '../session-runtime/runtime.js';
 import { CostTracker } from '../session-runtime/cost.js';
+import { killAllManagedProcessGroups } from '../session-runtime/managed-processes.js';
 import { ImplementationCoordinator } from '../implementation/coordinator.js';
 import { StateManager } from './state.js';
 import { createControlServer } from './server.js';
@@ -1869,10 +1870,32 @@ export async function startDaemon(
     console.log('Daemon stopped.');
   };
 
-  // SIGTERM/SIGINT enter drain mode — wait for active runs to finish, then exit.
-  // Use kill -9 (SIGKILL) for immediate force-kill.
+  // SIGTERM/SIGINT enter DRAIN mode — wait for active runs to finish, then exit.
+  // This is the safe default; a long worker keeps running until it completes.
   process.on('SIGTERM', enterDrainMode);
   process.on('SIGINT', enterDrainMode);
+
+  // SIGUSR2 is the operator FORCE-KILL path for a watched pilot: SIGKILL every
+  // active worker process GROUP (the `claude`/`codex` child AND its tool
+  // subprocesses) immediately, then exit the daemon. It does NOT drain. Use
+  // `kill -USR2 <daemon_pid>` to stop everything within seconds. (Plain
+  // `kill -9 <daemon_pid>` kills only the daemon and can orphan worker groups;
+  // SIGUSR2 reaps the children first.)
+  const forceKill = async () => {
+    const killed = killAllManagedProcessGroups('SIGKILL');
+    console.error(
+      `[daemon] SIGUSR2 force-kill — SIGKILLed ${killed} active worker process group(s), exiting now (no drain)`,
+    );
+    // Best-effort release of the instance lock / control server before exit so a
+    // restart can rebind the control port immediately. Do not await schedulers.
+    try {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    } catch {
+      /* best-effort */
+    }
+    process.exit(1);
+  };
+  process.on('SIGUSR2', forceKill);
 
   return ok(undefined);
 }

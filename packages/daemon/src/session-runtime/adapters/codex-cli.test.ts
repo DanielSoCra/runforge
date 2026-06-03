@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { EventEmitter } from 'events';
 import { CodexCliAdapter } from './codex-cli.js';
 import type { AgentDefinition, ProviderDefinition } from '../../types.js';
 
@@ -50,5 +51,64 @@ describe('CodexCliAdapter (#480)', () => {
         raw: 'implemented the plan\n',
       });
     }
+  });
+});
+
+vi.mock('child_process', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, spawn: vi.fn() };
+});
+
+import { spawn as spawnMock } from 'child_process';
+import {
+  managedProcessCount,
+  __clearManagedProcessesForTests,
+} from '../managed-processes.js';
+
+function createMockProcess(pid = 54321) {
+  const proc = new EventEmitter() as EventEmitter & {
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+    pid: number;
+  };
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  proc.pid = pid;
+  return proc;
+}
+
+describe('CodexCliAdapter.spawn() force-kill wiring (runaway envelope)', () => {
+  beforeEach(() => {
+    __clearManagedProcessesForTests();
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    __clearManagedProcessesForTests();
+    vi.restoreAllMocks();
+  });
+
+  it('spawns the codex child detached and registers/unregisters it', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CodexCliAdapter();
+    const promise = adapter.spawn(agent, 'plan this', {
+      cwd: '/tmp',
+      provider,
+    });
+
+    const opts = vi.mocked(spawnMock).mock.calls[0]?.[2] as {
+      detached?: boolean;
+    };
+    expect(opts.detached).toBe(true);
+    expect(managedProcessCount()).toBe(1);
+
+    mockProc.stdout.emit('data', Buffer.from('done'));
+    mockProc.emit('close', 0);
+    await promise;
+
+    expect(managedProcessCount()).toBe(0);
   });
 });

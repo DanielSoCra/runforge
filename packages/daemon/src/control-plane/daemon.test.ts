@@ -182,6 +182,16 @@ vi.mock('../session-runtime/runtime.js', () => {
     preloadPromptCache: async () => 0,
   };
 });
+const mockKillAllManagedProcessGroups = vi.hoisted(() => vi.fn(() => 0));
+vi.mock('../session-runtime/managed-processes.js', () => {
+  return {
+    killAllManagedProcessGroups: mockKillAllManagedProcessGroups,
+    managedProcessCount: vi.fn(() => 0),
+    registerManagedProcess: vi.fn(),
+    unregisterManagedProcess: vi.fn(),
+    killProcessGroup: vi.fn(),
+  };
+});
 vi.mock('../knowledge/gotcha-store.js', () => {
   return { GotchaStore: class {} };
 });
@@ -812,6 +822,36 @@ describe('daemon', () => {
 
       expect(signalHandlers['SIGTERM']).toBeDefined();
       expect(signalHandlers['SIGINT']).toBeDefined();
+    });
+
+    it('registers a SIGUSR2 force-kill handler (immediate, not drain)', async () => {
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      // SIGTERM/SIGINT drain; SIGUSR2 is the separate hard-kill path for a
+      // watched pilot so the operator can stop everything within seconds.
+      expect(signalHandlers['SIGUSR2']).toBeDefined();
+    });
+
+    it('SIGUSR2 SIGKILLs active worker process groups, then exits', async () => {
+      mockKillAllManagedProcessGroups.mockClear();
+      mockKillAllManagedProcessGroups.mockReturnValue(2);
+      const exitSpy = vi
+        .spyOn(process, 'exit')
+        .mockImplementation((() => undefined) as never);
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      expect(signalHandlers['SIGUSR2']).toBeDefined();
+      await signalHandlers['SIGUSR2']!();
+
+      // Force-kill child worker groups (SIGKILL) and then exit the daemon —
+      // it does NOT wait for active runs to drain.
+      expect(mockKillAllManagedProcessGroups).toHaveBeenCalledWith('SIGKILL');
+      expect(exitSpy).toHaveBeenCalled();
+
+      exitSpy.mockRestore();
     });
 
     it('starts RemoteControlManager', async () => {

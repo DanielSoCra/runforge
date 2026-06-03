@@ -76,6 +76,58 @@ describe('ConfigSchema', () => {
     }
   });
 
+  describe('workerCaps (runaway envelope, pilot-overridable)', () => {
+    it('omits workerCaps by default (no global cap change)', () => {
+      const result = ConfigSchema.safeParse(validConfig);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.workerCaps).toBeUndefined();
+      }
+    });
+
+    it('accepts a worker maxTurns + timeoutMs cap for a watched pilot', () => {
+      const result = ConfigSchema.safeParse({
+        ...validConfig,
+        workerCaps: { maxTurns: 15, timeoutMs: 1_200_000 },
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.workerCaps).toEqual({
+          maxTurns: 15,
+          timeoutMs: 1_200_000,
+        });
+      }
+    });
+
+    it('accepts a partial cap (maxTurns only)', () => {
+      const result = ConfigSchema.safeParse({
+        ...validConfig,
+        workerCaps: { maxTurns: 15 },
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.workerCaps?.maxTurns).toBe(15);
+        expect(result.data.workerCaps?.timeoutMs).toBeUndefined();
+      }
+    });
+
+    it('rejects a non-positive maxTurns cap', () => {
+      const result = ConfigSchema.safeParse({
+        ...validConfig,
+        workerCaps: { maxTurns: 0 },
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects a non-positive timeoutMs cap', () => {
+      const result = ConfigSchema.safeParse({
+        ...validConfig,
+        workerCaps: { timeoutMs: 0 },
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
   it('accepts directory scope overrides per agent type', () => {
     const result = ConfigSchema.safeParse({
       ...validConfig,

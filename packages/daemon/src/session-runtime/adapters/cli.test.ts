@@ -523,6 +523,76 @@ vi.mock('child_process', async (importOriginal) => {
 });
 
 import { spawn as spawnMock } from 'child_process';
+import {
+  managedProcessCount,
+  __clearManagedProcessesForTests,
+} from '../managed-processes.js';
+
+describe('CliAdapter.spawn() force-kill wiring (runaway envelope)', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'cli-killwire-test-'));
+    __clearManagedProcessesForTests();
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    rmSync(tempDir, { recursive: true, force: true });
+    __clearManagedProcessesForTests();
+    vi.restoreAllMocks();
+  });
+
+  it('spawns the child detached so it leads its own process group', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    const opts = vi.mocked(spawnMock).mock.calls[0]?.[2] as {
+      detached?: boolean;
+    };
+    expect(opts.detached).toBe(true);
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({ result: 'ok' })));
+    mockProc.emit('close', 0);
+    await promise;
+  });
+
+  it('registers the child while running and unregisters it on close', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    // While in flight, the child is in the kill registry so an operator
+    // force-kill can reach it.
+    expect(managedProcessCount()).toBe(1);
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({ result: 'ok' })));
+    mockProc.emit('close', 0);
+    await promise;
+
+    // After close, it is removed — no stale entries for the next kill sweep.
+    expect(managedProcessCount()).toBe(0);
+  });
+
+  it('unregisters the child on a spawn error too', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+    expect(managedProcessCount()).toBe(1);
+
+    mockProc.emit('error', new Error('spawn ENOENT'));
+    await promise;
+    expect(managedProcessCount()).toBe(0);
+  });
+});
 
 describe('CliAdapter.spawn() (#102)', () => {
   let tempDir: string;
@@ -630,8 +700,11 @@ describe('CliAdapter.spawn() (#102)', () => {
 
   it('returns timed-out result when timeout fires', async () => {
     const shortTimeoutDef = { ...mockDef, timeoutMs: 500 };
-    const mockProc = createMockProcess();
+    const mockProc = createMockProcess(); // pid 12345
     vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+    const killSpy = vi
+      .spyOn(process, 'kill')
+      .mockImplementation(() => true);
 
     const adapter = new CliAdapter();
     const promise = adapter.spawn(shortTimeoutDef, 'slow work', { cwd: tempDir });
@@ -642,12 +715,13 @@ describe('CliAdapter.spawn() (#102)', () => {
       cost_usd: 0.04,
     })));
 
-    // Advance timer to trigger timeout — sends SIGTERM first
+    // Advance timer to trigger timeout — group-signals SIGTERM first (negative pid)
     vi.advanceTimersByTime(600);
-    expect(mockProc.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(killSpy).toHaveBeenCalledWith(-12345, 'SIGTERM');
 
     // Process exits gracefully after SIGTERM (before SIGKILL grace period)
     mockProc.emit('close', null);
+    killSpy.mockRestore();
 
     const result = await promise;
     expect(result.ok).toBe(true);
@@ -658,10 +732,16 @@ describe('CliAdapter.spawn() (#102)', () => {
     }
   });
 
-  it('sends SIGTERM then SIGKILL after grace period on timeout (#42)', async () => {
+  it('sends SIGTERM then SIGKILL to the process GROUP after grace period on timeout (#42)', async () => {
+    // The child is spawned detached (its own process-group leader), so the
+    // timeout group-kills via process.kill(-pid, ...) — this reaps the CLI's
+    // tool subprocesses too, not just the CLI itself (runaway envelope).
     const shortTimeoutDef = { ...mockDef, timeoutMs: 500 };
-    const mockProc = createMockProcess();
+    const mockProc = createMockProcess(); // pid 12345
     vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+    const killSpy = vi
+      .spyOn(process, 'kill')
+      .mockImplementation(() => true);
 
     const adapter = new CliAdapter();
     const promise = adapter.spawn(shortTimeoutDef, 'stubborn work', { cwd: tempDir });
@@ -671,14 +751,14 @@ describe('CliAdapter.spawn() (#102)', () => {
       cost_usd: 0.01,
     })));
 
-    // Trigger timeout — should send SIGTERM first
+    // Trigger timeout — should group-signal SIGTERM first (negative pid).
     vi.advanceTimersByTime(600);
-    expect(mockProc.kill).toHaveBeenCalledWith('SIGTERM');
-    expect(mockProc.kill).not.toHaveBeenCalledWith('SIGKILL');
+    expect(killSpy).toHaveBeenCalledWith(-12345, 'SIGTERM');
+    expect(killSpy).not.toHaveBeenCalledWith(-12345, 'SIGKILL');
 
-    // Advance past the 5-second grace period — SIGKILL should fire
+    // Advance past the 5-second grace period — SIGKILL should fire on the group.
     vi.advanceTimersByTime(5_000);
-    expect(mockProc.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(killSpy).toHaveBeenCalledWith(-12345, 'SIGKILL');
 
     // Process finally exits after SIGKILL
     mockProc.emit('close', null);
@@ -688,6 +768,7 @@ describe('CliAdapter.spawn() (#102)', () => {
     if (result.ok) {
       expect(result.value.exitStatus).toBe('timed-out');
     }
+    killSpy.mockRestore();
   });
 
   it('returns SessionError with cost on process error event', async () => {
