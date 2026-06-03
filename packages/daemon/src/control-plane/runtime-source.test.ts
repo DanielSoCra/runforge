@@ -39,6 +39,7 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     perRunBudget: 10,
     adapter: 'cli',
     providers: undefined,
+    roleModels: {},
     runtimeSource: {
       enabled: true,
       requireClean: true,

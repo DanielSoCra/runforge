@@ -387,6 +387,52 @@ export function clampWorkerCaps(
   return { ...def, maxTurns, timeoutMs };
 }
 
+/**
+ * Applies a per-agent-role model/provider override (`config.roleModels`) onto a
+ * resolved agent definition. Thin config→def bridge for the dormant
+ * multi-provider plumbing:
+ *
+ * - Keyed on `roleName` — the caller passes the *resolved* def name
+ *   (`rawDef.name`), NOT the spawnSession `type`. This is what makes inline /
+ *   pipeline defs that arrive via `options.agentDef` (e.g. `spec-implementer`,
+ *   `batch-classifier`) overridable from the single spawnSession call-site,
+ *   alongside the DEFAULT_AGENT_DEFS roles.
+ * - Field mapping: `model` → `modelOverride` (the adapters read `modelOverride`);
+ *   `modelTier`, `provider`, `providerBinding` are copied through. Only fields
+ *   present on the override are touched — an override that sets just `provider`
+ *   leaves the def's existing `modelOverride` intact.
+ * - The def `name` is never changed, so a later `clampWorkerCaps` (which keys on
+ *   `def.name === 'worker'`) still behaves correctly. Order at the call-site is
+ *   model-first then clamp; the two are orthogonal (clamp only lowers
+ *   maxTurns/timeoutMs).
+ * - Returns the original def unchanged when there is no entry for the role (no
+ *   allocation on the common path); otherwise returns a shallow clone — the
+ *   frozen DEFAULT_AGENT_DEFS / pipeline defs are never mutated.
+ *
+ * NOTE: when the override routes to a provider whose definition sets its own
+ * `model`, the adapter resolves `provider.model ?? def.modelOverride` — so the
+ * provider's model WINS over a `roleModels.model` set here. Config validation
+ * permits this; operators should leave `model` off the provider def if they want
+ * the per-role `model` to take effect.
+ */
+export function applyRoleModel(
+  def: AgentDefinition,
+  roleName: string,
+  roleModels: Config['roleModels'] | undefined,
+): AgentDefinition {
+  const override = roleModels?.[roleName];
+  if (!override) return def;
+
+  const next: AgentDefinition = { ...def };
+  if (override.model !== undefined) next.modelOverride = override.model;
+  if (override.modelTier !== undefined) next.modelTier = override.modelTier;
+  if (override.provider !== undefined) next.provider = override.provider;
+  if (override.providerBinding !== undefined) {
+    next.providerBinding = override.providerBinding;
+  }
+  return next;
+}
+
 export class SessionRuntime {
   private adapter: ProviderAdapter;
   private costTracker: CostTracker;
@@ -422,15 +468,21 @@ export class SessionRuntime {
     runId?: string,
   ): Promise<Result<SessionResult>> {
     // 1. Look up agent definition
-    const baseDef = options?.agentDef ?? DEFAULT_AGENT_DEFS[type];
-    if (!baseDef) {
+    const rawDef = options?.agentDef ?? DEFAULT_AGENT_DEFS[type];
+    if (!rawDef) {
       return err(new Error(`No agent definition for session type: ${type}`));
     }
+    // Apply per-role model/provider override (config.roleModels), keyed on the
+    // RESOLVED def name (rawDef.name) so inline/pipeline defs arriving via
+    // options.agentDef (spec-implementer, batch-classifier) are overridable from
+    // this one call-site too. Model-first, before the clamp below.
+    const baseDef = applyRoleModel(rawDef, rawDef.name, this.config.roleModels);
     // Apply the optional pilot runaway envelope (config.workerCaps). Clamping
     // here — before budget reservation, prompt assembly, and adapter.spawn —
     // covers BOTH the legacy CLI adapter and the multi-provider fallback path,
     // since they each receive this resolved `def`. The clamp is worker-only and
-    // can only LOWER caps (min), never raise them.
+    // can only LOWER caps (min), never raise them. applyRoleModel never changes
+    // the def name, so this clamp still keys correctly.
     const def = clampWorkerCaps(baseDef, this.config.workerCaps);
 
     // 2. Reserve budget — fail-safe guard clause (STACK-AC-OPERATIONAL-SAFETY)
