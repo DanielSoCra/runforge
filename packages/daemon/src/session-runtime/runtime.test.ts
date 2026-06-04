@@ -610,8 +610,8 @@ describe('SessionRuntime', () => {
       expect.any(String),
       expect.objectContaining({
         directoryScope: expect.objectContaining({
-          writePaths: ['src/**', 'packages/**', 'tests/**'],
-          denyPaths: expect.arrayContaining(['.specify/scenarios/**']),
+          writePaths: ['**/*'],
+          denyPaths: expect.arrayContaining(['.specify/**', '.specify/scenarios/**']),
         }),
       }),
     );

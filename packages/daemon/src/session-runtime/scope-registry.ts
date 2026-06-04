@@ -7,8 +7,16 @@ export type ScopeRegistry = ReadonlyMap<string, DirectoryScope>;
 
 const workerScope: DirectoryScope = Object.freeze({
   readPaths: Object.freeze(['**/*']) as unknown as string[],
-  writePaths: Object.freeze(['src/**', 'packages/**', 'tests/**']) as unknown as string[],
-  denyPaths: Object.freeze(['.specify/scenarios/**', '.specify/methodology/**']) as unknown as string[],
+  // Greenfield-friendly: a feature build may create project files anywhere in its
+  // sandboxed worktree (root config like package.json/tsconfig, src, test/ OR tests/,
+  // public/, bin/, …). The real containment is the worktree boundary + the review
+  // gate + denyPaths below + policy.blockedPaths (merged in by resolveDirectoryScope).
+  // Build artifacts (node_modules, …) are dropped by the scope AUDIT, not denied here.
+  writePaths: Object.freeze(['**/*']) as unknown as string[],
+  // Specs are frozen during implement — the worker implements FROM them and never
+  // edits them. (Holdout dirs .specify/scenarios + .specify/methodology also come in
+  // via policy.blockedPaths, so they stay denied even independent of this.)
+  denyPaths: Object.freeze(['.specify/**']) as unknown as string[],
 });
 
 export const DEFAULT_AGENT_SCOPES: Readonly<Record<string, DirectoryScope>> = Object.freeze({
