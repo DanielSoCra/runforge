@@ -5,7 +5,7 @@ import { writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { generateContainmentScript, validatePolicyPatterns } from './generate-containment-script.js';
-import { DEFAULT_POLICY, type ContainmentPolicy } from './containment-hooks.js';
+import { DEFAULT_POLICY, policyForAgentType, type ContainmentPolicy } from './containment-hooks.js';
 
 function runHookScript(script: string, toolName: string, toolInput: Record<string, unknown>): { code: number; stderr: string } {
   const scriptPath = join(tmpdir(), `test-hook-${Date.now()}.mjs`);
@@ -391,5 +391,56 @@ describe('validatePolicyPatterns', () => {
       readOnlyPaths: ['CLAUDE.md'],
     };
     expect(() => validatePolicyPatterns(good)).not.toThrow();
+  });
+});
+
+describe('generated script honors writableExceptions (spec-authoring roles)', () => {
+  const l2Script = generateContainmentScript(
+    policyForAgentType('l2-designer'),
+    process.cwd(),
+  );
+  const baseScript = generateContainmentScript(DEFAULT_POLICY, process.cwd());
+
+  it('l2-designer can WRITE its ARCH spec under the read-only .specify tree', () => {
+    const r = runHookScript(l2Script, 'Write', {
+      file_path: '.specify/architecture/ARCH-NOTES-DIGEST.md',
+    });
+    expect(r.code).toBe(0);
+  });
+
+  it('l2-designer can EDIT .specify/traceability.yml', () => {
+    const r = runHookScript(l2Script, 'Edit', { file_path: '.specify/traceability.yml' });
+    expect(r.code).toBe(0);
+  });
+
+  it('l2-designer can write its spec via a Bash redirect', () => {
+    const r = runHookScript(l2Script, 'Bash', {
+      command: 'printf "x" > .specify/architecture/ARCH-X.md',
+    });
+    expect(r.code).toBe(0);
+  });
+
+  it('l2-designer still CANNOT write L1 specs (.specify/functional)', () => {
+    const r = runHookScript(l2Script, 'Write', {
+      file_path: '.specify/functional/FUNC-NOTES-DIGEST.md',
+    });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('read-only');
+  });
+
+  it('l2-designer still CANNOT write the holdout (blockedPaths win over exceptions)', () => {
+    const r = runHookScript(l2Script, 'Write', {
+      file_path: '.specify/scenarios/holdout.md',
+    });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('Blocked path');
+  });
+
+  it('regression: WITHOUT exceptions the same ARCH write is still blocked', () => {
+    const r = runHookScript(baseScript, 'Write', {
+      file_path: '.specify/architecture/ARCH-NOTES-DIGEST.md',
+    });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('read-only');
   });
 });

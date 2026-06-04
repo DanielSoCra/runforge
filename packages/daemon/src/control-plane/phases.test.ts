@@ -279,6 +279,9 @@ const mockOctokit = {
     listComments: vi.fn(async () => ({ data: [] })),
     removeLabel: vi.fn(async () => ({})),
   },
+  pulls: {
+    merge: vi.fn(async () => ({ data: { merged: true } })),
+  },
 } as any;
 const mockRuntime = { spawnSession: vi.fn() } as any;
 
@@ -2462,31 +2465,62 @@ describe('createPhaseHandlers', () => {
       expect(run.workspacePath).toContain('workspaces/issue-42');
     });
 
-    it('parks when l2-approved is present before the L2 proposal is merged', async () => {
+    it('auto-merges the L2 proposal on l2-approved, then advances (#49)', async () => {
+      // Approval authorizes the merge: the operator approved the L2 spec at the
+      // gate, so the daemon merges the proposal PR and proceeds — instead of
+      // re-parking forever waiting for a manual merge (the #49 livelock).
       mockOctokit.issues.get.mockResolvedValue({
         data: { labels: [{ name: 'l2-approved' }] },
       });
-      mockReconcilePhaseArtifact.mockResolvedValueOnce({
-        ok: true,
-        value: {
-          artifact: makePhaseArtifact('l2-design'),
-          status: 'awaiting-review',
-        },
-      });
+      mockReconcilePhaseArtifact
+        .mockResolvedValueOnce({
+          ok: true,
+          value: { artifact: makePhaseArtifact('l2-design'), status: 'awaiting-review' },
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          value: { artifact: makePhaseArtifact('l2-design'), status: 'merged', resumeRef: 'origin/staging' },
+        });
       const { handlers } = createHandlers();
       const run = makeRun({
-        phaseArtifacts: {
-          'l2-design': makePhaseArtifact('l2-design'),
-        },
+        phaseArtifacts: { 'l2-design': makePhaseArtifact('l2-design') },
       });
       const result = await handlers['l2-gate']!(run);
 
+      expect(mockOctokit.pulls.merge).toHaveBeenCalledWith(
+        expect.objectContaining({ pull_number: 12, merge_method: 'squash' }),
+      );
+      expect(result).toBe('success');
+      expect(run.pausedAtPhase).toBeUndefined();
+      expect(mockOctokit.issues.createComment).not.toHaveBeenCalledWith(
+        expect.objectContaining({ body: expect.stringContaining('Not Merged') }),
+      );
+    });
+
+    it('re-parks only when the L2 proposal cannot be auto-merged (#49)', async () => {
+      mockOctokit.issues.get.mockResolvedValue({
+        data: { labels: [{ name: 'l2-approved' }] },
+      });
+      mockReconcilePhaseArtifact.mockResolvedValue({
+        ok: true,
+        value: { artifact: makePhaseArtifact('l2-design'), status: 'awaiting-review' },
+      });
+      mockOctokit.pulls.merge.mockRejectedValueOnce(
+        new Error('Pull Request is not mergeable'),
+      );
+      const { handlers } = createHandlers();
+      const run = makeRun({
+        phaseArtifacts: { 'l2-design': makePhaseArtifact('l2-design') },
+      });
+      const result = await handlers['l2-gate']!(run);
+
+      expect(mockOctokit.pulls.merge).toHaveBeenCalled();
       expect(result).toBe('success');
       expect(run.pausedAtPhase).toBe('l2-gate');
       expect(run.l2MergeBlockedNotified).toBe(true);
       expect(mockOctokit.issues.createComment).toHaveBeenCalledWith(
         expect.objectContaining({
-          body: expect.stringContaining('L2 Proposal Not Merged'),
+          body: expect.stringContaining('Not Merged'),
         }),
       );
       expect(mockGit).not.toHaveBeenCalledWith(

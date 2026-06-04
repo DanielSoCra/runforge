@@ -537,9 +537,16 @@ function isAllowedArtifactPath(
   return path.startsWith('.specify/stack/');
 }
 
-function parsePorcelainPath(line: string): string | undefined {
+export function parsePorcelainPath(line: string): string | undefined {
   if (!line.trim()) return undefined;
-  const rawPath = line.slice(3);
+  // Porcelain v1 is "XY <path>" — two status columns then a single space.
+  // runCommand() .trim()s command output, which strips the LEADING space of an
+  // unstaged-modified (" M …") first line, turning "XY path" into "Y path". A
+  // fixed slice(3) then eats the first char of the path (".specify" -> "specify"),
+  // which silently fails the artifact-scope check for traceability.yml on every
+  // l2/l3 run. Strip ≤2 status chars + the one separator space instead, so the
+  // parse is correct whether or not the line was left-trimmed.
+  const rawPath = line.replace(/^.{0,2}[ \t]/, '');
   const renameIndex = rawPath.indexOf(' -> ');
   return renameIndex === -1 ? rawPath : rawPath.slice(renameIndex + 4);
 }

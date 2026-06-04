@@ -7,6 +7,15 @@ export interface ContainmentPolicy {
   blockedPaths: string[];
   blockedCommands: string[];
   readOnlyPaths: string[];
+  /**
+   * Paths that are writable even when they match a `readOnlyPaths` pattern.
+   * Used so a spec-authoring role (l2-designer, l3-generator) can write its own
+   * deliverable into the otherwise read-only `.specify/` tree. Exceptions ONLY
+   * relax `readOnlyPaths` — they never override `blockedPaths`, so holdout
+   * (`.specify/scenarios`) and methodology isolation always win. Optional;
+   * absent/empty preserves the original all-read-only behavior.
+   */
+  writableExceptions?: string[];
 }
 
 export interface ToolCall {
@@ -29,9 +38,15 @@ export function checkContainment(call: ToolCall, policy: ContainmentPolicy): Con
     }
   }
 
-  // 2. Read/write classification — write tools on read-only paths are blocked
+  // 2. Read/write classification — write tools on read-only paths are blocked,
+  // UNLESS the path is a writableException (a spec-authoring role's own output).
+  // Exceptions relax read-only only; blockedPaths above already returned.
+  const writableExceptions = policy.writableExceptions ?? [];
+  const isWritableException = (p: string): boolean =>
+    writableExceptions.some((pattern) => minimatch(p, pattern, { dot: true }));
   if (isWriteTool(call.tool)) {
     for (const path of paths) {
+      if (isWritableException(path)) continue;
       for (const pattern of policy.readOnlyPaths) {
         if (minimatch(path, pattern, { dot: true })) {
           return { allowed: false, reason: `Write blocked on read-only path: ${path}` };
@@ -72,7 +87,7 @@ export function checkContainment(call: ToolCall, policy: ContainmentPolicy): Con
           return { allowed: false, reason: `Blocked path in command: ${p} matches ${pattern}` };
         }
       }
-      if (commandIsWrite) {
+      if (commandIsWrite && !isWritableException(p)) {
         for (const pattern of policy.readOnlyPaths) {
           if (minimatch(p, pattern, { dot: true })) {
             return { allowed: false, reason: `Write blocked on read-only path in command: ${p}` };
@@ -271,3 +286,30 @@ export const DEFAULT_POLICY: ContainmentPolicy = {
     'auto-claude.config.json',
   ],
 };
+
+/**
+ * Spec-authoring roles whose only valid deliverable lives UNDER the otherwise
+ * read-only `.specify/` tree. This MUST mirror isAllowedArtifactPath() in
+ * control-plane/spec-pipeline/delivery.ts — the daemon only accepts l2/l3
+ * artifacts on exactly these paths, so the containment hook has to let the
+ * authoring role write them. Everything else under `.specify/` (L0/L1 specs,
+ * scenarios, methodology) stays read-only, and blockedPaths still win.
+ */
+export const SPEC_AUTHORING_WRITABLE_PATHS: Record<string, string[]> = {
+  'l2-designer': ['.specify/architecture/**', '.specify/traceability.yml'],
+  'l3-generator': ['.specify/stack/**', '.specify/traceability.yml'],
+};
+
+/**
+ * Containment policy for a specific agent role. Spec-authoring roles receive
+ * `writableExceptions` for their own output dirs; all other roles get `base`
+ * unchanged (today's behavior). Pass the role's resolved AgentDefinition name.
+ */
+export function policyForAgentType(
+  agentType: string,
+  base: ContainmentPolicy = DEFAULT_POLICY,
+): ContainmentPolicy {
+  const writable = SPEC_AUTHORING_WRITABLE_PATHS[agentType];
+  if (!writable) return base;
+  return { ...base, writableExceptions: writable };
+}

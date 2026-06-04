@@ -23,7 +23,7 @@ import {
 import { buildCompositeContext, type McpConfig } from './plugin-injection.js';
 import { readPluginsForContext } from './plugin-loader.js';
 import { loadGovernanceContext } from './governance-context.js';
-import { DEFAULT_POLICY } from './containment-hooks.js';
+import { DEFAULT_POLICY, policyForAgentType } from './containment-hooks.js';
 import { SessionError } from './session-error.js';
 import { auditSessionOutput } from './audit.js';
 import {
@@ -567,7 +567,10 @@ export class SessionRuntime {
       const adapterOptions = {
         cwd: context.workspacePath,
         jsonSchema,
-        containmentPolicy: DEFAULT_POLICY,
+        // Role-aware: spec-authoring roles (l2-designer/l3-generator) get
+        // writableExceptions so they can write their own deliverable into the
+        // otherwise read-only .specify/ tree. All other roles get DEFAULT_POLICY.
+        containmentPolicy: policyForAgentType(type),
         mcpConfigs: assembled.mcpConfigs,
         directoryScope,
         skipPermissions: this.skipPermissions,
