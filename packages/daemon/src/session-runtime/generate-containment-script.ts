@@ -12,7 +12,11 @@ import { WRITE_TOOLS, type ContainmentPolicy } from './containment-hooks.js';
  * Throws if an unsupported pattern is found.
  */
 export function validatePolicyPatterns(policy: ContainmentPolicy): void {
-  const allPatterns = [...policy.blockedPaths, ...policy.readOnlyPaths];
+  const allPatterns = [
+    ...policy.blockedPaths,
+    ...policy.readOnlyPaths,
+    ...(policy.writableExceptions ?? []),
+  ];
   for (const pattern of allPatterns) {
     const hasWildcard = pattern.includes('*') || pattern.includes('?');
     const isTrailingGlob = pattern.endsWith('/**');
@@ -41,6 +45,17 @@ function globMatch(path, pattern) {
     return path === prefix || path.startsWith(prefix + '/');
   }
   return path === pattern;
+}
+
+// A spec-authoring role's own output paths are writable even though they match a
+// read-only pattern. Relaxes read-only ONLY — blockedPaths are checked first and
+// always win, so holdout/methodology isolation is unaffected.
+function isWritableException(p) {
+  const exceptions = policy.writableExceptions || [];
+  for (const pattern of exceptions) {
+    if (globMatch(p, pattern)) return true;
+  }
+  return false;
 }
 
 const WRITE_TOOLS = ${writeToolsJson};
@@ -185,6 +200,7 @@ function checkContainment(toolName, toolInput) {
 
   if (WRITE_TOOLS.includes(toolName)) {
     for (const p of paths) {
+      if (isWritableException(p)) continue;
       for (const pattern of policy.readOnlyPaths) {
         if (globMatch(p, pattern)) {
           return { allowed: false, reason: 'Write blocked on read-only path: ' + p };
@@ -224,7 +240,7 @@ function checkContainment(toolName, toolInput) {
           return { allowed: false, reason: 'Blocked path in command: ' + cmdPaths[i] + ' matches ' + pattern };
         }
       }
-      if (isWrite) {
+      if (isWrite && !isWritableException(cmdPaths[i])) {
         for (const pattern of policy.readOnlyPaths) {
           if (globMatch(cmdPaths[i], pattern)) {
             return { allowed: false, reason: 'Write blocked on read-only path in command: ' + cmdPaths[i] };

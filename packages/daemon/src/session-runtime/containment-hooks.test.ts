@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import {
   checkContainment,
+  policyForAgentType,
+  SPEC_AUTHORING_WRITABLE_PATHS,
   DEFAULT_POLICY,
   type ContainmentPolicy,
   type ToolCall,
@@ -970,5 +972,134 @@ describe('checkContainment', () => {
     };
     const result = checkContainment(call, DEFAULT_POLICY);
     expect(result.allowed).toBe(true);
+  });
+});
+
+describe('writableExceptions — spec-authoring roles may write their own output dirs', () => {
+  // A role whose only valid output lives UNDER a read-only tree (.specify/**).
+  // writableExceptions must open exactly those output paths and nothing else,
+  // and must never override blockedPaths (holdout/methodology isolation).
+  const policy: ContainmentPolicy = {
+    blockedPaths: ['.specify/scenarios/**', '.specify/methodology/**'],
+    blockedCommands: [],
+    readOnlyPaths: ['.specify/**', '.claude/**', 'AGENTS.md'],
+    writableExceptions: ['.specify/architecture/**', '.specify/traceability.yml'],
+  };
+
+  it('allows a Write to an exception path that also matches a read-only glob', () => {
+    const call: ToolCall = {
+      tool: 'Write',
+      input: { file_path: '.specify/architecture/ARCH-NOTES-DIGEST.md' },
+    };
+    expect(checkContainment(call, policy)).toEqual({ allowed: true });
+  });
+
+  it('allows an Edit to an exact exception path (.specify/traceability.yml)', () => {
+    const call: ToolCall = {
+      tool: 'Edit',
+      input: { file_path: '.specify/traceability.yml' },
+    };
+    expect(checkContainment(call, policy)).toEqual({ allowed: true });
+  });
+
+  it('still blocks Write to a read-only .specify path with no exception', () => {
+    const call: ToolCall = {
+      tool: 'Write',
+      input: { file_path: '.specify/functional/FUNC-NOTES-DIGEST.md' },
+    };
+    expect(checkContainment(call, policy).allowed).toBe(false);
+  });
+
+  it('never lets an exception override a blocked path (holdout stays blocked)', () => {
+    const blockedExceptionPolicy: ContainmentPolicy = {
+      ...policy,
+      // even if a misconfig lists a blocked tree as writable, blockedPaths wins
+      writableExceptions: ['.specify/scenarios/**'],
+    };
+    const call: ToolCall = {
+      tool: 'Write',
+      input: { file_path: '.specify/scenarios/holdout.md' },
+    };
+    expect(checkContainment(call, blockedExceptionPolicy).allowed).toBe(false);
+  });
+
+  it('allows a Bash write-redirect (>) into an exception path', () => {
+    const call: ToolCall = {
+      tool: 'Bash',
+      input: { command: 'echo "spec" > .specify/architecture/ARCH-X.md' },
+    };
+    expect(checkContainment(call, policy)).toEqual({ allowed: true });
+  });
+
+  it('undefined writableExceptions behaves exactly like before (all .specify read-only)', () => {
+    const noExc: ContainmentPolicy = {
+      blockedPaths: [],
+      blockedCommands: [],
+      readOnlyPaths: ['.specify/**'],
+    };
+    const call: ToolCall = {
+      tool: 'Write',
+      input: { file_path: '.specify/architecture/ARCH-X.md' },
+    };
+    expect(checkContainment(call, noExc).allowed).toBe(false);
+  });
+});
+
+describe('policyForAgentType', () => {
+  it('grants l2-designer write to .specify/architecture and traceability, nothing else under .specify', () => {
+    const p = policyForAgentType('l2-designer');
+    expect(
+      checkContainment(
+        { tool: 'Write', input: { file_path: '.specify/architecture/ARCH-X.md' } },
+        p,
+      ),
+    ).toEqual({ allowed: true });
+    expect(
+      checkContainment(
+        { tool: 'Edit', input: { file_path: '.specify/traceability.yml' } },
+        p,
+      ),
+    ).toEqual({ allowed: true });
+    expect(
+      checkContainment(
+        { tool: 'Write', input: { file_path: '.specify/functional/FUNC-X.md' } },
+        p,
+      ).allowed,
+    ).toBe(false);
+  });
+
+  it('grants l3-generator write to .specify/stack and traceability', () => {
+    const p = policyForAgentType('l3-generator');
+    expect(
+      checkContainment(
+        { tool: 'Write', input: { file_path: '.specify/stack/STACK-X.md' } },
+        p,
+      ),
+    ).toEqual({ allowed: true });
+    // l3 must NOT be able to rewrite the architecture layer it builds on
+    expect(
+      checkContainment(
+        { tool: 'Write', input: { file_path: '.specify/architecture/ARCH-X.md' } },
+        p,
+      ).allowed,
+    ).toBe(false);
+  });
+
+  it('leaves non-authoring roles (worker) fully read-only on .specify', () => {
+    const p = policyForAgentType('worker');
+    expect(p.writableExceptions ?? []).toEqual([]);
+    expect(
+      checkContainment(
+        { tool: 'Write', input: { file_path: '.specify/architecture/ARCH-X.md' } },
+        p,
+      ).allowed,
+    ).toBe(false);
+  });
+
+  it('exposes the authoring map for the two spec phases', () => {
+    expect(Object.keys(SPEC_AUTHORING_WRITABLE_PATHS).sort()).toEqual([
+      'l2-designer',
+      'l3-generator',
+    ]);
   });
 });
