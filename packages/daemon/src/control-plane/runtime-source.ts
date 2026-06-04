@@ -189,7 +189,10 @@ function unhealthy(
 
 function parsePorcelainPath(line: string): string | undefined {
   if (!line.trim()) return undefined;
-  const rawPath = line.slice(3);
+  // Trim-robust: runCommand() .trim()s git output, stripping the leading space of
+  // an unstaged-modified (" M …") first line. A fixed slice(3) would then eat the
+  // path's first char. Strip ≤2 status chars + the one separator space instead.
+  const rawPath = line.replace(/^.{0,2}[ \t]/, '');
   const renameIndex = rawPath.indexOf(' -> ');
   return renameIndex === -1 ? rawPath : rawPath.slice(renameIndex + 4);
 }

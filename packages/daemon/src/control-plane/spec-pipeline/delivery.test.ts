@@ -9,10 +9,51 @@ import {
   deliverPhaseArtifact,
   DeliveryError,
   mergePhaseArtifact,
+  parsePorcelainPath,
   reconcilePhaseArtifact,
   type DeliveryRequest,
 } from './delivery.js';
 import type { PhaseArtifact } from '../../types.js';
+
+describe('parsePorcelainPath (trim-robust — git output is .trim()ed by runCommand)', () => {
+  it('parses an untracked entry "?? <path>"', () => {
+    expect(parsePorcelainPath('?? .specify/architecture/ARCH-X.md')).toBe(
+      '.specify/architecture/ARCH-X.md',
+    );
+  });
+
+  it('parses an unstaged-modified entry " M <path>" (untrimmed form)', () => {
+    expect(parsePorcelainPath(' M .specify/traceability.yml')).toBe(
+      '.specify/traceability.yml',
+    );
+  });
+
+  it('parses a LEFT-TRIMMED modified entry "M <path>" WITHOUT eating the dot (the bug)', () => {
+    // runCommand().trim() strips the leading space of the first porcelain line,
+    // so " M .specify/traceability.yml" arrives as "M .specify/traceability.yml".
+    // A fixed slice(3) would return "specify/traceability.yml" (dot eaten).
+    expect(parsePorcelainPath('M .specify/traceability.yml')).toBe(
+      '.specify/traceability.yml',
+    );
+  });
+
+  it('parses a staged entry "A  <path>" (two status cols, no leading space)', () => {
+    expect(parsePorcelainPath('A  .specify/stack/STACK-X.md')).toBe(
+      '.specify/stack/STACK-X.md',
+    );
+  });
+
+  it('returns the destination for a rename "R  old -> new"', () => {
+    expect(parsePorcelainPath('R  old/path.md -> .specify/architecture/ARCH-X.md')).toBe(
+      '.specify/architecture/ARCH-X.md',
+    );
+  });
+
+  it('ignores blank lines', () => {
+    expect(parsePorcelainPath('')).toBeUndefined();
+    expect(parsePorcelainPath('   ')).toBeUndefined();
+  });
+});
 
 type TestOctokit = {
   pulls: {
