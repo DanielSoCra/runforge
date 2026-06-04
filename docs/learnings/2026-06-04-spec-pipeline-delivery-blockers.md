@@ -82,13 +82,53 @@ When adding a new authoring phase, update prompt + `isAllowedArtifactPath` +
   may target different repos. Confirm which one owns your repo before reading
   `/api/runs` (the host one answered :3847 for me while the *container* ran the work).
 
-## Known, still-open (benign)
+## Proven live (2026-06-04)
 
-- **Duplicate resume handler.** `resumeParkedRuns()` has no re-entrancy guard;
+Two clean runs (#12 NOTES-DIGEST, #17 RSS-FEED) took a goal **L0→L3 end-to-end**:
+L2 design → deliver PR → park at l2-gate → cockpit approve → **auto-merge (#49)** →
+l3-generate → **L3 PR merged** (`.specify/stack/STACK-RSS-FEED.md`, PR #19, after the
+prompt fix) → l3-compliance → implement, where the worker **wrote real feature code**
+(`test/feed/*.test.ts`, `package.json`, `tsconfig.json`). The decision loop
+(emit → ingest → cockpit answer → resume) closed on a real run.
+
+## The next frontier — implement-phase scope (5th blocker, NOT yet fixed)
+
+The implement worker scaffolded a greenfield feature, then the **post-session scope
+audit** failed it with `Scope violation detected: write-outside-permitted …`. Three
+facets, all because `workerScope.writePaths = ['src/**','packages/**','tests/**']` is
+too narrow for greenfield:
+1. **`node_modules/**`** — `pnpm install` writes it (hundreds of paths). It's a
+   git-ignored build artifact, never a deliverable. The audit should ignore
+   node_modules / git-ignored / build dirs regardless of `.gitignore` presence (the
+   example repo has no `.gitignore`, so `git status` surfaces node_modules).
+2. **root config** — `package.json`, `tsconfig.json`, `pnpm-lock.yaml`: a greenfield
+   feature must create these; the scope forbids root files.
+3. **`test/` vs `tests/`** — the worker wrote `test/feed/*.test.ts`; the scope allows
+   only `tests/**`. Allow both, or pin the dir in the prompt + scope together.
+
+**Likely fix:** broaden `workerScope` to a greenfield-friendly surface AND make
+`auditScope`/`scope-enforcement` ignore node_modules + common build artifacts. Then
+the tail (review → holdout → integrate → report) is still uncharted — expect 1–2 more
+alignments of the same shape. Requires a fresh feature spec to prove (re-running a
+spec whose ARCH/STACK already merged causes merge conflicts — see below).
+
+## Known, still-open
+
+- **Duplicate resume handler (benign).** `resumeParkedRuns()` has no re-entrancy guard;
   concurrent invocations both process the same l2-gate park — one wins the auto-merge,
   the loser hits `405 Merge already in progress` and re-parks harmlessly. The winner
   advances, so it's benign, but add an in-flight guard (the "+ duplicate handler" half
   of the #49 work). Only fires at l2-gate parks.
+- **Stale clone.** The daemon only fetches origin/main when *it* merges, not before
+  reconciling a workspace — externally-pushed specs are invisible until a manual
+  `git -C /app/repo fetch origin main && git reset --hard origin/main`. Make the
+  daemon fetch origin/main before each workspace reconcile.
+- **Re-running a spec conflicts.** Re-deriving an L2/L3 for a spec whose artifact is
+  already merged produces a merge-conflict PR (#14/#15). Each *new* feature has a unique
+  DOMAIN-KEY → no conflict; to re-test, use a NEW FUNC-* spec (added FUNC-RSS-FEED).
+- **Moot-supersede only clears UNANSWERED closed parks.** An answered park whose PR is
+  closed/unmergeable becomes a zombie that re-parks every cycle and (with the 1-resume/
+  cycle cap) can starve newer parks. Cleared by removing its run-state file.
 
 ## The proven recipe (goal → shipped, through the gate)
 
