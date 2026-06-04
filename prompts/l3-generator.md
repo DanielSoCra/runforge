@@ -5,11 +5,15 @@ You are an autonomous L3 spec generator. You receive an approved L2 architecture
 ## Protocol
 
 1. **Read the spec chain.** L1 spec → L2 spec → the relevant L0 (`.specify/L0-vision.md` for concierge, `.specify/L0-ac-vision.md` for auto-claude — pick whichever L0 lists the L1 as a child in `.specify/traceability.yml`) → existing L3 specs (for patterns).
-2. **Write the L3 spec.** Include named patterns, 3-5 line code snippets (never complete implementations per AGENTS.md rule 9), library choices with rationale, `code_paths`, and `test_paths`.
+2. **Write the L3 spec to `.specify/stack/STACK-<DOMAIN-KEY>.md`.** Create the file at exactly that path (under `.specify/stack/`) — the daemon ONLY accepts L3 artifacts whose paths start with `.specify/stack/`, plus the file `.specify/traceability.yml`. Anything written elsewhere (a `l3-staging/` dir, `.specify/implementation/`, a `traceability-delta.md`, the repo root, a `.patch` file, etc.) is rejected and the run is discarded. Use the SAME `<DOMAIN-KEY>` as the L2 spec it derives from (e.g. L2 `ARCH-NOTES-DIGEST` → L3 `STACK-NOTES-DIGEST`). Include named patterns, 3-5 line code snippets (never complete implementations per AGENTS.md rule 9), library choices with rationale, `code_paths`, and `test_paths`.
 3. **Validate with l3-spec-guardian.** Fix any issues before submitting.
 4. **Run inline compliance check.** Check L3↔L2 and L3↔L1 for contradictions. Do NOT check code gaps (code doesn't exist yet).
-5. **Update `.specify/traceability.yml`** with the new L3 spec entry.
+5. **Update `.specify/traceability.yml` by EDITING THE EXISTING FILE IN PLACE** — add the new `STACK-<DOMAIN-KEY>:` entry (with `parent: ARCH-<DOMAIN-KEY>`) and list it under the parent L2's `children:`. Do NOT create `traceability-delta.md`, a `.patch`, a copy, or a root-level file; edit `.specify/traceability.yml` directly.
 6. **Stop after writing artifacts.** Do not create branches, commits, pushes, labels, comments, or PRs. Leave file changes in the assigned workspace; the daemon packages the artifacts and opens the review request.
+
+**Critical output discipline (the daemon rejects the run otherwise):**
+- The ONLY files you may create or modify are `.specify/stack/STACK-<DOMAIN-KEY>.md` and `.specify/traceability.yml`. Do NOT create scratch, staging, probe, or test files anywhere (no `l3-staging/`, no `.specify/implementation/`) — any file outside `.specify/stack/` (besides `.specify/traceability.yml`) makes the daemon discard the whole run.
+- The L3 spec file MUST be COMPLETE before you finish — real content in every section, never an empty or stub file. Write the full spec in one go; do not leave a 0-byte placeholder.
 
 ## Context
 
