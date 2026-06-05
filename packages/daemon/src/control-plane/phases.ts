@@ -33,7 +33,7 @@ import { runHoldout } from '../validation/holdout.js';
 import { integrateToStaging } from './integration.js';
 import { runDeploy } from '../validation/deploy.js';
 import { runPostDeployTests } from '../validation/post-deploy-test.js';
-import { reconcileWorkspace } from './workspace.js';
+import { reconcileWorkspace, ensureRepoFresh } from './workspace.js';
 import { extractStructuredOutput } from '../lib/structured-output.js';
 import { complianceReportJsonSchema } from '../diagnosis/schema.js';
 import { createFailureRecord } from './failure-routing.js';
@@ -412,6 +412,17 @@ export function createPhaseHandlers(
         console.log(
           `[detect] Reconciling workspace ${workspaceDir} for ${featureBranch} from ${config.branches.staging}`,
         );
+        // Fast-forward the local base to origin BEFORE branching the worktree off
+        // it, so externally-pushed specs are visible (the daemon otherwise only
+        // fetches when IT merges). Best-effort: never fails detect — a fetch/FF
+        // problem just leaves the prior (local) base in place.
+        const baseRef = config.runtimeSource.expectedRef ?? config.branches.staging;
+        const refreshed = await ensureRepoFresh(mainRepoRoot, baseRef);
+        if (!refreshed.ok) {
+          console.warn(
+            `[detect] ensureRepoFresh(${baseRef}) failed (continuing with local base): ${refreshed.error.message}`,
+          );
+        }
         const reconciled = await reconcileWorkspace({
           repoRoot: mainRepoRoot,
           workspaceDir,

@@ -44,6 +44,79 @@ export async function reconcileWorkspace(
   return createFresh(repoRoot, workspaceDir, featureBranch, sourceRef);
 }
 
+/**
+ * Bring the local `baseBranch` in `repoRoot` up to date with `origin/baseBranch`
+ * before a run reconciles its workspace, so worktrees branch off the latest
+ * remote main instead of a stale local clone. (The daemon otherwise only fetches
+ * when IT merges, leaving externally-pushed specs invisible until a manual
+ * `git fetch origin main && git reset --hard origin/main`.)
+ *
+ * Fast-forward ONLY: if local `baseBranch` has diverged from or is ahead of
+ * origin (e.g. an un-pushed daemon commit), it is left untouched — never
+ * clobbered. A missing local branch or origin tracking ref (e.g. a tag/commit
+ * sourceRef) is a safe no-op. Idempotent.
+ */
+export async function ensureRepoFresh(
+  repoRoot: string,
+  baseBranch: string,
+): Promise<Result<void>> {
+  // Best-effort freshness: a fetch failure (ref absent on origin, transient
+  // network/auth) must NOT introduce a new failure mode — degrade to the prior
+  // behaviour (branch off the existing local base) rather than failing the run.
+  const fetched = await git(['fetch', 'origin', baseBranch], repoRoot);
+  if (!fetched.ok) {
+    console.warn(
+      `[ensureRepoFresh] fetch origin ${baseBranch} failed (using local base as-is): ${fetched.error.message}`,
+    );
+    return ok(undefined);
+  }
+
+  const localSha = await git(
+    ['rev-parse', '--verify', '--quiet', `refs/heads/${baseBranch}`],
+    repoRoot,
+  );
+  const remoteSha = await git(
+    ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${baseBranch}`],
+    repoRoot,
+  );
+  // Missing local branch or no origin tracking ref → nothing to fast-forward.
+  if (!localSha.ok || !remoteSha.ok || !localSha.value.trim() || !remoteSha.value.trim()) {
+    return ok(undefined);
+  }
+  if (localSha.value.trim() === remoteSha.value.trim()) {
+    return ok(undefined); // already up to date
+  }
+
+  // Advance only when local is strictly behind: its tip must be an ancestor of
+  // the remote tip. Diverged or ahead → leave local intact (never clobber).
+  const isAncestor = await git(
+    ['merge-base', '--is-ancestor', `refs/heads/${baseBranch}`, `refs/remotes/origin/${baseBranch}`],
+    repoRoot,
+  );
+  if (!isAncestor.ok) {
+    return ok(undefined);
+  }
+
+  // Fast-forward. If baseBranch is checked out, merge --ff-only also updates the
+  // working tree; otherwise move the branch ref directly (no checkout needed).
+  const head = await git(['symbolic-ref', '--quiet', '--short', 'HEAD'], repoRoot);
+  if (head.ok && head.value.trim() === baseBranch) {
+    const ff = await git(['merge', '--ff-only', `origin/${baseBranch}`], repoRoot);
+    if (!ff.ok) {
+      return err(new Error(`ensureRepoFresh: ff-merge ${baseBranch} failed: ${ff.error.message}`));
+    }
+  } else {
+    const upd = await git(
+      ['update-ref', `refs/heads/${baseBranch}`, remoteSha.value.trim()],
+      repoRoot,
+    );
+    if (!upd.ok) {
+      return err(new Error(`ensureRepoFresh: update-ref ${baseBranch} failed: ${upd.error.message}`));
+    }
+  }
+  return ok(undefined);
+}
+
 async function createFresh(
   repoRoot: string,
   workspaceDir: string,

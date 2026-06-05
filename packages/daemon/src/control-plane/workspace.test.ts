@@ -4,7 +4,7 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { git } from '../lib/git.js';
-import { reconcileWorkspace } from './workspace.js';
+import { reconcileWorkspace, ensureRepoFresh } from './workspace.js';
 
 async function makeRepo(): Promise<{ repoRoot: string; cleanup: () => Promise<void> }> {
   const repoRoot = await mkdtemp(join(tmpdir(), 'workspace-test-'));
@@ -156,5 +156,93 @@ describe('reconcileWorkspace', () => {
       stagingBranch: 'dev',
     });
     expect(result.ok).toBe(true);
+  });
+});
+
+/** Push a fresh commit to origin/<branch> from a throwaway clone (simulating an
+ * operator/external push), leaving the test repo's local <branch> behind. Returns
+ * the new origin SHA. */
+async function externalPush(repoRoot: string, branch: string): Promise<string> {
+  const url = await git(['remote', 'get-url', 'origin'], repoRoot);
+  if (!url.ok) throw new Error('no origin url');
+  const ext = await mkdtemp(join(tmpdir(), 'workspace-ext-'));
+  try {
+    await git(['clone', '-q', url.value.trim(), '.'], ext);
+    await git(['config', 'user.email', 'ext@test'], ext);
+    await git(['config', 'user.name', 'ext'], ext);
+    await git(['checkout', '-q', branch], ext);
+    await writeFile(join(ext, 'EXTERNAL.md'), 'pushed externally\n');
+    await git(['add', '.'], ext);
+    await git(['commit', '-q', '-m', 'external commit'], ext);
+    await git(['push', '-q', 'origin', branch], ext);
+    const sha = await git(['rev-parse', 'HEAD'], ext);
+    if (!sha.ok) throw new Error('rev-parse failed');
+    return sha.value.trim();
+  } finally {
+    await rm(ext, { recursive: true, force: true });
+  }
+}
+
+describe('ensureRepoFresh', () => {
+  let repo: Awaited<ReturnType<typeof makeRepo>>;
+  beforeEach(async () => { repo = await makeRepo(); });
+  afterEach(async () => { await repo.cleanup(); });
+
+  it('fast-forwards a stale local base branch (checked out) to origin', async () => {
+    const newSha = await externalPush(repo.repoRoot, 'dev');
+    const before = await git(['rev-parse', 'dev'], repo.repoRoot);
+    expect(before.ok && before.value.trim()).not.toBe(newSha);
+
+    const result = await ensureRepoFresh(repo.repoRoot, 'dev');
+    expect(result.ok).toBe(true);
+
+    const after = await git(['rev-parse', 'dev'], repo.repoRoot);
+    expect(after.ok && after.value.trim()).toBe(newSha);
+  });
+
+  it('fast-forwards a base branch that is NOT checked out (update-ref path)', async () => {
+    const newSha = await externalPush(repo.repoRoot, 'dev');
+    await git(['checkout', '-q', '-b', 'feature/x'], repo.repoRoot); // dev no longer HEAD
+    const result = await ensureRepoFresh(repo.repoRoot, 'dev');
+    expect(result.ok).toBe(true);
+    const after = await git(['rev-parse', 'dev'], repo.repoRoot);
+    expect(after.ok && after.value.trim()).toBe(newSha);
+  });
+
+  it('does NOT clobber a local base branch that is ahead of origin', async () => {
+    await writeFile(join(repo.repoRoot, 'LOCAL.md'), 'unpushed\n');
+    await git(['add', '.'], repo.repoRoot);
+    await git(['commit', '-q', '-m', 'unpushed local'], repo.repoRoot);
+    const before = await git(['rev-parse', 'dev'], repo.repoRoot);
+    const result = await ensureRepoFresh(repo.repoRoot, 'dev');
+    expect(result.ok).toBe(true);
+    const after = await git(['rev-parse', 'dev'], repo.repoRoot);
+    expect(after.ok && after.value.trim()).toBe(before.ok && before.value.trim());
+  });
+
+  it('does NOT clobber a diverged local base branch', async () => {
+    await externalPush(repo.repoRoot, 'dev'); // origin gains a commit
+    await writeFile(join(repo.repoRoot, 'LOCAL.md'), 'unpushed\n');
+    await git(['add', '.'], repo.repoRoot);
+    await git(['commit', '-q', '-m', 'local diverge'], repo.repoRoot); // local gains a different commit
+    const before = await git(['rev-parse', 'dev'], repo.repoRoot);
+    const result = await ensureRepoFresh(repo.repoRoot, 'dev');
+    expect(result.ok).toBe(true);
+    const after = await git(['rev-parse', 'dev'], repo.repoRoot);
+    expect(after.ok && after.value.trim()).toBe(before.ok && before.value.trim());
+  });
+
+  it('is a no-op when already up to date', async () => {
+    const before = await git(['rev-parse', 'dev'], repo.repoRoot);
+    const result = await ensureRepoFresh(repo.repoRoot, 'dev');
+    expect(result.ok).toBe(true);
+    const after = await git(['rev-parse', 'dev'], repo.repoRoot);
+    expect(after.ok && after.value.trim()).toBe(before.ok && before.value.trim());
+  });
+
+  it('returns a no-op (ok) when the base branch has no origin tracking ref', async () => {
+    await git(['checkout', '-q', '-b', 'orphan-local'], repo.repoRoot);
+    const result = await ensureRepoFresh(repo.repoRoot, 'orphan-local');
+    expect(result.ok).toBe(true); // fetch of a non-existent origin branch is tolerated
   });
 });
