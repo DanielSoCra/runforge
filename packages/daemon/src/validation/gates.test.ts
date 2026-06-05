@@ -1,7 +1,10 @@
 // src/validation/gates.test.ts
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createGate1, selectGates, validateGate1Command } from './gates.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createGate1, selectGates, validateGate1Command, detectGate1Commands } from './gates.js';
 import type { Gate, } from './gates.js';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 vi.mock('../lib/process.js', () => ({
   runCommand: vi.fn(),
@@ -342,5 +345,87 @@ describe('selectGates', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0]).toBe(g1);
+  });
+});
+
+describe('detectGate1Commands', () => {
+  let dir: string;
+  beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'gate1-detect-')); });
+  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  it('detects typecheck + test scripts from package.json (cheapest-first order)', async () => {
+    await writeFile(
+      join(dir, 'package.json'),
+      JSON.stringify({ scripts: { start: 'node x', test: 'vitest', typecheck: 'tsc --noEmit' } }),
+    );
+    expect(detectGate1Commands(dir)).toEqual(['pnpm run typecheck', 'pnpm run test']);
+  });
+
+  it('includes lint when present', async () => {
+    await writeFile(
+      join(dir, 'package.json'),
+      JSON.stringify({ scripts: { test: 'vitest', lint: 'eslint .', typecheck: 'tsc' } }),
+    );
+    expect(detectGate1Commands(dir)).toEqual(['pnpm run typecheck', 'pnpm run lint', 'pnpm run test']);
+  });
+
+  it('returns only the scripts that exist', async () => {
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
+    expect(detectGate1Commands(dir)).toEqual(['pnpm run test']);
+  });
+
+  it('returns [] when package.json is missing', () => {
+    expect(detectGate1Commands(join(dir, 'nope'))).toEqual([]);
+  });
+
+  it('returns [] when package.json has no scripts', async () => {
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
+    expect(detectGate1Commands(dir)).toEqual([]);
+  });
+
+  it('ignores a blank/whitespace script value', async () => {
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ scripts: { test: '   ', typecheck: 'tsc' } }));
+    expect(detectGate1Commands(dir)).toEqual(['pnpm run typecheck']);
+  });
+});
+
+describe('createGate1 auto-detect (empty configured commands)', () => {
+  let dir: string;
+  beforeEach(async () => {
+    vi.resetAllMocks();
+    dir = await mkdtemp(join(tmpdir(), 'gate1-auto-'));
+  });
+  afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
+
+  it('runs the auto-detected commands when none are configured', async () => {
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest', typecheck: 'tsc' } }));
+    mockRunCommand.mockResolvedValue({ ok: true, value: '' });
+
+    const result = await createGate1([]).execute(dir);
+
+    expect(result.passed).toBe(true);
+    expect(mockRunCommand).toHaveBeenCalledWith('/bin/sh', ['-c', 'pnpm run typecheck'], expect.anything());
+    expect(mockRunCommand).toHaveBeenCalledWith('/bin/sh', ['-c', 'pnpm run test'], expect.anything());
+    expect(mockRunCommand).toHaveBeenCalledTimes(2);
+  });
+
+  it('FAILS the gate when an auto-detected test command fails', async () => {
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ scripts: { test: 'vitest' } }));
+    mockRunCommand.mockResolvedValue({ ok: false, error: new Error('test failed (1): 2 failing') });
+
+    const result = await createGate1([]).execute(dir);
+
+    expect(result.passed).toBe(false);
+    expect(result.findings[0]?.location).toBe('pnpm run test');
+  });
+
+  it('passes (does NOT run anything) when empty config AND no detectable scripts', async () => {
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'x' }));
+    mockRunCommand.mockResolvedValue({ ok: true, value: '' });
+
+    const result = await createGate1([]).execute(dir);
+
+    expect(result.passed).toBe(true);
+    expect(mockRunCommand).not.toHaveBeenCalled();
   });
 });

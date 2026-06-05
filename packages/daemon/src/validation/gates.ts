@@ -1,6 +1,41 @@
 // src/validation/gates.ts
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { runCommand } from '../lib/process.js';
 import type { GateResult, GateType, ReviewFinding } from '../types.js';
+
+/**
+ * package.json scripts that count as deterministic validation, cheapest-first
+ * (so a type error surfaces before the slower test run). `test` runs last
+ * because it is the strongest behaviour check.
+ */
+const DETECTABLE_VALIDATION_SCRIPTS = ['typecheck', 'lint', 'test'] as const;
+
+/**
+ * Auto-detect the deterministic validation commands for a worktree from its
+ * `package.json` scripts. Returns `pnpm run <script>` for each of
+ * {@link DETECTABLE_VALIDATION_SCRIPTS} that is present and non-blank, in that
+ * order. Returns `[]` when there is no package.json or no matching script — the
+ * caller treats that as "nothing to validate" (and should say so out loud).
+ *
+ * This is the fallback when no `gate1Commands` are configured, so that a run's
+ * deterministic gate actually executes the project's own tests/typecheck rather
+ * than passing vacuously over an empty command list.
+ */
+export function detectGate1Commands(worktreeDir: string): string[] {
+  let scripts: Record<string, unknown> = {};
+  try {
+    const pkg = JSON.parse(readFileSync(join(worktreeDir, 'package.json'), 'utf8'));
+    if (pkg && typeof pkg.scripts === 'object' && pkg.scripts) {
+      scripts = pkg.scripts as Record<string, unknown>;
+    }
+  } catch {
+    return [];
+  }
+  return DETECTABLE_VALIDATION_SCRIPTS.filter(
+    (s) => typeof scripts[s] === 'string' && (scripts[s] as string).trim().length > 0,
+  ).map((s) => `pnpm run ${s}`);
+}
 
 export interface Gate {
   type: GateType;
@@ -39,7 +74,24 @@ export function createGate1(commands: string[], opts?: Gate1Options): Gate {
     type: 'deterministic',
     async execute(cwd: string): Promise<GateResult> {
       const findings: ReviewFinding[] = [];
-      for (const cmd of commands) {
+      // No commands configured → auto-detect the project's own test/typecheck/lint
+      // scripts so the deterministic gate validates behaviour instead of passing
+      // vacuously over an empty list. If none are detectable, say so out loud —
+      // a "passed" gate that ran nothing must be observable, not silent.
+      let effectiveCommands = commands;
+      if (effectiveCommands.length === 0) {
+        effectiveCommands = detectGate1Commands(cwd);
+        if (effectiveCommands.length > 0) {
+          console.log(
+            `[gate1] no configured commands — auto-detected from package.json: ${effectiveCommands.join(', ')}`,
+          );
+        } else {
+          console.warn(
+            `[gate1] no configured commands AND no test/typecheck/lint scripts in ${cwd} — deterministic gate validated NOTHING (passing vacuously)`,
+          );
+        }
+      }
+      for (const cmd of effectiveCommands) {
         if (!cmd.trim()) continue;
         const validationError = validateGate1Command(cmd);
         if (validationError) {
