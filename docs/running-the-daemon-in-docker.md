@@ -123,3 +123,35 @@ docker stop auto-claude-daemon-1
 Verify the boot log shows the workspace line
 (`repoRoot … is a git checkout — using as-is`, or `cloning …`) and
 `Auto-Claude daemon started`. Health: `curl localhost:3847/health`.
+
+## Unattended 24/7
+
+Three launchd jobs make the pilot survive token expiry, crashes, and reboots
+without babysitting. The container itself is `restart: unless-stopped`, so it
+self-heals across crashes once the Docker engine is up.
+
+| Job | Installs via | Keeps alive |
+|-----|--------------|-------------|
+| `com.autoclaude.creds-sync` | `scripts/install-creds-sync.sh /private/tmp/pilot-claude` | refreshes the container's subscription token from the host Keychain every 15 min (token life ~1 h) — the #1 overnight killer |
+| `com.pmcockpit.watcher-pilot` | `pm-cockpit: packages/watcher/scripts/install-pilot-watcher.sh` | KeepAlive-restarts the watcher that owns the intent socket delivering gate approvals; secrets resolved at launch (`gh auth token` + `~/.agents/pm/.protected-key`), none in the plist; `/health` on `127.0.0.1:8799` |
+| `com.autoclaude.docker-autostart` | `cp scripts/com.autoclaude.docker-autostart.plist …` (sub `__HOME__`) + `launchctl load -w` | `open -g -a Docker` at login → the engine comes up → the `unless-stopped` container resurrects after a reboot |
+
+```bash
+# verify all three are loaded
+launchctl list | grep -E 'creds-sync|watcher-pilot|docker-autostart'
+# token freshness inside the container (should stay > ~45 min)
+docker exec auto-claude-daemon-1 sh -c 'cat /root/.claude/.credentials.json' \
+  | python3 -c 'import sys,json,time; o=json.load(sys.stdin).get("claudeAiOauth",{}); print(round((o["expiresAt"]/1000-time.time())/60),"min")'
+# watcher health + creds-sync log
+curl -fsS 127.0.0.1:8799/health; tail ~/logs/claude-creds-sync.log
+```
+
+**Prereqs that still need a human:** the host `claude` CLI must stay logged in
+(creds-sync only *copies* the Keychain token; it cannot refresh a dead login) and
+`gh` must stay authenticated (the watcher wrapper reads `gh auth token`). Both are
+checked fail-closed by the install scripts.
+
+**Single canonical daemon.** Only the Docker container serves the pilot
+(`auto-claude-example`). The legacy host launchd daemon `com.autoclaude.daemon`
+(which polled the `auto-claude` repo itself and double-bound :3847) is unloaded —
+re-`launchctl load` its plist only if you deliberately self-host that repo.
