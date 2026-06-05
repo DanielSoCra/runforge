@@ -60,6 +60,28 @@ describe('worktree management', () => {
     expect(mergeResult.ok).toBe(true);
   });
 
+  it('seeds build-artifact excludes so node_modules/etc are ignored by git', async () => {
+    const create = await createWorktree('unit-art', 'main', repoDir);
+    expect(create.ok).toBe(true);
+    if (!create.ok) return;
+    // the shared git excludes were seeded (covers every worktree + repoRoot)
+    const exclude = await readFile(join(repoDir, '.git/info/exclude'), 'utf8');
+    expect(exclude).toContain('node_modules/');
+    expect(exclude).toContain('.pnpm-store/');
+    expect(exclude).toContain('workspaces/');
+    // so `pnpm install`'s node_modules is invisible to git (not auto-committed,
+    // not counted in diff-size, not left as merge-tripping clutter); real changes still show.
+    await mkdir(join(create.value, 'node_modules/dep'), { recursive: true });
+    await writeFile(join(create.value, 'node_modules/dep/index.js'), 'x');
+    await writeFile(join(create.value, 'feature.ts'), 'export const x = 1;');
+    const status = await git(['status', '--porcelain'], create.value);
+    expect(status.ok).toBe(true);
+    if (status.ok) {
+      expect(status.value).not.toContain('node_modules');
+      expect(status.value).toContain('feature.ts');
+    }
+  });
+
   it('returns error for non-existent base branch', async () => {
     const result = await createWorktree('unit-bad', 'nonexistent', repoDir);
     expect(result.ok).toBe(false);

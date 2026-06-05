@@ -77,6 +77,14 @@ When adding a new authoring phase, update prompt + `isAllowedArtifactPath` +
   `claude-opus-4-8` (via `roleModels: {<role>: {model: "claude-opus-4-8"}}`) both
   fixes quality AND makes failures legible (Opus reports `BLOCKED` clearly instead of
   flailing).
+- **Restarting the pm-cockpit watcher needs two env vars.** The intent socket
+  (`~/.agents/pm/intent-e2e.sock`) lives in the watcher process; if it dies, gate
+  approvals fail with `ERR connect ENOENT …intent-e2e.sock`. Restart with
+  `PM_PROTECTED_KEY=$(head -c 32 /dev/urandom | base64) PM_GH_TOKEN=$(gh auth token)
+  node packages/watcher/__pilot-watcher.mjs` — it crashes on boot without
+  `PM_PROTECTED_KEY` (32-byte base64; any valid key works since pilot decisions carry
+  no PHI) and can't write the approve effect without `PM_GH_TOKEN`. Socket path + repos
+  come from `~/.agents/pm/registry.yaml`.
 - **Two daemons.** A host launchd daemon (`com.autoclaude.daemon`, runs from
   `.worktrees/runtime-current`) can coexist with the container daemon on :3847 — they
   may target different repos. Confirm which one owns your repo before reading
@@ -91,34 +99,64 @@ prompt fix) → l3-compliance → implement, where the worker **wrote real featu
 (`test/feed/*.test.ts`, `package.json`, `tsconfig.json`). The decision loop
 (emit → ingest → cockpit answer → resume) closed on a real run.
 
-## The next frontier — implement-phase scope (5th blocker, NOT yet fixed)
+## 5th blocker — implement-phase scope (FIXED) + the full tail (PROVEN e2e)
 
 The implement worker scaffolded a greenfield feature, then the **post-session scope
 audit** failed it with `Scope violation detected: write-outside-permitted …`. Three
-facets, all because `workerScope.writePaths = ['src/**','packages/**','tests/**']` is
+facets, all because `workerScope.writePaths = ['src/**','packages/**','tests/**']` was
 too narrow for greenfield:
 1. **`node_modules/**`** — `pnpm install` writes it (hundreds of paths). It's a
-   git-ignored build artifact, never a deliverable. The audit should ignore
-   node_modules / git-ignored / build dirs regardless of `.gitignore` presence (the
-   example repo has no `.gitignore`, so `git status` surfaces node_modules).
+   build artifact, never a deliverable. The example repo has no `.gitignore`, so
+   `git status` surfaced node_modules and the audit failed it.
 2. **root config** — `package.json`, `tsconfig.json`, `pnpm-lock.yaml`: a greenfield
-   feature must create these; the scope forbids root files.
-3. **`test/` vs `tests/`** — the worker wrote `test/feed/*.test.ts`; the scope allows
-   only `tests/**`. Allow both, or pin the dir in the prompt + scope together.
+   feature must create these; the old scope forbade root files.
+3. **`test/` vs `tests/`** — the worker wrote `test/feed/*.test.ts`; the scope allowed
+   only `tests/**`.
 
-**Likely fix:** broaden `workerScope` to a greenfield-friendly surface AND make
-`auditScope`/`scope-enforcement` ignore node_modules + common build artifacts. Then
-the tail (review → holdout → integrate → report) is still uncharted — expect 1–2 more
-alignments of the same shape. Requires a fresh feature spec to prove (re-running a
-spec whose ARCH/STACK already merged causes merge conflicts — see below).
+**Fix (on `fix/implement-greenfield-scope`, TDD, 2688 tests green):**
+- `workerScope` broadened to a greenfield surface: `readPaths/writePaths = ['**/*']`,
+  `denyPaths = ['.specify/**']` (real containment = worktree boundary + review gate +
+  `policy.blockedPaths` merged by `resolveDirectoryScope`). `scope-registry.ts`.
+- `scope-audit.ts` ignores build artifacts regardless of `.gitignore`:
+  `isIgnoredArtifactPath()` drops any path with a `node_modules/.git/.next/.turbo/
+  coverage` segment from `collectChangedPaths`.
+- `worktree.ts` `ensureBuildArtifactExcludes()` seeds the **shared** git excludes
+  (`<common-git-dir>/info/exclude`) with `node_modules/`, `.pnpm-store/`, `workspaces/`,
+  `dist/`, `build/`, `.next/`, `.turbo/`, `coverage/` at `createWorktree` — so the
+  implement auto-commit never stages artifacts, the diff-size limit never trips on
+  them, and they never linger as merge-tripping clutter.
+
+**PROVEN live, full tail e2e (#23 FUNC-TAGS, 2026-06-04):**
+`detect → l2-gate (cockpit approve) → l3-generate → l3-compliance → implement (real
+code) → review (passed, 0 fix cycles) → holdout → integrate (merged feature/23 → main)
+→ report → complete`. The delivered feature — `src/tags/{tag,tagIndexer,tagPage}.ts`
+plus `test/tags/*.test.ts` — was independently cloned and run: **22/22 tests pass,
+`tsc --noEmit` clean**. The diff was 671/757 lines (vs the pre-fix 866752 artifact
+bloat), confirming the exclusion fix. This is the first time a goal went L0 → merged
+feature on main autonomously.
 
 ## Known, still-open
 
-- **Duplicate resume handler (benign).** `resumeParkedRuns()` has no re-entrancy guard;
-  concurrent invocations both process the same l2-gate park — one wins the auto-merge,
-  the loser hits `405 Merge already in progress` and re-parks harmlessly. The winner
-  advances, so it's benign, but add an in-flight guard (the "+ duplicate handler" half
-  of the #49 work). Only fires at l2-gate parks.
+- **Duplicate resume handler (benign, re-observed on #23).** `resumeParkedRuns()` has no
+  re-entrancy guard; concurrent invocations both process the same l2-gate park — one wins
+  the auto-merge, the loser hits `405 Merge already in progress` (`PUT …/pulls/24/merge`)
+  and logs `Parked run #23 finished: parked`. The winner advances, so it's benign and
+  self-heals, but add an in-flight guard (the "+ duplicate handler" half of the #49 work).
+  Only fires at l2-gate parks. Seen again live on #23 — confirmed still present.
+- **Residual implement-merge `fatal: stash failed` (transient, self-heals).** On #23's
+  *first* implement attempt the unit-merge failed with `Merge failed for issue-23: git
+  failed (128): fatal: stash failed`; the automatic re-implement attempt succeeded and
+  the run completed. That message comes **only** from git's autostash (`die("stash
+  failed")` in merge/rebase/pull), yet `merge.autoStash` is unset in repo/global/system
+  config AND `runCommand`'s sanitized env (PATH/HOME/TERM/LANG/TMPDIR only) can't inject
+  it — and a plain `git merge --no-ff` with a dirty untracked file reproduces clean
+  (exit 0) on the same git 2.39.5. So this is a **non-deterministic transient** (likely a
+  race between the worker's in-container worktree/index activity and the merge), not a
+  config bug. It self-heals via the implement retry, so it's not blocking. **Proposed
+  defensive fix (needs a reliable repro first):** pass `-c merge.autoStash=false` to the
+  merge in `worktree.ts:mergeWorktree` (kills the only code path that can emit this
+  message) and/or ensure repoRoot is clean before the unit-merge. Not done yet — TDD has
+  no RED test without a repro, so it is filed rather than hacked in blind.
 - **Stale clone.** The daemon only fetches origin/main when *it* merges, not before
   reconciling a workspace — externally-pushed specs are invisible until a manual
   `git -C /app/repo fetch origin main && git reset --hard origin/main`. Make the

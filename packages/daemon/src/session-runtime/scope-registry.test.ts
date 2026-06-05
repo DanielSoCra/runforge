@@ -7,14 +7,18 @@ import {
 } from './scope-registry.js';
 
 describe('scope registry', () => {
-  it('provides default worker implementation scope', () => {
+  it('provides a greenfield worker implementation scope (writes anywhere but frozen specs)', () => {
     const registry = buildScopeRegistry();
     const scope = resolveDirectoryScope('worker-implement', registry, DEFAULT_POLICY);
 
-    expect(scope.writePaths).toEqual(['src/**', 'packages/**', 'tests/**']);
+    // Greenfield-friendly: a feature build may create project files anywhere in its
+    // sandboxed worktree (root config, src, test/ OR tests/, etc.). Containment is the
+    // worktree boundary + the review gate + the denied paths below — not a narrow allow-list.
+    expect(scope.writePaths).toEqual(['**/*']);
+    // Specs are frozen during implement; holdout + daemon internals stay blocked
+    // (.specify/scenarios + .specify/methodology come in via DEFAULT_POLICY.blockedPaths).
     expect(scope.denyPaths).toEqual(expect.arrayContaining([
-      '.specify/scenarios/**',
-      '.specify/methodology/**',
+      '.specify/**',
       ...DEFAULT_POLICY.blockedPaths,
     ]));
   });

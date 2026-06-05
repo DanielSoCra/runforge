@@ -45,12 +45,26 @@ export async function auditScope(input: ScopeAuditInput): Promise<ScopeAuditResu
   return violations.length > 0 ? err(violations) : ok(undefined);
 }
 
+/**
+ * Build artifacts / VCS internals are never deliverables and must not count as
+ * scope violations — e.g. `pnpm install` writes hundreds of node_modules files
+ * during a greenfield implement. Filtered by path segment, regardless of whether
+ * the target repo has a .gitignore (the example/sandbox repos often don't).
+ */
+const IGNORED_SEGMENTS = new Set(['node_modules', '.git', '.next', '.turbo', 'coverage']);
+
+export function isIgnoredArtifactPath(p: string): boolean {
+  return p.split('/').some((seg) => IGNORED_SEGMENTS.has(seg));
+}
+
 async function collectChangedPaths(workspacePath: string, baseCommit: string): Promise<string[]> {
   const committed = await gitLines(workspacePath, ['diff', '--name-only', `${baseCommit}..HEAD`]);
   const staged = await gitLines(workspacePath, ['diff', '--name-only', '--cached', 'HEAD']);
   const unstaged = await gitLines(workspacePath, ['diff', '--name-only', 'HEAD']);
   const untracked = await gitLines(workspacePath, ['ls-files', '--others', '--exclude-standard']);
-  return [...new Set([...committed, ...staged, ...unstaged, ...untracked])];
+  return [...new Set([...committed, ...staged, ...unstaged, ...untracked])].filter(
+    (p) => !isIgnoredArtifactPath(p),
+  );
 }
 
 async function gitLines(workspacePath: string, args: string[]): Promise<string[]> {

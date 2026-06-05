@@ -5,6 +5,8 @@ import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
 import type { DirectoryScope } from '../types.js';
 import { auditScope, captureScopeBaseCommit } from './scope-audit.js';
+import { buildScopeRegistry, resolveDirectoryScope } from './scope-registry.js';
+import { DEFAULT_POLICY } from './containment-hooks.js';
 
 const scope: DirectoryScope = {
   readPaths: ['**/*'],
@@ -86,6 +88,56 @@ describe('scope audit', () => {
         path: 'secret/value.txt',
         violationType: 'access-to-denied',
       });
+    }
+  });
+
+  it('ignores build artifacts (node_modules) even when outside the write scope', async () => {
+    // A narrow scope (only src/** writable). `pnpm install` writes node_modules,
+    // which is a build artifact, not a deliverable — it must NOT count as a violation.
+    await mkdir(join(dir, 'node_modules/dep'), { recursive: true });
+    await writeFile(join(dir, 'node_modules/dep/index.js'), 'module.exports = {};\n');
+    await writeFile(join(dir, 'src/app.ts'), 'export const ok = 2;\n'); // in scope
+
+    const result = await auditScope({
+      workspacePath: dir,
+      baseCommit,
+      sessionId: 's1',
+      agentType: 'worker',
+      scope, // writePaths: ['src/**']
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('greenfield worker scope: allows project scaffolding, denies only frozen specs', async () => {
+    const workerScope = resolveDirectoryScope('worker', buildScopeRegistry(), DEFAULT_POLICY);
+    // a real greenfield feature: root config + tests + installed deps
+    await writeFile(join(dir, 'package.json'), '{"name":"feat"}\n');
+    await writeFile(join(dir, 'tsconfig.json'), '{}\n');
+    await mkdir(join(dir, 'test/feed'), { recursive: true });
+    await writeFile(join(dir, 'test/feed/rss.test.ts'), 'export const t = 1;\n');
+    await mkdir(join(dir, 'node_modules/dep'), { recursive: true });
+    await writeFile(join(dir, 'node_modules/dep/index.js'), 'x\n');
+    // a spec write IS denied — specs are frozen during implement
+    await mkdir(join(dir, '.specify/architecture'), { recursive: true });
+    await writeFile(join(dir, '.specify/architecture/ARCH-X.md'), '# spec\n');
+
+    const result = await auditScope({
+      workspacePath: dir,
+      baseCommit,
+      sessionId: 's1',
+      agentType: 'worker',
+      scope: workerScope,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const paths = result.error.map((v) => v.path);
+      expect(paths).toContain('.specify/architecture/ARCH-X.md'); // frozen spec → denied
+      expect(paths).not.toContain('package.json'); // greenfield config → allowed
+      expect(paths).not.toContain('tsconfig.json');
+      expect(paths).not.toContain('test/feed/rss.test.ts'); // test/ allowed
+      expect(paths.some((p) => p.startsWith('node_modules/'))).toBe(false); // ignored
     }
   });
 

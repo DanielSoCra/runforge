@@ -1,11 +1,56 @@
 import { rm } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { git } from '../lib/git.js';
 import { ok, err, type Result } from '../lib/result.js';
-import { join } from 'path';
+import { join, isAbsolute } from 'path';
 import { isValidUnitId } from './task-graph.js';
 
 const WORKTREE_DIR = 'workspaces';
+
+const BUILD_ARTIFACT_EXCLUDES = [
+  'node_modules/',
+  '.pnpm-store/',
+  'workspaces/',
+  'dist/',
+  'build/',
+  '.next/',
+  '.turbo/',
+  'coverage/',
+];
+
+/**
+ * Seed the repo's SHARED git excludes (the common git dir's info/exclude) so build
+ * artifacts — node_modules, the pnpm store, the daemon's own `workspaces/` dir, and
+ * common build output — are never staged by the implement auto-commit, counted
+ * toward the diff-size limit, or left as untracked clutter that trips the merge.
+ * Applies to repoRoot AND every worktree (they share the common git dir). Written
+ * to info/exclude so the target repo's own tracked files are never modified.
+ * Idempotent.
+ */
+export async function ensureBuildArtifactExcludes(repoRoot: string): Promise<void> {
+  const commonDirResult = await git(['rev-parse', '--git-common-dir'], repoRoot);
+  if (!commonDirResult.ok) return;
+  const raw = commonDirResult.value.trim();
+  if (!raw) return;
+  const commonDir = isAbsolute(raw) ? raw : join(repoRoot, raw);
+  const infoDir = join(commonDir, 'info');
+  const excludePath = join(infoDir, 'exclude');
+  let current = '';
+  try {
+    current = readFileSync(excludePath, 'utf8');
+  } catch {
+    /* no exclude file yet */
+  }
+  const present = new Set(current.split('\n').map((l) => l.trim()));
+  const missing = BUILD_ARTIFACT_EXCLUDES.filter((p) => !present.has(p));
+  if (missing.length === 0) return;
+  if (!existsSync(infoDir)) mkdirSync(infoDir, { recursive: true });
+  const prefix = current.length > 0 && !current.endsWith('\n') ? '\n' : '';
+  writeFileSync(
+    excludePath,
+    `${current}${prefix}# auto-claude: build artifacts (never deliverables)\n${missing.join('\n')}\n`,
+  );
+}
 
 export async function createWorktree(
   unitId: string,
@@ -34,6 +79,10 @@ export async function createWorktree(
   );
 
   if (!result.ok) return result;
+  // Make build artifacts invisible to git before the worker runs, so the implement
+  // auto-commit / diff-size / merge never trip over node_modules, the pnpm store, or
+  // the daemon's own worktrees dir (the sandbox repo usually has no .gitignore).
+  await ensureBuildArtifactExcludes(repoRoot ?? process.cwd());
   return ok(worktreePath);
 }
 
