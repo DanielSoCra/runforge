@@ -90,6 +90,17 @@ vi.mock('node:fs', async (importOriginal) => {
   return { ...actual, existsSync: vi.fn(() => true) };
 });
 
+vi.mock('./workspace.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./workspace.js')>();
+  // Keep reconcileWorkspace REAL (the detect tests exercise its worktree logic);
+  // stub the pre-reconcile origin refresh so it doesn't consume the ordered git()
+  // mock sequence. ensureRepoFresh has its own unit coverage in workspace.test.ts.
+  return {
+    ...actual,
+    ensureRepoFresh: vi.fn(async () => ({ ok: true as const, value: undefined })),
+  };
+});
+
 vi.mock('../validation/holdout.js', () => ({
   runHoldout: vi.fn(),
 }));
