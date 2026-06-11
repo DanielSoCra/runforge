@@ -26,18 +26,26 @@ test_paths: []  # deferred until implementation — planned: packages/daemon/src
 **Lane config schema lives beside the classifier schema and is validated at pack activation.** A pack with an invalid `lanes` block fails activation atomically (the deployment keeps its previous pack). Shape:
 
 ```typescript
+const MergePolicy = z.enum(['auto', 'review-then-auto', 'hold']);
+// Lifecycle-mode variance (FUNC-AC-MERGE-DECISION v2.1): gateSet and
+// mergePolicy — and only those two fields — may be declared per mode.
+const byMode = <T extends z.ZodTypeAny>(value: T) =>
+  z.union([value, z.record(LifecycleModeName, value)]);
+
 const LaneDefinitionSchema = z.object({
   name: z.string().min(1),
   qualify: z.object({ complexity: z.array(Complexity).optional(),
     changeKind: z.array(ChangeKind).optional() }),
-  allowedPaths: z.array(z.string()).nonempty(),
+  allowedPaths: z.array(z.string()).nonempty(), // never mode-variant
   roleRouting: z.record(PhaseName, RoleBindingRef),
-  gateSet: GateSetRef,
-  mergePolicy: z.enum(['auto', 'review-then-auto', 'hold']),
+  gateSet: byMode(GateSetRef),
+  mergePolicy: byMode(MergePolicy),
   postMergeReview: BatchReviewPolicy.optional(),
   earnIn: EarnInPolicy.optional(), // all thresholds are pack data
 });
 ```
+
+**Lifecycle mode is resolved before evaluation, never inside it.** A `resolveForMode(laneSet, mode)` step flattens every per-mode map to plain values, producing a `ResolvedLaneSet` that the evaluation functions consume. The evaluation path (`assignLane`, `applyRiskPathFloor`, `evaluateTripwire`, `evaluateMergeEligibility`) never sees a mode parameter — so the tripwire and the risk-path floor *structurally cannot* vary by mode. The mode value is read from the deployment profile at the integration boundary (it is Operator-decision-written state; no engine code path writes it), recorded in the eligibility result and the `LaneDecisionRecord`. An unreadable mode, or a mode not in the pack's declared phase set, resolves every per-mode map to its most cautious declared variant (for `mergePolicy`: the most cautious of the declared variants by `hold > review-then-auto > auto`) with a recorded degraded-resolution cause; a lane referencing an undeclared phase fails pack validation at activation.
 
 **Classifier integration extends the existing verdict, no second classifier.** The batch classifier's structured output gains the fields lane qualification matches on (`changeKind`, declared scope); `assignLane(laneSet, verdict)` is a pure function over that verdict. Ambiguity (0 or 2+ matches) returns the deployment's `mostCautiousLane` with a recorded cause.
 
@@ -92,6 +100,7 @@ type LaneAssignmentResult =
 - Empty `allowedPaths` is rejected by schema (`nonempty`), because an empty allowlist would make every change out-of-scope and look like a tripwire storm instead of the config error it is.
 - In-flight runs pin the pack version recorded in their `LaneAssignment`; never read the "current" pack inside evaluation functions — pass the resolved `LaneSet` in.
 - The track-record predicate (earn-in) runs over recorded outcomes only; meeting it raises a DecisionRequest via the existing decision-escalation emitter — there is no code path that flips an autonomy flag directly.
+- The lifecycle mode is the same kind of Operator-decision-gated state as earned autonomy: read it from the deployment profile, record which mode each evaluation ran under, and never add a code path that transitions it — a proposed transition is a DecisionRequest, the recorded grant updates the profile, the engine merely reads the new value.
 
 ## Concerns This Spec Does Not Cover
 

@@ -45,6 +45,31 @@ lanes:
 mostCautiousLane: standard-hold     # hold-for-operator variant used for fallback assignment
 ```
 
+## Deployment lifecycle modes (FUNC-AC-MERGE-DECISION v2.1; Operator, 2026-06-11)
+
+> "First go fast and messy, then clean up, then be clinical when released." Modes scale lane gate rigor; they never bypass invariants (tripwire, always-escalate set, verification requirement, compliance). Transitions are Operator DecisionRequests, never automatic.
+
+```yaml
+lifecycleModes:
+  phases: [velocity, hardening, clinical]   # names are pack data, not spec
+deployments:
+  acme:      { lifecyclePhase: velocity }   # pre-production (2026-06): wider
+                                               # autonomous scope, lighter per-lane
+                                               # gate-sets; QA + review weight stays
+                                               # high — trust rests on QA results.
+                                               # clinical from first production release.
+  auto-claude:  { lifecyclePhase: hardening }
+```
+
+Per-mode lane variance (only `gateSet` and `mergePolicy` may vary by phase):
+
+```yaml
+lanes:
+  - name: standard            # acme deployment override, illustrative
+    gateSet:     { velocity: gate1-plus-review, clinical: full-ladder }
+    mergePolicy: { velocity: review-then-auto,  clinical: hold }
+```
+
 ## Model ladder & role registry defaults (D7)
 
 ```yaml

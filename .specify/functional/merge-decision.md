@@ -10,6 +10,8 @@ layer: 1
 # FUNC-AC-MERGE-DECISION — Earned-Trust Merge Decision and Lanes
 
 > **Spec history (v2, 2026-06-11):** v1 defined the four-level earned-trust decision. v2 generalizes it: the four risk levels remain the non-configurable caution floor, while the path a change travels — how it qualifies, who works on it at what capability level, which checks gate it, how it may join the shared mainline, and whether it is reviewed again afterwards — becomes deployment-configurable **lane** policy. One verification is deliberately excluded from configuration: the check that a change stayed within what its lane declared it may touch. This supersedes the earlier risk-class-rules approach tracked as issue #679 (the implementation phase closes that issue with a link here). Initial lane sets, earn-in bars, and the first regulated deployment's confirmed autonomy bar are **non-normative defaults** recorded in the default configuration pack example (`docs/superpowers/specs/2026-06-11-default-config-pack-example.md`) — they are illustrative data, not requirements of this spec.
+>
+> **Spec history (v2.1, 2026-06-11, alignment interview):** Adds the **deployment lifecycle mode** dimension, from the Operator's correction: *"First go fast and messy, then clean up, then be clinical when released. That's for acme but also for any other project. That's why the QA and review part matters even more than the planning."* Each deployment declares which phase of its life it is in (illustratively: velocity → hardening → clinical), and lane gate-sets and merge policies may vary by phase — so a pre-production deployment may run wider autonomous scope in a velocity mode, while the clinical treatment applies from the first production release onward. Phase transitions are Operator decisions surfaced as decision requests, never automatic; and no mode weakens the scope verification, the always-escalate set, the verification requirement, or the compliance lens — modes scale gate rigor, never bypass invariants. Phase names, meanings, and assignments are configuration (illustrated in the default configuration pack example), not requirements of this spec.
 
 ## Problem Statement
 
@@ -110,6 +112,23 @@ A second gap follows from the first. Even with risk levels, the *path* a change 
 - When such changes have merged
 - Then they are examined together at the lane's declared cadence, and every finding is routed back as new work or as a decision for the Operator — a finding from the batch review is never silently dropped
 
+### Lifecycle modes — phase-scaled rigor on an invariant floor
+
+**Scenario: A deployment declares its lifecycle phase**
+- Given a deployment's profile declares which phase of its life it is in — illustratively: an early phase that favors speed and breadth, a consolidation phase that favors cleanup and tightening, and a released phase that demands clinical rigor
+- When the platform handles that deployment's changes
+- Then the gate-sets and merge policies its lanes apply may vary by the declared phase, so the same class of change can travel with lighter ceremony before the deployment's first production release and with full rigor after it
+
+**Scenario: A phase transition is an Operator decision, never automatic**
+- Given a deployment shows whatever marker might suggest its phase should change — a first production release approaching, a track record accumulating, a hardening effort concluding
+- When a phase change is considered
+- Then the platform may at most propose it as a decision for the Operator, and the deployment's phase changes only on the Operator's explicit, recorded decision — never by elapsed time, by track record, or by any automatic rule
+
+**Scenario: Every mode keeps every invariant**
+- Given a deployment in its most permissive lifecycle phase
+- When any of its changes is considered for the shared mainline
+- Then the scope verification still runs unweakened, the always-escalate decisions — orange and red levels, compliance-forced changes, and every decision class the platform always routes to a human — still reach the Operator, and a change without passing verification still never proceeds autonomously: a lifecycle phase scales how much rigor a lane applies, it never bypasses an invariant
+
 ### The scope verification — never configurable
 
 **Scenario: A change is verified against its lane's declared scope**
@@ -172,7 +191,8 @@ A second gap follows from the first. Even with risk levels, the *path* a change 
 - Once a level's or lane's autonomy is earned, routine changes of that class stop reaching the Operator, measurably relieving him of that work
 - Reshaping how a deployment's changes are handled — qualification, scope, capability level, checks, merge treatment, batch review, earn-in bar — is an edit to that deployment's profile, never a change to the platform
 - Any uncertainty about a change's risk level or lane resolves toward more caution — never green, yellow, or a permissive lane when in genuine doubt — and a classification that cannot be established with confidence reaches the Operator
-- Every change carries a record of its lane, its risk level, the scope-verification verdict, the checks it passed, and the decision — sufficient to reconstruct the outcome after the fact
+- Every change carries a record of its lane, its risk level, the lifecycle phase in effect, the scope-verification verdict, the checks it passed, and the decision — sufficient to reconstruct the outcome after the fact
+- A deployment's lifecycle phase changes only by an explicit, recorded Operator decision; and no phase, however permissive, disables the scope verification, the always-escalate set, the verification requirement, or the compliance lens
 
 ## Constraints
 
@@ -184,6 +204,7 @@ A second gap follows from the first. Even with risk levels, the *path* a change 
 - **Sensitive-area markings in a deployment's profile escalate only**: they may force a change to a more cautious lane, level, or decision, and may never qualify it for a less cautious one
 - Autonomy for a risk level or a lane is a **per-deployment, earned** property held in the deployment's profile; it is never on by default, and it widens only by an explicit, recorded Operator decision — meeting an earn-in bar raises a promotion decision, it never widens autonomy by itself
 - The decision is **fail-safe**: any uncertainty — an unestablished risk level, an unassignable lane, an indeterminate scope verdict, a missing or indeterminate check, an unavailable reviewer — resolves to the more cautious treatment or to holding the change for the Operator, never to letting it proceed
+- **Lifecycle phases are configuration on an invariant floor**: which phases exist, what each phase means for a lane's gate-set and merge policy, and which phase a deployment is in are deployment policy held in its profile, never fixed in the platform; a phase transition is always an Operator decision surfaced as a decision request, never automatic; and no phase declaration can weaken the scope verification, the always-escalate set, the verification requirement, or the compliance lens — a mode scales rigor within the invariants, never past them
 - A change's risk level is judged by its effect on the shared mainline in plain terms — how far it reaches, whether it touches sensitive or hard-to-reverse areas, how large it is — not by any single fixed measure
 - A **batch-review finding is never terminal silence**: every finding from a lane's post-merge batch review ends as new work, a decision, or a recorded dismissal — never dropped
 - The lane assignment, the risk level, the scope-verification verdict, the required checks and their verdicts, and the final decision are durably recorded before a change is allowed to proceed
