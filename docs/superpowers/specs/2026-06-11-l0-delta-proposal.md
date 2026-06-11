@@ -2,17 +2,18 @@
 date: 2026-06-11
 status: PROPOSAL — AWAITING OPERATOR DECISION
 type: l0-delta-proposal
-topic: Three proposed amendments to L0-AC-VISION (v5 → v6)
-authors: Claude (spec-chain goal run), per masterplan v2.1 §2.1
+topic: Five proposed amendments to L0-AC-VISION (v5 → v6)
+authors: Claude (spec-chain goal run), per masterplan v2.1 §2.1; Deltas D–E salvaged from branch spec/l0-steering-surface (its draft v6, 2026-06-02)
 reads_down_from:
   - .specify/L0-ac-vision.md  # v5, Operator-approved — NOT edited by this proposal
 related:
   - docs/superpowers/specs/2026-06-11-auto-claude-vnext-masterplan-design.md  # D5, D9–D11, §2.2
+  - docs/superpowers/specs/2026-06-11-branch-salvage-checklist.md  # provenance of Deltas D–E
 ---
 
 # ⚠️ L0 Delta Proposal — Operator Decision Required
 
-> **This document edits nothing.** L0 is Operator-owned; per the platform's own boundaries the vision is never authored or edited autonomously. This is a *proposal* of exactly three deltas to `L0-AC-VISION` v5, surfaced for the Operator's decision per masterplan v2.1 §2.1. Accepting, reshaping, or rejecting any of the three blocks nothing else in the v-next spec chain: the L1 specs written alongside this proposal are consistent with v5 as it stands, and these deltas only *name in the vision* what those specs already keep within v5's boundaries.
+> **This document edits nothing.** L0 is Operator-owned; per the platform's own boundaries the vision is never authored or edited autonomously. This is a *proposal* of five deltas to `L0-AC-VISION` v5, surfaced for the Operator's decision per masterplan v2.1 §2.1. Deltas A–C originate from the v-next spec-chain run; Deltas D–E are salvaged from the stale branch `spec/l0-steering-surface` (which had drafted them directly into L0 as a v6 — content preserved here, the direct edit discarded). Accepting, reshaping, or rejecting any of the five blocks nothing else in the v-next spec chain: the L1 specs written alongside this proposal are consistent with v5 as it stands, and these deltas only *name in the vision* what those specs already keep within v5's boundaries.
 
 ## How to act on this
 
@@ -64,6 +65,45 @@ For each delta: **accept** (the wording below, or your own), **amend**, or **rej
 
 ---
 
+## Delta D — The levers the Operator turns: a named Set/Decide/Inspect inventory
+
+**Where:** A new bullet in **The steering surface**, after the "Coordinator, not executor." bullet. Salvaged from `spec/l0-steering-surface` (draft v6, 2026-06-02), updated for the lane decision (D5, ratified 2026-06-11) which post-dates it.
+
+**Why:** v5 describes the steering surface by *examples* of what the Operator does; it never inventories the levers. Without a named inventory, every new dial added by an L1 spec silently widens the Operator's surface, and there is no vision-level test for "does this belong in front of the human at all?". Grouping every dial under three verbs — SET (intents declared), DECIDE (the only things that reach the human), INSPECT/OVERRIDE (look beneath, reach in) — gives that test. The salvaged inventory predates the lane decision, so the SET list below adds the deployment's lane policy (consistent with Delta C); everything else is the salvaged wording.
+
+**Proposed wording (new bullet):**
+
+> - **The levers the Operator turns.** Every dial the Operator reaches for groups under three verbs — each phrased as an intent the Operator *sets*, never a mechanism the platform runs:
+>   - **SET** (intents and setpoints the Operator declares): the direction and what-is-worth-building; per deployment, the profile dials — its budget, its lane policy, its risk-classification rules, its compliance-reviewer set, its honest-automation map, its rollout slot, and its release path; and, across the fleet, the interruption threshold that decides which of one deployment's items break through while the Operator is focused on another.
+>   - **DECIDE** (the only things that ever reach the human): specification content; production releases; widening a deployment's autonomy, per deployment and per risk class; any escalated or compliance-blocked change; and a fleet-wide rollback.
+>   - **INSPECT / OVERRIDE** (the Operator can always look beneath and reach in): see *why* any item is ranked or learned the way it is; reset or revert a learned bias; and order a fleet-wide demote-on-red.
+>   The Operator sees decisions and a calm glance-state; everything below a decision is delegated to the platform and asked-about less over time, never crossing the boundaries below.
+
+**Interaction with Delta B:** independent — B reshapes the "One pane." bullet (the *surface*), D names the *levers* the surface carries. Accepting either alone is coherent.
+
+---
+
+## Delta E — Boundary ownership: each hard invariant names its enforcing L1
+
+**Where:** Amend the **Boundaries (hard, load-bearing)** section — one introductory sentence, plus a parenthetical ownership attribution on each invariant that has an enforcing L1 spec. Salvaged from `spec/l0-steering-surface` (draft v6; keep-distributed ratified there 2026-06-02).
+
+**Why:** v5 states the hard boundaries but not who enforces them, leaving open whether a central "boundary service" should exist. The ratified answer is keep-distributed: the vision centralizes the *principle*, each L1 spec owns and enforces the *mechanism* for its domain. Naming the owner on each invariant makes drift detectable (an invariant with no owning L1 is a gap) and blocks re-centralization by accident. All named owners exist in the current chain: FUNC-AC-COMPLIANCE-GATE, FUNC-AC-DECISION-ESCALATION, FUNC-AC-OPERATOR-LEARNING, FUNC-AC-FLEET, FUNC-AC-MERGE-DECISION, FUNC-AC-SAFETY.
+
+**Proposed wording (introductory sentence, inserted directly under the Boundaries heading):**
+
+> These are vision-level invariants; each is owned and enforced by the L1 spec for its domain — the platform centralizes the principle, not the mechanism.
+
+**Proposed attributions (appended to the existing v5 bullets, which are otherwise unchanged):**
+
+> - Never decides safety-critical, sensitive-data, specification-content, or production-release questions autonomously — […] *(Compliance and regulated-sensitive paths are owned and enforced by FUNC-AC-COMPLIANCE-GATE; fail-safe routing of every such decision to the human is owned by FUNC-AC-DECISION-ESCALATION.)*
+> - The learn-from-the-operator loop may reduce how often it asks the Operator **only** for decision-classes outside that always-escalate set […] *(The always-escalate set and the learning-can't-cross-a-boundary invariant are owned by FUNC-AC-OPERATOR-LEARNING.)*
+> - Never deploys to production, and never graduates a deployment to wider autonomy, without the Operator's approval […] *(Earned trust, the risk-class merge ramp, and per-deployment autonomy are owned by FUNC-AC-FLEET; the merge decision itself is owned by FUNC-AC-MERGE-DECISION.)*
+> - Never proceeds past a deployment's cost circuit breaker or budget ceiling without escalating to the Operator […] *(The cost circuit breaker, workspace containment, and credential isolation are owned and enforced by FUNC-AC-SAFETY.)*
+
+**Interaction with Delta C:** if Delta C's new boundary (scope verification + escalate-only risk markings, never configurable) is accepted, it receives the same treatment — its owner is FUNC-AC-MERGE-DECISION (v2, which defines the lane tripwire).
+
+---
+
 ## Record
 
 | Delta | Decision (accept / amend / reject) | Date | Note |
@@ -71,3 +111,5 @@ For each delta: **accept** (the wording below, or your own), **amend**, or **rej
 | A — platform thesis | _pending_ | | |
 | B — single interface | _pending_ | | |
 | C — lanes + tripwire | _pending_ | | |
+| D — operator lever inventory | _pending_ | | salvaged from spec/l0-steering-surface |
+| E — boundary ownership map | _pending_ | | salvaged from spec/l0-steering-surface |
