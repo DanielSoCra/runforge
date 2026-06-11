@@ -47,9 +47,17 @@ the Operator writes ideas into a **minimal inbox** (GitHub issue or quick captur
 | D6 | **Declarative role registry (Tier 2):** lift `DEFAULT_AGENT_DEFS` into data (role = prompt file + tools + budget + tier defaults); per-phase role assignment incl. parallel reviewers. **Tier 3 seam:** FSM transition tables stay pure data, loadable from config — node-based workflow UI (Archon-style) is a deferred UI layer, not a rewrite. | Operator requirement: define roles/workflows without code |
 | D7 | **Model routing stays unrestricted** (PHI-free code; the confidentiality statute/GDPR basis v1 App. B). Default ladder: frontier plan → cheap implement (Kimi K2.6 / DeepSeek V4 / Flash-tier per lane) → frontier review. Three payload guards (synthetic fixtures, no prod capture, no credentials) live in Layer B / CI. | v1, re-confirmed |
 | D8 | **M6.1 correction-pair capture now; fine-tuning/serving deferred** (research parked in v1 App. A). | v1 |
+| D9 | **Two-layer model.** Layer 1 = deterministic orchestration: heartbeats/wakeup queue, lanes, gates, tripwire, budgets, FSM — rules, fully data-driven, no LLM judgment. Layer 2 = **intelligent steering**: heartbeat agents (PM/PO/tech-lead) that scan inputs (GitHub, cockpit inbox, ideas) and route fuzzy work into Layer-1 workflows ("spike idea → research agent → tech-lead consult → back to operator inbox"). `po-agent.ts` + `tech-lead-scheduler.ts` are the embryos — they become the first steering agents, redefined as data. | Operator 2026-06-11; Paperclip-validated pattern; Cloudflare AI-code-review (deterministic risk tiers + coordinator judgment) |
+| D10 | **Mechanism vs policy.** Anything expressible as routing, threshold, assignment, or schedule (which model reviews, pool preference, which CLIs are wired, post-merge-net defaults, earn-in thresholds) ships as **editable config in a preconfigured default pipeline** — never as code, spec decision, or operator question. Specs cover mechanisms only. Runtime config control plane allows changes without deploys (Cloudflare pattern: per-reviewer model overrides via KV). | Operator 2026-06-11 |
+| D11 | **Agent = data bundle, pipelines = config packs.** An agent is role definition + tools + skills + `soul.md` + budget (Paperclip composition), in the declarative registry (extends D6). A complete pipeline configuration — lanes + agents + souls + gate sets + steering policy — is packaged as a versioned, swappable **config pack** in the existing plugin system (which already carries skills/agents/MCPs; extend to lanes + steering). Cloudflare's `ReviewPlugin` lifecycle (bootstrap/configure/postConfigure, contribute-via-context-API) is the reference shape. | Operator 2026-06-11; blog.cloudflare.com/ai-code-review |
 
 ### 2.1 L0/L1 impact (Operator gate)
-"Single interface replacing the operator's tool zoo" and "lanes as configurable policy" extend L0-AC-VISION v5's framing. The spec-writing goal run (§5) must surface these as **proposed L0/L1 amendments via DecisionRequest** — never auto-edit vision.
+"Single interface replacing the operator's tool zoo", "lanes as configurable policy", and the **platform thesis — auto-claude is a system that lets you build systems on top** (D9–D11) — extend L0-AC-VISION v5's framing. The spec-writing goal run (§5) must surface these as **proposed L0/L1 amendments via DecisionRequest** — never auto-edit vision.
+
+### 2.2 Platform positioning (build vs buy)
+- **pi is a component, not the system.** One agent, one session, four tools, extensions, RPC — no tickets, heartbeats, gates, multi-agent, or memory across runs. Proof point: Cloudflare's AI-review system is built **on top of opencode** — the harness was the runtime; all value lived in the layer above (plugins, config control plane, risk tiers, coordinator). pi gives auto-claude what opencode gave Cloudflare. Role stays D1: cheap-tier worker runtime.
+- **Paperclip is the closest existing "system on top"** and validates D9 wholesale (heartbeats, souls, ticket-mediated delegation). What it lacks is everything that makes unattended *software delivery* safe: no SDLC pipeline/FSM, no validation ladder, no risk lanes/tripwire, no spec governance, no earned-trust ramp, no holdout, no window-aware multi-subscription scheduling. It is a pattern donor + watchlist item — not a control-plane dependency (3 months old, single pseudonymous maintainer; not a foundation under client work).
+- **auto-claude's moat** = the trust machinery (gates, lanes, tripwire, earned autonomy, decision protocol) + spec-driven governance (auditable L1→L3) + composability (lanes/agents/souls/config-packs as data) + an operator surface built for one person steering many systems. The orchestration plumbing is commodity — adopt its patterns shamelessly, own the control plane.
 
 ## 3. Phases — reconciled with the open backlog
 
@@ -89,9 +97,13 @@ Fold pm-cockpit into the auto-claude dashboard (kills the contract-drift class);
 
 The next concrete artifact is a **goal-command prompt** that spawns a spec-writing run on this repo: full L1 coverage for the v-next scope (amend FUNC-AC-MERGE-DECISION → lane engine; new L1s: runtime-adapters/session-resume, operator-notes/intervention, single-interface, role-registry; rate-window scheduling into FUNC-AC-FLEET or new), L2/L3 depth per decision Q3, traceability updated, L0 deltas → DecisionRequests, guardian skills mandatory, **zero implementation**. Prompt text finalized after the decision brief is read back (it encodes Q1–Q6).
 
-## 6. Open decisions (→ decision brief)
+## 6. Open decisions — collapsed per D10 (2026-06-11)
 
-Q1 frontier-pool strategy · Q2 interface-fold timing · Q3 goal-run spec depth · Q4 stability bar · Q5 Cursor · Q6 lane-engine path (direct vs #679-minimal-first) · Q7 pi-adapter timing (direct vs OpenRouter-interim) · Q8 cheap-lane safety net + acme fast-lane earn-in.
+The original Q1–Q8 brief over-asked: most were **policy**, not design. Resolution:
+- **Q1 pools, Q5 Cursor, Q8 defaults → default-pipeline config** (D10). Shipped values: dual-pool window-aware failover Claude-preferred; Cursor unwired (adapter interface is generic — wire later by config+adapter); nightly batch review ON for auto-merge lanes; acme fast lanes earn in (20 clean merges + 7d zero bounces). All editable at runtime, none architectural.
+- **Q3 goal depth → follows from D10**: spec mechanisms only; L2/L3 where implementation is imminent (P1+P2).
+- **Q6 → lane engine directly** (supersede #679; no throwaway — Operator's standing preference). **Q7 → pi adapter directly** (no bridge plumbing). **Q2 → fold after stability bar** (sequencing default).
+- **Q4 stability bar — the one remaining Operator decision**: default 7 unattended days + content-site canary + e2e #681 ×2 + zero manual rescues before acme GREEN/YELLOW. Confirmed inline unless vetoed.
 
 ## 7. Out of scope (unchanged + new)
 
