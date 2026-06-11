@@ -3,7 +3,7 @@ id: STACK-AC-SESSION-PROVIDERS
 type: stack-specific
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 3
 stack: typescript
 references: ARCH-AC-SESSION-PROVIDERS
@@ -37,6 +37,14 @@ test_paths:
 **Failure classification as a pure function.** A small classifier maps session errors and process errors to `transient` or `terminal`. Transient failures can retry or fall through to fallback providers; terminal failures immediately degrade that provider.
 
 **Process-based adapter for Codex CLI.** `CodexCliAdapter` follows the same adapter contract as the existing CLI adapter, but treats stdout as plain text and wraps it into a `SessionResult`. The adapter reads binary path, flags, and model from the selected `ProviderDefinition`; these values are never hardcoded in the adapter.
+
+**Full adapter contract (v2).** The adapter interface widens from spawn-only to the five-operation contract of ARCH-AC-SESSION-PROVIDERS v2: `spawn`, `resume`, `abort`, plus cost and exit-status fields that every `SessionResult` must carry. Adapters that cannot resume declare it via a capability profile rather than throwing at call time.
+
+**Resume token persisted in run state (v2).** Each adapter returns the provider-native continuation id (`session_id` for Claude CLI, the experimental resume id for Codex, the pi session id for `pi-cli`) in its `SessionResult`; the runtime stores it as a `SessionResumeState` entry on the run's durable state keyed by `(runId, role, providerName)`, with the workspace identity captured at creation. Resolution before a later spawn is a pure check: same provider, same model binding, same workspace identity, validity marker `valid` — else fresh start with a recorded reason.
+
+**pi process adapter (v2).** `PiCliAdapter` (reserved `providerKind: 'pi-cli'`) follows the codex-cli shape: spawn the configured binary with prompt and model flags from the `ProviderDefinition`, treat exit status as the outcome authority, wrap stdout into `SessionResult`, surface the provider's continuation id for resume, and parse cost metadata when pi emits it (estimate-and-mark otherwise). pi sessions never get Claude-hook containment; the capability profile declares `nativeGuardHooks: false` so the runtime composes the compensating baseline (worktree isolation + deterministic gates + strongest-review marker).
+
+**Adapter smoke test (v2).** A `smokeTest(provider, binding)` helper runs a one-shot trivial task through the real adapter path in a disposable workspace and asserts two things: the routed model responded (non-empty model-attributed output) and an observable output change occurred (a file artifact or structured marker). Pass admits the provider to resolution; fail degrades it with `smoke-failed`. It runs at startup and on any provider/model-binding config change, and is distinct from the reachability probe.
 
 ## Key Decisions
 
@@ -85,6 +93,25 @@ type ResolveProviderResult =
 
 **Startup validation runs after all agent definitions are known.** Validation checks that every configured provider binding references existing providers and that at least one required/default fallback provider verifies successfully. Required providers that fail verification abort startup; optional providers degrade with a warning.
 
+**Adapter contract and resume types (v2).**
+
+```typescript
+interface ProviderAdapter {
+  spawn(req: SpawnRequest): Promise<SessionResult>;
+  resume(req: SpawnRequest, continuationId: string): Promise<SessionResult>;
+  abort(handle: SessionHandle): Promise<void>;
+  capabilities(): ContainmentCapabilityProfile;
+}
+```
+
+```typescript
+type SessionResumeState = {
+  runId: string; role: string; providerName: string; modelBinding: string;
+  continuationId: string; workspaceIdentity: string;
+  validity: 'valid' | 'invalidated-workspace-changed' | 'invalidated-poisoned' | 'invalidated-lost';
+};
+```
+
 ## Examples
 
 ```typescript
@@ -117,9 +144,24 @@ const proc = spawn(
 );
 ```
 
+```typescript
+async function resolveContinuation(run: RunState, role: string, p: ProviderDefinition) {
+  const s = run.resumeStates?.[key(run.id, role, p.name)];
+  return s && s.validity === 'valid' && s.providerName === p.name
+    && s.workspaceIdentity === currentWorkspaceIdentity(run)
+    ? { kind: 'resume' as const, continuationId: s.continuationId }
+    : { kind: 'fresh' as const, reason: freshReason(s) };
+}
+```
+
 ## Gotchas
 
 - Do not read both legacy `adapter` and new `providers` config for the same spawn. Once providers are configured, Provider Registry is the single source of provider selection.
+- A rejected continuation id is invalidated (`invalidated-lost`) and the dispatch falls through to a fresh spawn in the same call — never retry the same continuation id, and never fail the run on a failed resume.
+- Workspace identity must change whenever the worktree is recreated, moved, or rebased onto a new base — derive it from worktree path + base commit, not path alone, or resumes will run against silently rebased ground.
+- Continuations are provider-bound: on failover to another provider the session starts fresh there while the original `SessionResumeState` stays intact for its own provider.
+- The smoke test must execute through the real adapter code path (same spawn arguments, same env shaping); a separate "test mode" path proves nothing about production dispatch.
+- pi/codex cost fields, when absent, must produce a `costEstimated: true` result — silently recording zero cost corrupts budget enforcement and the per-lane telemetry.
 - Provider cooldown is health state, not global daemon state. A provider-local cooldown must not block another healthy provider from running.
 - `CodexCliAdapter` must not assume Claude-style JSON output. Exit status drives success/failure, and stdout is wrapped as text unless a future Codex mode provides structured output.
 - Liveness probes check reachability, not full session correctness. A binary being present does not prove credentials are valid; auth failures still degrade the provider on first real spawn.
@@ -131,3 +173,6 @@ const proc = spawn(
 - The existing Session Runtime lifecycle, prompt rendering, cost accounting, containment enforcement, and workspace handling remain governed by STACK-AC-SESSION-RUNTIME.
 - Agent tier selection strategy beyond basic model tier resolution is tracked separately from this multi-provider abstraction.
 - Provider-specific pricing tables and exact token accounting for providers that do not emit usage metadata are implementation concerns for the Session Runtime cost layer.
+- Which roles route to `pi-cli` (or any provider) and the fallback orders are config-pack data, never adapter code (D10).
+- Capacity-pool window tracking and pool provenance are governed by ARCH-AC-WINDOW-SCHEDULER (its L3 is deferred to the implementation phase).
+- Planned new files for v2 (`adapters/pi-cli.ts`, `providers/resume-state.ts`, `providers/smoke-test.ts`) are intentionally **not** listed in `code_paths` until the implementation lands them — the path-existence validator requires real files.
