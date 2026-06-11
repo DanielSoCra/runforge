@@ -54,6 +54,12 @@ roles:
                         fallbackModels: [deepseek-v4, gemini-flash] }
   frontier-reviewer:  { provider: claude-cli,  model: opus-4.x,        budgetUsd: 6,
                         fallbackProviders: [codex-cli] }
+  # Checklist-shaped structured work (classification, spec-compliance checks,
+  # reporting) routes to the cheapest adequate model; adversarial quality and
+  # security review stays frontier. (Assignment substance salvaged from the
+  # retired ARCH-AC-MODEL-TIER draft on feature/467 — per D10 it is pack data,
+  # not a fixed table in a spec.)
+  fast-structured:    { provider: pi-cli,      model: gemini-flash,    budgetUsd: 0.5 }
 ```
 
 ## Providers & capacity pools (window-aware failover; masterplan Q1)
