@@ -1,6 +1,15 @@
+---
+date: 2026-06-03
+status: north-star-input
+authority: NOT execution-canonical — docs/superpowers/specs/2026-06-11-auto-claude-vnext-masterplan-design.md (masterplan v2.1) is the sole execution-canonical roadmap
+decision: Operator decision 2026-06-11 (sparring-hardened cleanup slate, card 5)
+---
+
 # Company OS ("Mission Control") — Vision, Architecture & Roadmap
 
-Date: 2026-06-03 · Status: **design approved** (brainstorm) → entering implementation
+> **⚠️ NORTH-STAR INPUT — NOT EXECUTION-CANONICAL (2026-06-11).** Masterplan v2.1 is the **sole execution-canonical roadmap**; do not generate work from this document. Reconciliation: Company-OS **Phase 0 ≈ masterplan v2.1 P0–P4**; **§§6–7 are stale/landed** (the listed PRs and blockers were resolved); the **shell / multiplayer / multi-tenant** ambitions (§§3, 5 Phase 1–3) are **deferred horizon inputs**, preserved here, re-elevated only by Operator decision. Kill-condition on this marker: if a steering agent still produces out-of-sequence shell work, escalate to full supersession.
+
+Date: 2026-06-03 · Status: ~~design approved (brainstorm) → entering implementation~~ **north-star input (see banner)**
 Visual overview: `pm-cockpit/docs/integration/2026-06-03-company-os-vision-overview.html`
 Cockpit prototype: `pm-cockpit/docs/integration/2026-06-03-cockpit-redesign-prototype.html`
 
