@@ -1,4 +1,13 @@
+---
+date: 2026-03-20
+status: superseded
+superseded_by: .specify/L0-ac-vision.md  # unified L0-AC-VISION v5 + its L1 children (per the 2026-05-29 spec-reconciliation ledger)
+superseded_date: 2026-06-11
+---
+
 # Issues Board & Session Controls — Design Spec
+
+> **⛔ SUPERSEDED (2026-06-11).** The canonical specs now live in the unified **L0-AC-VISION v5** (`.specify/L0-ac-vision.md`) + its L1 children in `.specify/` (per the Spec Reconciliation Ledger, `docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`). Retained for history — do not act on this doc. <!-- RECONCILIATION-LEDGER-BANNER -->
 
 **Date:** 2026-03-20
 **Status:** Approved
