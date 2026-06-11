@@ -12,7 +12,7 @@ references: FUNC-AC-FLEET
 
 ## Overview
 
-The Window Scheduler realizes FUNC-AC-FLEET's capacity-pool behavior. It maintains a per-pool ledger of consumption against each pool's rolling usage window, is consulted by the Provider Registry during provider resolution so that work prefers pools with headroom and avoids exhausted ones, classifies exhaustion signals so a spent window triggers failover rather than a global stall, and stamps every session outcome — review outcomes above all — with the pool, provider, and model that served it, persisting that provenance for quality-drift analysis. It schedules nothing itself: it is a ledger plus an advisory filter that the existing resolution and pause machinery consult.
+The Window Scheduler realizes FUNC-AC-FLEET's capacity-pool behavior. It maintains a per-pool ledger of consumption against each pool's rolling usage window, is consulted by the Provider Registry during provider resolution so that work prefers pools with headroom and avoids exhausted ones, classifies exhaustion signals so a spent window triggers failover rather than a global stall, and stamps every session outcome — review outcomes above all — with the pool, provider, and model that served it, persisting that provenance for quality-drift analysis and for **intelligence-fit analysis**: the telemetry's objective is to reveal whether each task class runs on the minimal capability tier that sustains its lane's quality bar (fit signals: iterations-to-green and review-rejection rate per tier and task class) — not to minimize raw cost. It schedules nothing itself: it is a ledger plus an advisory filter that the existing resolution and pause machinery consult.
 
 ## Data Model
 
@@ -20,7 +20,7 @@ A **CapacityPool** is a named, configured source of reasoning capacity — typic
 
 A **WindowLedger** entry tracks one pool's current window: window start, estimated consumption within the window (in the pool's native unit where reported, otherwise in session counts as a proxy), an estimated headroom state (ample, tight, exhausted, unknown), the evidence for that state (last signal kind and timestamp), the projected reopen time when exhausted, and an observed-reset timestamp. The ledger is persisted in the Database so window state survives daemon restarts; on restart with stale evidence the state degrades to unknown rather than assuming ample.
 
-A **PoolOutcomeProvenance** record stamps one completed session with: run identifier, session role, pool name, provider name, model binding, window state at dispatch, and timestamp. For review sessions the record is additionally linked to the review verdict, so review quality can later be grouped and compared per pool from records alone. Provenance is written with the session result, in the same persistence step.
+A **PoolOutcomeProvenance** record stamps one completed session with: run identifier, session role, pool name, provider name, model binding, window state at dispatch, and timestamp. For review sessions the record is additionally linked to the review verdict, so review quality can later be grouped and compared per pool from records alone. Because the record carries run identifier, role, and model binding, it joins against the run's recorded outcomes (fix-cycle counts to gate-pass, review rejections) — making intelligence-fit per tier and task class computable from records alone, with no re-execution. Provenance is written with the session result, in the same persistence step.
 
 A **PoolExhaustionEvent** records a transition to exhausted: pool name, the triggering signal, the projected reopen time, the work affected (paused or failed over), and a timestamp. It feeds the dashboard and Operator notifications.
 
@@ -63,10 +63,11 @@ The Window Scheduler exposes four operations, all internal.
 2. The provider-unavailable pathway fires; the Daemon Control Plane pauses the affected work with the earliest projected reopen attached and visible.
 3. At the projected reopen (or on an earlier success signal), the ledger transitions the pool out of exhausted, and the existing auto-resume machinery picks the paused work back up. Nothing is dropped.
 
-**Provenance for drift detection:**
+**Provenance for drift and fit detection:**
 1. Every session completion writes its PoolOutcomeProvenance with the result.
 2. Review verdicts link to their provenance record.
 3. A consumer (telemetry, tech-lead analysis, the dashboard) can group review outcomes by pool over time and surface divergence — entirely from records, with no re-execution.
+4. The same consumers can group iterations-to-green and review-rejection rates by model binding and task class, surfacing capability overshoot (frontier tiers on routine work) and undershoot (a tier repeatedly failing the lane's bar) as configuration signals for the Operator — the fit objective per FUNC-AC-FLEET v2.1. The scheduler supplies the records; it never adjusts routing itself.
 
 **Window reset observation:**
 1. After a projected reopen passes, the first successful attempt on a pool's provider is treated as the observed reset.

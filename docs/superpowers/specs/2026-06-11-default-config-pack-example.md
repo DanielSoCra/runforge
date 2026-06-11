@@ -72,6 +72,10 @@ lanes:
 
 ## Model ladder & role registry defaults (D7)
 
+> Objective (FUNC-AC-FLEET v2.1): **intelligence-fit** — the cheapest tier that
+> sustains each lane's quality bar. Fit telemetry: iterations-to-green and
+> review-rejection rate per tier and task class. Not raw cost minimization.
+
 ```yaml
 roles:
   frontier-planner:   { provider: claude-cli,  model: opus-4.x,        budgetUsd: 8 }

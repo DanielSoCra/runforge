@@ -171,7 +171,7 @@ async function resolveContinuation(run: RunState, role: string, p: ProviderDefin
 ## Concerns This Spec Does Not Cover
 
 - The existing Session Runtime lifecycle, prompt rendering, cost accounting, containment enforcement, and workspace handling remain governed by STACK-AC-SESSION-RUNTIME.
-- Agent tier selection strategy beyond basic model tier resolution is tracked separately from this multi-provider abstraction.
+- Agent tier selection strategy beyond basic model tier resolution is tracked separately from this multi-provider abstraction. The objective tier routing serves — intelligence-fit per task class, measured by iterations-to-green and review-rejection per tier — is stated in FUNC-AC-FLEET v2.1 / ARCH-AC-WINDOW-SCHEDULER; this spec only guarantees the per-attempt cost and outcome metadata those fit metrics are computed from.
 - Provider-specific pricing tables and exact token accounting for providers that do not emit usage metadata are implementation concerns for the Session Runtime cost layer.
 - Which roles route to `pi-cli` (or any provider) and the fallback orders are config-pack data, never adapter code (D10).
 - Capacity-pool window tracking and pool provenance are governed by ARCH-AC-WINDOW-SCHEDULER (its L3 is deferred to the implementation phase).

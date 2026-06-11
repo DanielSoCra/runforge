@@ -10,6 +10,8 @@ layer: 1
 # FUNC-AC-FLEET — Fleet & Deployment Management
 
 > **Spec history (v2, 2026-06-11):** v2 adds the capacity-pool behavior (per-pool usage windows, failover on exhaustion, recorded provenance of which pool performed each review) for the v-next masterplan's window-aware scheduling (workstream M3). Which pools exist and their preference order are configuration values illustrated in the non-normative default configuration pack example, never requirements of this spec. v1 (approved) is otherwise carried forward unchanged.
+>
+> **Spec history (v2.1, 2026-06-11, alignment interview):** Names the economic objective the capacity routing and its records serve: **intelligence-fit per task class** — the minimal capability tier that sustains the lane's quality bar — not raw cost minimization. The Operator's framing: better-fit intelligence means cheaper runs, which means more throughput, higher quality, and higher confidence — more automation and more leverage; frontier capability is not needed everywhere. The records must make fit measurable (attempts-to-pass, review-rejection rates per tier); the tier and routing values themselves remain config-pack data.
 
 ## Problem Statement
 
@@ -148,6 +150,12 @@ A further shared resource has the same shape. The fleet's reasoning capacity is 
 - When its verdict is recorded
 - Then the record names the capacity pool (and the capability that served it) that performed the review, so that a later quality comparison between pools is possible from the records alone
 
+**Scenario: Routing seeks intelligence-fit, and the records make fit measurable**
+- Given the fleet's work classes differ in how much reasoning capability they genuinely need
+- When work is routed to capability tiers and pools and its outcomes are recorded
+- Then the objective the routing serves is fit — the least capable tier that still sustains the lane's quality bar — and the records carry what measuring fit requires: how many attempts a piece of work needed before its checks passed, and how often a tier's work was rejected in review, attributable per tier and per task class
+- And both kinds of misfit are visible from the records alone — capability overshoot (the strongest tiers spent on routine work) and undershoot (a tier whose work repeatedly fails checks or review) — so the Operator can correct the routing configuration; the objective is never raw spend minimization at the expense of the quality bar
+
 **Scenario: Pool preference is configuration**
 - Given the Operator wants work to prefer one pool over another, or wants a pool removed from rotation
 - When they edit the pool configuration
@@ -184,6 +192,7 @@ A further shared resource has the same shape. The fleet's reasoning capacity is 
 - A bad shared capability version and a bad learned bias are both reversible across the entire fleet, leaving no deployment on the bad version or behavior, with the reversal recorded so it is not silently re-applied.
 - One capacity pool's exhausted window no longer stalls the fleet while another configured pool stands idle: eligible work fails over in the configured preference order, and only when every eligible pool is exhausted does work pause — visibly, with its reason, and resuming on its own when a window reopens.
 - Every recorded review names the pool and capability that performed it, so a quality drift between pools is detectable from the records without re-running any work.
+- Capacity routing demonstrably serves intelligence-fit per task class: the records expose, per tier and task class, attempts-to-pass and review-rejection rates, and both overshoot and undershoot are visible without re-running work — the lane's quality bar is never traded for cheaper capability.
 
 ## Constraints
 
@@ -198,4 +207,5 @@ A further shared resource has the same shape. The fleet's reasoning capacity is 
 - A promoted shared capability version and an adopted learned behavior must both be reversible fleet-wide to a prior known-good state; sensitive knowledge is never auto-promoted, and every rollback is recorded so a withdrawn version or behavior is not silently re-applied.
 - Capacity pools, their windows, and their preference order are **configuration values**, never platform behavior; the platform supplies the tracking and failover mechanism, the configuration supplies the pools and the order. Failing over between pools never weakens any gate: the same checks and decisions apply to a piece of work whichever pool carried it.
 - Exhaustion handling is **fail-visible**: work waiting on capacity is paused and surfaced, never silently dropped; spend on a failover pool still counts against the same deployment budget as the work it carried.
+- The routing objective is **intelligence-fit, never bare cost**: the platform supplies fit-measurable records (attempts-to-pass and review-rejection per tier and task class); which tiers exist and which task classes route where remain configuration values; and no routing choice — configured or learned — may sustain itself by lowering a lane's quality bar.
 - This capability coordinates the fleet; it never merges, never deploys, never alters a pipeline phase, and never edits or authors specifications or the vision — those boundaries hold across every deployment.
