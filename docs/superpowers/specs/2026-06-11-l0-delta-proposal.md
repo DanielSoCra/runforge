@@ -2,8 +2,8 @@
 date: 2026-06-11
 status: PROPOSAL — AWAITING OPERATOR DECISION
 type: l0-delta-proposal
-topic: Five proposed amendments to L0-AC-VISION (v5 → v6)
-authors: Claude (spec-chain goal run), per masterplan v2.1 §2.1; Deltas D–E salvaged from branch spec/l0-steering-surface (its draft v6, 2026-06-02)
+topic: Seven proposed amendments to L0-AC-VISION (v5 → v6)
+authors: Claude (spec-chain goal run), per masterplan v2.1 §2.1; Deltas D–E salvaged from branch spec/l0-steering-surface (its draft v6, 2026-06-02); Deltas F–G from the Operator alignment interview (2026-06-11)
 reads_down_from:
   - .specify/L0-ac-vision.md  # v5, Operator-approved — NOT edited by this proposal
 related:
@@ -13,7 +13,7 @@ related:
 
 # ⚠️ L0 Delta Proposal — Operator Decision Required
 
-> **This document edits nothing.** L0 is Operator-owned; per the platform's own boundaries the vision is never authored or edited autonomously. This is a *proposal* of five deltas to `L0-AC-VISION` v5, surfaced for the Operator's decision per masterplan v2.1 §2.1. Deltas A–C originate from the v-next spec-chain run; Deltas D–E are salvaged from the stale branch `spec/l0-steering-surface` (which had drafted them directly into L0 as a v6 — content preserved here, the direct edit discarded). Accepting, reshaping, or rejecting any of the five blocks nothing else in the v-next spec chain: the L1 specs written alongside this proposal are consistent with v5 as it stands, and these deltas only *name in the vision* what those specs already keep within v5's boundaries.
+> **This document edits nothing.** L0 is Operator-owned; per the platform's own boundaries the vision is never authored or edited autonomously. This is a *proposal* of seven deltas to `L0-AC-VISION` v5, surfaced for the Operator's decision per masterplan v2.1 §2.1. Deltas A–C originate from the v-next spec-chain run; Deltas D–E are salvaged from the stale branch `spec/l0-steering-surface` (which had drafted them directly into L0 as a v6 — content preserved here, the direct edit discarded); Deltas F–G capture the Operator's own vision corrections from the alignment interview (2026-06-11). Accepting, reshaping, or rejecting any of the seven blocks nothing else in the v-next spec chain: the L1 specs written alongside this proposal are consistent with v5 as it stands, and these deltas only *name in the vision* what those specs already keep within v5's boundaries.
 
 ## How to act on this
 
@@ -29,7 +29,9 @@ For each delta: **accept** (the wording below, or your own), **amend**, or **rej
 
 **Proposed wording (new paragraph):**
 
-> **A system for building systems:** The platform's deepest property is that its behavior is composed, not coded. Roles, steering agents, lanes, gates, workflows, and whole pipeline configurations are declared data — versioned, swappable, auditable — bound by the platform's non-negotiable trust machinery. What the platform ultimately offers is therefore not one pipeline but the ability to assemble new autonomous systems — a development organization, a steering office, a review house — out of governed parts, on top of the same engine, without engineering the engine. The platform's value concentrates in what cannot be swapped: the gates, the earned-trust ramp, the decision protocol, the spec governance, and the audit trail under everything.
+> **A system for building systems:** The platform's deepest property is that its behavior is composed, not coded — it is more a plugin system than a hardcoded piece of software. Roles, steering agents, lanes, gates, workflows, and whole pipeline configurations are declared data — versioned, swappable, auditable config packs — bound by the platform's non-negotiable trust machinery. What the platform ultimately offers is therefore not one pipeline but the ability to assemble new autonomous systems — a development organization, a steering office, a review house — out of governed parts, on top of the same engine, without engineering the engine. The platform's value concentrates in what cannot be swapped: the gates, the earned-trust ramp, the decision protocol, the spec governance, and the audit trail under everything.
+
+*(Alignment interview, 2026-06-11: the Operator reinforced this framing in his own words — the platform should be "a plugin system, less a hardcoded piece of software". The wording above reflects that.)*
 
 **Proposed Success addition:** "A new kind of autonomous system is assembled from declared parts on the existing engine — without changing the engine."
 
@@ -104,6 +106,32 @@ For each delta: **accept** (the wording below, or your own), **amend**, or **rej
 
 ---
 
+## Delta F — Purpose: personal leverage, not a product
+
+**Where:** A new sentence-pair in the **For:** framing (the Operator paragraph), and one line under whatever horizon/out-of-scope list v6 carries. From the alignment interview (2026-06-11).
+
+**Why:** Nothing in v5 states what the platform is ultimately *for* beyond serving "a human Operator" — which leaves room for product-shaped drift: generalizing for hypothetical other users, multi-tenant hardening, sellability trade-offs. The Operator's correction closes that room: the platform's purpose is **personal leverage** — it pays rent to its Operator and is deeply customizable to that one person's way of working. Selling it is an explicitly low-priority horizon option, never a goal that may shape design.
+
+**Proposed wording (added to the For: framing):**
+
+> The platform exists to pay rent to its Operator: it multiplies one person's reach and is deeply customizable to that person's way of working. It is not built to be sold. Making it sellable or multi-tenant is at most a low-priority horizon option — and never one that trades away operator-fit, customizability, or the speed of serving its one Operator.
+
+**Proposed Boundaries/horizon line:** "Generalizing for hypothetical other users at the expense of the Operator's fit is a vision violation, not a roadmap item."
+
+---
+
+## Delta G — Free of reasoning-vendor lock-in
+
+**Where:** A new bullet under the platform-properties section (beside "Project-agnostic by construction"). From the alignment interview (2026-06-11).
+
+**Why:** v5 is silent on vendor posture, while the runtime today is culturally anchored to one vendor's tooling. The v-next chain already builds the mechanism (provider-agnostic adapters, multi-provider registry, config-pack model routing — FUNC-AC-RUNTIME-ADAPTERS / ARCH-AC-SESSION-PROVIDERS v2); the vision should state the *property* the mechanism guarantees, so future work cannot quietly re-anchor the platform to a single vendor.
+
+**Proposed wording (new bullet):**
+
+> - **Free of vendor lock-in:** The platform is bound to no reasoning-model vendor. Provider-agnostic adapters are the structural guarantee: every role and lane can be re-pointed at a different vendor's models by configuration alone, and the platform's durable value — trust machinery, governance, composability — survives any vendor swap. Were an open-source baseline to serve the platform's needs, it would be adopted; as of 2026-06 none did — a finding to revisit, never a commitment to any vendor.
+
+---
+
 ## Record
 
 | Delta | Decision (accept / amend / reject) | Date | Note |
@@ -113,3 +141,5 @@ For each delta: **accept** (the wording below, or your own), **amend**, or **rej
 | C — lanes + tripwire | _pending_ | | |
 | D — operator lever inventory | _pending_ | | salvaged from spec/l0-steering-surface |
 | E — boundary ownership map | _pending_ | | salvaged from spec/l0-steering-surface |
+| F — personal leverage, not a product | _pending_ | | alignment interview 2026-06-11 |
+| G — vendor lock-in freedom | _pending_ | | alignment interview 2026-06-11 |
