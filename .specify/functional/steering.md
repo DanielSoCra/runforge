@@ -76,6 +76,11 @@ What is missing is a thin layer of judgment above the deterministic machinery: s
 - When it is ready
 - Then it lands in the Operator's inbox as a self-contained item he can approve, decline, or redirect, and implementation begins only on his recorded word
 
+**Scenario: A baseline technology question becomes a decision brief, never a settled choice**
+- Given a steering agent's scan surfaces a baseline technology question — a database, a cloud or hosting provider, a reasoning-model vendor, or any comparable foundation later work would build on
+- When it routes that input
+- Then it dispatches research to assemble the viable options with their trade-offs and a recommendation, and the shaped outcome reaches the Operator as a technology-selection decision request (per FUNC-AC-DECISION-ESCALATION) — the steering layer never settles such a question on its own judgment and never routes implementation work that presumes an unsettled one; day-to-day implementation choices inside dispatched work remain the work's own to make and are not steering's to escalate
+
 **Scenario: Steering agents consult each other through artifacts**
 - Given one steering agent wants another's judgment
 - When it asks

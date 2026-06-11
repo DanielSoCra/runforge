@@ -10,6 +10,8 @@ layer: 1
 # FUNC-AC-DECISION-ESCALATION — Structured Decision Escalation and Run Steering
 
 > **Spec history (v2, 2026-06-11):** v2 adds the reverse direction over the same uniform transport: Operator-initiated guidance to a specific running team (notes applied at phase boundaries) and the three run controls (pause, redirect, abort), per masterplan decision D4. v1 (approved, the run→Operator direction) is carried forward unchanged. Altering a run's work mid-thought is an explicit exclusion, recorded in Constraints.
+>
+> **Spec history (v2.1, 2026-06-11, alignment interview):** Adds the **technology-selection / baseline-decision class** to the always-escalate set, with a shape requirement: a request of this class must arrive as a researched decision brief — a highly informed set of options with trade-offs and a recommendation the Operator can decide from directly. Day-to-day implementation choices (naming, schemas, code structure) are explicitly excluded from escalation; they are the platform's to make and record.
 
 ## Problem Statement
 
@@ -49,6 +51,16 @@ The same need exists in the other direction. Today the Operator can only influen
 - Given a decision request offers a defined set of choices
 - When an answer is submitted
 - Then only an answer that matches the offered choices is accepted
+
+**Scenario: A technology-selection decision always reaches the Operator as a researched brief**
+- Given work surfaces a baseline technology decision — which database, which cloud or hosting provider, which reasoning-model vendor or family, or any comparable choice that sets a foundation later work builds on
+- When the platform encounters it
+- Then the question is never decided autonomously, at any earned-autonomy level, in any lane, in any lifecycle phase: it is raised as a decision request of the technology-selection class, carrying a researched set of viable options with their trade-offs and a recommended choice — a brief the Operator can decide from directly, never a bare question that sends him off to do the research himself
+
+**Scenario: Day-to-day implementation choices are never escalated as decisions**
+- Given a run faces an ordinary implementation choice — naming, the shape of a schema, code structure, which existing pattern to follow — within its declared scope and the platform's rules
+- When the run proceeds
+- Then it makes such choices itself and records them in its work; routine development choices never become decision requests, and the technology-selection class is never widened to cover them — the class exists for foundations, not for the day-to-day
 
 **Scenario: Sensitive content is withheld**
 - Given a decision request would carry confidential or secret information
@@ -115,6 +127,7 @@ The same need exists in the other direction. Today the Operator can only influen
 - Every run pause that needs a human decision produces a self-contained item the Operator can act on without opening the run
 - The Operator answers with a single choice, and the run continues or restarts without further intervention
 - An answer takes effect exactly once, even when submitted more than once or from more than one place
+- Baseline technology decisions reach the Operator as decision-brief-shaped requests — researched options, trade-offs, a recommendation — and are never made autonomously; ordinary day-to-day implementation choices never reach the inbox as decisions
 - Confidential and secret content never appears in shared items, notifications, or run history
 - No decision request is silently lost; each one ends answered, withdrawn, or overdue-and-re-surfaced
 - A coordinator overseeing several teams can read, prioritize, and route any team's request and its answer without knowing that team's internals
@@ -129,6 +142,7 @@ The same need exists in the other direction. Today the Operator can only influen
 - Decisions that are hard to reverse or that cause effects outside the system must be marked as such in the request
 - Confidential and secret information carried in a request must follow the same confidentiality rules as the rest of the system and never be exposed to anyone but the authorized Operator
 - A decision request must be understandable and routable on its own, independent of the team that raised it
+- The **technology-selection / baseline-decision class belongs to the always-escalate set**: no earned autonomy, lane policy, lifecycle phase, or learned behavior reduces its escalation; a request of this class must carry a researched option set with trade-offs and a recommendation before it is surfaced; and the class covers foundational choices (databases, hosting and cloud providers, reasoning-model vendors, comparable load-bearing technology) — never day-to-day implementation choices, which are explicitly excluded from escalation
 - Existing human-required signals must remain understandable while the uniform requests are introduced
 - Notes and run controls travel over the **same uniform, durably-recorded transport** as decisions, with the same guarantees: durably recorded before taking effect, effective exactly once, scoped to the single run they address, and verified against the run state they were written against — stale guidance is returned, never silently applied
 - **Mid-thought injection is excluded by design**: the platform never alters, appends to, or splices guidance into a run's in-flight reasoning; phase boundaries are the only points where notes and redirections take effect, and this exclusion is not configurable
