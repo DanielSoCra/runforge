@@ -1,3 +1,10 @@
+---
+date: 2026-05-01
+status: superseded
+superseded_by: .specify/L0-ac-vision.md  # demoted per the spec-reconciliation ledger; .specify/L0-vision.md (L0-CONCIERGE-VISION) is the live concierge vision
+superseded_date: 2026-06-02
+---
+
 > **⛔ SUPERSEDED (2026-06-02).** This design doc's still-valid content has been folded into the unified **L0-AC-VISION v5** (`.specify/L0-ac-vision.md`) + its L1 children. Retained for history; the canonical specs in `.specify/` govern — do not act on it as a live instruction. See the Spec Reconciliation Ledger (`docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`). <!-- RECONCILIATION-LEDGER-BANNER -->
 
 # Concierge — the Operator's Autonomous-Life-OS Design

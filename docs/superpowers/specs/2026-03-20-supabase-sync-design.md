@@ -1,9 +1,14 @@
 ---
+status: superseded
+superseded_by: .specify/L0-ac-vision.md  # unified L0-AC-VISION v5 + its L1 children; Postgres data-platform cutover (STACK-AC-DATA-PLATFORM)
+superseded_date: 2026-06-11
 deprecated_by: STACK-AC-DATA-PLATFORM
 deprecation_reason: "Superseded by the app-owned Postgres data platform cutover from issue #626."
 ---
 
 # Design: Daemon Supabase Config Sync and Run Writes
+
+> **⛔ SUPERSEDED (2026-06-11).** Already deprecated by **STACK-AC-DATA-PLATFORM** (Postgres cutover, #626); the canonical specs now live in the unified **L0-AC-VISION v5** (`.specify/L0-ac-vision.md`) + its L1 children in `.specify/` (per the Spec Reconciliation Ledger, `docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`). Retained for history — do not act on this doc. <!-- RECONCILIATION-LEDGER-BANNER -->
 
 Date: 2026-03-20
 

@@ -1,4 +1,13 @@
+---
+date: 2026-03-20
+status: superseded
+superseded_by: .specify/L0-ac-vision.md  # unified L0-AC-VISION v5 + its L1 children; the daemon polls repo config from Postgres now
+superseded_date: 2026-06-11
+---
+
 # GitHub OAuth Repo Import & Multi-Repo Polling — Design
+
+> **⛔ SUPERSEDED (2026-06-11).** The canonical specs now live in the unified **L0-AC-VISION v5** (`.specify/L0-ac-vision.md`) + its L1 children in `.specify/` — the daemon polls repo configuration from Postgres now (per the Spec Reconciliation Ledger, `docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`). Retained for history — do not act on this doc. <!-- RECONCILIATION-LEDGER-BANNER -->
 
 **Date:** 2026-03-20
 **Status:** Approved
