@@ -2,7 +2,7 @@
 id: FUNC-AC-MERGE-DECISION
 type: functional
 domain: auto-claude
-status: draft
+status: approved
 version: 2
 layer: 1
 ---
@@ -12,6 +12,8 @@ layer: 1
 > **Spec history (v2, 2026-06-11):** v1 defined the four-level earned-trust decision. v2 generalizes it: the four risk levels remain the non-configurable caution floor, while the path a change travels — how it qualifies, who works on it at what capability level, which checks gate it, how it may join the shared mainline, and whether it is reviewed again afterwards — becomes deployment-configurable **lane** policy. One verification is deliberately excluded from configuration: the check that a change stayed within what its lane declared it may touch. This supersedes the earlier risk-class-rules approach tracked as issue #679 (the implementation phase closes that issue with a link here). Initial lane sets, earn-in bars, and the first regulated deployment's confirmed autonomy bar are **non-normative defaults** recorded in the default configuration pack example (`docs/superpowers/specs/2026-06-11-default-config-pack-example.md`) — they are illustrative data, not requirements of this spec.
 >
 > **Spec history (v2.1, 2026-06-11, alignment interview):** Adds the **deployment lifecycle mode** dimension, from the Operator's correction: *"First go fast and messy, then clean up, then be clinical when released. That's for acme but also for any other project. That's why the QA and review part matters even more than the planning."* Each deployment declares which phase of its life it is in (illustratively: velocity → hardening → clinical), and lane gate-sets and merge policies may vary by phase — so a pre-production deployment may run wider autonomous scope in a velocity mode, while the clinical treatment applies from the first production release onward. Phase transitions are Operator decisions surfaced as decision requests, never automatic; and no mode weakens the scope verification, the always-escalate set, the verification requirement, or the compliance lens — modes scale gate rigor, never bypass invariants. Phase names, meanings, and assignments are configuration (illustrated in the default configuration pack example), not requirements of this spec.
+>
+> **Spec history (v2.2, 2026-06-14, L0 v6 enactment):** Adds **pre-approved earn-in auto-promotion**, from the Operator's earn-in ruling alongside the L0 deltas. By default, meeting a lane's earn-in bar still raises a promotion DecisionRequest (v2 behavior, carried forward). In addition, a deployment may declare a **pre-approved earn-in policy** for a lane: the Operator's approval is then given *in advance*, and the lane auto-widens on meeting its bar without a per-promotion decision. The pre-approval is bounded and non-relaxable: it applies only to a **verifier-gated** lane (per L0 v6's verifier-gated-autonomy boundary; enforcing L1 designated at implementation) and only to risk levels eligible for an autonomous proceed — never orange, red, compliance-forced, or any always-escalate class — and every auto-promotion is recorded and remains reversible fleet-wide (demote-on-red, per FUNC-AC-FLEET). This sets `status: approved`, the Operator's re-approval of the amended content.
 
 ## Problem Statement
 
@@ -164,9 +166,19 @@ A second gap follows from the first. Even with risk levels, the *path* a change 
 - Then the lane's per-deployment track record is updated, and the record is visible to the Operator
 
 **Scenario: A lane that meets its earn-in bar is proposed for promotion**
-- Given a deployment's profile declares an earn-in bar for a lane — a required track record before that lane may merge autonomously, expressed in the profile, not in the platform
+- Given a deployment's profile declares an earn-in bar for a lane — a required track record before that lane may merge autonomously, expressed in the profile, not in the platform — and no pre-approved auto-promotion policy for it
 - When the lane's recorded track record meets the bar
 - Then the platform surfaces a promotion decision to the Operator, and only the Operator's explicit, recorded grant widens that lane's autonomy
+
+**Scenario: A lane with a pre-approved earn-in policy auto-widens on meeting its bar**
+- Given a deployment's profile declares a **pre-approved earn-in policy** for a lane — the Operator's grant given in advance — and the lane is verifier-gated and its risk level is one eligible for an autonomous proceed
+- When the lane's recorded track record meets the bar
+- Then the lane's autonomy widens without a per-promotion decision, the auto-promotion is recorded with the policy and the track record that triggered it, and it remains reversible fleet-wide
+
+**Scenario: Pre-approved auto-promotion never crosses an always-escalate boundary**
+- Given a deployment has declared a pre-approved earn-in policy
+- When the policy would widen autonomy for a lane that is not verifier-gated, or for an orange, red, compliance-forced, or otherwise always-escalate class
+- Then the auto-promotion does not occur — the pre-approval is inert outside its bounds, and any such widening still requires an explicit, per-event Operator decision
 
 **Scenario: An uncertain or failing track record never promotes**
 - Given a lane whose track record is below its earn-in bar, or cannot be established with confidence
@@ -187,7 +199,7 @@ A second gap follows from the first. Even with risk levels, the *path* a change 
 - A change touching regulated-sensitive paths never proceeds without the Operator, at any risk level or in any lane
 - The red level never proceeds without the Operator, no matter how much autonomy a deployment has earned
 - A change that touched anything outside its lane's declared scope never proceeds on the platform's judgement, in any lane, under any configuration
-- Every deployment begins with all risk levels held for the Operator and widens only by an explicit, recorded Operator grant — trust is earned, never granted at the outset, for levels and for lanes alike
+- Every deployment begins with all risk levels held for the Operator and widens only by the Operator's grant — given per promotion, or in advance as a pre-approved earn-in policy bounded to verifier-gated, autonomous-eligible lanes — trust is earned, never granted at the outset, for levels and for lanes alike
 - Once a level's or lane's autonomy is earned, routine changes of that class stop reaching the Operator, measurably relieving him of that work
 - Reshaping how a deployment's changes are handled — qualification, scope, capability level, checks, merge treatment, batch review, earn-in bar — is an edit to that deployment's profile, never a change to the platform
 - Any uncertainty about a change's risk level or lane resolves toward more caution — never green, yellow, or a permissive lane when in genuine doubt — and a classification that cannot be established with confidence reaches the Operator
@@ -202,7 +214,7 @@ A second gap follows from the first. Even with risk levels, the *path* a change 
 - **Lanes are deployment policy**: every value in a lane declaration — qualification, allowed scope, capability levels, check set, merge treatment, batch-review cadence, earn-in bar — is held in the deployment's profile (per FUNC-AC-FLEET) and is never fixed in the platform itself; the platform supplies the mechanism, the profile supplies the values
 - The **scope verification is the platform's own and is non-configurable**: it runs against what a change actually touched, for every lane that allows an autonomous proceed, and no profile, lane, or configuration may disable, weaken, or bypass it; it exists to catch the platform's own classification errors, never to constrain what the Operator may deliberately permit
 - **Sensitive-area markings in a deployment's profile escalate only**: they may force a change to a more cautious lane, level, or decision, and may never qualify it for a less cautious one
-- Autonomy for a risk level or a lane is a **per-deployment, earned** property held in the deployment's profile; it is never on by default, and it widens only by an explicit, recorded Operator decision — meeting an earn-in bar raises a promotion decision, it never widens autonomy by itself
+- Autonomy for a risk level or a lane is a **per-deployment, earned** property held in the deployment's profile; it is never on by default, and it widens only by the Operator's decision — given either per promotion (the default: meeting an earn-in bar raises a promotion decision) or **in advance** as a pre-approved earn-in policy that auto-widens the lane on meeting its bar. Pre-approved auto-promotion is bounded and non-relaxable: it applies only to a **verifier-gated** lane and only to risk levels eligible for an autonomous proceed — never orange, red, compliance-forced, or any always-escalate class — and every auto-promotion is recorded and remains reversible fleet-wide (demote-on-red, per FUNC-AC-FLEET)
 - The decision is **fail-safe**: any uncertainty — an unestablished risk level, an unassignable lane, an indeterminate scope verdict, a missing or indeterminate check, an unavailable reviewer — resolves to the more cautious treatment or to holding the change for the Operator, never to letting it proceed
 - **Lifecycle phases are configuration on an invariant floor**: which phases exist, what each phase means for a lane's gate-set and merge policy, and which phase a deployment is in are deployment policy held in its profile, never fixed in the platform; a phase transition is always an Operator decision surfaced as a decision request, never automatic; and no phase declaration can weaken the scope verification, the always-escalate set, the verification requirement, or the compliance lens — a mode scales rigor within the invariants, never past them
 - A change's risk level is judged by its effect on the shared mainline in plain terms — how far it reaches, whether it touches sensitive or hard-to-reverse areas, how large it is — not by any single fixed measure

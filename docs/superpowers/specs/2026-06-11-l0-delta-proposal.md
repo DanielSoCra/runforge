@@ -1,6 +1,6 @@
 ---
 date: 2026-06-11
-status: PROPOSAL — AWAITING OPERATOR DECISION
+status: RESOLVED 2026-06-14 — all 8 deltas accepted, enacted in L0-AC-VISION v6 (historical record)
 type: l0-delta-proposal
 topic: Eight proposed amendments to L0-AC-VISION (v5 → v6)
 authors: Claude (spec-chain goal run), per masterplan v2.1 §2.1; Deltas D–E salvaged from branch spec/l0-steering-surface (its draft v6, 2026-06-02); Deltas F–G from the Operator alignment interview (2026-06-11); Delta H from the sparring-driven-decision session (2026-06-14)
@@ -158,11 +158,14 @@ For each delta: **accept** (the wording below, or your own), **amend**, or **rej
 
 | Delta | Decision (accept / amend / reject) | Date | Note |
 |---|---|---|---|
-| A — platform thesis | _pending_ | | |
-| B — single interface | _pending_ | | |
-| C — lanes + tripwire | _pending_ | | |
-| D — operator lever inventory | _pending_ | | salvaged from spec/l0-steering-surface |
-| E — boundary ownership map | _pending_ | | salvaged from spec/l0-steering-surface |
-| F — personal leverage, not a product | _pending_ | | alignment interview 2026-06-11 |
-| G — vendor lock-in freedom | _pending_ | | alignment interview 2026-06-11 |
-| H — operations-org thesis + verifier-gated autonomy | _pending_ | | sparring-hardened 2026-06-14; full design PR #724 |
+| A — platform thesis | **accept** (as-worded) | 2026-06-14 | enacted in L0 v6 |
+| B — single interface | **accept** (as-worded) | 2026-06-14 | enacted in L0 v6 |
+| C — lanes + tripwire | **accept** (as-worded) | 2026-06-14 | enacted in L0 v6; new non-configurable scope-tripwire boundary |
+| D — operator lever inventory | **accept** (as-worded) | 2026-06-14 | enacted in L0 v6; salvaged from spec/l0-steering-surface |
+| E — boundary ownership map | **accept** (as-worded) | 2026-06-14 | enacted in L0 v6; salvaged from spec/l0-steering-surface |
+| F — personal leverage, not a product | **accept** (as-worded) | 2026-06-14 | enacted in L0 v6; alignment interview 2026-06-11 |
+| G — vendor lock-in freedom | **accept** (as-worded) | 2026-06-14 | enacted in L0 v6; alignment interview 2026-06-11 |
+| H — operations-org thesis + verifier-gated autonomy | **accept** (as-worded) | 2026-06-14 | enacted in L0 v6; verifier-gate enforcing L1 **deferred to implementation** (extend FUNC-AC-MERGE-DECISION or new FUNC); sparring-hardened 2026-06-14, full design PR #724 |
+| Earn-in semantics (Operator ruling alongside the deltas) | **pre-approved auto-promote** | 2026-06-14 | enacted in L0 v6 + FUNC-AC-MERGE-DECISION v2.2 / FUNC-AC-FLEET v2.2; bounded to verifier-gated, autonomous-eligible lanes; recorded + reversible |
+
+> **Resolved 2026-06-14.** All eight deltas accepted as-worded and enacted in `L0-AC-VISION` v6; the earn-in ruling enacted in the merge-decision and fleet L1s. This proposal is now a historical record — `L0-AC-VISION` v6 is canonical.

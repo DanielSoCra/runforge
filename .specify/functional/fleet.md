@@ -2,7 +2,7 @@
 id: FUNC-AC-FLEET
 type: functional
 domain: auto-claude
-status: draft
+status: approved
 version: 2
 layer: 1
 ---
@@ -12,6 +12,8 @@ layer: 1
 > **Spec history (v2, 2026-06-11):** v2 adds the capacity-pool behavior (per-pool usage windows, failover on exhaustion, recorded provenance of which pool performed each review) for the v-next masterplan's window-aware scheduling (workstream M3). Which pools exist and their preference order are configuration values illustrated in the non-normative default configuration pack example, never requirements of this spec. v1 (approved) is otherwise carried forward unchanged.
 >
 > **Spec history (v2.1, 2026-06-11, alignment interview):** Names the economic objective the capacity routing and its records serve: **intelligence-fit per task class** — the minimal capability tier that sustains the lane's quality bar — not raw cost minimization. The Operator's framing: better-fit intelligence means cheaper runs, which means more throughput, higher quality, and higher confidence — more automation and more leverage; frontier capability is not needed everywhere. The records must make fit measurable (attempts-to-pass, review-rejection rates per tier); the tier and routing values themselves remain config-pack data.
+>
+> **Spec history (v2.2, 2026-06-14, L0 v6 enactment):** Re-approval pass. Aligns the autonomy-widening language with the Operator's earn-in ruling (L0 v6): the Operator's approval that widens a deployment's autonomy may be given **per event** or **in advance** as a pre-approved earn-in policy (the earn-in mechanism itself lives in FUNC-AC-MERGE-DECISION v2.2; this spec owns the per-deployment autonomy state it updates and the fleet-wide reversibility — demote-on-red — that every auto-promotion remains subject to). No invariant changes: pre-approval is bounded to verifier-gated, autonomous-eligible lanes, and every widening is recorded and reversible. This sets `status: approved`.
 
 ## Problem Statement
 
@@ -198,7 +200,7 @@ A further shared resource has the same shape. The fleet's reasoning capacity is 
 
 - A deployment is governed only by its own profile; no project-specific rule, reviewer, boundary, budget, or rollout setting is part of the platform itself.
 - The honest map of what can and cannot be automated is a per-deployment property, never the platform's; the platform optimizes for concentrating the Operator's attention on each deployment's irreducibly-human work and does not pretend that work away.
-- A deployment is fully human-gated at registration; its autonomy may widen only along a proven, risk-class-by-risk-class ramp, and only with the Operator's approval — autonomy is earned per deployment, never granted at switch-on.
+- A deployment is fully human-gated at registration; its autonomy may widen only along a proven, risk-class-by-risk-class ramp, and only with the Operator's approval — given per event, or in advance as a pre-approved earn-in policy bounded to verifier-gated, autonomous-eligible lanes (per FUNC-AC-MERGE-DECISION). Autonomy is earned per deployment, never granted at switch-on, and every widening is recorded and reversible fleet-wide.
 - Deployments are isolated by default; one deployment's routine activity must never surface inside another, and the cross-deployment inbox is the only exception.
 - An item from a non-focused deployment must never be silently dropped; it either interrupts because it meets the Operator's threshold or accrues for later, and cross-deployment priority must always be explainable, never a hidden global ranking.
 - The platform adopts capabilities only as identified versions recorded in the registry; it never acts on live, unversioned edits to shared capabilities or instructions.

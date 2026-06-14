@@ -125,11 +125,11 @@ FUNC-AC-RUNTIME-SOURCE-ISOLATION:
   children: [ARCH-AC-RUNTIME-SOURCE-ISOLATION]
   status: draft
 
-# v-next (2026-06-11): amended to v2 (operator notes + run verbs); status
-# draft pending Operator re-approval. v1 remains the approved baseline.
+# v-next: amended to v2 (operator notes + run verbs); v2.2 re-approved by the
+# Operator 2026-06-14 alongside the L0 v6 delta enactment.
 FUNC-AC-DECISION-ESCALATION:
   children: [ARCH-AC-DECISION-ESCALATION]
-  status: draft
+  status: approved
 
 ARCH-AC-DECISION-ESCALATION:
   parent: FUNC-AC-DECISION-ESCALATION
@@ -158,9 +158,9 @@ STACK-AC-DECISION-ESCALATION-EMITTER:
   status: approved
 
 # --- Unified-cockpit L1s (Phase 1 act-2; approved + canonical on main, PR #697) ---
-# v-next (2026-06-11): FUNC-AC-FLEET and FUNC-AC-MERGE-DECISION amended to v2
-# (lane engine; capacity pools). Status draft pending Operator re-approval of
-# the amended content; v1 content remains the approved baseline until then.
+# v-next: FUNC-AC-FLEET (v2.2) and FUNC-AC-MERGE-DECISION (v2.2) amended for the
+# lane engine, capacity pools, and pre-approved earn-in auto-promotion; both
+# re-approved by the Operator 2026-06-14 alongside the L0 v6 delta enactment.
 
 FUNC-AC-OPERATOR-LEARNING:
   status: approved
@@ -170,12 +170,12 @@ FUNC-AC-COMPLIANCE-GATE:
 
 FUNC-AC-FLEET:
   children: [ARCH-AC-WINDOW-SCHEDULER]
-  status: draft
+  status: approved
 
 FUNC-AC-MERGE-DECISION:
   children: [ARCH-AC-LANE-ENGINE]
   related: [FUNC-AC-COMPLIANCE-GATE, FUNC-AC-FLEET, FUNC-AC-DECISION-ESCALATION, FUNC-AC-QUALITY]
-  status: draft
+  status: approved
 
 # --- v-next L1 specs (2026-06-11 spec chain; masterplan v2.1) ---
 

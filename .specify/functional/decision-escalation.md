@@ -2,7 +2,7 @@
 id: FUNC-AC-DECISION-ESCALATION
 type: functional
 domain: auto-claude
-status: draft
+status: approved
 version: 2
 layer: 1
 ---
@@ -12,6 +12,8 @@ layer: 1
 > **Spec history (v2, 2026-06-11):** v2 adds the reverse direction over the same uniform transport: Operator-initiated guidance to a specific running team (notes applied at phase boundaries) and the three run controls (pause, redirect, abort), per masterplan decision D4. v1 (approved, the run→Operator direction) is carried forward unchanged. Altering a run's work mid-thought is an explicit exclusion, recorded in Constraints.
 >
 > **Spec history (v2.1, 2026-06-11, alignment interview):** Adds the **technology-selection / baseline-decision class** to the always-escalate set, with a shape requirement: a request of this class must arrive as a researched decision brief — a highly informed set of options with trade-offs and a recommendation the Operator can decide from directly. Day-to-day implementation choices (naming, schemas, code structure) are explicitly excluded from escalation; they are the platform's to make and record.
+>
+> **Spec history (v2.2, 2026-06-14, L0 v6 enactment):** Re-approval pass, no content change. The Operator re-approves the v2/v2.1 content alongside the L0 v6 delta enactment; the always-escalate set defined here (including the technology-selection class) is the set L0 v6's pre-approved earn-in auto-promotion is explicitly barred from crossing. This sets `status: approved`.
 
 ## Problem Statement
 
