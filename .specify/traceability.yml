@@ -52,7 +52,7 @@ ARCH-SDD-SPEC-LIFECYCLE:
 # --- Auto-Claude L0 spec (vision — root of all Auto-Claude specs) ---
 
 L0-AC-VISION:
-  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, FUNC-AC-PLUGINS, FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, FUNC-AC-AGENT-DISCIPLINE, FUNC-AC-CONTROLLED-ARTIFACT-DELIVERY, FUNC-AC-RECOVERABLE-FAILURE-ROUTING, FUNC-AC-RUNTIME-SOURCE-ISOLATION, FUNC-AC-DATA-PLATFORM, FUNC-AC-OPERATOR-AUTH, FUNC-AC-DECISION-ESCALATION, FUNC-AC-OPERATOR-LEARNING, FUNC-AC-COMPLIANCE-GATE, FUNC-AC-FLEET, FUNC-AC-MERGE-DECISION, STACK-AC-CONVENTIONS]
+  children: [FUNC-AC-PIPELINE, FUNC-AC-IMPLEMENTATION, FUNC-AC-QUALITY, FUNC-AC-SAFETY, FUNC-AC-BUG-TRIAGE, FUNC-AC-LEARNING, FUNC-AC-HANDOFF, FUNC-AC-DASHBOARD, FUNC-AC-COORDINATION, FUNC-AC-PLUGINS, FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, FUNC-AC-AGENT-DISCIPLINE, FUNC-AC-CONTROLLED-ARTIFACT-DELIVERY, FUNC-AC-RECOVERABLE-FAILURE-ROUTING, FUNC-AC-RUNTIME-SOURCE-ISOLATION, FUNC-AC-DATA-PLATFORM, FUNC-AC-OPERATOR-AUTH, FUNC-AC-DECISION-ESCALATION, FUNC-AC-OPERATOR-LEARNING, FUNC-AC-COMPLIANCE-GATE, FUNC-AC-FLEET, FUNC-AC-MERGE-DECISION, FUNC-AC-RUNTIME-ADAPTERS, FUNC-AC-STEERING, FUNC-AC-OPERATOR-SURFACE, STACK-AC-CONVENTIONS]
   status: approved
 
 # --- Auto-Claude L1 specs ---
@@ -125,9 +125,11 @@ FUNC-AC-RUNTIME-SOURCE-ISOLATION:
   children: [ARCH-AC-RUNTIME-SOURCE-ISOLATION]
   status: draft
 
+# v-next (2026-06-11): amended to v2 (operator notes + run verbs); status
+# draft pending Operator re-approval. v1 remains the approved baseline.
 FUNC-AC-DECISION-ESCALATION:
   children: [ARCH-AC-DECISION-ESCALATION]
-  status: approved
+  status: draft
 
 ARCH-AC-DECISION-ESCALATION:
   parent: FUNC-AC-DECISION-ESCALATION
@@ -156,6 +158,9 @@ STACK-AC-DECISION-ESCALATION-EMITTER:
   status: approved
 
 # --- Unified-cockpit L1s (Phase 1 act-2; approved + canonical on main, PR #697) ---
+# v-next (2026-06-11): FUNC-AC-FLEET and FUNC-AC-MERGE-DECISION amended to v2
+# (lane engine; capacity pools). Status draft pending Operator re-approval of
+# the amended content; v1 content remains the approved baseline until then.
 
 FUNC-AC-OPERATOR-LEARNING:
   status: approved
@@ -164,11 +169,32 @@ FUNC-AC-COMPLIANCE-GATE:
   status: approved
 
 FUNC-AC-FLEET:
-  status: approved
+  children: [ARCH-AC-WINDOW-SCHEDULER]
+  status: draft
 
 FUNC-AC-MERGE-DECISION:
+  children: [ARCH-AC-LANE-ENGINE]
   related: [FUNC-AC-COMPLIANCE-GATE, FUNC-AC-FLEET, FUNC-AC-DECISION-ESCALATION, FUNC-AC-QUALITY]
-  status: approved
+  status: draft
+
+# --- v-next L1 specs (2026-06-11 spec chain; masterplan v2.1) ---
+
+FUNC-AC-RUNTIME-ADAPTERS:
+  # Realized by the amended ARCH-AC-SESSION-PROVIDERS (v2), which keeps its
+  # FUNC-AC-SAFETY parent; the cross-link is expressed as related, not parent.
+  children: []
+  related: [ARCH-AC-SESSION-PROVIDERS, FUNC-AC-SAFETY]
+  status: draft
+
+FUNC-AC-STEERING:
+  children: []
+  related: [FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, FUNC-AC-FLEET, FUNC-AC-PLUGINS]
+  status: draft
+
+FUNC-AC-OPERATOR-SURFACE:
+  children: []
+  related: [FUNC-AC-DASHBOARD, FUNC-AC-FLEET, FUNC-AC-DECISION-ESCALATION]
+  status: draft
 
 # --- Auto-Claude Plugins L2 spec ---
 
@@ -247,6 +273,21 @@ ARCH-AC-CONTAINMENT:
 ARCH-AC-SESSION-PROVIDERS:
   parent: FUNC-AC-SAFETY
   children: [STACK-AC-SESSION-PROVIDERS]
+  related: [FUNC-AC-RUNTIME-ADAPTERS]  # v2 realizes the runtime-adapter contract
+  status: draft
+
+# --- v-next L2 specs (2026-06-11 spec chain) ---
+
+ARCH-AC-LANE-ENGINE:
+  parent: FUNC-AC-MERGE-DECISION
+  children: [STACK-AC-LANE-ENGINE]
+  related: [FUNC-AC-COMPLIANCE-GATE, ARCH-AC-CONTROL-PLANE, ARCH-AC-BATCH-CLASSIFIER]
+  status: draft
+
+ARCH-AC-WINDOW-SCHEDULER:
+  parent: FUNC-AC-FLEET
+  children: []  # L3 deliberately deferred to the implementation phase (goal Q3 depth rule)
+  related: [ARCH-AC-SESSION-PROVIDERS]
   status: draft
 
 ARCH-AC-GOVERNANCE:
@@ -533,6 +574,13 @@ STACK-AC-SESSION-PROVIDERS:
     - packages/daemon/src/session-runtime/providers/registry.test.ts
     - packages/daemon/src/session-runtime/adapters/index.test.ts
     - packages/daemon/src/session-runtime/adapters/codex-cli.test.ts
+  status: draft
+
+STACK-AC-LANE-ENGINE:
+  parent: ARCH-AC-LANE-ENGINE
+  children: []
+  code_paths: []  # deferred until implementation — path validator requires real files
+  test_paths: []  # deferred until implementation
   status: draft
 
 STACK-AC-OPERATIONAL-SAFETY:
