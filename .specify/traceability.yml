@@ -851,8 +851,10 @@ STACK-AC-ENRICHED-COMMITS-KNOWLEDGE:
   status: draft
 
 STACK-AC-SUPABASE-SYNC:
-  parent: ARCH-AC-CONTROL-PLANE
+  # deprecated + detached: supabase retired in the postgres migration; matches the
+  # deprecated-node convention (no active parent, like ENRICHED-COMMITS/BOARD/AWARENESS).
   children: []
+  related: [ARCH-AC-CONTROL-PLANE]   # historical: was the control-plane's supabase sync
   spec: docs/superpowers/specs/2026-03-20-supabase-sync-design.md
   code_paths: []
   test_paths: []
@@ -1114,17 +1116,19 @@ FUNC-CONCIERGE-CORE:
   status: draft
 
 FUNC-CONCIERGE-MEMORY:
-  children: [ARCH-CONCIERGE-RUNTIME]
+  children: []
+  related: [ARCH-CONCIERGE-RUNTIME]   # realized by the shared concierge runtime (canonical parent: FUNC-CONCIERGE-CORE)
   status: draft
 
 FUNC-CONCIERGE-BOARD:
-  children: [ARCH-CONCIERGE-RUNTIME, ARCH-EVENT-BUS]
-  related: [FUNC-AC-DASHBOARD]   # boundary documented in concierge-board.md spec
+  children: []
+  related: [FUNC-AC-DASHBOARD, ARCH-CONCIERGE-RUNTIME, ARCH-EVENT-BUS]   # boundary in concierge-board.md; shared L2s referenced via related (canonical parents elsewhere)
   status: deprecated
   deprecated_by: FUNC-AC-FLEET   # focus-gated decision inbox + FUNC-AC-OPERATOR-LEARNING ranking (ledger 2026-05-29)
 
 FUNC-CONCIERGE-CHANNEL:
-  children: [ARCH-CONCIERGE-RUNTIME]
+  children: []
+  related: [ARCH-CONCIERGE-RUNTIME]   # realized by the shared concierge runtime (canonical parent: FUNC-CONCIERGE-CORE)
   status: draft
 
 FUNC-CONCIERGE-AWARENESS:
@@ -1141,17 +1145,20 @@ ARCH-CONCIERGE-RUNTIME:
 
 ARCH-EVENT-BUS:
   parent: FUNC-CONCIERGE-AWARENESS
-  children: [STACK-CONCIERGE-NODE]
+  children: []
+  related: [STACK-CONCIERGE-NODE]   # implemented by the shared concierge stack (canonical parent: ARCH-CONCIERGE-RUNTIME)
   status: draft
 
 ARCH-TOOL-REGISTRY:
   parent: FUNC-CONCIERGE-CORE
-  children: [STACK-CONCIERGE-NODE]
+  children: []
+  related: [STACK-CONCIERGE-NODE]   # implemented by the shared concierge stack (canonical parent: ARCH-CONCIERGE-RUNTIME)
   status: draft
 
 ARCH-CONFIRMATION-LIFECYCLE:
   parent: FUNC-CONCIERGE-CORE
-  children: [STACK-CONCIERGE-NODE]
+  children: []
+  related: [STACK-CONCIERGE-NODE]   # implemented by the shared concierge stack (canonical parent: ARCH-CONCIERGE-RUNTIME)
   status: draft
 
 # --- Concierge L3 specs ---
