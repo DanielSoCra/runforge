@@ -165,7 +165,7 @@ For each delta: **accept** (the wording below, or your own), **amend**, or **rej
 | E — boundary ownership map | **accept** (as-worded) | 2026-06-14 | enacted in L0 v6; salvaged from spec/l0-steering-surface |
 | F — personal leverage, not a product | **accept** (as-worded) | 2026-06-14 | enacted in L0 v6; alignment interview 2026-06-11 |
 | G — vendor lock-in freedom | **accept** (as-worded) | 2026-06-14 | enacted in L0 v6; alignment interview 2026-06-11 |
-| H — operations-org thesis + verifier-gated autonomy | **accept** (as-worded) | 2026-06-14 | enacted in L0 v6; verifier-gate enforcing L1 **deferred to implementation** (extend FUNC-AC-MERGE-DECISION or new FUNC); sparring-hardened 2026-06-14, full design PR #724 |
+| H — operations-org thesis + verifier-gated autonomy | **accept** (as-worded) | 2026-06-14 | enacted in L0 v6; verifier-gate enforcing L1 authored as **FUNC-AC-VERIFIER-GATE** (new cross-cutting boundary spec, 2026-06-14; L2/L3 deferred to impl); sparring-hardened 2026-06-14, full design PR #724 |
 | Earn-in semantics (Operator ruling alongside the deltas) | **pre-approved auto-promote** | 2026-06-14 | enacted in L0 v6 + FUNC-AC-MERGE-DECISION v2.2 / FUNC-AC-FLEET v2.2; bounded to verifier-gated, autonomous-eligible lanes; recorded + reversible |
 
 > **Resolved 2026-06-14.** All eight deltas accepted as-worded and enacted in `L0-AC-VISION` v6; the earn-in ruling enacted in the merge-decision and fleet L1s. This proposal is now a historical record — `L0-AC-VISION` v6 is canonical.
