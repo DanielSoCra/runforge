@@ -2,8 +2,8 @@
 date: 2026-06-11
 status: PROPOSAL — AWAITING OPERATOR DECISION
 type: l0-delta-proposal
-topic: Seven proposed amendments to L0-AC-VISION (v5 → v6)
-authors: Claude (spec-chain goal run), per masterplan v2.1 §2.1; Deltas D–E salvaged from branch spec/l0-steering-surface (its draft v6, 2026-06-02); Deltas F–G from the Operator alignment interview (2026-06-11)
+topic: Eight proposed amendments to L0-AC-VISION (v5 → v6)
+authors: Claude (spec-chain goal run), per masterplan v2.1 §2.1; Deltas D–E salvaged from branch spec/l0-steering-surface (its draft v6, 2026-06-02); Deltas F–G from the Operator alignment interview (2026-06-11); Delta H from the sparring-driven-decision session (2026-06-14)
 reads_down_from:
   - .specify/L0-ac-vision.md  # v5, Operator-approved — NOT edited by this proposal
 related:
@@ -13,7 +13,7 @@ related:
 
 # ⚠️ L0 Delta Proposal — Operator Decision Required
 
-> **This document edits nothing.** L0 is Operator-owned; per the platform's own boundaries the vision is never authored or edited autonomously. This is a *proposal* of seven deltas to `L0-AC-VISION` v5, surfaced for the Operator's decision per masterplan v2.1 §2.1. Deltas A–C originate from the v-next spec-chain run; Deltas D–E are salvaged from the stale branch `spec/l0-steering-surface` (which had drafted them directly into L0 as a v6 — content preserved here, the direct edit discarded); Deltas F–G capture the Operator's own vision corrections from the alignment interview (2026-06-11). Accepting, reshaping, or rejecting any of the seven blocks nothing else in the v-next spec chain: the L1 specs written alongside this proposal are consistent with v5 as it stands, and these deltas only *name in the vision* what those specs already keep within v5's boundaries.
+> **This document edits nothing.** L0 is Operator-owned; per the platform's own boundaries the vision is never authored or edited autonomously. This is a *proposal* of eight deltas to `L0-AC-VISION` v5, surfaced for the Operator's decision per masterplan v2.1 §2.1. Deltas A–C originate from the v-next spec-chain run; Deltas D–E are salvaged from the stale branch `spec/l0-steering-surface` (which had drafted them directly into L0 as a v6 — content preserved here, the direct edit discarded); Deltas F–G capture the Operator's own vision corrections from the alignment interview (2026-06-11); Delta H (operations-org thesis + verifier-gated autonomy) was added 2026-06-14 from an adversarial sparring session and ratified the same day (full design: PR #724). Accepting, reshaping, or rejecting any of the eight blocks nothing else in the v-next spec chain: the L1 specs written alongside this proposal are consistent with v5 as it stands, and these deltas only *name in the vision* what those specs already keep within v5's boundaries.
 
 ## How to act on this
 
@@ -132,6 +132,28 @@ For each delta: **accept** (the wording below, or your own), **amend**, or **rej
 
 ---
 
+## Delta H — From software-org to operations-org (one operating system for all the Operator's work)
+
+**Where:** A new paragraph in the platform-properties region (beside Delta A's "A system for building systems"); a new bullet in **Boundaries** (verifier-gated autonomy); and one sentence added to **Success**.
+
+**Provenance:** Hardened via adversarial sparring (codex GPT-5.5 xhigh, different model family) on 2026-06-14 and ratified by the Operator the same day. Full design + reasoning: `docs/superpowers/specs/2026-06-14-cockpit-as-operations-os-design.md` (PR #724). Strategic record: `knowledge-vault: 10-Projects/side-project/decisions/2026-06-14-cockpit-convergence-decision.md`.
+
+**Why:** v5 and Deltas A–G still scope the platform to autonomous *software development* — even Delta B's "one pane" is the only steering tool for autonomous *work*, where "work" means software pipelines. The Operator's actual need is broader: a single steering surface over **all** his AI-assisted work across ventures (the platform itself, a regulated regulated SaaS, a product project, an AI-consulting practice, and personal/GTD), with software delivery as one *lane-type* among operations, knowledge-work, client-delivery, and business-development. Adopted as a **north-star executed narrow-first**. Sparring established the widening is only safe under a new invariant — the verifier-gate below: the trust machinery (risk-class gates, earned-trust merge, "no verification, no merge", spec governance) assumes a verifiable **oracle** that most non-software work lacks; without the gate, no-oracle lanes force a choice between fake-confidence autonomy and escalation-flooding, and fusing a no-oracle assistant (the Operator's existing personal agent) into the oracle-gated factory degrades both. Resolution: absorb such systems at the **surface** (their decisions enter the one inbox), federate their **execution** (they run as assist-only domain executors behind the cockpit).
+
+**Proposed wording (new paragraph):**
+
+> **One operating system for all the Operator's work.** The platform's mandate is not limited to building software; it is the Operator's single operations layer — one steering surface over every kind of AI-assisted work he runs across his ventures: software delivery, operations, knowledge-work, client delivery, and business development. Software development is one *lane-type*, not the platform's purpose. What unifies the domains is the surface and the trust machinery, not the work itself: each domain is a lane with its own executor, surfaced and steered from the one pane. This is a destination reached incrementally — the platform proves each new domain on the Operator himself, instrumented and measured, before it carries another's, and never widens a lane's autonomy ahead of its earned trust.
+
+**Proposed Boundaries addition (verifier-gated autonomy):**
+
+> - **Verifier-gated autonomy.** A lane may earn autonomous *execution* only if it declares a verifier — an oracle that can falsify "this work is correct" (tests, CI, a deployable diff, or any deterministic or independent check). A lane with no verifier is **assist-and-escalate only**: it may draft, surface decisions, and act on the Operator's approval, but never executes autonomously. This generalizes the platform's "no verification, no merge" rule to all work — *no verifier, no autonomous action*. Like the scope tripwire (Delta C), it is never configurable: no deployment profile, lane declaration, or learned behavior can grant a no-verifier lane autonomous execution.
+
+**Proposed Success addition:** "A non-software domain is steered from the same one pane as code; and no lane — in any domain — acts autonomously without a declared verifier."
+
+**Interaction with other deltas:** builds on **A** (a domain is a config-pack-shaped lane) and is the autonomy sibling of **C** (the scope tripwire); consistent with **B** (the one pane now spans domains), **D** (the SET/DECIDE/INSPECT levers gain non-software lanes), and **F** (the widening is personal leverage, never a horizontal product — "operations cockpit" must not drift into product positioning). Per **E**'s keep-distributed model, the new boundary's owning L1 is an Operator call: extend `FUNC-AC-MERGE-DECISION` or stand up a new FUNC for the verifier-gate.
+
+---
+
 ## Record
 
 | Delta | Decision (accept / amend / reject) | Date | Note |
@@ -143,3 +165,4 @@ For each delta: **accept** (the wording below, or your own), **amend**, or **rej
 | E — boundary ownership map | _pending_ | | salvaged from spec/l0-steering-surface |
 | F — personal leverage, not a product | _pending_ | | alignment interview 2026-06-11 |
 | G — vendor lock-in freedom | _pending_ | | alignment interview 2026-06-11 |
+| H — operations-org thesis + verifier-gated autonomy | _pending_ | | sparring-hardened 2026-06-14; full design PR #724 |
