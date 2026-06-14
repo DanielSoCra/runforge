@@ -178,30 +178,33 @@ FUNC-AC-MERGE-DECISION:
   status: approved
 
 # --- v-next L1 specs (2026-06-11 spec chain; masterplan v2.1) ---
+# Approved by the Operator 2026-06-14 (own approval pass, after L0 v6). Their
+# L2/L3 stay draft until implementation lands — the corpus convention (L1s pass
+# the Operator gate; L2/L3 firm up at build, like the decision-escalation L3s).
 
 FUNC-AC-RUNTIME-ADAPTERS:
   # Realized by the amended ARCH-AC-SESSION-PROVIDERS (v2), which keeps its
   # FUNC-AC-SAFETY parent; the cross-link is expressed as related, not parent.
   children: []
   related: [ARCH-AC-SESSION-PROVIDERS, FUNC-AC-SAFETY]
-  status: draft
+  status: approved
 
 FUNC-AC-STEERING:
   children: []
   related: [FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, FUNC-AC-FLEET, FUNC-AC-PLUGINS]
-  status: draft
+  status: approved
 
 FUNC-AC-OPERATOR-SURFACE:
   children: []
   related: [FUNC-AC-DASHBOARD, FUNC-AC-FLEET, FUNC-AC-DECISION-ESCALATION]
-  status: draft
+  status: approved
 
 # Enacts L0 v6's verifier-gated-autonomy boundary (Delta H); the enforcing L1
 # v6 deferred "to implementation" — created 2026-06-14. L2/L3 deferred to impl.
 FUNC-AC-VERIFIER-GATE:
   children: []
   related: [FUNC-AC-MERGE-DECISION, FUNC-AC-FLEET, FUNC-AC-COMPLIANCE-GATE]
-  status: draft
+  status: approved
 
 # --- Auto-Claude Plugins L2 spec ---
 
