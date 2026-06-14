@@ -2,7 +2,7 @@
 id: FUNC-AC-OPERATOR-SURFACE
 type: functional
 domain: auto-claude
-status: draft
+status: approved
 version: 1
 layer: 1
 ---
