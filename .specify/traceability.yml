@@ -324,6 +324,7 @@ STACK-AC-CONVENTIONS:
   children: []
   code_paths:
     - .github/workflows/ci.yml
+    - .husky/pre-commit
     - package.json
     - packages/daemon/package.json
     - packages/daemon/eslint.config.js

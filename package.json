@@ -4,6 +4,7 @@
   "private": true,
   "packageManager": "pnpm@10.32.1",
   "scripts": {
+    "prepare": "husky",
     "dev:dashboard": "pnpm --filter @auto-claude/dashboard dev",
     "lint": "pnpm -r --if-present lint",
     "test": "pnpm -r test",
@@ -11,5 +12,8 @@
     "test:dashboard": "pnpm --filter @auto-claude/dashboard test",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7"
   }
 }

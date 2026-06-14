@@ -26,7 +26,13 @@ export function detectGate1Commands(worktreeDir: string): string[] {
   let scripts: Record<string, unknown> = {};
   try {
     const pkg = JSON.parse(readFileSync(join(worktreeDir, 'package.json'), 'utf8'));
-    if (pkg && typeof pkg.scripts === 'object' && pkg.scripts) {
+    if (
+      pkg !== null &&
+      typeof pkg === 'object' &&
+      'scripts' in pkg &&
+      typeof pkg.scripts === 'object' &&
+      pkg.scripts !== null
+    ) {
       scripts = pkg.scripts as Record<string, unknown>;
     }
   } catch {
@@ -94,7 +100,7 @@ export function createGate1(commands: string[], opts?: Gate1Options): Gate {
       for (const cmd of effectiveCommands) {
         if (!cmd.trim()) continue;
         const validationError = validateGate1Command(cmd);
-        if (validationError) {
+        if (validationError !== null) {
           findings.push({
             severity: 'critical',
             location: cmd,

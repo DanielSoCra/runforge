@@ -531,11 +531,6 @@
       "count": 4
     }
   },
-  "src/validation/gates.ts": {
-    "@typescript-eslint/strict-boolean-expressions": {
-      "count": 1
-    }
-  },
   "src/validation/holdout.ts": {
     "@typescript-eslint/strict-boolean-expressions": {
       "count": 2
