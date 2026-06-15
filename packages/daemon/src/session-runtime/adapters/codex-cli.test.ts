@@ -45,7 +45,8 @@ describe('CodexCliAdapter (#480)', () => {
     expect(parsed.ok).toBe(true);
     if (parsed.ok) {
       expect(parsed.value.output).toBe('implemented the plan');
-      expect(parsed.value.cost).toBe(0);
+      expect(parsed.value.cost).toBeGreaterThan(0);
+      expect(parsed.value.costEstimated).toBe(true);
       expect(parsed.value.structuredData).toEqual({
         provider: 'codex-cli',
         raw: 'implemented the plan\n',

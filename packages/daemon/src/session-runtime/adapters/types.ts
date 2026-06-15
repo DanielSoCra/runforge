@@ -9,6 +9,17 @@ import type { Result } from '../../lib/result.js';
 import type { ContainmentPolicy } from '../containment-hooks.js';
 import type { McpConfig } from '../plugin-injection.js';
 
+export interface ContainmentCapabilityProfile {
+  nativeGuardHooks: boolean;
+  structuredOutput: boolean;
+  exactCostReporting: boolean;
+  sessionContinuation: boolean;
+}
+
+export interface SessionHandle {
+  pid?: number;
+}
+
 export interface ProviderAdapter {
   spawn(def: AgentDefinition, prompt: string, options?: {
     cwd?: string;
@@ -23,4 +34,12 @@ export interface ProviderAdapter {
     // Adapters that don't model a trust gate (e.g. codex-cli) may ignore it.
     skipPermissions?: boolean;
   }): Promise<Result<SessionResult>>;
+  resume(
+    def: AgentDefinition,
+    prompt: string,
+    continuationId: string,
+    options?: Parameters<ProviderAdapter['spawn']>[2],
+  ): Promise<Result<SessionResult>>;
+  abort(handle: SessionHandle): Promise<void>;
+  capabilities(): ContainmentCapabilityProfile;
 }

@@ -269,6 +269,8 @@ export interface SessionResult {
   output: string;
   structuredData: unknown;
   cost: number;
+  /** True when `cost` is a conservative estimate rather than an exact provider-reported value. */
+  costEstimated?: boolean;
   pitfallMarkers: PitfallMarker[];
   exitStatus: ExitStatus;
   handoffNote?: string;
