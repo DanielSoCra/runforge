@@ -158,10 +158,11 @@ export class SteeringLedger {
       operator: string;
       body: string;
       againstPhaseSeq: number;
+      againstGeneration?: number;
       idempotencyKey?: string;
     },
   ): SendNoteResult {
-    const { operator, body, againstPhaseSeq, idempotencyKey } = payload;
+    const { operator, body, againstPhaseSeq, againstGeneration, idempotencyKey } = payload;
     const run = this.store.getRun(runId);
 
     if (run === undefined) {
@@ -184,6 +185,12 @@ export class SteeringLedger {
         outcome: 'undeliverable',
         reason: `Run is ${run.status}`,
       };
+    }
+
+    if (againstGeneration !== undefined && againstGeneration !== run.generation) {
+      const reason = `Written against generation ${againstGeneration} but run is at generation ${run.generation}`;
+      this.recordReceipt(runId, operator, body, 'stale', reason);
+      return { accepted: false, outcome: 'stale', reason };
     }
 
     if (run.phaseSeq !== againstPhaseSeq) {
@@ -295,7 +302,12 @@ export class SteeringLedger {
 
   pause(
     runId: string,
-    payload: { operator: string; againstPhaseSeq: number; idempotencyKey?: string },
+    payload: {
+      operator: string;
+      againstPhaseSeq: number;
+      againstGeneration?: number;
+      idempotencyKey?: string;
+    },
   ): ControlResult {
     return this.queueControl(runId, 'pause', payload);
   }
@@ -331,13 +343,17 @@ export class SteeringLedger {
       operator: string;
       direction: string;
       againstPhaseSeq: number;
+      againstGeneration?: number;
       idempotencyKey?: string;
     },
   ): ControlResult {
     return this.queueControl(runId, 'redirect', payload);
   }
 
-  abort(runId: string, payload: { operator: string; reason: string }): ControlResult {
+  abort(
+    runId: string,
+    payload: { operator: string; reason: string; againstGeneration?: number },
+  ): ControlResult {
     const run = this.store.getRun(runId);
     if (run === undefined) {
       this.recordReceipt(runId, payload.operator, '', 'not-found', 'Run not found');
@@ -357,6 +373,12 @@ export class SteeringLedger {
         outcome: 'undeliverable',
         reason: `Run is ${run.status}`,
       };
+    }
+
+    if (payload.againstGeneration !== undefined && payload.againstGeneration !== run.generation) {
+      const reason = `Written against generation ${payload.againstGeneration} but run is at generation ${run.generation}`;
+      this.recordReceipt(runId, payload.operator, '', 'stale', reason);
+      return { accepted: false, outcome: 'stale', reason };
     }
 
     // Do NOT mark the run aborted at request time — the abort only takes effect
@@ -500,11 +522,18 @@ export class SteeringLedger {
     runId: string,
     control: 'pause' | 'redirect',
     payload:
-      | { operator: string; againstPhaseSeq: number; idempotencyKey?: string }
-      | { operator: string; direction: string; againstPhaseSeq: number; idempotencyKey?: string },
+      | { operator: string; againstPhaseSeq: number; againstGeneration?: number; idempotencyKey?: string }
+      | {
+          operator: string;
+          direction: string;
+          againstPhaseSeq: number;
+          againstGeneration?: number;
+          idempotencyKey?: string;
+        },
   ): ControlResult {
     const operator = payload.operator;
     const againstPhaseSeq = payload.againstPhaseSeq;
+    const againstGeneration = payload.againstGeneration;
     const idempotencyKey = payload.idempotencyKey;
     const direction = 'direction' in payload ? payload.direction : undefined;
     const run = this.store.getRun(runId);
@@ -529,6 +558,12 @@ export class SteeringLedger {
         outcome: 'undeliverable',
         reason: `Run is ${run.status}`,
       };
+    }
+
+    if (againstGeneration !== undefined && againstGeneration !== run.generation) {
+      const reason = `Written against generation ${againstGeneration} but run is at generation ${run.generation}`;
+      this.recordReceipt(runId, operator, '', 'stale', reason);
+      return { accepted: false, outcome: 'stale', reason };
     }
 
     if (run.phaseSeq !== againstPhaseSeq) {
