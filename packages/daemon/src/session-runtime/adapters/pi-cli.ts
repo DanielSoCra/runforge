@@ -27,7 +27,10 @@ export class PiCliAdapter implements ProviderAdapter {
     prompt: string,
     provider?: ProviderDefinition,
   ): string[] {
-    const args = [...(provider?.executionFlags ?? ['run'])];
+    // zod fills executionFlags with [] when omitted, so `?? ['run']` wouldn't apply;
+    // treat an empty/absent list as "use the default `run` subcommand".
+    const execFlags = provider?.executionFlags;
+    const args = [...(execFlags !== undefined && execFlags.length > 0 ? execFlags : ['run'])];
     const model = provider?.model ?? def.modelOverride;
     if (model !== undefined) args.push('--model', model);
     args.push(prompt);

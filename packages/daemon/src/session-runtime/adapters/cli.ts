@@ -473,6 +473,7 @@ export class CliAdapter implements ProviderAdapter {
           output: parsed.value.output,
           structuredData: parsed.value.structuredData,
           cost: parsed.value.cost,
+          costEstimated: parsed.value.costEstimated,
           pitfallMarkers: this.extractPitfalls(parsed.value.output),
           exitStatus,
           handoffNote: this.extractHandoff(parsed.value.output),
