@@ -7,8 +7,15 @@ version: 1
 layer: 3
 stack: typescript
 references: ARCH-AC-VERIFIER-GATE
-code_paths: []  # DEFERRED to implementation — the path-existence validator requires real files; paths land with the impl PR (new sibling module under control-plane/lane-engine/verifier-gate/)
-test_paths: []  # DEFERRED to implementation — colocated *.test.ts added with the impl PR
+code_paths:
+  - packages/daemon/src/control-plane/lane-engine/verifier-gate/
+  - packages/daemon/src/control-plane/lane-engine/verifier-gate/types.ts
+  - packages/daemon/src/control-plane/lane-engine/verifier-gate/schema.ts
+  - packages/daemon/src/control-plane/lane-engine/verifier-gate/evaluate.ts
+  - packages/daemon/src/control-plane/lane-engine/verifier-gate/index.ts
+test_paths:
+  - packages/daemon/src/control-plane/lane-engine/verifier-gate/evaluate.test.ts
+  - packages/daemon/src/control-plane/lane-engine/verifier-gate/schema.test.ts
 ---
 
 # STACK-AC-VERIFIER-GATE — Verifier Gate (TypeScript)

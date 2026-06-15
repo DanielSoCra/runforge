@@ -631,8 +631,15 @@ STACK-AC-LANE-ENGINE:
 STACK-AC-VERIFIER-GATE:
   parent: ARCH-AC-VERIFIER-GATE
   children: []
-  code_paths: []
-  test_paths: []
+  code_paths:
+    - packages/daemon/src/control-plane/lane-engine/verifier-gate/
+    - packages/daemon/src/control-plane/lane-engine/verifier-gate/types.ts
+    - packages/daemon/src/control-plane/lane-engine/verifier-gate/schema.ts
+    - packages/daemon/src/control-plane/lane-engine/verifier-gate/evaluate.ts
+    - packages/daemon/src/control-plane/lane-engine/verifier-gate/index.ts
+  test_paths:
+    - packages/daemon/src/control-plane/lane-engine/verifier-gate/evaluate.test.ts
+    - packages/daemon/src/control-plane/lane-engine/verifier-gate/schema.test.ts
   status: draft
 
 STACK-AC-OPERATIONAL-SAFETY:
