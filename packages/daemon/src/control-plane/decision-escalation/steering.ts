@@ -182,18 +182,18 @@ export class SteeringLedger {
       };
     }
 
-    if (run.phaseSeq > againstPhaseSeq) {
+    if (run.phaseSeq !== againstPhaseSeq) {
       this.recordReceipt(
         runId,
         operator,
         body,
         'stale',
-        `Run has moved past phaseSeq ${againstPhaseSeq}`,
+        `Written against phaseSeq ${againstPhaseSeq} which no longer matches the run state`,
       );
       return {
         accepted: false,
         outcome: 'stale',
-        reason: `Run has moved past phaseSeq ${againstPhaseSeq}`,
+        reason: `Written against phaseSeq ${againstPhaseSeq} which no longer matches the run state`,
       };
     }
 
@@ -386,14 +386,24 @@ export class SteeringLedger {
 
     const isSafe = boundary.safePoint !== false;
 
+    // Terminal: an already-aborted run stays aborted idempotently — no re-mutation,
+    // no re-emitted side effects (abort is exactly-once, like notes and redirects).
+    if (run.status === 'aborted') {
+      return {
+        directive: 'abort',
+        partialWorkPreserved: true,
+        partialWorkLabel: 'abandoned',
+        discardPriorWork: false,
+        ...baseFlags,
+      };
+    }
+
     const abortControl = this.findControl(runId, targetGeneration, 'abort');
-    if (abortControl !== undefined) {
+    if (abortControl !== undefined && !abortControl.applied) {
       if (!isSafe) {
         return { directive: 'proceed', ...baseFlags };
       }
-      if (run.status !== 'aborted') {
-        this.store.upsertRun({ ...run, status: 'aborted' });
-      }
+      this.store.upsertRun({ ...run, status: 'aborted' });
       abortControl.applied = true;
       abortControl.appliedAtPhaseSeq = boundary.phaseSeq;
       return {
@@ -500,18 +510,18 @@ export class SteeringLedger {
       };
     }
 
-    if (run.phaseSeq > againstPhaseSeq) {
+    if (run.phaseSeq !== againstPhaseSeq) {
       this.recordReceipt(
         runId,
         operator,
         '',
         'stale',
-        `Run has moved past phaseSeq ${againstPhaseSeq}`,
+        `Written against phaseSeq ${againstPhaseSeq} which no longer matches the run state`,
       );
       return {
         accepted: false,
         outcome: 'stale',
-        reason: `Run has moved past phaseSeq ${againstPhaseSeq}`,
+        reason: `Written against phaseSeq ${againstPhaseSeq} which no longer matches the run state`,
       };
     }
 
