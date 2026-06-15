@@ -220,10 +220,14 @@ export class SteeringLedger {
     boundary: { phaseSeq: number; phase: string; generation?: number },
   ): DeliverNotesResult {
     const run = this.store.getRun(runId);
-    const targetGeneration = boundary.generation ?? run?.generation;
-    if (run === undefined || targetGeneration === undefined) {
+    if (run === undefined) {
       return { delivered: [], gateBypassed: false, decisionAnswered: false, scopeWidened: false };
     }
+    // Stale-generation boundary event → no-op: a successor generation never inherits prior guidance.
+    if (boundary.generation !== undefined && boundary.generation !== run.generation) {
+      return { delivered: [], gateBypassed: false, decisionAnswered: false, scopeWidened: false };
+    }
+    const targetGeneration = run.generation;
 
     if (run.status === 'aborted' || run.status === 'completed') {
       return { delivered: [], gateBypassed: false, decisionAnswered: false, scopeWidened: false };
@@ -342,7 +346,9 @@ export class SteeringLedger {
       };
     }
 
-    this.store.upsertRun({ ...run, status: 'aborted' });
+    // Do NOT mark the run aborted at request time — the abort only takes effect
+    // at the earliest safe point (directiveAtBoundary), never mid-write. Queue
+    // it as a pending control; status transitions there.
     const controlId = randomUUID();
     this.store.controls.set(controlId, {
       controlId,
@@ -351,7 +357,7 @@ export class SteeringLedger {
       operator: payload.operator,
       control: 'abort',
       reason: payload.reason,
-      applied: true,
+      applied: false,
     });
 
     return { accepted: true, outcome: 'queued', controlId };
@@ -362,7 +368,6 @@ export class SteeringLedger {
     boundary: { phaseSeq: number; phase: string; generation?: number; safePoint?: boolean },
   ): BoundaryDirective {
     const run = this.store.getRun(runId);
-    const targetGeneration = boundary.generation ?? run?.generation;
     const baseFlags = {
       gateBypassed: false,
       decisionAnswered: false,
@@ -370,9 +375,14 @@ export class SteeringLedger {
       scopeWidened: false,
     };
 
-    if (run === undefined || targetGeneration === undefined) {
+    if (run === undefined) {
       return { directive: 'proceed', ...baseFlags };
     }
+    // Stale-generation boundary event → no-op: never act on a different generation's guidance.
+    if (boundary.generation !== undefined && boundary.generation !== run.generation) {
+      return { directive: 'proceed', ...baseFlags };
+    }
+    const targetGeneration = run.generation;
 
     const isSafe = boundary.safePoint !== false;
 
@@ -384,6 +394,8 @@ export class SteeringLedger {
       if (run.status !== 'aborted') {
         this.store.upsertRun({ ...run, status: 'aborted' });
       }
+      abortControl.applied = true;
+      abortControl.appliedAtPhaseSeq = boundary.phaseSeq;
       return {
         directive: 'abort',
         partialWorkPreserved: true,
