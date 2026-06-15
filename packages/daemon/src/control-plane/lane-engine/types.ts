@@ -110,6 +110,8 @@ export interface EligibilityInput {
   lane: ResolvedLane;
   classifierLevel: RiskLevel;
   riskPathMap: RiskPathMap;
+  /** The deployment's configured default minimum risk level — applied to paths that match no RiskPathMap entry. */
+  defaultMinLevel: RiskLevel;
   touchedPaths: string[];
   /** The mode resolution the lane was resolved under (from resolveForMode), carried into the result for audit. */
   modeResolution: ModeResolution;

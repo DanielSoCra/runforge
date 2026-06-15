@@ -37,6 +37,7 @@ describe('evaluateMergeEligibility', () => {
       lane: makeLane(),
       classifierLevel: 'green',
       riskPathMap: [],
+      defaultMinLevel: 'green',
       touchedPaths: ['docs/a.md'],
       modeResolution: { mode: 'velocity', degraded: false },
     };
@@ -55,6 +56,7 @@ describe('evaluateMergeEligibility', () => {
       lane: makeLane(),
       classifierLevel: 'green',
       riskPathMap: [],
+      defaultMinLevel: 'green',
       touchedPaths: ['src/secret.ts'],
       modeResolution: { mode: 'velocity', degraded: false },
     };
@@ -68,6 +70,7 @@ describe('evaluateMergeEligibility', () => {
       lane: makeLane(),
       classifierLevel: 'green',
       riskPathMap: [],
+      defaultMinLevel: 'green',
       touchedPaths: ['docs/a.md'],
       modeResolution: { mode: null, degraded: true, cause: 'mode-unreadable' },
     };
@@ -80,6 +83,7 @@ describe('evaluateMergeEligibility', () => {
       lane: makeLane({ allowedPaths: ['**'], mergePolicy: 'auto' }),
       classifierLevel: 'green',
       riskPathMap: [{ paths: ['migrations/**'], minLevel: 'orange' }],
+      defaultMinLevel: 'green',
       touchedPaths: ['migrations/001.sql'],
       modeResolution: { mode: 'velocity', degraded: false },
     };
@@ -88,6 +92,23 @@ describe('evaluateMergeEligibility', () => {
     if (r.kind === 'eligible') {
       expect(r.effectiveRisk).toBe('orange');
       expect(r.mergePolicy).toBe('hold');
+    }
+  });
+
+  it('applies the configured default minimum to an unmatched path (caps policy)', () => {
+    const input: EligibilityInput = {
+      lane: makeLane({ allowedPaths: ['**'], mergePolicy: 'auto' }),
+      classifierLevel: 'green',
+      riskPathMap: [],
+      defaultMinLevel: 'yellow',
+      touchedPaths: ['anything.ts'],
+      modeResolution: { mode: 'velocity', degraded: false },
+    };
+    const r = evaluateMergeEligibility(input);
+    expect(r.kind).toBe('eligible');
+    if (r.kind === 'eligible') {
+      expect(r.effectiveRisk).toBe('yellow'); // unmatched path raised to default minimum
+      expect(r.mergePolicy).toBe('review-then-auto'); // auto capped by yellow
     }
   });
 });

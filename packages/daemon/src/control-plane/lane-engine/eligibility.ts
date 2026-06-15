@@ -29,7 +29,12 @@ export function capPolicy(lanePolicy: MergePolicy, risk: RiskLevel): MergePolicy
  * caller (Plan 2) — never inside here.
  */
 export function evaluateMergeEligibility(input: EligibilityInput): Eligibility {
-  const effectiveRisk = applyRiskPathFloor(input.classifierLevel, input.riskPathMap, input.touchedPaths);
+  const effectiveRisk = applyRiskPathFloor(
+    input.classifierLevel,
+    input.riskPathMap,
+    input.touchedPaths,
+    input.defaultMinLevel,
+  );
   const tripwire = evaluateTripwire(input.touchedPaths, input.lane);
   if (tripwire.kind !== 'in-scope') {
     return {

@@ -14,16 +14,23 @@ export function maxRiskLevel(first: RiskLevel, ...rest: RiskLevel[]): RiskLevel 
 
 /**
  * Raise-only floor: the effective risk is the most cautious of the classifier
- * level and every risk-path entry whose patterns match a touched path. By
- * construction (a max over levels) a map entry can never lower a level.
+ * level and every touched path's floor. A path's floor is the max of the
+ * risk-path entries it matches, or the deployment's configured default minimum
+ * when it matches none (ARCH-AC-LANE-ENGINE: "unmatched paths fall through to
+ * the deployment's configured default minimum"). By construction (a max over
+ * levels) nothing here can ever lower a level.
  */
 export function applyRiskPathFloor(
   classifierLevel: RiskLevel,
   riskPathMap: RiskPathMap,
   touchedPaths: string[],
+  defaultMinLevel: RiskLevel,
 ): RiskLevel {
-  const matchedFloors = riskPathMap
-    .filter((entry) => touchedPaths.some((p) => matchesAny(p, entry.paths)))
-    .map((entry) => entry.minLevel);
-  return maxRiskLevel(classifierLevel, ...matchedFloors);
+  const perPathFloors = touchedPaths.map((path) => {
+    const matched = riskPathMap
+      .filter((entry) => matchesAny(path, entry.paths))
+      .map((entry) => entry.minLevel);
+    return matched.length > 0 ? maxRiskLevel(matched[0]!, ...matched.slice(1)) : defaultMinLevel;
+  });
+  return maxRiskLevel(classifierLevel, ...perPathFloors);
 }
