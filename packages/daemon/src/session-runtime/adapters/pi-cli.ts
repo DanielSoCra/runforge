@@ -10,22 +10,29 @@ import type {
   SessionResult,
 } from '../../types.js';
 import { SessionError } from '../session-error.js';
-import type { ProviderAdapter, SessionHandle, ContainmentCapabilityProfile } from './types.js';
+import type {
+  ProviderAdapter,
+  SessionHandle,
+  ContainmentCapabilityProfile,
+} from './types.js';
 import {
   registerManagedProcess,
   unregisterManagedProcess,
   killProcessGroup,
 } from '../managed-processes.js';
 
-export class CodexCliAdapter implements ProviderAdapter {
+export class PiCliAdapter implements ProviderAdapter {
   buildArgs(
     def: AgentDefinition,
     prompt: string,
     provider?: ProviderDefinition,
   ): string[] {
-    const args = [...(provider?.executionFlags ?? ['exec'])];
+    // zod fills executionFlags with [] when omitted, so `?? ['run']` wouldn't apply;
+    // treat an empty/absent list as "use the default `run` subcommand".
+    const execFlags = provider?.executionFlags;
+    const args = [...(execFlags !== undefined && execFlags.length > 0 ? execFlags : ['run'])];
     const model = provider?.model ?? def.modelOverride;
-    if (model) args.push('--model', model);
+    if (model !== undefined) args.push('--model', model);
     args.push(prompt);
     return args;
   }
@@ -42,12 +49,12 @@ export class CodexCliAdapter implements ProviderAdapter {
 
   parseOutput(stdout: string): Result<SessionResult> {
     const output = stdout.trim();
-    // Codex CLI does not emit exact usage cost; record a conservative,
-    // clearly-marked estimate rather than a silent zero (STACK-AC-SESSION-PROVIDERS v2).
+    // pi CLI does not emit exact usage cost; record a conservative,
+    // clearly-marked estimate rather than a silent zero.
     const estimatedCost = output.length > 0 ? Math.max(0.001, output.length * 0.0001) : 0.001;
     return ok({
       output,
-      structuredData: { provider: 'codex-cli', raw: stdout },
+      structuredData: { provider: 'pi-cli', raw: stdout },
       cost: estimatedCost,
       costEstimated: true,
       pitfallMarkers: [],
@@ -61,25 +68,27 @@ export class CodexCliAdapter implements ProviderAdapter {
     options?: Parameters<ProviderAdapter['spawn']>[2],
   ): Promise<Result<SessionResult>> {
     const provider = options?.provider;
-    const command = provider?.binaryPath ?? provider?.cliTool ?? 'codex';
+    const command = provider?.binaryPath ?? provider?.cliTool ?? 'pi';
     const args = this.buildArgs(def, prompt, provider);
     const env = this.buildEnv(provider);
-    const tempCwd = options?.cwd ? undefined : mkdtempSync(join(tmpdir(), 'codex-session-cwd-'));
+    const tempCwd = options?.cwd !== undefined ? undefined : mkdtempSync(join(tmpdir(), 'pi-session-cwd-'));
     const cwd = options?.cwd ?? tempCwd;
 
     return new Promise((resolve) => {
       const chunks: Buffer[] = [];
       const errChunks: Buffer[] = [];
-      // detached: child leads its own process group so the timeout AND the
-      // operator force-kill can group-signal (`kill -pid`) the codex CLI and its
-      // tool subprocesses together.
       const proc = spawn(command, args, { cwd, env, detached: true });
       registerManagedProcess(proc);
 
       let timedOut = false;
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      const SIGTERM_GRACE_MS = 5_000;
       const timer = setTimeout(() => {
         timedOut = true;
         killProcessGroup(proc, 'SIGTERM');
+        killTimer = setTimeout(() => {
+          killProcessGroup(proc, 'SIGKILL');
+        }, SIGTERM_GRACE_MS);
       }, def.timeoutMs);
 
       proc.stdout.on('data', (d: Buffer) => chunks.push(d));
@@ -87,8 +96,9 @@ export class CodexCliAdapter implements ProviderAdapter {
 
       proc.on('close', (code) => {
         clearTimeout(timer);
+        if (killTimer) clearTimeout(killTimer);
         unregisterManagedProcess(proc);
-        if (tempCwd) {
+        if (tempCwd !== undefined) {
           try {
             rmSync(tempCwd, { recursive: true, force: true });
           } catch {
@@ -127,8 +137,9 @@ export class CodexCliAdapter implements ProviderAdapter {
 
       proc.on('error', (e) => {
         clearTimeout(timer);
+        if (killTimer) clearTimeout(killTimer);
         unregisterManagedProcess(proc);
-        if (tempCwd) {
+        if (tempCwd !== undefined) {
           try {
             rmSync(tempCwd, { recursive: true, force: true });
           } catch {
@@ -140,33 +151,13 @@ export class CodexCliAdapter implements ProviderAdapter {
     });
   }
 
-  isRateLimitError(text: string): boolean {
-    const lower = text.toLowerCase();
-    return (
-      lower.includes('rate limit') ||
-      lower.includes('rate_limit') ||
-      /\b429\b/.test(lower) ||
-      lower.includes('too many requests')
-    );
-  }
-
-  parseExitStatusFromOutput(output: string): ExitStatus {
-    const upper = output.toUpperCase();
-    if (upper.includes('DONE_WITH_CONCERNS')) return 'completed-with-concerns';
-    if (upper.includes('NEEDS_CONTEXT')) return 'needs-context';
-    if (/(?:^|\*\*|^-\s+)\s*BLOCKED\s*(?:\*\*|$|\s*—|\s*:)/.test(upper)) {
-      return 'blocked';
-    }
-    return 'completed';
-  }
-
   async resume(
     def: AgentDefinition,
     prompt: string,
     continuationId: string,
     options?: Parameters<ProviderAdapter['spawn']>[2],
   ): Promise<Result<SessionResult>> {
-    // Codex CLI does not expose a native continuation primitive in this adapter.
+    // pi CLI does not expose a native continuation primitive in this adapter.
     // The capability profile declares sessionContinuation: false; resume degrades
     // to a fresh spawn so the caller never receives a missing-method error.
     // We still surface the continuation id on success so the runtime can keep
@@ -195,5 +186,25 @@ export class CodexCliAdapter implements ProviderAdapter {
       exactCostReporting: false,
       sessionContinuation: false,
     };
+  }
+
+  isRateLimitError(text: string): boolean {
+    const lower = text.toLowerCase();
+    return (
+      lower.includes('rate limit') ||
+      lower.includes('rate_limit') ||
+      /\b429\b/.test(lower) ||
+      lower.includes('too many requests')
+    );
+  }
+
+  parseExitStatusFromOutput(output: string): ExitStatus {
+    const upper = output.toUpperCase();
+    if (upper.includes('DONE_WITH_CONCERNS')) return 'completed-with-concerns';
+    if (upper.includes('NEEDS_CONTEXT')) return 'needs-context';
+    if (/(?:^|\*\*|^-\s+)\s*BLOCKED\s*(?:\*\*|$|\s*—|\s*:)/.test(upper)) {
+      return 'blocked';
+    }
+    return 'completed';
   }
 }

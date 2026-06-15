@@ -848,6 +848,7 @@ describe('SessionRuntime', () => {
         providers: {
           defaultProvider: 'claude-default',
           fallbackChain: ['claude-default'],
+          requireSmokeProof: false,
           definitions: {
             'codex-planner': {
               name: 'codex-planner',
@@ -924,6 +925,7 @@ describe('SessionRuntime', () => {
         providers: {
           defaultProvider: 'claude-default',
           fallbackChain: [],
+          requireSmokeProof: false,
           definitions: {
             'codex-planner': {
               name: 'codex-planner',
@@ -1172,6 +1174,7 @@ describe('SessionRuntime', () => {
     const providersBlock = {
       defaultProvider: 'claude-default',
       fallbackChain: [] as string[],
+      requireSmokeProof: false,
       definitions: {
         'claude-default': {
           name: 'claude-default',

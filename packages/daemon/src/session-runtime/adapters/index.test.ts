@@ -5,6 +5,7 @@ import {
   createProviderAdapter,
   CliAdapter,
   CodexCliAdapter,
+  PiCliAdapter,
 } from './index.js';
 import type { ProviderDefinition } from '../../types.js';
 
@@ -36,18 +37,21 @@ describe('createProviderAdapter (#480)', () => {
     expect(createProviderAdapter(baseProvider)).toBeInstanceOf(CliAdapter);
   });
 
-  it('returns plain process adapter for codex-cli and pi-cli providers', () => {
+  it('returns Codex CLI adapter for codex-cli providers', () => {
     expect(
       createProviderAdapter({
         ...baseProvider,
         providerKind: 'codex-cli',
       }),
     ).toBeInstanceOf(CodexCliAdapter);
+  });
+
+  it('returns Pi CLI adapter for pi-cli providers', () => {
     expect(
       createProviderAdapter({
         ...baseProvider,
         providerKind: 'pi-cli',
       }),
-    ).toBeInstanceOf(CodexCliAdapter);
+    ).toBeInstanceOf(PiCliAdapter);
   });
 });

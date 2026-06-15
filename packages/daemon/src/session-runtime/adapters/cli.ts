@@ -6,7 +6,7 @@ import { tmpdir } from 'os';
 import { ok, err, type Result } from '../../lib/result.js';
 import type { AgentDefinition, SessionContext, SessionResult, ExitStatus, PitfallMarker, DirectoryScope, ProviderDefinition } from '../../types.js';
 import type { ContainmentPolicy } from '../containment-hooks.js';
-import type { ProviderAdapter } from './types.js';
+import type { ProviderAdapter, SessionHandle, ContainmentCapabilityProfile } from './types.js';
 import type { McpConfig } from '../plugin-injection.js';
 import { generateContainmentScript } from '../generate-containment-script.js';
 import { generateTimeoutHookScript } from '../timeout-hook-script.js';
@@ -36,6 +36,7 @@ export class CliAdapter implements ProviderAdapter {
     jsonSchema?: string,
     provider?: ProviderDefinition,
     skipPermissions?: boolean,
+    continuationId?: string,
   ): string[] {
     const args = [
       '-p', prompt,
@@ -51,6 +52,9 @@ export class CliAdapter implements ProviderAdapter {
     }
     if (jsonSchema) {
       args.push('--json-schema', jsonSchema);
+    }
+    if (continuationId !== undefined) {
+      args.push('--resume', continuationId);
     }
     // Permission bypass for autonomous, externally-sandboxed workers (the
     // container IS the sandbox). GATED: only when the caller turns the gate on —
@@ -97,7 +101,7 @@ export class CliAdapter implements ProviderAdapter {
     return env;
   }
 
-  parseOutput(stdout: string): Result<{ output: string; cost: number; structuredData: unknown }> {
+  parseOutput(stdout: string): Result<{ output: string; cost: number; costEstimated: boolean; structuredData: unknown; continuationId?: string }> {
     try {
       const json = JSON.parse(stdout) as Record<string, unknown>;
       const output = typeof json['result'] === 'string'
@@ -111,10 +115,13 @@ export class CliAdapter implements ProviderAdapter {
           ? json['cost']
           : 0;
       const cost = Number.isFinite(rawCost) && rawCost > 0 ? rawCost : 0;
+      const continuationId = typeof json['session_id'] === 'string' ? json['session_id'] : undefined;
       return ok({
         output,
         cost,
         structuredData: json,
+        costEstimated: cost === 0,
+        continuationId,
       });
     } catch {
       // Non-JSON output means the CLI crashed, was killed, or produced unexpected output.
@@ -327,7 +334,7 @@ export class CliAdapter implements ProviderAdapter {
     let hookPaths: { scriptPaths: string[]; settingsPath: string; markerPath?: string } | undefined;
     let tempCwd: string | undefined;
     let effectiveCwd: string;
-    if (options?.cwd) {
+    if (options?.cwd !== undefined) {
       effectiveCwd = options.cwd;
     } else {
       tempCwd = mkdtempSync(join(tmpdir(), 'session-cwd-'));
@@ -399,8 +406,8 @@ export class CliAdapter implements ProviderAdapter {
         clearTimeout(timer);
         if (killTimer) clearTimeout(killTimer);
         unregisterManagedProcess(proc);
-        if (hookPaths) this.cleanupHooks(hookPaths);
-        if (tempCwd) { try { rmSync(tempCwd, { recursive: true, force: true }); } catch { /* best-effort */ } }
+        if (hookPaths !== undefined) this.cleanupHooks(hookPaths);
+        if (tempCwd !== undefined) { try { rmSync(tempCwd, { recursive: true, force: true }); } catch { /* best-effort */ } }
         const stdout = Buffer.concat(chunks).toString();
         const stderr = Buffer.concat(errChunks).toString();
 
@@ -431,6 +438,7 @@ export class CliAdapter implements ProviderAdapter {
             pitfallMarkers: this.extractPitfalls(timedOutOutput),
             exitStatus: 'timed-out' as ExitStatus,
             handoffNote: this.extractHandoff(timedOutOutput),
+            continuationId: timedOutParsed.ok && this.capabilities().sessionContinuation ? timedOutParsed.value.continuationId : undefined,
           }));
           return;
         }
@@ -465,9 +473,11 @@ export class CliAdapter implements ProviderAdapter {
           output: parsed.value.output,
           structuredData: parsed.value.structuredData,
           cost: parsed.value.cost,
+          costEstimated: parsed.value.costEstimated,
           pitfallMarkers: this.extractPitfalls(parsed.value.output),
           exitStatus,
           handoffNote: this.extractHandoff(parsed.value.output),
+          continuationId: this.capabilities().sessionContinuation ? parsed.value.continuationId : undefined,
         }));
       });
 
@@ -475,8 +485,8 @@ export class CliAdapter implements ProviderAdapter {
         clearTimeout(timer);
         if (killTimer) clearTimeout(killTimer);
         unregisterManagedProcess(proc);
-        if (hookPaths) this.cleanupHooks(hookPaths);
-        if (tempCwd) { try { rmSync(tempCwd, { recursive: true, force: true }); } catch { /* best-effort */ } }
+        if (hookPaths !== undefined) this.cleanupHooks(hookPaths);
+        if (tempCwd !== undefined) { try { rmSync(tempCwd, { recursive: true, force: true }); } catch { /* best-effort */ } }
         const partialStdout = Buffer.concat(chunks).toString();
         const parsed = this.parseOutput(partialStdout);
         const cost = parsed.ok ? parsed.value.cost : 0;
@@ -493,6 +503,193 @@ export class CliAdapter implements ProviderAdapter {
     const match = output.match(/\[HANDOFF\]([\s\S]*?)\[\/HANDOFF\]/);
     const note = match?.[1]?.trim();
     return note || undefined;
+  }
+
+  async resume(
+    def: AgentDefinition,
+    prompt: string,
+    continuationId: string,
+    options?: Parameters<ProviderAdapter['spawn']>[2],
+  ): Promise<Result<SessionResult>> {
+    const args = this.buildArgs(
+      def,
+      prompt,
+      options?.jsonSchema,
+      options?.provider,
+      options?.skipPermissions,
+      continuationId,
+    );
+    const sessionStartTime = Date.now();
+    const extraEnv: Record<string, string> = {
+      SESSION_START_TIME: String(sessionStartTime),
+      SESSION_TIMEOUT_MS: String(def.timeoutMs),
+    };
+    const env = this.buildEnv(extraEnv, options?.provider);
+
+    let hookPaths: { scriptPaths: string[]; settingsPath: string; markerPath?: string } | undefined;
+    let tempCwd: string | undefined;
+    let effectiveCwd: string;
+    if (options?.cwd !== undefined) {
+      effectiveCwd = options.cwd;
+    } else {
+      tempCwd = mkdtempSync(join(tmpdir(), 'session-cwd-'));
+      effectiveCwd = tempCwd;
+    }
+    hookPaths = this.setupHooks(
+      effectiveCwd,
+      options?.containmentPolicy,
+      def.timeoutMs,
+      sessionStartTime,
+      options?.mcpConfigs,
+      options?.directoryScope,
+    );
+
+    if (options?.skipPermissions === true) {
+      try {
+        await seedClaudeProjectTrust(effectiveCwd);
+      } catch (e) {
+        console.warn(
+          `[cli-adapter] workspace-trust seed failed for ${effectiveCwd}: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    }
+
+    return new Promise((resolve) => {
+      const chunks: Buffer[] = [];
+      const errChunks: Buffer[] = [];
+
+      const proc = spawn(
+        options?.provider?.binaryPath ?? options?.provider?.cliTool ?? 'claude',
+        args,
+        {
+          cwd: effectiveCwd,
+          env,
+          detached: true,
+        },
+      );
+      registerManagedProcess(proc);
+
+      let timedOut = false;
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      const SIGTERM_GRACE_MS = 5_000;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        killProcessGroup(proc, 'SIGTERM');
+        killTimer = setTimeout(() => {
+          killProcessGroup(proc, 'SIGKILL');
+        }, SIGTERM_GRACE_MS);
+      }, def.timeoutMs);
+
+      proc.stdout.on('data', (d: Buffer) => chunks.push(d));
+      proc.stderr.on('data', (d: Buffer) => errChunks.push(d));
+
+      proc.on('close', (code) => {
+        clearTimeout(timer);
+        if (killTimer) clearTimeout(killTimer);
+        unregisterManagedProcess(proc);
+        if (hookPaths !== undefined) this.cleanupHooks(hookPaths);
+        if (tempCwd !== undefined) { try { rmSync(tempCwd, { recursive: true, force: true }); } catch { /* best-effort */ } }
+        const stdout = Buffer.concat(chunks).toString();
+        const stderr = Buffer.concat(errChunks).toString();
+
+        if (this.isRateLimitError(stderr) || this.isRateLimitError(stdout)) {
+          const parsed = this.parseOutput(stdout);
+          const cost = parsed.ok ? parsed.value.cost : 0;
+          resolve(err(new SessionError('Rate limited by upstream provider', cost, true)));
+          return;
+        }
+
+        if (stdout.includes('scope-violation') || stderr.includes('scope-violation')) {
+          const parsed = this.parseOutput(stdout);
+          const cost = parsed.ok ? parsed.value.cost : 0;
+          const evidence = (stderr + '\n' + stdout).trim().slice(-1200);
+          resolve(err(SessionError.scopeViolated(evidence || 'pre-execution hook blocked tool call', cost)));
+          return;
+        }
+
+        if (timedOut) {
+          const timedOutParsed = this.parseOutput(stdout);
+          const timedOutCost = timedOutParsed.ok ? timedOutParsed.value.cost : 0;
+          const timedOutOutput = timedOutParsed.ok ? timedOutParsed.value.output : stdout.trim();
+          resolve(ok({
+            output: timedOutOutput,
+            structuredData: null,
+            cost: timedOutCost,
+            costEstimated: timedOutCost === 0,
+            pitfallMarkers: this.extractPitfalls(timedOutOutput),
+            exitStatus: 'timed-out' as ExitStatus,
+            handoffNote: this.extractHandoff(timedOutOutput),
+            continuationId,
+          }));
+          return;
+        }
+
+        const parsed = this.parseOutput(stdout);
+        if (!parsed.ok) {
+          resolve(err(parsed.error));
+          return;
+        }
+
+        const reportedStatus = this.parseExitStatusFromOutput(parsed.value.output);
+        const exitStatus: ExitStatus = code === 0
+          ? reportedStatus
+          : reportedStatus === 'completed'
+            ? 'completed-with-concerns'
+            : reportedStatus;
+
+        if (code !== 0) {
+          const stderrTail = stderr.trim().slice(-1200) || '(empty stderr)';
+          const outputTail = parsed.value.output.trim().slice(-1200) || '(empty output)';
+          console.warn(
+            `[cli-adapter] claude exited ${code}; reported=${reportedStatus}; returning=${exitStatus}; stderr_tail=${JSON.stringify(stderrTail)}; output_tail=${JSON.stringify(outputTail)}`,
+          );
+        }
+
+        resolve(ok({
+          output: parsed.value.output,
+          structuredData: parsed.value.structuredData,
+          cost: parsed.value.cost,
+          costEstimated: parsed.value.costEstimated,
+          pitfallMarkers: this.extractPitfalls(parsed.value.output),
+          exitStatus,
+          handoffNote: this.extractHandoff(parsed.value.output),
+          continuationId,
+        }));
+      });
+
+      proc.on('error', (e) => {
+        clearTimeout(timer);
+        if (killTimer) clearTimeout(killTimer);
+        unregisterManagedProcess(proc);
+        if (hookPaths !== undefined) this.cleanupHooks(hookPaths);
+        if (tempCwd !== undefined) { try { rmSync(tempCwd, { recursive: true, force: true }); } catch { /* best-effort */ } }
+        const partialStdout = Buffer.concat(chunks).toString();
+        const parsed = this.parseOutput(partialStdout);
+        const cost = parsed.ok ? parsed.value.cost : 0;
+        resolve(err(new SessionError(e.message, cost)));
+      });
+    });
+  }
+
+  async abort(handle: SessionHandle): Promise<void> {
+    const pid = handle.pid;
+    if (pid === undefined) return;
+    try {
+      process.kill(-pid, 'SIGTERM');
+    } catch {
+      // best-effort: process may already be gone
+    }
+  }
+
+  capabilities(): ContainmentCapabilityProfile {
+    return {
+      nativeGuardHooks: true,
+      structuredOutput: true,
+      exactCostReporting: true,
+      sessionContinuation: true,
+    };
   }
 
   /**

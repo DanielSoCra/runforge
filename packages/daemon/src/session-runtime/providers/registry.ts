@@ -30,6 +30,7 @@ export interface ProviderRegistryConfig {
   fallbackChain: string[];
   baseBackoffMs?: number;
   maxBackoffMs?: number;
+  requireSmokeProof?: boolean;
 }
 
 export interface ProviderResolveOptions {
@@ -40,16 +41,19 @@ export interface ProviderResolveOptions {
 export class ProviderRegistry {
   private readonly providers = new Map<string, ProviderDefinition>();
   private readonly health = new Map<string, ProviderHealthState>();
+  private readonly smokeProofs = new Map<string, boolean>();
   private readonly defaultProvider: string;
   private readonly fallbackChain: string[];
   private readonly baseBackoffMs: number;
   private readonly maxBackoffMs: number;
+  private readonly requireSmokeProof: boolean;
 
   constructor(config: ProviderRegistryConfig) {
     this.defaultProvider = config.defaultProvider;
     this.fallbackChain = config.fallbackChain;
     this.baseBackoffMs = config.baseBackoffMs ?? 5_000;
     this.maxBackoffMs = config.maxBackoffMs ?? 300_000;
+    this.requireSmokeProof = config.requireSmokeProof ?? false;
 
     for (const provider of config.providers) {
       this.providers.set(provider.name, provider);
@@ -80,6 +84,7 @@ export class ProviderRegistry {
       fallbackChain: config.providers.fallbackChain,
       baseBackoffMs: config.retryBackoffBaseMs,
       maxBackoffMs: config.retryBackoffMaxMs,
+      requireSmokeProof: config.providers.requireSmokeProof ?? false,
     });
   }
 
@@ -109,6 +114,7 @@ export class ProviderRegistry {
       if (!provider.supportedModelTiers.includes(tier)) continue;
       sawTierCompatible = true;
       if (!this.isEligible(name, now)) continue;
+      if (!this.hasSmokeProof(name, tier)) continue;
       return { ok: true, provider };
     }
 
@@ -128,6 +134,31 @@ export class ProviderRegistry {
     state.consecutiveTransientFailures = 0;
     state.cooldownUntil = 0;
     state.lastChecked = Date.now();
+  }
+
+  markSmokeProof(providerName: string, tier: string): void {
+    this.smokeProofs.set(this.smokeProofKey(providerName, tier), true);
+    const state = this.health.get(providerName);
+    if (state) {
+      state.status = 'available';
+    }
+  }
+
+  markSmokeFailed(providerName: string, tier: string): void {
+    this.smokeProofs.set(this.smokeProofKey(providerName, tier), false);
+    const state = this.health.get(providerName);
+    if (state) {
+      state.status = 'degraded';
+    }
+  }
+
+  private hasSmokeProof(providerName: string, tier: string): boolean {
+    if (!this.requireSmokeProof) return true;
+    return this.smokeProofs.get(this.smokeProofKey(providerName, tier)) === true;
+  }
+
+  private smokeProofKey(providerName: string, tier: string): string {
+    return `${providerName}:${tier}`;
   }
 
   reportFailure(

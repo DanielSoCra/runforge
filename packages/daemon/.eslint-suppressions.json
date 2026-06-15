@@ -477,7 +477,7 @@
       "count": 1
     },
     "@typescript-eslint/strict-boolean-expressions": {
-      "count": 12
+      "count": 7
     }
   },
   "src/session-runtime/adapters/codex-cli.ts": {
