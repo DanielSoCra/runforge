@@ -84,6 +84,7 @@ export class ProviderRegistry {
       fallbackChain: config.providers.fallbackChain,
       baseBackoffMs: config.retryBackoffBaseMs,
       maxBackoffMs: config.retryBackoffMaxMs,
+      requireSmokeProof: config.providers.requireSmokeProof ?? true,
     });
   }
 

@@ -616,6 +616,7 @@ export class CliAdapter implements ProviderAdapter {
             pitfallMarkers: this.extractPitfalls(timedOutOutput),
             exitStatus: 'timed-out' as ExitStatus,
             handoffNote: this.extractHandoff(timedOutOutput),
+            continuationId,
           }));
           return;
         }
@@ -649,6 +650,7 @@ export class CliAdapter implements ProviderAdapter {
           pitfallMarkers: this.extractPitfalls(parsed.value.output),
           exitStatus,
           handoffNote: this.extractHandoff(parsed.value.output),
+          continuationId,
         }));
       });
 

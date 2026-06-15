@@ -78,9 +78,14 @@ export class PiCliAdapter implements ProviderAdapter {
       registerManagedProcess(proc);
 
       let timedOut = false;
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      const SIGTERM_GRACE_MS = 5_000;
       const timer = setTimeout(() => {
         timedOut = true;
         killProcessGroup(proc, 'SIGTERM');
+        killTimer = setTimeout(() => {
+          killProcessGroup(proc, 'SIGKILL');
+        }, SIGTERM_GRACE_MS);
       }, def.timeoutMs);
 
       proc.stdout.on('data', (d: Buffer) => chunks.push(d));
@@ -88,6 +93,7 @@ export class PiCliAdapter implements ProviderAdapter {
 
       proc.on('close', (code) => {
         clearTimeout(timer);
+        if (killTimer) clearTimeout(killTimer);
         unregisterManagedProcess(proc);
         if (tempCwd !== undefined) {
           try {
@@ -128,6 +134,7 @@ export class PiCliAdapter implements ProviderAdapter {
 
       proc.on('error', (e) => {
         clearTimeout(timer);
+        if (killTimer) clearTimeout(killTimer);
         unregisterManagedProcess(proc);
         if (tempCwd !== undefined) {
           try {
@@ -144,13 +151,19 @@ export class PiCliAdapter implements ProviderAdapter {
   async resume(
     def: AgentDefinition,
     prompt: string,
-    _continuationId: string,
+    continuationId: string,
     options?: Parameters<ProviderAdapter['spawn']>[2],
   ): Promise<Result<SessionResult>> {
     // pi CLI does not expose a native continuation primitive in this adapter.
     // The capability profile declares sessionContinuation: false; resume degrades
     // to a fresh spawn so the caller never receives a missing-method error.
-    return this.spawn(def, prompt, options);
+    // We still surface the continuation id on success so the runtime can keep
+    // tracking the attempted resume state.
+    const result = await this.spawn(def, prompt, options);
+    if (result.ok) {
+      return ok({ ...result.value, continuationId });
+    }
+    return result;
   }
 
   async abort(handle: SessionHandle): Promise<void> {

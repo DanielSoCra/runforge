@@ -36,6 +36,7 @@ const ProvidersConfigSchema = z.object({
   defaultProvider: z.string().min(1),
   fallbackChain: z.array(z.string().min(1)).default([]),
   definitions: z.record(z.string(), ProviderDefinitionSchema),
+  requireSmokeProof: z.boolean().default(true),
 });
 
 const ProviderBindingSchema = z.object({

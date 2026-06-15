@@ -5,6 +5,23 @@ import {
   classifyProviderFailure,
 } from './registry.js';
 import type { ProviderDefinition } from '../../types.js';
+import { ConfigSchema } from '../../config.js';
+
+const baseConfig = {
+  repo: { owner: 'test-owner', name: 'test-repo' },
+  controlPort: 3847,
+  pollIntervalMs: 30000,
+  maxConcurrentRuns: 1,
+  dailyBudget: 50,
+  perRunBudget: 10,
+  adapter: 'cli' as const,
+  branches: { staging: 'staging', production: 'main' },
+  webhooks: [],
+  validation: {
+    gate1Commands: ['vitest run', 'tsc --noEmit'],
+    maxFixCycles: 3,
+  },
+};
 
 const providers: ProviderDefinition[] = [
   {
@@ -88,5 +105,61 @@ describe('ProviderRegistry (#480)', () => {
         new SessionError('Rate limited by upstream provider', 0.12, true),
       ),
     ).toBe('transient');
+  });
+});
+
+describe('ProviderRegistry.fromConfig — production smoke-proof gate', () => {
+  it('excludes unproven providers from resolve until they have a passing SmokeProof', () => {
+    const parsed = ConfigSchema.safeParse({
+      ...baseConfig,
+      providers: {
+        defaultProvider: 'codex-planner',
+        fallbackChain: ['claude-default'],
+        definitions: {
+          'claude-default': {
+            name: 'claude-default',
+            adapterClass: 'process-based',
+            providerKind: 'claude-cli',
+            supportedModelTiers: [
+              'standard-capability',
+              'higher-capability',
+            ],
+            cliTool: 'claude',
+          },
+          'codex-planner': {
+            name: 'codex-planner',
+            adapterClass: 'process-based',
+            providerKind: 'codex-cli',
+            supportedModelTiers: ['higher-capability'],
+            cliTool: 'codex',
+            model: 'gpt-5.5',
+          },
+        },
+      },
+    });
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+
+    const registry = ProviderRegistry.fromConfig(parsed.data);
+    // Seed the fallback with a passing smoke proof so the gate can demonstrate
+    // that an unproven preferred provider is skipped.
+    registry.markSmokeProof('claude-default', 'higher-capability');
+    // Without a passing SmokeProof, the preferred provider is skipped and the
+    // fallback is chosen.
+    const unproven = registry.resolve(
+      { preferred: 'codex-planner' },
+      'higher-capability',
+    );
+    expect(unproven.ok).toBe(true);
+    if (unproven.ok) expect(unproven.provider.name).toBe('claude-default');
+
+    // After a passing smoke proof, the preferred provider resolves normally.
+    registry.markSmokeProof('codex-planner', 'higher-capability');
+    const proven = registry.resolve(
+      { preferred: 'codex-planner' },
+      'higher-capability',
+    );
+    expect(proven.ok).toBe(true);
+    if (proven.ok) expect(proven.provider.name).toBe('codex-planner');
   });
 });

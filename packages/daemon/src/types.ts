@@ -274,6 +274,8 @@ export interface SessionResult {
   pitfallMarkers: PitfallMarker[];
   exitStatus: ExitStatus;
   handoffNote?: string;
+  /** Provider-native continuation id that allows this session to be resumed later. */
+  continuationId?: string;
   pluginGates?: string[]; // Gate scripts from active plugins — additive with repo validation commands
   // Non-terminal warnings from post-session output audit (audit.ts).
   // Output text matching blocked command patterns is recorded here rather than

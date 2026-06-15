@@ -44,6 +44,7 @@ import {
   classifyProviderFailure,
   ProviderRegistry,
 } from './providers/registry.js';
+import { deriveWorkspaceIdentity, type SessionResumeState } from './providers/resume-state.js';
 
 export interface SpawnSessionOptions {
   jsonSchema?: string | object;
@@ -846,6 +847,34 @@ export class SessionRuntime {
 
   getRateLimiter(): RateLimiter {
     return this.rateLimiter;
+  }
+
+  /**
+   * Build a `SessionResumeState` from a successful session result so later
+   * phases / fix cycles can resume the same provider-native conversation.
+   * Returns `undefined` when the result carries no continuation id.
+   */
+  toResumeState(
+    runId: string,
+    role: string,
+    providerName: string,
+    modelBinding: string,
+    workspacePath: string,
+    baseCommit: string,
+    result: SessionResult,
+  ): SessionResumeState | undefined {
+    if (result.continuationId === undefined) {
+      return undefined;
+    }
+    return {
+      runId,
+      role,
+      providerName,
+      modelBinding,
+      continuationId: result.continuationId,
+      workspaceIdentity: deriveWorkspaceIdentity(workspacePath, baseCommit),
+      validity: 'valid',
+    };
   }
 }
 

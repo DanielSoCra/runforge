@@ -163,13 +163,19 @@ export class CodexCliAdapter implements ProviderAdapter {
   async resume(
     def: AgentDefinition,
     prompt: string,
-    _continuationId: string,
+    continuationId: string,
     options?: Parameters<ProviderAdapter['spawn']>[2],
   ): Promise<Result<SessionResult>> {
     // Codex CLI does not expose a native continuation primitive in this adapter.
     // The capability profile declares sessionContinuation: false; resume degrades
     // to a fresh spawn so the caller never receives a missing-method error.
-    return this.spawn(def, prompt, options);
+    // We still surface the continuation id on success so the runtime can keep
+    // tracking the attempted resume state.
+    const result = await this.spawn(def, prompt, options);
+    if (result.ok) {
+      return ok({ ...result.value, continuationId });
+    }
+    return result;
   }
 
   async abort(handle: SessionHandle): Promise<void> {
