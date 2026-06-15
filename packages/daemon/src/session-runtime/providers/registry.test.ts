@@ -108,44 +108,65 @@ describe('ProviderRegistry (#480)', () => {
   });
 });
 
-describe('ProviderRegistry.fromConfig — production smoke-proof gate', () => {
-  it('excludes unproven providers from resolve until they have a passing SmokeProof', () => {
-    const parsed = ConfigSchema.safeParse({
-      ...baseConfig,
-      providers: {
-        defaultProvider: 'codex-planner',
-        fallbackChain: ['claude-default'],
-        definitions: {
-          'claude-default': {
-            name: 'claude-default',
-            adapterClass: 'process-based',
-            providerKind: 'claude-cli',
-            supportedModelTiers: [
-              'standard-capability',
-              'higher-capability',
-            ],
-            cliTool: 'claude',
-          },
-          'codex-planner': {
-            name: 'codex-planner',
-            adapterClass: 'process-based',
-            providerKind: 'codex-cli',
-            supportedModelTiers: ['higher-capability'],
-            cliTool: 'codex',
-            model: 'gpt-5.5',
-          },
+describe('ProviderRegistry.fromConfig — smoke-proof gate (opt-in)', () => {
+  function rawConfigWithSmokeProof(requireSmokeProof?: boolean) {
+    const providers: Record<string, unknown> = {
+      defaultProvider: 'codex-planner',
+      fallbackChain: ['claude-default'],
+      definitions: {
+        'claude-default': {
+          name: 'claude-default',
+          adapterClass: 'process-based',
+          providerKind: 'claude-cli',
+          supportedModelTiers: [
+            'standard-capability',
+            'higher-capability',
+          ],
+          cliTool: 'claude',
+        },
+        'codex-planner': {
+          name: 'codex-planner',
+          adapterClass: 'process-based',
+          providerKind: 'codex-cli',
+          supportedModelTiers: ['higher-capability'],
+          cliTool: 'codex',
+          model: 'gpt-5.5',
         },
       },
-    });
+    };
+    if (requireSmokeProof !== undefined) {
+      providers.requireSmokeProof = requireSmokeProof;
+    }
+    return {
+      ...baseConfig,
+      providers,
+    };
+  }
+
+  it('default config resolves a configured provider WITHOUT a smoke proof', () => {
+    const parsed = ConfigSchema.safeParse(rawConfigWithSmokeProof());
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) return;
+
+    expect(parsed.data.providers?.requireSmokeProof).toBe(false);
+    const registry = ProviderRegistry.fromConfig(parsed.data);
+
+    const resolved = registry.resolve(
+      { preferred: 'codex-planner' },
+      'higher-capability',
+    );
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) expect(resolved.provider.name).toBe('codex-planner');
+  });
+
+  it('with requireSmokeProof:true, an unproven provider is skipped until marked proven', () => {
+    const parsed = ConfigSchema.safeParse(rawConfigWithSmokeProof(true));
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
 
     const registry = ProviderRegistry.fromConfig(parsed.data);
-    // Seed the fallback with a passing smoke proof so the gate can demonstrate
-    // that an unproven preferred provider is skipped.
     registry.markSmokeProof('claude-default', 'higher-capability');
-    // Without a passing SmokeProof, the preferred provider is skipped and the
-    // fallback is chosen.
+
     const unproven = registry.resolve(
       { preferred: 'codex-planner' },
       'higher-capability',
@@ -153,7 +174,6 @@ describe('ProviderRegistry.fromConfig — production smoke-proof gate', () => {
     expect(unproven.ok).toBe(true);
     if (unproven.ok) expect(unproven.provider.name).toBe('claude-default');
 
-    // After a passing smoke proof, the preferred provider resolves normally.
     registry.markSmokeProof('codex-planner', 'higher-capability');
     const proven = registry.resolve(
       { preferred: 'codex-planner' },
@@ -161,5 +181,29 @@ describe('ProviderRegistry.fromConfig — production smoke-proof gate', () => {
     );
     expect(proven.ok).toBe(true);
     if (proven.ok) expect(proven.provider.name).toBe('codex-planner');
+  });
+
+  it('markSmokeProof restores health after a smoke failure', () => {
+    const registry = new ProviderRegistry({
+      providers,
+      defaultProvider: 'codex-planner',
+      fallbackChain: ['claude-default'],
+      requireSmokeProof: true,
+    });
+
+    registry.markSmokeFailed('codex-planner', 'higher-capability');
+    expect(registry.getHealth('codex-planner')?.status).toBe('degraded');
+    expect(
+      registry.resolve({ preferred: 'codex-planner' }, 'higher-capability').ok,
+    ).toBe(false);
+
+    registry.markSmokeProof('codex-planner', 'higher-capability');
+    expect(registry.getHealth('codex-planner')?.status).toBe('available');
+    const resolved = registry.resolve(
+      { preferred: 'codex-planner' },
+      'higher-capability',
+    );
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) expect(resolved.provider.name).toBe('codex-planner');
   });
 });

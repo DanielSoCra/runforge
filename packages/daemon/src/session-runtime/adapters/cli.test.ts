@@ -654,6 +654,27 @@ describe('CliAdapter.spawn() (#102)', () => {
     }
   });
 
+  it('populates continuationId from a successful fresh spawn when CLI reports session_id', async () => {
+    const mockProc = createMockProcess();
+    vi.mocked(spawnMock).mockReturnValue(mockProc as never);
+
+    const adapter = new CliAdapter();
+    const promise = adapter.spawn(mockDef, 'do work', { cwd: tempDir });
+
+    mockProc.stdout.emit('data', Buffer.from(JSON.stringify({
+      result: 'task done',
+      cost_usd: 0.03,
+      session_id: 'cli-sess-abc',
+    })));
+    mockProc.emit('close', 0);
+
+    const result = await promise;
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.continuationId).toBe('cli-sess-abc');
+    }
+  });
+
   it('downgrades unmarked output on non-zero exit to completed-with-concerns', async () => {
     // When the CLI exits non-zero but produced parseable output without a
     // status marker (default "completed"), we soften to completed-with-concerns

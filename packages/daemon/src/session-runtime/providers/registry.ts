@@ -84,7 +84,7 @@ export class ProviderRegistry {
       fallbackChain: config.providers.fallbackChain,
       baseBackoffMs: config.retryBackoffBaseMs,
       maxBackoffMs: config.retryBackoffMaxMs,
-      requireSmokeProof: config.providers.requireSmokeProof ?? true,
+      requireSmokeProof: config.providers.requireSmokeProof ?? false,
     });
   }
 
@@ -138,6 +138,10 @@ export class ProviderRegistry {
 
   markSmokeProof(providerName: string, tier: string): void {
     this.smokeProofs.set(this.smokeProofKey(providerName, tier), true);
+    const state = this.health.get(providerName);
+    if (state) {
+      state.status = 'available';
+    }
   }
 
   markSmokeFailed(providerName: string, tier: string): void {

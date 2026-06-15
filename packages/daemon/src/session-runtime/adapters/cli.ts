@@ -101,7 +101,7 @@ export class CliAdapter implements ProviderAdapter {
     return env;
   }
 
-  parseOutput(stdout: string): Result<{ output: string; cost: number; costEstimated: boolean; structuredData: unknown }> {
+  parseOutput(stdout: string): Result<{ output: string; cost: number; costEstimated: boolean; structuredData: unknown; continuationId?: string }> {
     try {
       const json = JSON.parse(stdout) as Record<string, unknown>;
       const output = typeof json['result'] === 'string'
@@ -115,11 +115,13 @@ export class CliAdapter implements ProviderAdapter {
           ? json['cost']
           : 0;
       const cost = Number.isFinite(rawCost) && rawCost > 0 ? rawCost : 0;
+      const continuationId = typeof json['session_id'] === 'string' ? json['session_id'] : undefined;
       return ok({
         output,
         cost,
         structuredData: json,
         costEstimated: cost === 0,
+        continuationId,
       });
     } catch {
       // Non-JSON output means the CLI crashed, was killed, or produced unexpected output.
@@ -436,6 +438,7 @@ export class CliAdapter implements ProviderAdapter {
             pitfallMarkers: this.extractPitfalls(timedOutOutput),
             exitStatus: 'timed-out' as ExitStatus,
             handoffNote: this.extractHandoff(timedOutOutput),
+            continuationId: timedOutParsed.ok && this.capabilities().sessionContinuation ? timedOutParsed.value.continuationId : undefined,
           }));
           return;
         }
@@ -473,6 +476,7 @@ export class CliAdapter implements ProviderAdapter {
           pitfallMarkers: this.extractPitfalls(parsed.value.output),
           exitStatus,
           handoffNote: this.extractHandoff(parsed.value.output),
+          continuationId: this.capabilities().sessionContinuation ? parsed.value.continuationId : undefined,
         }));
       });
 
