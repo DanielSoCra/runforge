@@ -32,6 +32,11 @@ const EarnInPolicy = z
 const LaneDefinitionSchema = z
   .object({
     name: z.string().min(1),
+    // Qualification matches on complexity + changeKind — the L3's *normative*
+    // schema. "Declared scope" qualification (mentioned in L3 prose, not its
+    // schema) is deferred to Plan 2: it must land together with the classifier
+    // verdict's scope field that feeds it. Adding a scope qualifier here before
+    // the classifier emits scope would create lanes that can never match.
     qualify: z
       .object({
         // .min(1): an empty array makes the lane unreachable (no verdict can
