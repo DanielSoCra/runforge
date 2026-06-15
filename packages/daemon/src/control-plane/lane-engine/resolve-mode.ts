@@ -13,14 +13,34 @@ function isModeMap<T>(field: T | Record<string, T>): field is Record<string, T> 
   return typeof field === 'object' && field !== null;
 }
 
-/** The phase key whose mergePolicy is most cautious (ties: first declared). */
-function mostCautiousPhase(mergePolicy: Record<string, MergePolicy>): string {
-  return Object.entries(mergePolicy).reduce((acc, [phase, policy]) =>
-    POLICY_CAUTION[policy] > POLICY_CAUTION[mergePolicy[acc]!] ? phase : acc,
-  Object.keys(mergePolicy)[0]!);
+/**
+ * The most cautious phase: highest mergePolicy caution, ties broken by the
+ * LATEST position in declaredPhases. declaredPhases is ordered least → most
+ * cautious by convention (e.g. velocity → hardening → clinical), so a later
+ * phase wins a tie — making the degraded-mode choice deterministic and never
+ * dependent on JS object key insertion order.
+ */
+function mostCautiousPhase(
+  mergePolicy: Record<string, MergePolicy>,
+  declaredPhases: string[],
+): string {
+  const phases = Object.keys(mergePolicy);
+  return phases.reduce((best, phase) => {
+    const caution = POLICY_CAUTION[mergePolicy[phase]!];
+    const bestCaution = POLICY_CAUTION[mergePolicy[best]!];
+    if (caution > bestCaution) return phase;
+    if (caution === bestCaution && declaredPhases.indexOf(phase) > declaredPhases.indexOf(best)) {
+      return phase;
+    }
+    return best;
+  }, phases[0]!);
 }
 
-function resolveLane(lane: LaneDefinition, mode: string | null): ResolvedLane {
+function resolveLane(
+  lane: LaneDefinition,
+  mode: string | null,
+  declaredPhases: string[],
+): ResolvedLane {
   const variant = isModeMap(lane.mergePolicy) || isModeMap(lane.gateSet);
   if (!variant) {
     return { ...lane, gateSet: lane.gateSet as string, mergePolicy: lane.mergePolicy as MergePolicy };
@@ -28,7 +48,7 @@ function resolveLane(lane: LaneDefinition, mode: string | null): ResolvedLane {
   // Schema guarantees both are maps over identical phases when variant.
   const mpMap = lane.mergePolicy as Record<string, MergePolicy>;
   const gsMap = lane.gateSet as Record<string, string>;
-  const phase = mode !== null && mode in mpMap ? mode : mostCautiousPhase(mpMap);
+  const phase = mode !== null && mode in mpMap ? mode : mostCautiousPhase(mpMap, declaredPhases);
   return { ...lane, gateSet: gsMap[phase]!, mergePolicy: mpMap[phase]! };
 }
 
@@ -46,7 +66,7 @@ export function resolveForMode(laneSet: LaneSet, mode: string | null): ResolvedL
   else if (!known) cause = `mode-undeclared:${mode}`;
 
   return {
-    lanes: laneSet.lanes.map((lane) => resolveLane(lane, known ? mode : null)),
+    lanes: laneSet.lanes.map((lane) => resolveLane(lane, known ? mode : null, laneSet.declaredPhases)),
     mostCautiousLane: laneSet.mostCautiousLane,
     resolution: { mode: known ? mode : null, degraded, cause },
   };

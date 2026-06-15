@@ -55,4 +55,27 @@ describe('resolveForMode', () => {
     expect(r.resolution).toEqual({ mode: null, degraded: true, cause: 'mode-undeclared:staging' });
     expect(r.lanes.find((l) => l.name === 'standard')!.mergePolicy).toBe('hold');
   });
+
+  it('breaks a degraded-mode mergePolicy tie by declared-phase order, not object key order', () => {
+    const tied: LaneSet = {
+      declaredPhases: ['velocity', 'clinical'], // ordered least → most cautious
+      mostCautiousLane: 'x',
+      lanes: [
+        {
+          name: 'x',
+          qualify: { complexity: ['standard'] },
+          allowedPaths: ['**'],
+          roleRouting: {},
+          // both phases tie on mergePolicy (hold); gateSets differ; velocity is
+          // listed FIRST so a key-order tie-break would wrongly pick 'gate1'.
+          gateSet: { velocity: 'gate1', clinical: 'full-ladder' },
+          mergePolicy: { velocity: 'hold', clinical: 'hold' },
+        },
+      ],
+    };
+    const x = resolveForMode(tied, null).lanes.find((l) => l.name === 'x')!;
+    expect(x.mergePolicy).toBe('hold');
+    // tie broken by declaredPhases order → clinical (latest) wins, not velocity (first key)
+    expect(x.gateSet).toBe('full-ladder');
+  });
 });

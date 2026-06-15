@@ -94,6 +94,13 @@ describe('parseLaneSet', () => {
     if (!r.ok) expect(r.errors.join()).toContain('overlapping qualifications');
   });
 
+  it('rejects an empty qualifier array (an unreachable lane is a config error)', () => {
+    const bad = structuredClone(valid);
+    (bad.lanes[0]!.qualify as { complexity: string[] }).complexity = [];
+    const r = parseLaneSet(bad);
+    expect(r.ok).toBe(false);
+  });
+
   it('rejects an unknown qualifier field instead of silently stripping it (fail-closed)', () => {
     const bad = structuredClone(valid);
     // typo: `changeKinds` (plural) — Zod would strip it, collapsing qualify to a catch-all

@@ -34,8 +34,10 @@ const LaneDefinitionSchema = z
     name: z.string().min(1),
     qualify: z
       .object({
-        complexity: z.array(Complexity).optional(),
-        changeKind: z.array(ChangeKind).optional(),
+        // .min(1): an empty array makes the lane unreachable (no verdict can
+        // satisfy it) — that is a config error, not a valid catch-all.
+        complexity: z.array(Complexity).min(1).optional(),
+        changeKind: z.array(ChangeKind).min(1).optional(),
       })
       .strict(),
     allowedPaths: z.array(z.string()).min(1),
