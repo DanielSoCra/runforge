@@ -7,8 +7,19 @@ version: 1
 layer: 3
 stack: typescript
 references: ARCH-AC-LANE-ENGINE
-code_paths: []  # deferred until implementation — planned: packages/daemon/src/control-plane/lane-engine/ (schema.ts, assign.ts, tripwire.ts, track-record.ts)
-test_paths: []  # deferred until implementation — planned: packages/daemon/src/control-plane/lane-engine/**/*.test.ts
+code_paths:  # pure evaluation core (Plan 1); pipeline integration (config load, FSM hooks, Postgres) is Plan 2
+  - packages/daemon/src/control-plane/lane-engine/types.ts
+  - packages/daemon/src/control-plane/lane-engine/match.ts
+  - packages/daemon/src/control-plane/lane-engine/risk.ts
+  - packages/daemon/src/control-plane/lane-engine/tripwire.ts
+  - packages/daemon/src/control-plane/lane-engine/assign.ts
+  - packages/daemon/src/control-plane/lane-engine/schema.ts
+  - packages/daemon/src/control-plane/lane-engine/resolve-mode.ts
+  - packages/daemon/src/control-plane/lane-engine/eligibility.ts
+  - packages/daemon/src/control-plane/lane-engine/earn-in.ts
+  - packages/daemon/src/control-plane/lane-engine/index.ts
+test_paths:
+  - packages/daemon/src/control-plane/lane-engine/**/*.test.ts
 ---
 
 # STACK-AC-LANE-ENGINE — Lane Engine (TypeScript)
