@@ -32,7 +32,13 @@ export function evaluateMergeEligibility(input: EligibilityInput): Eligibility {
   const effectiveRisk = applyRiskPathFloor(input.classifierLevel, input.riskPathMap, input.touchedPaths);
   const tripwire = evaluateTripwire(input.touchedPaths, input.lane);
   if (tripwire.kind !== 'in-scope') {
-    return { kind: 'escalate', effectiveRisk, reason: 'out-of-scope', tripwire };
+    return {
+      kind: 'escalate',
+      effectiveRisk,
+      reason: 'out-of-scope',
+      tripwire,
+      modeResolution: input.modeResolution,
+    };
   }
   return {
     kind: 'eligible',
@@ -40,5 +46,6 @@ export function evaluateMergeEligibility(input: EligibilityInput): Eligibility {
     gateSet: input.lane.gateSet,
     mergePolicy: capPolicy(input.lane.mergePolicy, effectiveRisk),
     tripwire,
+    modeResolution: input.modeResolution,
   };
 }

@@ -38,6 +38,7 @@ describe('evaluateMergeEligibility', () => {
       classifierLevel: 'green',
       riskPathMap: [],
       touchedPaths: ['docs/a.md'],
+      modeResolution: { mode: 'velocity', degraded: false },
     };
     const r = evaluateMergeEligibility(input);
     expect(r.kind).toBe('eligible');
@@ -46,6 +47,7 @@ describe('evaluateMergeEligibility', () => {
       expect(r.mergePolicy).toBe('auto');
       expect(r.gateSet).toBe('gate1');
     }
+    expect(r.modeResolution).toEqual({ mode: 'velocity', degraded: false });
   });
 
   it('escalates out-of-scope changes regardless of risk', () => {
@@ -54,10 +56,23 @@ describe('evaluateMergeEligibility', () => {
       classifierLevel: 'green',
       riskPathMap: [],
       touchedPaths: ['src/secret.ts'],
+      modeResolution: { mode: 'velocity', degraded: false },
     };
     const r = evaluateMergeEligibility(input);
     expect(r.kind).toBe('escalate');
     if (r.kind === 'escalate') expect(r.reason).toBe('out-of-scope');
+  });
+
+  it('preserves a degraded mode resolution in the eligibility result (audit)', () => {
+    const input: EligibilityInput = {
+      lane: makeLane(),
+      classifierLevel: 'green',
+      riskPathMap: [],
+      touchedPaths: ['docs/a.md'],
+      modeResolution: { mode: null, degraded: true, cause: 'mode-unreadable' },
+    };
+    const r = evaluateMergeEligibility(input);
+    expect(r.modeResolution).toEqual({ mode: null, degraded: true, cause: 'mode-unreadable' });
   });
 
   it('caps an auto lane to hold when a risk-path floor raises to orange', () => {
@@ -66,6 +81,7 @@ describe('evaluateMergeEligibility', () => {
       classifierLevel: 'green',
       riskPathMap: [{ paths: ['migrations/**'], minLevel: 'orange' }],
       touchedPaths: ['migrations/001.sql'],
+      modeResolution: { mode: 'velocity', degraded: false },
     };
     const r = evaluateMergeEligibility(input);
     expect(r.kind).toBe('eligible');

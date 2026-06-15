@@ -111,6 +111,8 @@ export interface EligibilityInput {
   classifierLevel: RiskLevel;
   riskPathMap: RiskPathMap;
   touchedPaths: string[];
+  /** The mode resolution the lane was resolved under (from resolveForMode), carried into the result for audit. */
+  modeResolution: ModeResolution;
 }
 
 export type Eligibility =
@@ -120,12 +122,14 @@ export type Eligibility =
       gateSet: string;
       mergePolicy: MergePolicy;
       tripwire: TripwireVerdict;
+      modeResolution: ModeResolution;
     }
   | {
       kind: 'escalate';
       effectiveRisk: RiskLevel;
       reason: 'out-of-scope';
       tripwire: TripwireVerdict;
+      modeResolution: ModeResolution;
     };
 
 export interface LaneTrackRecord {
