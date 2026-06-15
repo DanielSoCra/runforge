@@ -70,6 +70,16 @@ export function parseLaneSet(raw: unknown): ParseLaneSetResult {
     errors.push(`mostCautiousLane '${data.mostCautiousLane}' is not a declared lane`);
   }
 
+  // Lane names must be unique: assignment and audit records persist only the
+  // name, so a duplicate makes a recorded assignment ambiguous.
+  const seenNames = new Set<string>();
+  for (const lane of data.lanes) {
+    if (seenNames.has(lane.name)) {
+      errors.push(`duplicate lane name '${lane.name}' — lane names must be unique`);
+    }
+    seenNames.add(lane.name);
+  }
+
   for (const lane of data.lanes) {
     const gsMap = isModeMap(lane.gateSet);
     const mpMap = isModeMap(lane.mergePolicy);
@@ -88,6 +98,16 @@ export function parseLaneSet(raw: unknown): ParseLaneSetResult {
       }
       if (gsKeys.length !== mpKeys.length || gsKeys.some((k) => !mpKeys.includes(k))) {
         errors.push(`lane '${lane.name}': gateSet and mergePolicy must declare the same phases`);
+      }
+      // A variant lane must cover EVERY declared phase — otherwise a stricter
+      // mode silently resolves to another phase's (looser) policy while
+      // resolveForMode reports degraded:false.
+      for (const phase of data.declaredPhases) {
+        if (!gsKeys.includes(phase)) {
+          errors.push(
+            `lane '${lane.name}': per-mode field must cover declared phase '${phase}'`,
+          );
+        }
       }
     }
   }

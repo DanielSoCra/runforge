@@ -67,4 +67,22 @@ describe('parseLaneSet', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errors.join()).toContain('coherent');
   });
+
+  it('rejects duplicate lane names (assignment/audit persist only the name)', () => {
+    const bad = structuredClone(valid);
+    bad.lanes[0]!.name = 'standard'; // collides with lanes[1]; mostCautiousLane still resolves
+    const r = parseLaneSet(bad);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join()).toContain('duplicate lane name');
+  });
+
+  it('rejects a per-mode lane that omits a declared phase (would silently apply a looser policy)', () => {
+    const bad = structuredClone(valid);
+    // declaredPhases is [velocity, clinical] but this lane only declares velocity
+    (bad.lanes[1]!.gateSet as Record<string, string>) = { velocity: 'gate1-plus-review' };
+    (bad.lanes[1]!.mergePolicy as Record<string, string>) = { velocity: 'review-then-auto' };
+    const r = parseLaneSet(bad);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join()).toContain("cover declared phase 'clinical'");
+  });
 });
