@@ -110,6 +110,24 @@ describe('parseLaneSet', () => {
     if (!r.ok) expect(r.errors.join()).toContain('changeKinds');
   });
 
+  it('accepts a declared-scope qualifier', () => {
+    const r = parseLaneSet({
+      declaredPhases: ['velocity'],
+      mostCautiousLane: 'fe',
+      lanes: [
+        {
+          name: 'fe',
+          qualify: { scope: ['frontend'] },
+          allowedPaths: ['**'],
+          roleRouting: {},
+          gateSet: 'g',
+          mergePolicy: 'hold',
+        },
+      ],
+    });
+    expect(r.ok).toBe(true);
+  });
+
   it('deep-freezes the parsed lane set (nested arrays and lanes are immutable)', () => {
     const r = parseLaneSet(valid);
     expect(r.ok).toBe(true);

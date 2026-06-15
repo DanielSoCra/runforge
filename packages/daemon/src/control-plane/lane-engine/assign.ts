@@ -13,7 +13,7 @@ import type {
  * a catch-all.
  */
 function qualifies(lane: ResolvedLane, verdict: ClassifierVerdict): boolean {
-  const { complexity, changeKind } = lane.qualify;
+  const { complexity, changeKind, scope } = lane.qualify;
   if (
     complexity !== undefined &&
     (verdict.complexity === undefined || !complexity.includes(verdict.complexity))
@@ -26,6 +26,9 @@ function qualifies(lane: ResolvedLane, verdict: ClassifierVerdict): boolean {
   ) {
     return false;
   }
+  if (scope !== undefined && (verdict.scope === undefined || !scope.includes(verdict.scope))) {
+    return false;
+  }
   return true;
 }
 
@@ -36,6 +39,9 @@ function reasonsFor(lane: ResolvedLane, verdict: ClassifierVerdict): string[] {
   }
   if (lane.qualify.changeKind !== undefined && verdict.changeKind !== undefined) {
     reasons.push(`changeKind=${verdict.changeKind}`);
+  }
+  if (lane.qualify.scope !== undefined && verdict.scope !== undefined) {
+    reasons.push(`scope=${verdict.scope}`);
   }
   if (reasons.length === 0) reasons.push('catch-all (no qualification criteria)');
   return reasons;

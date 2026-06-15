@@ -32,17 +32,17 @@ const EarnInPolicy = z
 const LaneDefinitionSchema = z
   .object({
     name: z.string().min(1),
-    // Qualification matches on complexity + changeKind — the L3's *normative*
-    // schema. "Declared scope" qualification (mentioned in L3 prose, not its
-    // schema) is deferred to Plan 2: it must land together with the classifier
-    // verdict's scope field that feeds it. Adding a scope qualifier here before
-    // the classifier emits scope would create lanes that can never match.
+    // Qualification matches on complexity, changeKind, and declared scope —
+    // the L2/L3 qualify contract. scope values are deployment-defined categories
+    // (free strings) emitted by the Plan-2 classifier extension; the contract
+    // lives here so packs can declare scope-specific lanes.
     qualify: z
       .object({
         // .min(1): an empty array makes the lane unreachable (no verdict can
         // satisfy it) — that is a config error, not a valid catch-all.
         complexity: z.array(Complexity).min(1).optional(),
         changeKind: z.array(ChangeKind).min(1).optional(),
+        scope: z.array(z.string()).min(1).optional(),
       })
       .strict(),
     allowedPaths: z.array(z.string()).min(1),
@@ -83,10 +83,14 @@ function dimsCompatible<T>(a: T[] | undefined, b: T[] | undefined): boolean {
  * rejects overlaps at activation rather than silently routing to mostCautious.
  */
 function qualificationsOverlap(
-  a: { complexity?: string[]; changeKind?: string[] },
-  b: { complexity?: string[]; changeKind?: string[] },
+  a: { complexity?: string[]; changeKind?: string[]; scope?: string[] },
+  b: { complexity?: string[]; changeKind?: string[]; scope?: string[] },
 ): boolean {
-  return dimsCompatible(a.complexity, b.complexity) && dimsCompatible(a.changeKind, b.changeKind);
+  return (
+    dimsCompatible(a.complexity, b.complexity) &&
+    dimsCompatible(a.changeKind, b.changeKind) &&
+    dimsCompatible(a.scope, b.scope)
+  );
 }
 
 /** Recursively freeze an object graph so a parsed LaneSet cannot be mutated post-validation. */

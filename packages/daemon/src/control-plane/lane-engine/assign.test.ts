@@ -52,4 +52,19 @@ describe('assignLane', () => {
       cause: 'verdict-unavailable',
     });
   });
+
+  it('qualifies on declared scope', () => {
+    const scoped: ResolvedLaneSet = {
+      ...laneSet,
+      lanes: [lane('frontend', { scope: ['frontend'] }), lane('backend', { scope: ['backend'] })],
+    };
+    expect(assignLane(scoped, { scope: 'frontend' })).toEqual({
+      kind: 'assigned',
+      lane: 'frontend',
+      reasons: ['scope=frontend'],
+    });
+    const miss = assignLane(scoped, { scope: 'data' });
+    expect(miss.kind).toBe('fallback-most-cautious');
+    if (miss.kind === 'fallback-most-cautious') expect(miss.cause).toBe('no-match');
+  });
 });

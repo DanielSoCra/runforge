@@ -26,6 +26,8 @@ export type ByMode<T> = T | Record<string, T>;
 export interface LaneQualification {
   complexity?: Complexity[];
   changeKind?: ChangeKind[];
+  /** Declared-scope categories the lane qualifies on (matched against the verdict's scope). */
+  scope?: string[];
 }
 
 export interface BatchReviewPolicy {
@@ -86,6 +88,8 @@ export interface ResolvedLaneSet {
 export interface ClassifierVerdict {
   complexity?: Complexity;
   changeKind?: ChangeKind;
+  /** Declared-scope category. Populated by the Plan-2 classifier extension; matched against a lane's `scope`. */
+  scope?: string;
 }
 
 export type LaneAssignmentResult =

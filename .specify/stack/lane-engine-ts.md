@@ -45,8 +45,10 @@ const byMode = <T extends z.ZodTypeAny>(value: T) =>
 
 const LaneDefinitionSchema = z.object({
   name: z.string().min(1),
-  qualify: z.object({ complexity: z.array(Complexity).optional(),
-    changeKind: z.array(ChangeKind).optional() }),
+  qualify: z.object({ complexity: z.array(Complexity).min(1).optional(),
+    changeKind: z.array(ChangeKind).min(1).optional(),
+    scope: z.array(z.string()).min(1).optional() }).strict(), // declared-scope per L2; .strict() fails on unknown keys
+  
   allowedPaths: z.array(z.string()).nonempty(), // never mode-variant
   roleRouting: z.record(PhaseName, RoleBindingRef),
   gateSet: byMode(GateSetRef),
