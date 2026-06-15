@@ -85,4 +85,22 @@ describe('parseLaneSet', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errors.join()).toContain("cover declared phase 'clinical'");
   });
+
+  it('rejects overlapping lane qualifications (a catch-all makes a specific lane unreachable)', () => {
+    const bad = structuredClone(valid);
+    (bad.lanes[0]!.qualify as Record<string, string[]>) = {}; // catch-all — overlaps the 'standard' lane
+    const r = parseLaneSet(bad);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join()).toContain('overlapping qualifications');
+  });
+
+  it('deep-freezes the parsed lane set (nested arrays and lanes are immutable)', () => {
+    const r = parseLaneSet(valid);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(Object.isFrozen(r.laneSet.lanes)).toBe(true);
+      expect(Object.isFrozen(r.laneSet.lanes[0])).toBe(true);
+      expect(Object.isFrozen(r.laneSet.lanes[0]!.allowedPaths)).toBe(true);
+    }
+  });
 });

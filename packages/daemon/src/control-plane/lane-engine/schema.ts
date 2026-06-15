@@ -52,6 +52,36 @@ function isModeMap(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
 }
 
+/** Two value-sets are compatible if either is unconstrained (undefined) or they intersect. */
+function dimsCompatible<T>(a: T[] | undefined, b: T[] | undefined): boolean {
+  if (a === undefined || b === undefined) return true;
+  return a.some((x) => b.includes(x));
+}
+
+/**
+ * Two lane qualifications overlap when some classifier verdict could satisfy
+ * both — i.e. they are compatible on every dimension. Assignment requires
+ * exactly one match, so overlapping lanes make one unreachable; the schema
+ * rejects overlaps at activation rather than silently routing to mostCautious.
+ */
+function qualificationsOverlap(
+  a: { complexity?: string[]; changeKind?: string[] },
+  b: { complexity?: string[]; changeKind?: string[] },
+): boolean {
+  return dimsCompatible(a.complexity, b.complexity) && dimsCompatible(a.changeKind, b.changeKind);
+}
+
+/** Recursively freeze an object graph so a parsed LaneSet cannot be mutated post-validation. */
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object') {
+    for (const child of Object.values(value as Record<string, unknown>)) {
+      deepFreeze(child);
+    }
+    Object.freeze(value);
+  }
+  return value;
+}
+
 /**
  * Validate raw config-pack lane data at pack-activation time. On any error the
  * result is `ok: false` with messages — the caller keeps the previous pack
@@ -112,6 +142,21 @@ export function parseLaneSet(raw: unknown): ParseLaneSetResult {
     }
   }
 
+  // Lane qualifications must be pairwise non-overlapping — assignment requires
+  // exactly one match, so an overlap makes a lane unreachable (a catch-all lane
+  // plus any specific lane is the common trap).
+  for (let i = 0; i < data.lanes.length; i++) {
+    for (let j = i + 1; j < data.lanes.length; j++) {
+      const a = data.lanes[i]!;
+      const b = data.lanes[j]!;
+      if (qualificationsOverlap(a.qualify, b.qualify)) {
+        errors.push(
+          `lanes '${a.name}' and '${b.name}' have overlapping qualifications — a change could match both, making one unreachable`,
+        );
+      }
+    }
+  }
+
   if (errors.length > 0) return { ok: false, errors };
-  return { ok: true, laneSet: Object.freeze(data) as Readonly<LaneSet> };
+  return { ok: true, laneSet: deepFreeze(data) as Readonly<LaneSet> };
 }
