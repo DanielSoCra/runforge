@@ -96,6 +96,8 @@ interface StoredNote {
   againstPhaseSeq: number;
   delivered: boolean;
   deliveredAtPhaseSeq?: number;
+  /** Terminal: returned to the Operator (run finished before delivery) — no longer pending. */
+  returned?: boolean;
 }
 
 /** Internal durable representation of a run control. */
@@ -230,6 +232,15 @@ export class SteeringLedger {
     const targetGeneration = run.generation;
 
     if (run.status === 'aborted' || run.status === 'completed') {
+      // Run finished before this boundary — return any still-pending notes to the
+      // Operator (recorded receipts) rather than dropping them silently.
+      for (const note of this.store.notes.values()) {
+        if (note.runId !== runId) continue;
+        if (note.generation !== targetGeneration) continue;
+        if (note.delivered || note.returned === true) continue;
+        note.returned = true;
+        this.recordReceipt(runId, note.operator, note.body, 'undeliverable', `Run is ${run.status}`);
+      }
       return { delivered: [], gateBypassed: false, decisionAnswered: false, scopeWidened: false };
     }
 
@@ -396,6 +407,11 @@ export class SteeringLedger {
         discardPriorWork: false,
         ...baseFlags,
       };
+    }
+
+    // Finished run: never (re)controlled — pending controls do not apply (no completed→held resurrection).
+    if (run.status === 'completed') {
+      return { directive: 'proceed', ...baseFlags };
     }
 
     const abortControl = this.findControl(runId, targetGeneration, 'abort');
