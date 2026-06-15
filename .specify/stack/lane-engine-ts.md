@@ -7,8 +7,19 @@ version: 1
 layer: 3
 stack: typescript
 references: ARCH-AC-LANE-ENGINE
-code_paths: []  # deferred until implementation — planned: packages/daemon/src/control-plane/lane-engine/ (schema.ts, assign.ts, tripwire.ts, track-record.ts)
-test_paths: []  # deferred until implementation — planned: packages/daemon/src/control-plane/lane-engine/**/*.test.ts
+code_paths:  # pure evaluation core (Plan 1); pipeline integration (config load, FSM hooks, Postgres) is Plan 2
+  - packages/daemon/src/control-plane/lane-engine/types.ts
+  - packages/daemon/src/control-plane/lane-engine/match.ts
+  - packages/daemon/src/control-plane/lane-engine/risk.ts
+  - packages/daemon/src/control-plane/lane-engine/tripwire.ts
+  - packages/daemon/src/control-plane/lane-engine/assign.ts
+  - packages/daemon/src/control-plane/lane-engine/schema.ts
+  - packages/daemon/src/control-plane/lane-engine/resolve-mode.ts
+  - packages/daemon/src/control-plane/lane-engine/eligibility.ts
+  - packages/daemon/src/control-plane/lane-engine/earn-in.ts
+  - packages/daemon/src/control-plane/lane-engine/index.ts
+test_paths:
+  - packages/daemon/src/control-plane/lane-engine/**/*.test.ts
 ---
 
 # STACK-AC-LANE-ENGINE — Lane Engine (TypeScript)
@@ -34,8 +45,9 @@ const byMode = <T extends z.ZodTypeAny>(value: T) =>
 
 const LaneDefinitionSchema = z.object({
   name: z.string().min(1),
-  qualify: z.object({ complexity: z.array(Complexity).optional(),
-    changeKind: z.array(ChangeKind).optional() }),
+  qualify: z.object({ complexity: z.array(Complexity).min(1).optional(),
+    changeKind: z.array(ChangeKind).min(1).optional(),
+    scope: z.array(z.string()).min(1).optional() }).strict(), // declared-scope per L2; .strict() fails on unknown keys
   allowedPaths: z.array(z.string()).nonempty(), // never mode-variant
   roleRouting: z.record(PhaseName, RoleBindingRef),
   gateSet: byMode(GateSetRef),

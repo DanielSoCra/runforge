@@ -589,8 +589,19 @@ STACK-AC-SESSION-PROVIDERS:
 STACK-AC-LANE-ENGINE:
   parent: ARCH-AC-LANE-ENGINE
   children: []
-  code_paths: []  # deferred until implementation — path validator requires real files
-  test_paths: []  # deferred until implementation
+  code_paths:  # pure evaluation core (Plan 1); pipeline integration is Plan 2
+    - packages/daemon/src/control-plane/lane-engine/types.ts
+    - packages/daemon/src/control-plane/lane-engine/match.ts
+    - packages/daemon/src/control-plane/lane-engine/risk.ts
+    - packages/daemon/src/control-plane/lane-engine/tripwire.ts
+    - packages/daemon/src/control-plane/lane-engine/assign.ts
+    - packages/daemon/src/control-plane/lane-engine/schema.ts
+    - packages/daemon/src/control-plane/lane-engine/resolve-mode.ts
+    - packages/daemon/src/control-plane/lane-engine/eligibility.ts
+    - packages/daemon/src/control-plane/lane-engine/earn-in.ts
+    - packages/daemon/src/control-plane/lane-engine/index.ts
+  test_paths:
+    - packages/daemon/src/control-plane/lane-engine/**/*.test.ts
   status: draft
 
 STACK-AC-OPERATIONAL-SAFETY:
