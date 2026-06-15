@@ -200,9 +200,10 @@ FUNC-AC-OPERATOR-SURFACE:
   status: approved
 
 # Enacts L0 v6's verifier-gated-autonomy boundary (Delta H); the enforcing L1
-# v6 deferred "to implementation" — created 2026-06-14. L2/L3 deferred to impl.
+# v6 deferred "to implementation" — created 2026-06-14. L2/L3 authored 2026-06-15
+# (ARCH/STACK draft); L3 code_paths/test_paths deferred to implementation.
 FUNC-AC-VERIFIER-GATE:
-  children: []
+  children: [ARCH-AC-VERIFIER-GATE]
   related: [FUNC-AC-MERGE-DECISION, FUNC-AC-FLEET, FUNC-AC-COMPLIANCE-GATE]
   status: approved
 
@@ -292,6 +293,16 @@ ARCH-AC-LANE-ENGINE:
   parent: FUNC-AC-MERGE-DECISION
   children: [STACK-AC-LANE-ENGINE]
   related: [FUNC-AC-COMPLIANCE-GATE, ARCH-AC-CONTROL-PLANE, ARCH-AC-BATCH-CLASSIFIER]
+  status: draft
+
+# Verifier gate composes AHEAD of the lane engine: it is a precondition that can
+# only WITHHOLD autonomy (no/unusable verifier ⇒ assist-and-escalate). A withheld
+# verdict makes the lane-engine eligibility result moot; a verifier-gated verdict
+# proceeds to the lane engine + compliance + earned-trust on top.
+ARCH-AC-VERIFIER-GATE:
+  parent: FUNC-AC-VERIFIER-GATE
+  children: [STACK-AC-VERIFIER-GATE]
+  related: [ARCH-AC-LANE-ENGINE, FUNC-AC-COMPLIANCE-GATE, FUNC-AC-FLEET]
   status: draft
 
 ARCH-AC-WINDOW-SCHEDULER:
@@ -611,6 +622,17 @@ STACK-AC-LANE-ENGINE:
     - packages/daemon/src/control-plane/lane-engine/index.ts
   test_paths:
     - packages/daemon/src/control-plane/lane-engine/**/*.test.ts
+  status: draft
+
+# code_paths/test_paths DEFERRED to implementation — the path-existence validator
+# requires real files, and the verifier-gate module is not built yet. The intended
+# layout is a `verifier-gate/` sibling under control-plane/lane-engine/; paths land
+# with the implementation PR (mirrors the decision-escalation L3 deferral pattern).
+STACK-AC-VERIFIER-GATE:
+  parent: ARCH-AC-VERIFIER-GATE
+  children: []
+  code_paths: []
+  test_paths: []
   status: draft
 
 STACK-AC-OPERATIONAL-SAFETY:
