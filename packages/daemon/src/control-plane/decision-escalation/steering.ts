@@ -112,6 +112,8 @@ interface StoredControl {
   reason?: string;
   applied: boolean;
   appliedAtPhaseSeq?: number;
+  /** Terminal: returned to the Operator (run finished before this control applied). */
+  returned?: boolean;
 }
 
 /**
@@ -409,8 +411,10 @@ export class SteeringLedger {
       };
     }
 
-    // Finished run: never (re)controlled — pending controls do not apply (no completed→held resurrection).
+    // Finished run: never (re)controlled — no completed→held resurrection; any
+    // still-pending controls are returned to the Operator rather than lost.
     if (run.status === 'completed') {
+      this.returnPendingControls(runId, targetGeneration, run.status);
       return { directive: 'proceed', ...baseFlags };
     }
 
@@ -422,6 +426,7 @@ export class SteeringLedger {
       this.store.upsertRun({ ...run, status: 'aborted' });
       abortControl.applied = true;
       abortControl.appliedAtPhaseSeq = boundary.phaseSeq;
+      this.returnPendingControls(runId, targetGeneration, 'aborted');
       return {
         directive: 'abort',
         partialWorkPreserved: true,
@@ -558,6 +563,22 @@ export class SteeringLedger {
     });
 
     return { accepted: true, outcome: 'queued', controlId };
+  }
+
+  /**
+   * When a run reaches a terminal state at a boundary, return any still-pending
+   * pause/redirect controls to the Operator (the same durable-transport guarantee
+   * as notes) so a control that missed the run is never silently lost. Idempotent
+   * via the `returned` flag.
+   */
+  private returnPendingControls(runId: string, generation: number, runStatus: string): void {
+    for (const c of this.store.controls.values()) {
+      if (c.runId !== runId || c.generation !== generation) continue;
+      if (c.control !== 'pause' && c.control !== 'redirect') continue;
+      if (c.applied || c.returned === true) continue;
+      c.returned = true;
+      this.recordReceipt(runId, c.operator, c.direction ?? '', 'undeliverable', `Run is ${runStatus}`);
+    }
   }
 
   private findControl(
