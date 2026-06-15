@@ -14,13 +14,16 @@ export function evaluateVerifierGate(
   if (declaration === undefined) {
     return { kind: 'assist-and-escalate', reason: 'no-verifier' };
   }
-  if (status.observed === false) {
+  // Fail-closed: only an EXPLICIT `true` passes each stage. A missing/undefined
+  // field (e.g. a partial status cast from runtime/JSON) withholds autonomy —
+  // anything not provably true is doubt, and doubt → assist-and-escalate.
+  if (status.observed !== true) {
     return { kind: 'assist-and-escalate', reason: 'evaluation-indeterminate' };
   }
-  if (status.runnable === false) {
+  if (status.runnable !== true) {
     return { kind: 'assist-and-escalate', reason: 'verifier-unusable' };
   }
-  if (status.falsifying === false) {
+  if (status.falsifying !== true) {
     return { kind: 'assist-and-escalate', reason: 'verifier-non-falsifying' };
   }
   return { kind: 'verifier-gated' };
