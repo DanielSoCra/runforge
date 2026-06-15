@@ -8,3 +8,4 @@ export { parseLaneSet, type ParseLaneSetResult } from './schema.js';
 export { resolveForMode } from './resolve-mode.js';
 export { capPolicy, evaluateMergeEligibility } from './eligibility.js';
 export { evaluateEarnIn } from './earn-in.js';
+export * from './verifier-gate/index.js';
