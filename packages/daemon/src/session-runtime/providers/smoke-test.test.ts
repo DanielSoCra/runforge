@@ -47,10 +47,10 @@ function fakeResult(over: Partial<SessionResult> = {}): SessionResult {
 function stubAdapter(spawnImpl: ProviderAdapter['spawn']): ProviderAdapter & {
   spawnCalls: number;
 } {
-  const adapter = {
+  const adapter: ProviderAdapter & { spawnCalls: number } = {
     spawnCalls: 0,
     async spawn(...args: Parameters<ProviderAdapter['spawn']>) {
-      this.spawnCalls += 1;
+      adapter.spawnCalls += 1;
       return spawnImpl(...args);
     },
     async resume() {
