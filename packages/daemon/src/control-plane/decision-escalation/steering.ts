@@ -381,6 +381,13 @@ export class SteeringLedger {
       return { accepted: false, outcome: 'stale', reason };
     }
 
+    // Idempotent: abort is once-per-(run, generation). A retry returns the existing
+    // control rather than queuing a duplicate (exactly-once transport guarantee).
+    const existingAbort = this.findControl(runId, run.generation, 'abort');
+    if (existingAbort !== undefined) {
+      return { accepted: true, outcome: 'duplicate', controlId: existingAbort.controlId };
+    }
+
     // Do NOT mark the run aborted at request time — the abort only takes effect
     // at the earliest safe point (directiveAtBoundary), never mid-write. Queue
     // it as a pending control; status transitions there.
@@ -424,6 +431,8 @@ export class SteeringLedger {
     // Terminal: an already-aborted run stays aborted idempotently — no re-mutation,
     // no re-emitted side effects (abort is exactly-once, like notes and redirects).
     if (run.status === 'aborted') {
+      this.returnPendingControls(runId, targetGeneration, 'aborted');
+      this.returnPendingNotes(runId, targetGeneration, 'aborted');
       return {
         directive: 'abort',
         partialWorkPreserved: true,
@@ -437,6 +446,7 @@ export class SteeringLedger {
     // still-pending controls are returned to the Operator rather than lost.
     if (run.status === 'completed') {
       this.returnPendingControls(runId, targetGeneration, run.status);
+      this.returnPendingNotes(runId, targetGeneration, run.status);
       return { directive: 'proceed', ...baseFlags };
     }
 
@@ -449,6 +459,7 @@ export class SteeringLedger {
       abortControl.applied = true;
       abortControl.appliedAtPhaseSeq = boundary.phaseSeq;
       this.returnPendingControls(runId, targetGeneration, 'aborted');
+      this.returnPendingNotes(runId, targetGeneration, 'aborted');
       return {
         directive: 'abort',
         partialWorkPreserved: true,
@@ -613,6 +624,18 @@ export class SteeringLedger {
       if (c.applied || c.returned === true) continue;
       c.returned = true;
       this.recordReceipt(runId, c.operator, c.direction ?? '', 'undeliverable', `Run is ${runStatus}`);
+    }
+  }
+
+  /** Return any still-pending (undelivered) notes to the Operator when a run becomes
+   *  terminal via the control path — an aborted run may never call
+   *  deliverNotesAtBoundary again, so its queued notes are swept here. Idempotent. */
+  private returnPendingNotes(runId: string, generation: number, runStatus: string): void {
+    for (const note of this.store.notes.values()) {
+      if (note.runId !== runId || note.generation !== generation) continue;
+      if (note.delivered || note.returned === true) continue;
+      note.returned = true;
+      this.recordReceipt(runId, note.operator, note.body, 'undeliverable', `Run is ${runStatus}`);
     }
   }
 
