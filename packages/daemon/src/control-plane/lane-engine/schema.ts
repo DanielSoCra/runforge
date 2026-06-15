@@ -18,31 +18,42 @@ const MergePolicy = z.enum(['auto', 'review-then-auto', 'hold']);
 /** A field that is either a single value or a per-phase map. */
 const byMode = <T extends z.ZodTypeAny>(value: T) => z.union([value, z.record(z.string(), value)]);
 
-const BatchReviewPolicy = z.object({ enabled: z.boolean(), cadence: z.string() });
-const EarnInPolicy = z.object({
-  cleanMerges: z.number().int().min(0),
-  bounceFreeDays: z.number().int().min(0),
-});
+// All object schemas are .strict(): unknown keys are REJECTED, never silently
+// stripped — a typo'd qualifier (e.g. `changeKinds`) must fail pack activation
+// rather than collapse a lane into an unintended catch-all (fail-closed).
+const BatchReviewPolicy = z.object({ enabled: z.boolean(), cadence: z.string() }).strict();
+const EarnInPolicy = z
+  .object({
+    cleanMerges: z.number().int().min(0),
+    bounceFreeDays: z.number().int().min(0),
+  })
+  .strict();
 
-const LaneDefinitionSchema = z.object({
-  name: z.string().min(1),
-  qualify: z.object({
-    complexity: z.array(Complexity).optional(),
-    changeKind: z.array(ChangeKind).optional(),
-  }),
-  allowedPaths: z.array(z.string()).min(1),
-  roleRouting: z.record(z.string(), z.string()),
-  gateSet: byMode(z.string()),
-  mergePolicy: byMode(MergePolicy),
-  postMergeReview: BatchReviewPolicy.optional(),
-  earnIn: EarnInPolicy.optional(),
-});
+const LaneDefinitionSchema = z
+  .object({
+    name: z.string().min(1),
+    qualify: z
+      .object({
+        complexity: z.array(Complexity).optional(),
+        changeKind: z.array(ChangeKind).optional(),
+      })
+      .strict(),
+    allowedPaths: z.array(z.string()).min(1),
+    roleRouting: z.record(z.string(), z.string()),
+    gateSet: byMode(z.string()),
+    mergePolicy: byMode(MergePolicy),
+    postMergeReview: BatchReviewPolicy.optional(),
+    earnIn: EarnInPolicy.optional(),
+  })
+  .strict();
 
-const LaneSetSchema = z.object({
-  lanes: z.array(LaneDefinitionSchema).min(1),
-  mostCautiousLane: z.string().min(1),
-  declaredPhases: z.array(z.string()).min(1),
-});
+const LaneSetSchema = z
+  .object({
+    lanes: z.array(LaneDefinitionSchema).min(1),
+    mostCautiousLane: z.string().min(1),
+    declaredPhases: z.array(z.string()).min(1),
+  })
+  .strict();
 
 export type ParseLaneSetResult =
   | { ok: true; laneSet: Readonly<LaneSet> }

@@ -94,6 +94,15 @@ describe('parseLaneSet', () => {
     if (!r.ok) expect(r.errors.join()).toContain('overlapping qualifications');
   });
 
+  it('rejects an unknown qualifier field instead of silently stripping it (fail-closed)', () => {
+    const bad = structuredClone(valid);
+    // typo: `changeKinds` (plural) — Zod would strip it, collapsing qualify to a catch-all
+    (bad.lanes[0]!.qualify as Record<string, string[]>) = { changeKinds: ['docs'] };
+    const r = parseLaneSet(bad);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join()).toContain('changeKinds');
+  });
+
   it('deep-freezes the parsed lane set (nested arrays and lanes are immutable)', () => {
     const r = parseLaneSet(valid);
     expect(r.ok).toBe(true);
