@@ -132,33 +132,26 @@ export function parseLaneSet(raw: unknown): ParseLaneSetResult {
     seenNames.add(lane.name);
   }
 
+  // gateSet and mergePolicy may EACH independently be a single value or a
+  // per-mode map (the L2/L3 byMode contract — no cross-field coherence rule).
+  // For each field that is a map: its phases must be declared, and it must cover
+  // EVERY declared phase, so a known mode never silently falls through to
+  // another phase's policy.
   for (const lane of data.lanes) {
-    const gsMap = isModeMap(lane.gateSet);
-    const mpMap = isModeMap(lane.mergePolicy);
-    if (gsMap !== mpMap) {
-      errors.push(
-        `lane '${lane.name}': gateSet and mergePolicy must be coherent — either both per-mode maps or both plain values`,
-      );
-    }
-    if (gsMap && mpMap) {
-      const gsKeys = Object.keys(lane.gateSet as Record<string, unknown>);
-      const mpKeys = Object.keys(lane.mergePolicy as Record<string, unknown>);
-      for (const key of [...gsKeys, ...mpKeys]) {
+    for (const [fieldName, field] of [
+      ['gateSet', lane.gateSet],
+      ['mergePolicy', lane.mergePolicy],
+    ] as const) {
+      if (!isModeMap(field)) continue;
+      const keys = Object.keys(field);
+      for (const key of keys) {
         if (!phases.has(key)) {
-          errors.push(`lane '${lane.name}': per-mode field references undeclared phase '${key}'`);
+          errors.push(`lane '${lane.name}': ${fieldName} references undeclared phase '${key}'`);
         }
       }
-      if (gsKeys.length !== mpKeys.length || gsKeys.some((k) => !mpKeys.includes(k))) {
-        errors.push(`lane '${lane.name}': gateSet and mergePolicy must declare the same phases`);
-      }
-      // A variant lane must cover EVERY declared phase — otherwise a stricter
-      // mode silently resolves to another phase's (looser) policy while
-      // resolveForMode reports degraded:false.
       for (const phase of data.declaredPhases) {
-        if (!gsKeys.includes(phase)) {
-          errors.push(
-            `lane '${lane.name}': per-mode field must cover declared phase '${phase}'`,
-          );
+        if (!keys.includes(phase)) {
+          errors.push(`lane '${lane.name}': ${fieldName} must cover declared phase '${phase}'`);
         }
       }
     }

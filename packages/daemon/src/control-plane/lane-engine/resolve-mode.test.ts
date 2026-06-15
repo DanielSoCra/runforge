@@ -78,4 +78,27 @@ describe('resolveForMode', () => {
     // tie broken by declaredPhases order → clinical (latest) wins, not velocity (first key)
     expect(x.gateSet).toBe('full-ladder');
   });
+
+  it('resolves a gateSet-only variant independently (mergePolicy constant)', () => {
+    const ls: LaneSet = {
+      declaredPhases: ['velocity', 'clinical'],
+      mostCautiousLane: 'x',
+      lanes: [
+        {
+          name: 'x',
+          qualify: { complexity: ['standard'] },
+          allowedPaths: ['**'],
+          roleRouting: {},
+          gateSet: { velocity: 'light', clinical: 'heavy' },
+          mergePolicy: 'hold', // constant — varies independently of gateSet
+        },
+      ],
+    };
+    const known = resolveForMode(ls, 'velocity').lanes[0]!;
+    expect(known.gateSet).toBe('light');
+    expect(known.mergePolicy).toBe('hold');
+    const degraded = resolveForMode(ls, null).lanes[0]!;
+    expect(degraded.gateSet).toBe('heavy'); // latest declared phase (no caution order on gate sets)
+    expect(degraded.mergePolicy).toBe('hold');
+  });
 });

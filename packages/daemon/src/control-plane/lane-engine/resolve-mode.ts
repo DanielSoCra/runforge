@@ -13,27 +13,55 @@ function isModeMap<T>(field: T | Record<string, T>): field is Record<string, T> 
   return typeof field === 'object' && field !== null;
 }
 
+// gateSet and mergePolicy are declared per-mode INDEPENDENTLY (the L2/L3
+// byMode contract) — a lane may vary one, both, or neither. Each is resolved
+// on its own; there is no cross-field coherence requirement.
+
 /**
- * The most cautious phase: highest mergePolicy caution, ties broken by the
- * LATEST position in declaredPhases. declaredPhases is ordered least → most
- * cautious by convention (e.g. velocity → hardening → clinical), so a later
- * phase wins a tie — making the degraded-mode choice deterministic and never
- * dependent on JS object key insertion order.
+ * mergePolicy degraded resolution: the most cautious value by caution rank,
+ * ties broken by the LATEST declared phase (declaredPhases is ordered least →
+ * most cautious by convention, e.g. velocity → hardening → clinical). The spec
+ * fixes the mergePolicy caution order (hold > review-then-auto > auto), so it
+ * drives the choice; declared-phase order is only the deterministic tie-break.
  */
-function mostCautiousPhase(
-  mergePolicy: Record<string, MergePolicy>,
+function mostCautiousMergePolicy(
+  map: Record<string, MergePolicy>,
   declaredPhases: string[],
-): string {
-  const phases = Object.keys(mergePolicy);
-  return phases.reduce((best, phase) => {
-    const caution = POLICY_CAUTION[mergePolicy[phase]!];
-    const bestCaution = POLICY_CAUTION[mergePolicy[best]!];
-    if (caution > bestCaution) return phase;
-    if (caution === bestCaution && declaredPhases.indexOf(phase) > declaredPhases.indexOf(best)) {
+): MergePolicy {
+  const best = Object.keys(map).reduce((acc, phase) => {
+    const caution = POLICY_CAUTION[map[phase]!];
+    const accCaution = POLICY_CAUTION[map[acc]!];
+    if (caution > accCaution) return phase;
+    if (caution === accCaution && declaredPhases.indexOf(phase) > declaredPhases.indexOf(acc)) {
       return phase;
     }
-    return best;
-  }, phases[0]!);
+    return acc;
+  }, Object.keys(map)[0]!);
+  return map[best]!;
+}
+
+function resolveGateSet(
+  gateSet: LaneDefinition['gateSet'],
+  mode: string | null,
+  declaredPhases: string[],
+): string {
+  if (!isModeMap(gateSet)) return gateSet;
+  if (mode !== null && mode in gateSet) return gateSet[mode]!;
+  // Degraded: gate-set names carry no intrinsic caution order, so pick the
+  // LATEST declared phase present (most cautious by the declaredPhases convention).
+  const present = declaredPhases.filter((phase) => phase in gateSet);
+  const phase = present.length > 0 ? present[present.length - 1]! : Object.keys(gateSet)[0]!;
+  return gateSet[phase]!;
+}
+
+function resolveMergePolicy(
+  mergePolicy: LaneDefinition['mergePolicy'],
+  mode: string | null,
+  declaredPhases: string[],
+): MergePolicy {
+  if (!isModeMap(mergePolicy)) return mergePolicy;
+  if (mode !== null && mode in mergePolicy) return mergePolicy[mode]!;
+  return mostCautiousMergePolicy(mergePolicy, declaredPhases);
 }
 
 function resolveLane(
@@ -41,15 +69,11 @@ function resolveLane(
   mode: string | null,
   declaredPhases: string[],
 ): ResolvedLane {
-  const variant = isModeMap(lane.mergePolicy) || isModeMap(lane.gateSet);
-  if (!variant) {
-    return { ...lane, gateSet: lane.gateSet as string, mergePolicy: lane.mergePolicy as MergePolicy };
-  }
-  // Schema guarantees both are maps over identical phases when variant.
-  const mpMap = lane.mergePolicy as Record<string, MergePolicy>;
-  const gsMap = lane.gateSet as Record<string, string>;
-  const phase = mode !== null && mode in mpMap ? mode : mostCautiousPhase(mpMap, declaredPhases);
-  return { ...lane, gateSet: gsMap[phase]!, mergePolicy: mpMap[phase]! };
+  return {
+    ...lane,
+    gateSet: resolveGateSet(lane.gateSet, mode, declaredPhases),
+    mergePolicy: resolveMergePolicy(lane.mergePolicy, mode, declaredPhases),
+  };
 }
 
 /**

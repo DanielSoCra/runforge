@@ -60,12 +60,12 @@ describe('parseLaneSet', () => {
     if (!r.ok) expect(r.errors.join()).toContain('staging');
   });
 
-  it('rejects a lane where gateSet is per-mode but mergePolicy is not (coherence)', () => {
-    const bad = structuredClone(valid);
-    (bad.lanes[1]!.mergePolicy as unknown) = 'hold';
-    const r = parseLaneSet(bad);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errors.join()).toContain('coherent');
+  it('accepts independent mode variance (gateSet per-mode, mergePolicy constant)', () => {
+    const ok = structuredClone(valid);
+    // gateSet stays a per-mode map covering both phases; mergePolicy is constant.
+    (ok.lanes[1]!.mergePolicy as unknown) = 'hold';
+    const r = parseLaneSet(ok);
+    expect(r.ok).toBe(true);
   });
 
   it('rejects duplicate lane names (assignment/audit persist only the name)', () => {
