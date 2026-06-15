@@ -52,6 +52,7 @@ function extractPaths(content: string): { specId: string; path: string }[] {
 
 type TraceabilityEntry = {
   id: string;
+  parent?: string;
   children: string[];
   status?: string;
 };
@@ -70,6 +71,12 @@ function extractEntries(content: string): Map<string, TraceabilityEntry> {
 
     if (!currentSpec) continue;
     const current = entries.get(currentSpec)!;
+
+    const parentMatch = line.match(/^\s+parent:\s*([A-Z][A-Z0-9_-]+)/);
+    if (parentMatch) {
+      current.parent = parentMatch[1]!;
+      continue;
+    }
 
     const childrenMatch = line.match(/^\s+children:\s*\[(.*)\]/);
     if (childrenMatch) {
@@ -147,5 +154,46 @@ describe('concierge spec tree', () => {
     ]) {
       expect(raw, `expected ${id} in traceability`).toContain(`${id}:`);
     }
+  });
+});
+
+describe('traceability parent↔child reciprocity', () => {
+  // A `children` edge means ownership and must be reciprocal with the child's
+  // `parent`. A node realized by an L2/L3 it does not own (a shared realization)
+  // must reference it via `related`, not `children`. An L1 deliberately has no
+  // `parent` (it is linked via L0's `children` array) — so a listed child with
+  // no `parent` of its own is allowed; only a *differing* parent is a violation.
+  it('every parent link is reciprocated, and every child link matches the child\'s parent', () => {
+    const raw = readFileSync(resolve(ROOT, '.specify/traceability.yml'), 'utf-8');
+    const entries = extractEntries(raw);
+    const mismatches: string[] = [];
+
+    for (const entry of entries.values()) {
+      // parent → child: a node that declares a parent must be listed by it
+      if (entry.parent !== undefined) {
+        const parent = entries.get(entry.parent);
+        if (parent && !parent.children.includes(entry.id)) {
+          mismatches.push(
+            `${entry.id} declares parent ${entry.parent}, but ${entry.parent}.children omits it`,
+          );
+        }
+      }
+      // child → parent: a child this node lists, if it declares a parent of its
+      // own, must name this node (else it is a shared realization → use `related`)
+      for (const childId of entry.children) {
+        const child = entries.get(childId);
+        if (child?.parent !== undefined && child.parent !== entry.id) {
+          mismatches.push(
+            `${entry.id} lists child ${childId}, but ${childId}.parent is ${child.parent} ` +
+              `(use 'related' for non-canonical realization links)`,
+          );
+        }
+      }
+    }
+
+    expect(
+      mismatches,
+      `Traceability parent↔child reciprocity violations:\n${mismatches.join('\n')}`,
+    ).toEqual([]);
   });
 });
