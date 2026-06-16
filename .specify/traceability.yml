@@ -641,8 +641,20 @@ STACK-AC-VERIFIER-GATE:
 STACK-AC-WINDOW-SCHEDULER:
   parent: ARCH-AC-WINDOW-SCHEDULER
   children: []
-  code_paths: []  # DEFERRED to implementation — path-existence validator requires real files
-  test_paths: []  # DEFERRED to implementation — same reason
+  code_paths:
+    - packages/daemon/src/session-runtime/providers/window-scheduler/types.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/headroom.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/classify.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/ledger.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/filter-rank.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/schema.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/index.ts
+  test_paths:
+    - packages/daemon/src/session-runtime/providers/window-scheduler/headroom.test.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/classify.test.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/filter-rank.test.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/schema.test.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/ledger.test.ts
   status: draft
 
 STACK-AC-OPERATIONAL-SAFETY:
