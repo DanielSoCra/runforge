@@ -263,6 +263,17 @@ export class DeploymentRegistry {
       return { ok: false, reason: `unknown deployment '${id}'` };
     }
 
+    // A lane-scoped grant must name a lane DECLARED in this deployment's lane set.
+    // Otherwise a typo'd/stale lane records as ok but is never effective (integrate
+    // queries autonomy with the profile's real lane name), and pollutes the history.
+    if (lane !== undefined) {
+      const profile = this.profiles.get(id);
+      const declared = profile?.laneSet.lanes.some((l) => l.name === lane) === true;
+      if (declared === false) {
+        return { ok: false, reason: `unknown lane '${lane}' for deployment '${id}'` };
+      }
+    }
+
     // A LANE-SPECIFIC grant (lane given) updates laneEntries[lane][riskClass] and
     // leaves the level-wide entries untouched; a LEVEL-WIDE grant (no lane) updates
     // entries[riskClass]. The record carries the lane for attribution.
