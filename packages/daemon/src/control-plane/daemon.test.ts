@@ -935,7 +935,7 @@ describe('daemon', () => {
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.error.message).toContain('codex-impl');
-        expect(result.error.message).toContain('failed smoke proof');
+        expect(result.error.message).toContain('smoke admission');
       }
       expect(mockServerStart).not.toHaveBeenCalled();
 

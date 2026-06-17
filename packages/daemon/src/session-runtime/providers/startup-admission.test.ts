@@ -204,6 +204,47 @@ describe('admitProviders — startup smoke-proof admission gate', () => {
     expect(result.failed).toHaveLength(2);
   });
 
+  it('GATE ON, the default-resolution-path provider fails while an UNRELATED provider passes: aborts (criticalChain unusable, codex)', async () => {
+    // defaultProvider fails; an unrelated optional provider passes. Zero-admitted
+    // would NOT fire (one admitted), but unbound work resolves through the default
+    // path which is now unproven → must abort.
+    const registry = fakeRegistry();
+    const runSmoke = vi.fn(async (p: ProviderDefinition) =>
+      p.name === 'codex-default' ? failProof(p.name) : passProof(p.name),
+    );
+
+    const result = await admitProviders({
+      registry,
+      providers: [binding('codex-default', false), binding('claude-side', false)],
+      requireSmokeProof: true,
+      criticalChain: ['codex-default'], // defaultProvider + fallbackChain
+      runSmoke,
+    });
+
+    expect(result.aborted).toBe(true);
+    expect(result.abortReasons.join(' ')).toContain('default resolution path');
+    // The unrelated provider WAS admitted — abort is about the resolution path.
+    expect(result.admitted.map((a) => a.providerName)).toEqual(['claude-side']);
+  });
+
+  it('GATE ON, default fails but a FALLBACK in the chain passes: does NOT abort (chain absorbs it)', async () => {
+    const registry = fakeRegistry();
+    const runSmoke = vi.fn(async (p: ProviderDefinition) =>
+      p.name === 'codex-default' ? failProof(p.name) : passProof(p.name),
+    );
+
+    const result = await admitProviders({
+      registry,
+      providers: [binding('codex-default', false), binding('claude-fallback', false)],
+      requireSmokeProof: true,
+      criticalChain: ['codex-default', 'claude-fallback'],
+      runSmoke,
+    });
+
+    expect(result.aborted).toBe(false);
+    expect(result.admitted.map((a) => a.providerName)).toEqual(['claude-fallback']);
+  });
+
   it('GATE ON, MULTIPLE required providers fail: abortReasons names every offender (ordering/parallelism unobservable)', async () => {
     const registry = fakeRegistry();
     const runSmoke = vi.fn(async (p: ProviderDefinition) => failProof(p.name));

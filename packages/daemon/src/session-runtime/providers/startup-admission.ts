@@ -69,6 +69,15 @@ export interface AdmitProvidersOptions {
     provider: ProviderDefinition,
     modelBinding: string,
   ) => Promise<SmokeProof>;
+  /**
+   * The ordered provider names UNBOUND work resolves through (the registry's
+   * `defaultProvider` followed by its `fallbackChain`). If given, admission aborts
+   * unless at least ONE of these was admitted — otherwise the daemon would boot but
+   * every unbound role would resolve `provider-unavailable` through a dead default
+   * path even if some unrelated provider passed. When omitted, the weaker
+   * zero-admitted rule applies instead.
+   */
+  criticalChain?: readonly string[];
   logger?: AdmissionLogger;
 }
 
@@ -165,18 +174,33 @@ export async function admitProviders(
     }
   }
 
-  // No usable provider was admitted (the common case: only OPTIONAL providers are
-  // configured and they all failed their proving run). With smoke-proofing ON the
-  // registry now gates every resolve() on a proof that does not exist, so the
-  // daemon would start but resolve `provider-unavailable` for all work — a live
-  // but useless daemon. Treat zero-admitted as a startup-contract abort even when
-  // no provider was marked `required` (codex). A genuinely empty provider list
-  // (nothing to prove) is a misconfiguration and likewise aborts.
-  if (admitted.length === 0 && abortReasons.length === 0) {
-    abortReasons.push('no provider passed smoke admission');
-    opts.logger?.error?.(
-      `[admission] no provider passed smoke admission — startup cannot dispatch work`,
-    );
+  // The default resolution path must remain usable. With smoke-proofing ON the
+  // registry gates every resolve() on a proof, so the daemon would boot but
+  // resolve `provider-unavailable` for unbound work if the path it resolves
+  // through is unproven — even when some unrelated provider passed. Abort unless
+  // at least one provider in the critical chain (defaultProvider + fallbackChain)
+  // was admitted; when no chain is supplied, fall back to the weaker
+  // zero-admitted rule (the common case: only optional providers, all failed).
+  // (Only when no REQUIRED-failure reason already fired — those keep abortReasons
+  // precise.) (codex)
+  if (abortReasons.length === 0) {
+    const admittedNames = new Set(admitted.map((a) => a.providerName));
+    const chain = opts.criticalChain;
+    if (chain !== undefined && chain.length > 0) {
+      if (!chain.some((name) => admittedNames.has(name))) {
+        abortReasons.push(
+          `no provider in the default resolution path passed smoke admission (${chain.join(' -> ')})`,
+        );
+        opts.logger?.error?.(
+          `[admission] default resolution path unusable — startup cannot dispatch unbound work`,
+        );
+      }
+    } else if (admitted.length === 0) {
+      abortReasons.push('no provider passed smoke admission');
+      opts.logger?.error?.(
+        `[admission] no provider passed smoke admission — startup cannot dispatch work`,
+      );
+    }
   }
 
   const aborted = abortReasons.length > 0;

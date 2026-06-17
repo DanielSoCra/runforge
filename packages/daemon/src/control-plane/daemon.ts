@@ -545,6 +545,12 @@ export async function startDaemon(
       providers,
       requireSmokeProof: true,
       runSmoke,
+      // Unbound work resolves through defaultProvider then the fallback chain —
+      // admission must keep that path usable, not just any single provider.
+      criticalChain: [
+        config.providers.defaultProvider,
+        ...config.providers.fallbackChain,
+      ],
       logger: {
         info: (message) => console.log(message),
         warn: (message) => console.warn(message),
@@ -553,9 +559,14 @@ export async function startDaemon(
     });
 
     if (admission.aborted === true) {
+      // Mirror the earlier startup-failure paths: release the resources already
+      // started above (config-reader polling interval + Postgres client) before
+      // returning, so a non-exiting caller/test does not leak them.
+      configReader.stop();
+      await postgresClient?.sql.end().catch(() => {});
       return err(
         new Error(
-          `Startup aborted: required provider(s) failed smoke proof: ${admission.abortReasons.join(', ')}`,
+          `Startup aborted by smoke admission: ${admission.abortReasons.join(', ')}`,
         ),
       );
     }
