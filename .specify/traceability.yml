@@ -654,11 +654,13 @@ STACK-AC-LANE-ENGINE:
     - packages/daemon/src/control-plane/merge-decision/build-request.ts
     - packages/daemon/src/control-plane/merge-decision/observe-verifier.ts
     - packages/daemon/src/control-plane/merge-decision/touched-paths.ts
+    - packages/daemon/src/control-plane/merge-decision/compliance.ts
   test_paths:
     - packages/daemon/src/control-plane/lane-engine/**/*.test.ts
     - packages/daemon/src/control-plane/merge-decision/decide.test.ts
     - packages/daemon/src/control-plane/merge-decision/risk-class.test.ts
     - packages/daemon/src/control-plane/merge-decision/build-request.test.ts
+    - packages/daemon/src/control-plane/merge-decision/compliance.test.ts
     - packages/daemon/src/control-plane/merge-decision-wiring.integration.test.ts
   status: draft
 

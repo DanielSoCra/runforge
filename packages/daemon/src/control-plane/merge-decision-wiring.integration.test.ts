@@ -422,6 +422,39 @@ describe('merge-decision live wiring — integrate handler', () => {
     expect(mockIntegrate).not.toHaveBeenCalled();
   });
 
+  it('(g) a compliance reviewer governing a touched path forces escalation, even when widened', async () => {
+    const reg = new DeploymentRegistry();
+    // A compliance reviewer governs docs/** — and the (mocked) touched path is
+    // docs/readme.md. Green is widened, verifier good, in-scope → WITHOUT the
+    // compliance lens this would auto-merge; the lens must override and escalate.
+    const out = reg.register(DEPLOYMENT_ID, {
+      ...makeProfile(),
+      complianceReviewers: [{ reviewer: 'clinical-lead', condition: 'docs/**' }],
+    });
+    expect(out.ok).toBe(true);
+    reg.recordWidening(
+      DEPLOYMENT_ID,
+      'green',
+      'widened',
+      { kind: 'operator-grant', operator: 'daniel' },
+      1,
+    );
+    const decision = makeDecisionDouble();
+    const { handlers } = createHandlers({
+      config: { deployment: { id: DEPLOYMENT_ID, profile: {} } },
+      registry: reg,
+      decisionManager: decision.manager,
+      decisionPublisher: decision.publisher,
+    });
+    const run = makeRun();
+
+    await handlers.integrate!(run);
+
+    expect(mockIntegrate).not.toHaveBeenCalled(); // compliance overrides autonomy
+    expect(run.pausedAtPhase).toBe('integrate');
+    expect(decision.raise).toHaveBeenCalled();
+  });
+
   it('(c) flag-OFF byte-identity: no config.deployment AND no registry → integrate merges unconditionally, no decision logic', async () => {
     const decision = makeDecisionDouble();
     // No deployment block, no registry param → today's behavior.
