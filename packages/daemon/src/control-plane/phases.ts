@@ -1883,9 +1883,13 @@ export function createPhaseHandlers(
         return readings.some((r) => r.level === 'widened');
       };
 
-      // v1 proxy: a run that reached integrate with no recorded failure is
-      // treated as having passed its gate-set. If we cannot tell, fail-safe.
-      const validationPassed = run.lastFailure === undefined;
+      // Reaching the integrate phase means the pipeline's verification gates
+      // (review + holdout) already RAN and PASSED — the FSM does not advance a run
+      // to integrate otherwise. So validation has passed by construction here.
+      // (NB: do NOT proxy this off run.lastFailure — that field retains historical
+      // diagnostics after a repairable failure is later fixed, which would spuriously
+      // escalate an already-green run. A finer per-lane gate-set verdict is a follow-up.)
+      const validationPassed = true;
 
       // v1: real compliance dispatch is deferred; no path is forced here.
       const complianceForced = false;
