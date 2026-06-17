@@ -307,7 +307,7 @@ ARCH-AC-VERIFIER-GATE:
 
 ARCH-AC-WINDOW-SCHEDULER:
   parent: FUNC-AC-FLEET
-  children: []  # L3 deliberately deferred to the implementation phase (goal Q3 depth rule)
+  children: [STACK-AC-WINDOW-SCHEDULER]
   related: [ARCH-AC-SESSION-PROVIDERS]
   status: draft
 
@@ -624,10 +624,6 @@ STACK-AC-LANE-ENGINE:
     - packages/daemon/src/control-plane/lane-engine/**/*.test.ts
   status: draft
 
-# code_paths/test_paths DEFERRED to implementation — the path-existence validator
-# requires real files, and the verifier-gate module is not built yet. The intended
-# layout is a `verifier-gate/` sibling under control-plane/lane-engine/; paths land
-# with the implementation PR (mirrors the decision-escalation L3 deferral pattern).
 STACK-AC-VERIFIER-GATE:
   parent: ARCH-AC-VERIFIER-GATE
   children: []
@@ -640,6 +636,25 @@ STACK-AC-VERIFIER-GATE:
   test_paths:
     - packages/daemon/src/control-plane/lane-engine/verifier-gate/evaluate.test.ts
     - packages/daemon/src/control-plane/lane-engine/verifier-gate/schema.test.ts
+  status: draft
+
+STACK-AC-WINDOW-SCHEDULER:
+  parent: ARCH-AC-WINDOW-SCHEDULER
+  children: []
+  code_paths:
+    - packages/daemon/src/session-runtime/providers/window-scheduler/types.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/headroom.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/classify.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/ledger.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/filter-rank.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/schema.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/index.ts
+  test_paths:
+    - packages/daemon/src/session-runtime/providers/window-scheduler/headroom.test.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/classify.test.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/filter-rank.test.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/schema.test.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/ledger.test.ts
   status: draft
 
 STACK-AC-OPERATIONAL-SAFETY:
