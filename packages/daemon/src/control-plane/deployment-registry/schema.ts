@@ -31,6 +31,32 @@ import {
 const RiskLevel = z.enum(['green', 'yellow', 'orange', 'red']);
 
 /**
+ * The platform's gate vocabulary (the lane engine's `GateKey`), reused verbatim
+ * so a gate-set definition cannot name a second, drifting set of gate keys. An
+ * entry naming a key outside this set is rejected at parse time (fail-closed).
+ */
+const GateKeySchema = z.enum([
+  'deterministic',
+  'spec-compliance',
+  'quality',
+  'security',
+  'holdout',
+]);
+
+/**
+ * OPTIONAL deployment-level gate-set DEFINITIONS (XCUT P2#1): a map from gate-set
+ * NAME → the gate keys that must have PASSED for the set to be satisfied. The same
+ * name space a lane's `gateSet` field selects. `.min(1)` required: a gate-set that
+ * demands nothing makes the lane's verdict vacuously true, which is a config error
+ * masquerading as a gate. ABSENT on a profile ⇒ the feature is inert (the integrate
+ * verdict preserves today's safe `validationPassed = true`).
+ */
+const GateSetDefinitionSchema = z
+  .object({ required: z.array(GateKeySchema).min(1) })
+  .strict();
+const GateSetDefinitionsSchema = z.record(z.string(), GateSetDefinitionSchema);
+
+/**
  * Thin `.strict()` schema over RiskPathEntry[] — the lane engine only *consumes*
  * the risk-path map, never parses it, so the envelope owns this shape. `.min(1)`
  * paths: an entry with no paths matches nothing (config error).
@@ -91,6 +117,11 @@ export const ProfileEnvelopeSchema = z
     riskPathMap: z.array(RiskPathEntrySchema),
     defaultMinLevel: RiskLevel,
     laneSet: z.unknown(),
+    // OPTIONAL gate-set definitions (XCUT P2#1). Absent ⇒ the lane-specific
+    // gate-set verdict is inert. Validated here (not re-declared elsewhere); a
+    // dangling lane→gate-set reference is checked in parseProfile's cross-field
+    // pass below, where both the lane set and the gate-set names are known.
+    gateSets: GateSetDefinitionsSchema.optional(),
     lifecycleMode: z.string().min(1),
     complianceReviewers: z.array(ComplianceReviewerSchema),
     honestAutomation: HonestAutomationMapSchema,
@@ -199,6 +230,7 @@ function assembleProfile(
     riskPathMap: env.riskPathMap,
     defaultMinLevel: env.defaultMinLevel,
     laneSet,
+    gateSets: env.gateSets,
     lifecycleMode: env.lifecycleMode,
     complianceReviewers: env.complianceReviewers,
     honestAutomation: env.honestAutomation,

@@ -22,6 +22,42 @@ export type ChangeKind =
 /** How a qualifying change may join the shared mainline. Ordered by caution. */
 export type MergePolicy = 'auto' | 'review-then-auto' | 'hold';
 
+/**
+ * The platform's gate vocabulary (XCUT P2#1) — the concrete checks a gate-set
+ * DEFINITION may reference and the keys a run records in `RunState.passedGates`.
+ * Superset of the four review `GateType`s (`result.gateResults[].gate`) plus
+ * `'holdout'`, which is a lifecycle PHASE rather than a review gate — it produces
+ * no `gateResults` entry, so the holdout handler appends the key itself when its
+ * scenarios pass. This is the SINGLE source of truth for gate-set membership; a
+ * gate-set definition naming a key outside this set is rejected at pack
+ * activation.
+ */
+export type GateKey =
+  | 'deterministic'
+  | 'spec-compliance'
+  | 'quality'
+  | 'security'
+  | 'holdout';
+
+/**
+ * A single gate-set DEFINITION: the gate keys that must have PASSED for the set
+ * to be satisfied. Keyed by gate-set NAME in `GateSetDefinitions` (the same name
+ * space a lane's `gateSet` field selects). `required` is the closed contract the
+ * pure `gateSetVerdict` evaluates against a run's observed `passedGates`.
+ */
+export interface GateSetDefinition {
+  required: GateKey[];
+}
+
+/**
+ * The deployment-level map from gate-set NAME → its definition. OPTIONAL on a
+ * deployment profile: absent ⇒ the lane-specific gate-set verdict feature is
+ * INERT (the integrate handler preserves today's safe `validationPassed = true`).
+ * When present, a lane's resolved `gateSet` name is looked up here; a
+ * declared-but-dangling reference (lane names a set not in this map) fails CLOSED.
+ */
+export type GateSetDefinitions = Record<string, GateSetDefinition>;
+
 /** A field that may be a single value, or declared per lifecycle phase. */
 export type ByMode<T> = T | Record<string, T>;
 

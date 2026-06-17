@@ -12,12 +12,13 @@ import type {
   LaneSet,
   RiskPathMap,
   RiskLevel,
+  GateSetDefinitions,
 } from '../lane-engine/types.js';
 import type { PoolConfig } from '../../session-runtime/providers/window-scheduler/types.js';
 
 // Re-export the sibling shapes so consumers of the registry import them from one
 // place and never re-declare a lane/pool/risk field (the L3 composition rule).
-export type { LaneSet, RiskPathMap, RiskPathEntry, RiskLevel, ModeResolution } from '../lane-engine/types.js';
+export type { LaneSet, RiskPathMap, RiskPathEntry, RiskLevel, ModeResolution, GateKey, GateSetDefinition, GateSetDefinitions } from '../lane-engine/types.js';
 export type { PoolConfig } from '../../session-runtime/providers/window-scheduler/types.js';
 
 /**
@@ -84,6 +85,12 @@ export interface DeploymentProfile {
   riskPathMap: RiskPathMap;
   defaultMinLevel: RiskLevel;
   laneSet: LaneSet;
+  /**
+   * OPTIONAL gate-set DEFINITIONS (XCUT P2#1): gate-set NAME → the gate keys that
+   * must have PASSED for the set to be satisfied. The integrate verdict looks up a
+   * lane's resolved `gateSet` name here. Absent ⇒ the verdict feature is inert.
+   */
+  gateSets?: GateSetDefinitions;
   /** Currently declared lifecycle phase — must be one of laneSet.declaredPhases. */
   lifecycleMode: string;
   complianceReviewers: ComplianceReviewer[];
@@ -203,7 +210,11 @@ export type DeclaredDatum =
   | 'honestAutomation'
   | 'budget'
   | 'landing'
-  | 'capabilityBindings';
+  | 'capabilityBindings'
+  // The OPTIONAL gate-set DEFINITIONS (XCUT P2#1). The integrate handler reads this
+  // the same way it reads complianceReviewers — value is GateSetDefinitions | undefined
+  // (undefined ⇒ the lane-specific verdict feature is inert).
+  | 'gateSets';
 
 /** Read of a declared datum; tagged not-found rather than a throw on a bad id. */
 export type DeclaredDataResult =

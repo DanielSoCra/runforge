@@ -347,8 +347,10 @@ export class DeploymentRegistry {
 
   /**
    * Read one declared datum (compliance reviewers, honest-automation map, budget,
-   * landing target / production-release path, or capability bindings) from the
-   * frozen profile. Read-only; tagged not-found on an unknown id.
+   * landing target / production-release path, capability bindings, or the optional
+   * gate-set definitions) from the frozen profile. Read-only; tagged not-found on
+   * an unknown id. An absent optional datum (e.g. gateSets) resolves to a `found`
+   * read with `value: undefined`.
    */
   readDeclaredData(id: string, which: DeclaredDatum): DeclaredDataResult {
     const result = this.lookup(id);

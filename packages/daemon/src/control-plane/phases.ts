@@ -57,8 +57,8 @@ import {
   evaluateComplianceForced,
   observeVerifierStatus,
 } from './merge-decision/index.js';
-import { assignLane, resolveForMode } from './lane-engine/index.js';
-import type { ClassifierVerdict, RiskLevel } from './lane-engine/types.js';
+import { assignLane, gateSetVerdict, resolveForMode } from './lane-engine/index.js';
+import type { ClassifierVerdict, GateSetDefinitions, RiskLevel } from './lane-engine/types.js';
 import type { ClassificationComplexity } from '../types.js';
 
 // Serializes git operations on the shared repoRoot across concurrent pipeline runs.
@@ -1447,11 +1447,11 @@ export function createPhaseHandlers(
         console.warn(`[review] Failed to load spec content:`, e);
       }
 
-      // Skip all gates if there's no diff (e.g., spec-only tasks with no code changes).
-      // Running gate1 tests against the baseline codebase would fail on pre-existing
-      // test failures unrelated to this branch — and spec tasks don't modify code.
-      if (!diff || diff.trim().length === 0) {
-        console.log(`[review] No code changes — skipping all gates`);
+      // Skip all gates only when the diff could not be loaded at all. An empty
+      // diff still means the pipeline reached review, and the lane-specific
+      // gate-set verdict needs the observed gate results to decide at integrate.
+      if (diff === undefined) {
+        console.log(`[review] Diff unavailable — skipping all gates`);
         return 'success';
       }
 
@@ -1617,6 +1617,12 @@ export function createPhaseHandlers(
         return 'failure';
       }
       console.log(`[review] Passed (${result.fixCycles} fix cycles)`);
+      // Record the gate keys that RAN and PASSED so the lane-specific gate-set
+      // verdict at integrate can observe them. Only passing gates are recorded —
+      // a gate that did not pass must never appear, even on overall success.
+      run.passedGates = result.gateResults
+        .filter((g) => g.passed === true)
+        .map((g) => g.gate);
       // #4: clear consumed findings once review passes so they don't bleed into
       // an unrelated later cycle.
       run.reviewFindings = undefined;
@@ -1796,6 +1802,9 @@ export function createPhaseHandlers(
         return 'escalated';
       }
       console.log(`[holdout] All scenarios passed`);
+      // Holdout is a lifecycle phase, not a review gate, so it appends its own
+      // key to the observed passed-gates list without clobbering review keys.
+      run.passedGates = [...(run.passedGates ?? []), 'holdout'];
       return 'success';
     },
 
@@ -1919,13 +1928,30 @@ export function createPhaseHandlers(
         return readings.some((r) => r.level === 'widened');
       };
 
-      // Reaching the integrate phase means the pipeline's verification gates
-      // (review + holdout) already RAN and PASSED — the FSM does not advance a run
-      // to integrate otherwise. So validation has passed by construction here.
-      // (NB: do NOT proxy this off run.lastFailure — that field retains historical
-      // diagnostics after a repairable failure is later fixed, which would spuriously
-      // escalate an already-green run. A finer per-lane gate-set verdict is a follow-up.)
-      const validationPassed = true;
+      // Lane-specific gate-set verdict (XCUT P2#1): when the deployment declares
+      // gate-set definitions, look up the assigned lane's set and check whether
+      // every required gate was observed as passed. A declared-but-dangling
+      // reference fails closed; absent gateSets keeps the legacy inert path.
+      let validationPassed = true;
+      if (registry !== undefined && deploymentId !== undefined) {
+        const gateSetsDeclared = registry.readDeclaredData(
+          deploymentId,
+          'gateSets',
+        );
+        if (
+          gateSetsDeclared.kind === 'found' &&
+          gateSetsDeclared.value !== undefined
+        ) {
+          const gateSets = gateSetsDeclared.value as GateSetDefinitions;
+          const laneGateSet = assignedLane?.gateSet;
+          const definition =
+            laneGateSet !== undefined ? gateSets[laneGateSet] : undefined;
+          validationPassed =
+            definition !== undefined
+              ? gateSetVerdict(definition.required, run.passedGates ?? [])
+              : false;
+        }
+      }
 
       // Compliance lens: force the change to the Operator when a touched path is
       // governed by one of the deployment's compliance reviewers (condition read as

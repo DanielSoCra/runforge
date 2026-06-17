@@ -80,6 +80,11 @@
       "count": 3
     }
   },
+  "src/control-plane/merge-decision-wiring.integration.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
   "src/control-plane/notify.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 1
@@ -98,11 +103,6 @@
   "src/control-plane/phase-labels.ts": {
     "@typescript-eslint/strict-boolean-expressions": {
       "count": 3
-    }
-  },
-  "src/control-plane/merge-decision-wiring.integration.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 4
     }
   },
   "src/control-plane/phases-website.test.ts": {
@@ -130,7 +130,7 @@
       "count": 1
     },
     "@typescript-eslint/strict-boolean-expressions": {
-      "count": 11
+      "count": 10
     }
   },
   "src/control-plane/pipeline.test.ts": {
