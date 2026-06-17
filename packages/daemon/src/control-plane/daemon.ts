@@ -1950,6 +1950,23 @@ export async function startDaemon(
       // DURABLE COMMIT: persist the requeue BEFORE driving the ledger to resumed.
       await stateMgr.saveRunState(run);
 
+      // Strip the cockpit `ready` requeue label AFTER the durable save (mirrors the
+      // l2-gate branch). The integrate park is decision-index-owned, but `ready`
+      // aliases the daemon's NEW-work label — leaving it set lets detectReadyWork
+      // reclaim this issue and start a DUPLICATE run if decision-owned detection is
+      // ever unavailable or the body marker is stripped. Best-effort: a missing
+      // label is fine; comments/markers are kept as audit + idempotency evidence.
+      try {
+        await runOctokit.issues.removeLabel({
+          owner: runOwner,
+          repo: runRepoName,
+          issue_number: run.issueNumber,
+          name: REQUEUE_LABEL,
+        });
+      } catch {
+        /* label may not exist — ignore */
+      }
+
       // CRASH-SAFE ORDERING (2/2): only AFTER the run-state requeue is committed
       // do we drive the ledger to terminal `resumed`.
       try {

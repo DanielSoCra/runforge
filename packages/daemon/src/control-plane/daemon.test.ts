@@ -3914,6 +3914,11 @@ describe('daemon', () => {
         // The ledger reached terminal resumed exactly once.
         expect(manager.ledger().statusOf(decisionId)).toBe('resumed');
         expect(mockRunPipeline).toHaveBeenCalled();
+        // The cockpit `ready` requeue label is stripped so detectReadyWork cannot
+        // reclaim the resumed issue and start a duplicate run (codex r5).
+        expect(mockOctokit.issues.removeLabel).toHaveBeenCalledWith(
+          expect.objectContaining({ issue_number: 100, name: 'ready' }),
+        );
       });
 
       it('APPROVE (legacy/migrated): a parked run with NO mergeDecisionEpoch resolves the epoch to 1 and stores it on BOTH fields so the integrate handler honors it (codex r4)', async () => {
