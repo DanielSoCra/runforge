@@ -4,6 +4,15 @@ import { Octokit } from '@octokit/rest';
 import { loadConfig, type Config } from '../config.js';
 import { SessionRuntime } from '../session-runtime/runtime.js';
 import { CostTracker } from '../session-runtime/cost.js';
+import { createProviderAdapter } from '../session-runtime/adapters/index.js';
+import type { ProviderAdapter } from '../session-runtime/adapters/index.js';
+import { DEFAULT_POLICY } from '../session-runtime/containment-hooks.js';
+import {
+  admitProviders,
+  buildCriticalChainByTier,
+  type ProviderAdmissionBinding,
+} from '../session-runtime/providers/startup-admission.js';
+import { smokeTest, type SmokeProof } from '../session-runtime/providers/smoke-test.js';
 import { killAllManagedProcessGroups } from '../session-runtime/managed-processes.js';
 import { ImplementationCoordinator } from '../implementation/coordinator.js';
 import { StateManager } from './state.js';
@@ -56,7 +65,12 @@ import { createPhaseLabelMirror } from './phase-labels.js';
 import { getPipeline, getStartPhase } from './fsm.js';
 import { selectVariant } from './variants.js';
 import { notify } from './notify.js';
-import type { RunState, RuntimeSourceStatus, WorkRequest } from '../types.js';
+import type {
+  ProviderDefinition,
+  RunState,
+  RuntimeSourceStatus,
+  WorkRequest,
+} from '../types.js';
 import { ok, err, type Result } from '../lib/result.js';
 import {
   buildRuntimeSourcePolicy,
@@ -110,7 +124,8 @@ import { TechProposalStore } from '../coordination/tech-lead/proposal-store.js';
 import { assembleSignalDigest } from '../coordination/tech-lead/signal-digest.js';
 import { isTerminalStatus } from '../coordination/tech-lead/proposal-lifecycle.js';
 import { readJsonSafe, writeJsonSafe } from '../lib/json-store.js';
-import { mkdir } from 'fs/promises';
+import { mkdir, mkdtemp, rm, stat } from 'fs/promises';
+import { tmpdir } from 'os';
 import type { Proposal, IdeaSubmission } from '../coordination/types.js';
 import {
   buildProductOwnerSessionVariables,
@@ -460,6 +475,122 @@ export async function startDaemon(
     perRunBudget: config.perRunBudget, // per-run budget is repo-specific, handled per-run
   });
   const runtime = new SessionRuntime(config, costTracker);
+
+  // 3a. Startup smoke-proof admission (opt-in; gate-off path is a byte-identical
+  // NO-OP). Each configured provider/model binding is proven in a disposable
+  // workspace before the daemon binds the control server. Required providers
+  // that fail abort startup; optional failures are degraded but not fatal.
+  if (config.providers?.requireSmokeProof === true) {
+    const registry = runtime.getProviderRegistry();
+    const skipPermissions =
+      config.autonomous === true ||
+      process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'] === '1';
+
+    const runSmoke = async (
+      provider: ProviderDefinition,
+      modelBinding: string,
+    ): Promise<SmokeProof> => {
+      const baseAdapter = createProviderAdapter(provider);
+      // Sanitize the provider name into the temp-dir prefix: provider names are
+      // validated only as non-empty, so a name with a path separator would turn
+      // the prefix into a nested path and make mkdtemp throw ENOENT before the
+      // proof could be recorded. Keep only filename-safe chars (codex).
+      const safeName = provider.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const workspace = await mkdtemp(join(tmpdir(), `smoke-${safeName}-`));
+      const smokeAdapter: ProviderAdapter = {
+        capabilities: () => baseAdapter.capabilities(),
+        abort: (handle) => baseAdapter.abort(handle),
+        resume: (def, prompt, continuationId, options) =>
+          baseAdapter.resume(def, prompt, continuationId, {
+            ...options,
+            cwd: workspace,
+            containmentPolicy: DEFAULT_POLICY,
+            skipPermissions,
+          }),
+        spawn: (def, prompt, options) =>
+          baseAdapter.spawn(def, prompt, {
+            ...options,
+            cwd: workspace,
+            containmentPolicy: DEFAULT_POLICY,
+            skipPermissions,
+          }),
+      };
+      try {
+        return await smokeTest(provider, modelBinding, {
+          adapter: smokeAdapter,
+          observedChange: async () => {
+            try {
+              await stat(join(workspace, 'smoke-proof.txt'));
+              return true;
+            } catch {
+              return false;
+            }
+          },
+        });
+      } finally {
+        await rm(workspace, { recursive: true, force: true }).catch(() => {});
+      }
+    };
+
+    // One binding per (provider, tier) — the granularity the registry gates
+    // resolve() on. The proven model is the provider's declared `model` (else the
+    // tier label). NOTE (scoped limitation): per-role `roleModels.<role>.model`
+    // overrides within a tier are NOT individually proven — the smoke gate is
+    // per-(provider,tier), not per-model. Proving role-specific model bindings is a
+    // separate enhancement to the gate's granularity (registry + smoke key), not
+    // this startup-wiring task; it still proves strictly more than the gate-off
+    // default (which proves nothing).
+    const providers: ProviderAdmissionBinding[] = [];
+    for (const provider of Object.values(config.providers.definitions)) {
+      for (const tier of provider.supportedModelTiers) {
+        providers.push({
+          provider,
+          modelBinding: provider.model ?? tier,
+          tier,
+          required: provider.required === true,
+        });
+      }
+    }
+
+    // Unbound work resolves through defaultProvider then the fallback chain, and
+    // resolution is per-(provider,tier). Build the tier-keyed critical path so
+    // admission keeps EVERY tier any chain provider serves usable (incl.
+    // fallback-only tiers — an unbound request for one still resolves here).
+    const chainNames = [
+      config.providers.defaultProvider,
+      ...config.providers.fallbackChain,
+    ];
+    const criticalChainByTier = buildCriticalChainByTier(
+      config.providers.definitions,
+      chainNames,
+    );
+
+    const admission = await admitProviders({
+      registry,
+      providers,
+      requireSmokeProof: true,
+      runSmoke,
+      criticalChainByTier,
+      logger: {
+        info: (message) => console.log(message),
+        warn: (message) => console.warn(message),
+        error: (message) => console.error(message),
+      },
+    });
+
+    if (admission.aborted === true) {
+      // Mirror the earlier startup-failure paths: release the resources already
+      // started above (config-reader polling interval + Postgres client) before
+      // returning, so a non-exiting caller/test does not leak them.
+      configReader.stop();
+      await postgresClient?.sql.end().catch(() => {});
+      return err(
+        new Error(
+          `Startup aborted by smoke admission: ${admission.abortReasons.join(', ')}`,
+        ),
+      );
+    }
+  }
   const batchClassifierConfig: BatchClassifierConfig = {
     maxBatchSize: config.classifierBatchSize,
     fallbackOnFailure: true,

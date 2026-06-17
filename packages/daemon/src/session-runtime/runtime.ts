@@ -849,6 +849,10 @@ export class SessionRuntime {
     return this.rateLimiter;
   }
 
+  getProviderRegistry(): ProviderRegistry {
+    return this.providerRegistry;
+  }
+
   /**
    * Build a `SessionResumeState` from a successful session result so later
    * phases / fix cycles can resume the same provider-native conversation.
