@@ -695,6 +695,7 @@ STACK-AC-WINDOW-SCHEDULER:
     - packages/daemon/src/session-runtime/providers/window-scheduler/filter-rank.test.ts
     - packages/daemon/src/session-runtime/providers/window-scheduler/schema.test.ts
     - packages/daemon/src/session-runtime/providers/window-scheduler/ledger.test.ts
+    - packages/daemon/src/session-runtime/providers/window-scheduler/regressions.test.ts
   status: draft
 
 STACK-AC-DEPLOYMENT-REGISTRY:

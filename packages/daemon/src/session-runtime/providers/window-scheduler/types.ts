@@ -35,6 +35,15 @@ export interface QuotaSignal {
   observedAt: number;
   /** Optional provider wording that positively indicates the recurring window. */
   windowWording?: boolean;
+  /**
+   * Plan-2 (silent-pool estimate→headroom): the consumption estimate within the
+   * current window, in the pool's native unit (cf. `PoolConfig.capacity`). When a
+   * pool declares `capacity` and a `reportConsumption` signal carries an estimate
+   * but no direct headroom evidence, the ledger derives headroom via
+   * `headroomFromEstimate(estimate, capacity, hasEvidence)`. Absent → no
+   * estimate-driven cap (Plan-1).
+   */
+  estimate?: number;
 }
 
 /**
@@ -54,6 +63,14 @@ export interface Candidate {
  */
 export interface LedgerSnapshot {
   headroom(pool: string): Headroom;
+  /**
+   * Plan-2 (all-exhausted reopen hint): the projected reopen time for an
+   * exhausted pool, or `undefined` if the pool is not exhausted / has no
+   * projection. Optional so a Plan-1 snapshot (and test doubles) need not
+   * implement it; `filterAndRankByWindow` reads it only to compute the
+   * `earliestReopenProjection` hint when every candidate's pool is exhausted.
+   */
+  reopenProjection?(pool: string): number | undefined;
 }
 
 /** Window shape for a pool (config-pack data; the scheduler validates shape, not values). */
@@ -72,6 +89,24 @@ export interface PoolConfig {
   window: PoolWindow;
   signalSources: Array<'reported-quota' | 'retry-after' | 'observed-throttle'>;
   preferenceRank: number;
+  /**
+   * Plan-2 (silent-pool estimate→headroom): the window's historical capacity in
+   * the pool's native unit. When declared, the ledger derives headroom from a
+   * consumption estimate via `headroomFromEstimate` and caps the snapshot at
+   * `tight` once the estimate crosses `TIGHT_FRACTION * capacity`. ABSENT → the
+   * feature is inert (Plan-1 behavior, fail-safe). Positive number when present.
+   * Also read by `deployment-registry` via the shared `PoolConfigSchema`, so it
+   * MUST stay optional (existing fleet fixtures declare neither field).
+   */
+  capacity?: number;
+  /**
+   * Plan-2 (repeated-throttle self-correction): the number of consecutive
+   * ambiguous/throttle signals on a pool the ledger still calls `ample` that
+   * escalates it to `exhausted` (misclassification self-correction). ABSENT →
+   * the pool never auto-escalates (Plan-1 behavior). Positive integer when
+   * present. Optional for the same shared-schema reason as `capacity`.
+   */
+  threshold?: number;
 }
 
 /**
@@ -100,4 +135,12 @@ export type PoolOutcomeProvenance = {
 export interface FilterRankResult {
   eligible: Candidate[];
   excludePools: string[];
+  /**
+   * Plan-2 (all-exhausted reopen hint): when `eligible` is EMPTY because every
+   * relevant pool is exhausted, the MINIMUM `reopenProjection` across those
+   * exhausted pools — so the caller can end the provider-unavailable pause AT the
+   * earliest reopen rather than only on probe success. UNDEFINED whenever any
+   * candidate is eligible (there is nothing to wait for).
+   */
+  earliestReopenProjection?: number;
 }

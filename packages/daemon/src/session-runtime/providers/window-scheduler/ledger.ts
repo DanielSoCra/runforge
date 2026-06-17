@@ -1,5 +1,6 @@
 // packages/daemon/src/session-runtime/providers/window-scheduler/ledger.ts
 import { classifySignal } from './classify.js';
+import { headroomFromEstimate } from './headroom.js';
 import type {
   Headroom,
   LedgerSnapshot,
@@ -12,6 +13,7 @@ interface PoolState {
   headroom: Headroom;
   reopenProjection?: number;
   lastObservedAt?: number;
+  throttleCount: number;
 }
 
 /**
@@ -30,7 +32,7 @@ export class WindowLedger {
   constructor(pools: readonly PoolConfig[]) {
     this.pools = pools;
     for (const pool of pools) {
-      this.states.set(pool.name, { headroom: 'unknown' });
+      this.states.set(pool.name, { headroom: 'unknown', throttleCount: 0 });
     }
   }
 
@@ -45,23 +47,33 @@ export class WindowLedger {
 
   private ensureImplicitPool(providerName: string): void {
     if (!this.states.has(providerName)) {
-      this.states.set(providerName, { headroom: 'unknown' });
+      this.states.set(providerName, { headroom: 'unknown', throttleCount: 0 });
     }
   }
 
-  private markExhausted(poolName: string, reopenProjection: number, observedAt: number): void {
+  private resetThrottleCount(poolName: string): void {
+    const state = this.states.get(poolName);
+    if (state === undefined) {
+      return;
+    }
+    state.throttleCount = 0;
+  }
+
+  private markExhausted(poolName: string, reopenProjection: number | undefined, observedAt: number): void {
     const state = this.states.get(poolName);
     if (state === undefined) {
       this.states.set(poolName, {
         headroom: 'exhausted',
         reopenProjection,
         lastObservedAt: observedAt,
+        throttleCount: 0,
       });
       return;
     }
     state.headroom = 'exhausted';
     state.reopenProjection = reopenProjection;
     state.lastObservedAt = observedAt;
+    state.throttleCount = 0;
   }
 
   /**
@@ -91,6 +103,36 @@ export class WindowLedger {
       return;
     }
     state.lastObservedAt = signal.observedAt;
+
+    // Plan-2 (silent-pool estimate→headroom): derive from the estimate when the
+    // pool declares a capacity and the signal is not direct headroom evidence.
+    if (pool.capacity !== undefined && signal.estimate !== undefined) {
+      const derived = headroomFromEstimate(signal.estimate, pool.capacity, false);
+      state.headroom = derived;
+      // A derived estimate is a consumption observation, not a throttle: reset.
+      this.resetThrottleCount(poolName);
+    }
+
+    // Plan-2 (repeated-throttle self-correction): count ambiguous throttles on
+    // a pool that is not yet exhausted; escalate once the configured threshold
+    // is reached. Any clean signal (short-horizon provider-throttle, estimate,
+    // or window-exhaustion) resets the counter.
+    if (pool.threshold !== undefined) {
+      if (cls.kind === 'ambiguous') {
+        if (state.headroom !== 'exhausted') {
+          state.throttleCount += 1;
+          if (state.throttleCount >= pool.threshold) {
+            // Self-correct to exhausted with no reopen projection (pure policy
+            // escalation). It behaves like other exhausted states in the snapshot.
+            state.headroom = 'exhausted';
+            state.reopenProjection = undefined;
+            state.throttleCount = 0;
+          }
+        }
+      } else {
+        this.resetThrottleCount(poolName);
+      }
+    }
   }
 
   /**
@@ -127,6 +169,11 @@ export class WindowLedger {
     // from later in-place markExhausted() mutations of the ledger's own PoolState
     // objects (a shallow Map copy would share them and let mutations bleed back).
     const resolved = new Map<string, Headroom>();
+    // Project the still-exhausted pools' reopen times so the snapshot can answer
+    // `reopenProjection(pool)` for the all-exhausted reopen hint (Plan-2). A pool
+    // whose projection has passed is no longer exhausted in `resolved`, so its
+    // projection is intentionally omitted (it is dispatchable again).
+    const reopenProjections = new Map<string, number>();
     for (const [name, state] of this.states) {
       // Reopen is a hint, not a gate: once `now` reaches the projection the pool is
       // dispatchable again as 'unknown' (rebuilt from new evidence only — never
@@ -136,10 +183,16 @@ export class WindowLedger {
         state.reopenProjection !== undefined &&
         now >= state.reopenProjection;
       resolved.set(name, reopened ? 'unknown' : state.headroom);
+      if (state.headroom === 'exhausted' && state.reopenProjection !== undefined && !reopened) {
+        reopenProjections.set(name, state.reopenProjection);
+      }
     }
     return {
       headroom(pool: string): Headroom {
         return resolved.get(pool) ?? 'unknown';
+      },
+      reopenProjection(pool: string): number | undefined {
+        return reopenProjections.get(pool);
       },
     };
   }

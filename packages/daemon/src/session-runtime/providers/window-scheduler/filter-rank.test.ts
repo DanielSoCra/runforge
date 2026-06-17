@@ -12,6 +12,25 @@ function snapOf(states: Record<string, Headroom>): LedgerSnapshot {
   };
 }
 
+/**
+ * A test-only snapshot that ALSO answers `reopenProjection(pool)` — for the
+ * Plan-2 all-exhausted reopen-hint. Pools absent from `reopens` (or not
+ * exhausted) return `undefined`, matching the ledger contract.
+ */
+function snapWithReopens(
+  states: Record<string, Headroom>,
+  reopens: Record<string, number>,
+): LedgerSnapshot {
+  return {
+    headroom(pool: string): Headroom {
+      return states[pool] ?? 'unknown';
+    },
+    reopenProjection(pool: string): number | undefined {
+      return reopens[pool];
+    },
+  };
+}
+
 const c = (name: string, pool: string, preferenceRank: number): Candidate => ({
   name,
   pool,
@@ -106,5 +125,29 @@ describe('filterAndRankByWindow', () => {
     const snap = snapOf({ 'pool-hi': 'tight', 'pool-lo': 'ample' });
     const { eligible } = filterAndRankByWindow(candidates, snap);
     expect(eligible.map((e) => e.name)).toEqual(['hi', 'lo']);
+  });
+
+  // === Plan-2 GATE TESTS: all-exhausted reopen hint (RED until implemented) ===
+
+  it('all pools exhausted → earliestReopenProjection is the MINIMUM reopen across exhausted pools', () => {
+    const candidates = [c('a', 'pool-x', 0), c('b', 'pool-y', 1)];
+    const snap = snapWithReopens(
+      { 'pool-x': 'exhausted', 'pool-y': 'exhausted' },
+      { 'pool-x': 9_000, 'pool-y': 5_000 }, // earliest is pool-y at 5_000
+    );
+    const { eligible, earliestReopenProjection } = filterAndRankByWindow(candidates, snap);
+    expect(eligible).toEqual([]);
+    expect(earliestReopenProjection).toBe(5_000);
+  });
+
+  it('some candidates eligible → earliestReopenProjection is undefined (nothing to wait for)', () => {
+    const candidates = [c('a', 'pool-x', 0), c('b', 'pool-y', 1)];
+    const snap = snapWithReopens(
+      { 'pool-x': 'exhausted', 'pool-y': 'ample' }, // pool-y still serves
+      { 'pool-x': 9_000 },
+    );
+    const { eligible, earliestReopenProjection } = filterAndRankByWindow(candidates, snap);
+    expect(eligible.map((e) => e.name)).toEqual(['b']);
+    expect(earliestReopenProjection).toBeUndefined();
   });
 });

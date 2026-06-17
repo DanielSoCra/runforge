@@ -7,6 +7,14 @@ import type { PoolConfig } from './types.js';
  * collapsing into a default (fail-closed, exactly as the lane-engine schema).
  * `.nonempty()` providers — a pool with zero providers is unreachable config.
  * `.positive()` window length — a non-positive window is a config error.
+ *
+ * Plan-2 adds the OPTIONAL `capacity` and `threshold` knobs. They are optional
+ * because this same schema is reused verbatim by `deployment-registry`
+ * (`FleetCapacitySchema = z.array(PoolConfigSchema)`) whose existing fleet
+ * fixtures declare neither — making them required would break those fixtures.
+ * Absent → the silent-pool / self-correction features are inert (Plan-1).
+ *  - `capacity`: positive number (window's historical capacity → estimate cap).
+ *  - `threshold`: positive integer (repeated-throttle escalation count).
  */
 export const PoolConfigSchema = z
   .object({
@@ -22,6 +30,8 @@ export const PoolConfigSchema = z
       .array(z.enum(['reported-quota', 'retry-after', 'observed-throttle']))
       .nonempty(),
     preferenceRank: z.number().int(),
+    capacity: z.number().positive().optional(),
+    threshold: z.number().int().positive().optional(),
   })
   .strict();
 
