@@ -264,8 +264,10 @@ export function cronMatchesAt(expr: string, utcMs: number): boolean {
  *   lower = snapshot.lastWakingAt ?? (snapshot.now - 60_000)
  *
  * A first-ever wake (`snapshot.lastWakingAt` undefined) looks back exactly one
- * minute so the CURRENT tick can fire if it matches (the interval decider's
- * "first-ever is due" analogue, expressed as a one-minute lookback). The boundary
+ * minute so the CURRENT tick can fire if it matches. This is the PRIMITIVE
+ * window-predicate behavior; the rhythm-agnostic "first-ever is due" rule
+ * (FUNC-AC-STEERING) lives one level up in `decideWake`'s cron arm, which
+ * short-circuits to `due` before ever consulting this function. The boundary
  * is inclusive at the TOP (`m <= now`: a fire exactly at `now`'s minute counts)
  * and exclusive at the BOTTOM (`lower < m`: the minute already consumed by the
  * previous waking does not re-fire). The backward search is bounded to

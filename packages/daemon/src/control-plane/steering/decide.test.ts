@@ -80,6 +80,17 @@ describe('decideWake (pure over the snapshot)', () => {
     const r = decideWake(role, { now: Date.UTC(2024, 0, 1, 9, 0) });
     expect(r.kind).toBe('due');
   });
+
+  it('first-ever cron wake at a NON-matching minute → due (initial scan, codex round 4)', () => {
+    // lastWakingAt undefined, now at 10:00 while the role fires daily at 09:00. The
+    // rhythm-agnostic "first-ever is due" rule (this is the role's INITIAL scan on
+    // activation) makes this due — a newly activated cron role must NOT sit idle
+    // until tomorrow's 09:00 fire. The first-ever rule lives in decideWake's cron
+    // arm, above cronDue's primitive one-minute lookback.
+    const role = makeRole({ wakeRhythm: { kind: 'cron', expr: '0 9 * * *' } });
+    const r = decideWake(role, { now: Date.UTC(2024, 0, 1, 10, 0) });
+    expect(r.kind).toBe('due');
+  });
 });
 
 describe('checkSpend (bounded by the declared budget)', () => {
