@@ -804,6 +804,37 @@ describe('createPhaseHandlers', () => {
       );
     });
 
+    it('delivers an integrate operator send-back reason to coordinator via reviewFindings, then clears it one-shot (#9, codex)', async () => {
+      const { handlers, coordinator } = createHandlers();
+      coordinator.implement.mockResolvedValue({
+        ok: true,
+        value: { success: true, totalCost: 1.0 },
+      });
+      // A merge-decision REJECT routed this run back to implement with the
+      // Operator's send-back reason. Re-implement must receive it (tagged), folded
+      // ahead of any review findings, and it must be consumed exactly once.
+      const run = makeRun({
+        mergeDecisionFeedback:
+          'Touches billing — split the schema change out first.',
+        reviewFindings: ['[quality] function too long'],
+      });
+      await handlers.implement!(run);
+      expect(coordinator.implement).toHaveBeenCalledWith(
+        expect.anything(),
+        'feature/42',
+        undefined,
+        undefined,
+        expect.objectContaining({
+          reviewFindings: [
+            '[operator-send-back] Touches billing — split the schema change out first.',
+            '[quality] function too long',
+          ],
+        }),
+      );
+      // one-shot: a subsequent implement retry is driven by review findings only.
+      expect(run.mergeDecisionFeedback).toBeUndefined();
+    });
+
     it('clears handoff notes from RunState after successful implementation (#121)', async () => {
       const { handlers, coordinator } = createHandlers();
       coordinator.implement.mockResolvedValue({

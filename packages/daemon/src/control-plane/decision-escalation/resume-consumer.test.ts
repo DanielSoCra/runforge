@@ -58,6 +58,16 @@ describe('parseCockpitAnswer', () => {
     expect(result?.choice).toBe('approve');
   });
 
+  it('recognizes the legacy integrate `approve-merge` option id as an approve (backward-compat, codex)', () => {
+    // An integrate DecisionRequest published before the option id was aligned to
+    // `approve` declared `approve-merge`; an already-answered, still-parked run
+    // must still resume. The alias maps to `approve` (l2-gate never emits it).
+    const comments = [
+      { body: decisionResponseComment(DECISION_ID, 'approve-merge') },
+    ];
+    expect(parseCockpitAnswer(comments, DECISION_ID)?.choice).toBe('approve');
+  });
+
   it('recognizes a reject DecisionResponse and exposes the raw comment body as feedback', () => {
     const comments = [
       { body: decisionResponseComment(DECISION_ID, 'reject') },
