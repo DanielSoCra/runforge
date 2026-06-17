@@ -122,19 +122,16 @@ describe('parseRole — fail-closed rejections (real zod .strict())', () => {
     expect(r.ok).toBe(false);
   });
 
-  it('a valid cron rhythm parses + deep-freezes (storable; cron tick-evaluation is deferred)', () => {
-    // A cron-rhythm role declaration STORES fine — freezing is rhythm-agnostic.
-    // (Only the cron tick-evaluation in decideWake is deferred — it returns not-due
-    // until a pure cron decider lands — so a cron role never auto-wakes yet but is
-    // fully declarable.)
+  it('a valid-shape cron rhythm is REJECTED (unsupported — fail closed, never silently inert)', () => {
+    // The schema accepts the cron SHAPE, but decideWake cannot evaluate a cron
+    // expression yet, so a cron role would parse and then never wake. Registration
+    // fails closed with a clear offender rather than accepting an inert role.
+    // (A pure cron decider is a tracked follow-up; until then, cron is rejected.)
     const r = parseRole(
       { ...validRole, wakeRhythm: { kind: 'cron', expr: '0 * * * *' } },
       version,
     );
-    expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.role.wakeRhythm).toEqual({ kind: 'cron', expr: '0 * * * *' });
-      expect(Object.isFrozen(r.role)).toBe(true);
-    }
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.offenders.some((o) => o.toLowerCase().includes('cron'))).toBe(true);
   });
 });

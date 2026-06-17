@@ -36,10 +36,11 @@ export function decideWake(role: SteeringRole, snapshot: WakeSnapshot): WakeDeci
         : { kind: 'not-due', reason: 'interval not elapsed' };
     }
     case 'cron': {
-      // A pure cron evaluation would compare snap.now against the cron expr.
-      // Until the platform supplies a cron decider, a cron rhythm is treated as
-      // not-yet-due (exhaustive, fail-closed, and free of Date.now()).
-      return { kind: 'not-due', reason: 'cron not yet due' };
+      // Unreachable in practice: cron rhythms are rejected at registration (see
+      // schema.ts assembleRole — fail-closed until a pure cron decider lands), so a
+      // frozen role never carries a cron rhythm. Kept for switch exhaustiveness and
+      // defense in depth; not-due is the cautious arm if one ever reaches here.
+      return { kind: 'not-due', reason: 'cron not supported (rejected at registration)' };
     }
     default: {
       const _exhaustive: never = role.wakeRhythm;
