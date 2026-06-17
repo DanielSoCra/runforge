@@ -226,10 +226,11 @@ STACK-AC-OPERATOR-SURFACE-CLIENT:
   code_paths:
     - packages/dashboard/app/api/decisions/pending/route.ts
     - packages/dashboard/components/decisions/decision-inbox.tsx
-    - packages/dashboard/app/(dashboard)/page.tsx
+    - packages/dashboard/app/(dashboard)/steering/page.tsx
   test_paths:
     - packages/dashboard/components/decisions/decision-inbox.test.tsx
     - packages/dashboard/app/api/decisions/pending/route.test.ts
+    - packages/dashboard/app/(dashboard)/steering/page.test.tsx
   status: draft
 
 # Enacts L0 v6's verifier-gated-autonomy boundary (Delta H); the enforcing L1

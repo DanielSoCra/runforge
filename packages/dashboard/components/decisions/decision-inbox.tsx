@@ -1,14 +1,14 @@
 /**
  * STACK-AC-OPERATOR-SURFACE-CLIENT — the Operator Surface decisions inbox (read).
  *
- * The ranked pending-decisions inbox rendered on the dashboard's default view
- * (FUNC-AC-OPERATOR-SURFACE: "the default view shows decisions and the briefing").
- * This is the PRESENTATIONAL core: a pure component that takes a plain
+ * The ranked pending-decisions inbox rendered on the operator-surface route
+ * (FUNC-AC-OPERATOR-SURFACE: "the operator surface shows decisions and the
+ * briefing"). This is the PRESENTATIONAL core: a pure component that takes a plain
  * `RankedListItem[]` (mirroring the daemon Decision API's `GET /decisions/pending`
  * wire shape — see `packages/daemon/src/control-plane/decision-api.ts`) plus an
  * `unavailable` degraded flag, and renders rows / empty / degraded from props
- * alone. The server component (`app/(dashboard)/page.tsx`) owns the fetch via the
- * proxy route (`app/api/decisions/pending/route.ts`); this component owns pixels.
+ * alone. The server component (`app/(dashboard)/steering/page.tsx`) owns the fetch
+ * via the proxy route (`app/api/decisions/pending/route.ts`); this owns pixels.
  *
  * REDACTION (L2/L3): a `question` (or any `ListField`) is a discriminated union.
  * A `protected` field carries ONLY its class marker (no resolvable value/ref by
@@ -62,12 +62,24 @@ import {
 } from '@/components/ui/card';
 import { AlertTriangle, Inbox } from 'lucide-react';
 
-function riskBadgeVariant(riskClass: string) {
+/**
+ * Map the wire `risk_class` (`P0|P1|P2|P3` — decision-protocol `RISK_CLASSES`)
+ * to a shadcn `Badge` variant. P0 is the most urgent / destructive class and
+ * gets the loudest treatment; P3 is the calmest. Unknown values fall back to
+ * the muted `outline` so an unexpected class never reads as urgent.
+ */
+function riskBadgeVariant(
+  riskClass: string,
+): 'destructive' | 'secondary' | 'default' | 'outline' {
   switch (riskClass) {
-    case 'RED':
+    case 'P0':
       return 'destructive';
-    case 'ORANGE':
+    case 'P1':
       return 'secondary';
+    case 'P2':
+      return 'default';
+    case 'P3':
+      return 'outline';
     default:
       return 'outline';
   }
@@ -122,26 +134,29 @@ export function DecisionInbox({ items, unavailable }: DecisionInboxProps) {
     );
   }
 
-  const groups = new Map<string, RankedListItem[]>();
-  for (const item of items) {
-    const date = item.created_at.slice(0, 10);
-    const group = groups.get(date) ?? [];
-    group.push(item);
-    groups.set(date, group);
-  }
-
+  // Render in the EXACT daemon-ranked order — the daemon returns a global ranked
+  // order the client MUST preserve and never re-rank (L3: "render daemon order,
+  // do not re-rank"; FUNC-AC-FLEET owns ranking). Date separators are inline
+  // headers inserted only when the date CHANGES from the previous row in ranked
+  // sequence — they never regroup or sort, so a [today, yesterday, today] ranked
+  // list stays in that order (and shows the date header three times). The header
+  // condition is derived purely from the preceding item (no render-time mutation).
   return (
-    <div className="flex flex-col gap-4">
-      {Array.from(groups.entries()).map(([date, groupItems]) => (
-        <div key={date} className="flex flex-col gap-3">
-          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            {date}
-          </div>
-          {groupItems.map((item) => (
-            <div
-              key={item.decision_id}
-              className="flex flex-col gap-2 rounded-xl border p-4 sm:flex-row sm:items-start sm:justify-between"
-            >
+    <div className="flex flex-col gap-3">
+      {items.map((item, index) => {
+        const date = item.created_at.slice(0, 10);
+        const previousDate =
+          index > 0 ? items[index - 1].created_at.slice(0, 10) : null;
+        const showDateHeader = date !== previousDate;
+
+        return (
+          <div key={item.decision_id} className="flex flex-col gap-3">
+            {showDateHeader && (
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {date}
+              </div>
+            )}
+            <div className="flex flex-col gap-2 rounded-xl border p-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="flex flex-col gap-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant={riskBadgeVariant(item.risk_class)}>
@@ -164,9 +179,9 @@ export function DecisionInbox({ items, unavailable }: DecisionInboxProps) {
                 </div>
               </div>
             </div>
-          ))}
-        </div>
-      ))}
+          </div>
+        );
+      })}
     </div>
   );
 }
