@@ -31,6 +31,8 @@ export interface BatchResultItem {
   classified: boolean;
   event: ClassifyResult['event'];
   complexity?: ClassificationComplexity;
+  changeKind?: import('./lane-engine/types.js').ChangeKind;
+  scope?: string;
   allocatedCost: number;
   reasoning?: string;
   estimatedUnits?: number;
@@ -72,6 +74,10 @@ Return a JSON array. Each item must contain:
 - reasoning
 - estimatedUnits
 - estimatedArtifacts
+- changeKind: one of "docs", "formatting", "dependency-refresh", "feature", "fix", "refactor", "config", "other"
+- scope: a short lowercase declared-scope category (e.g. "documentation", "frontend", "api", "infra", "tests")
+
+Always include changeKind and scope — a deployment's lane policy qualifies changes on them, and omitting them forces the most-cautious lane.
 
 ## Classification Criteria
 
@@ -324,6 +330,8 @@ function toResultItem(
     classified: true,
     event: item.complexity === 'simple' ? 'success:simple' : 'success',
     complexity: item.complexity,
+    changeKind: item.changeKind,
+    scope: item.scope,
     allocatedCost,
     reasoning: item.reasoning,
     estimatedUnits: item.estimatedUnits,

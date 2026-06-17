@@ -491,6 +491,32 @@ export const ConfigSchema = z.object({
       techLeadMaxEntriesPerSection: 50,
       maxConsecutiveTickErrors: 5,
     }),
+  // OPTIONAL deployment profile — the config source for the lane-engine /
+  // merge-decision live wiring (slice 5b). ABSENT by default: with no
+  // `deployment` block the merge-decision gate is OFF and `integrate` keeps its
+  // unconditional merge (flag-OFF byte-identity). When present, the daemon
+  // registers it into the DeploymentRegistry at boot, which RE-PARSES it
+  // authoritatively via parseProfile (lane-set / risk-path / lifecycle-mode
+  // structural validation lives there, not here) — so this schema only asserts
+  // the envelope is object-shaped and carries the required keys. `laneSet` /
+  // `riskPathMap` are passed through as opaque (z.unknown) to avoid duplicating
+  // the lane-engine schema; a malformed lane set is rejected at registry
+  // registration (fail-closed → empty registry → all escalate).
+  // A registered deployment: an id + the FULL DeploymentProfile envelope, carried
+  // OPAQUELY (`profile: z.unknown()`) and validated by the registry's `parseProfile`
+  // (the single authoritative validator — config must not duplicate, or partially
+  // restate, the profile schema). `parseProfile`'s strict envelope does NOT include
+  // `id` and DOES require repositories/laneSet/riskPathMap/defaultMinLevel/
+  // lifecycleMode/complianceReviewers/honestAutomation/budget/landing/
+  // capabilityBindings; the daemon registers `register(deployment.id, deployment.profile)`.
+  // A malformed profile is rejected at registration → empty registry → the
+  // integrate handler fails CLOSED for that configured deployment.
+  deployment: z
+    .object({
+      id: z.string().min(1),
+      profile: z.unknown(),
+    })
+    .optional(),
 }).superRefine((config, ctx) => {
   const providers = config.providers;
   if (providers) {

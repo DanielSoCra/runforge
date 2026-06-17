@@ -5,3 +5,11 @@
 export * from './types.js';
 export { decideMerge } from './decide.js';
 export { toDecisionRiskClass } from './risk-class.js';
+export {
+  buildMergeDecisionRequest,
+  decisionIdFor,
+  INTEGRATE_PHASE,
+  type BuildMergeDecisionRequestOpts,
+} from './build-request.js';
+export { observeVerifierStatus } from './observe-verifier.js';
+export { computeTouchedPaths } from './touched-paths.js';

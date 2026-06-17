@@ -22,15 +22,27 @@ Produce a JSON classification:
   "complexity": "simple",
   "reasoning": "Single file change, no cross-cutting concerns",
   "estimatedUnits": 1,
-  "estimatedArtifacts": 2
+  "estimatedArtifacts": 2,
+  "changeKind": "docs",
+  "scope": "documentation"
 }
 ```
+
+Always include `changeKind` and `scope` — a deployment's lane policy qualifies changes on them, and omitting them forces the most-cautious lane.
 
 ## Classification Criteria
 
 - **simple** — 1 unit, 3 or fewer artifacts, no cross-cutting concerns. Uses streamlined pipeline (skip decomposition).
 - **standard** — 2-5 units, moderate scope, single domain. Uses full pipeline with decomposition.
 - **complex** — 6+ units, cross-cutting concerns, multiple domains or significant architectural changes. Uses full pipeline with additional review rounds.
+
+## Change Kind (`changeKind`)
+
+The dominant kind of change. One of: `docs`, `formatting`, `dependency-refresh`, `feature`, `fix`, `refactor`, `config`, `other`. Pick the single best fit for what the change primarily does.
+
+## Scope (`scope`)
+
+A short declared-scope category for what area the change touches (e.g. `documentation`, `frontend`, `api`, `infra`, `tests`). Deployments match lane policy against this, so prefer a stable, lowercase category over a sentence.
 
 ## Rules
 

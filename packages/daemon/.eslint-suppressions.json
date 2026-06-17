@@ -100,6 +100,11 @@
       "count": 3
     }
   },
+  "src/control-plane/merge-decision-wiring.integration.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
   "src/control-plane/phases-website.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 4
@@ -125,7 +130,7 @@
       "count": 1
     },
     "@typescript-eslint/strict-boolean-expressions": {
-      "count": 13
+      "count": 11
     }
   },
   "src/control-plane/pipeline.test.ts": {

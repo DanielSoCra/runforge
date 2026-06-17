@@ -6,6 +6,7 @@ import { ImplementationCoordinator } from '../implementation/coordinator.js';
 import { StateManager } from './state.js';
 import { createWorkDetector, type FeaturePipelineWorkType } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
+import { createDeploymentRegistry } from './deployment-registry/index.js';
 import { runPipeline } from './pipeline.js';
 import { getPipeline, getStartPhase } from './fsm.js';
 import { selectVariant } from './variants.js';
@@ -64,6 +65,19 @@ export async function processSingleIssue(issueNumber: number, configPath: string
   const configResult = await loadConfig(configPath);
   if (!configResult.ok) return configResult;
   const config = configResult.value;
+
+  const deploymentRegistry = createDeploymentRegistry();
+  if (config.deployment !== undefined) {
+    const registered = deploymentRegistry.register(
+      config.deployment.id,
+      config.deployment.profile,
+    );
+    if (!registered.ok) {
+      console.error(
+        `[process] Deployment registration failed for ${config.deployment.id}: ${registered.offenders.join('; ')}`,
+      );
+    }
+  }
 
   const { preloadGovernanceContext } = await import('../session-runtime/governance-context.js');
   try {
@@ -124,6 +138,7 @@ export async function processSingleIssue(issueNumber: number, configPath: string
     phaseCompletions: {}, checkpoints: [], cost: 0,
     perRunBudget: config.perRunBudget, fixAttempts: [], errorHashes: {},
     body: request.body, labels: request.labels, specRefs: request.specRefs,
+    deploymentId: config.deployment?.id,
     startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   };
   await stateMgr.saveRunState(run);
@@ -144,6 +159,9 @@ export async function processSingleIssue(issueNumber: number, configPath: string
     undefined,
     undefined,
     phaseLabelMirror,
+    undefined,
+    undefined,
+    deploymentRegistry,
   );
   const table = getPipeline(variant);
   const result = await runPipeline(run, table, handlers, stateMgr, costTracker, undefined, undefined, phaseLabelMirror);

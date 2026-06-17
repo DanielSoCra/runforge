@@ -55,6 +55,11 @@ export interface PreClassification {
     | 'containment-breach'
   >;
   complexity?: ClassificationComplexity;
+  // Lane-qualification verdict fields (carried through batch pre-classification so
+  // a deployment's lane policy that qualifies on changeKind/scope is honored on the
+  // normal daemon path, not just the per-issue classify path).
+  changeKind?: import('./control-plane/lane-engine/types.js').ChangeKind;
+  scope?: string;
   allocatedCost?: number;
   batchSequenceId?: string;
 }
@@ -357,6 +362,45 @@ export interface RunState {
   diagnosisConfidence?: number;
   diagnosisDetail?: string; // Serialized BugDiagnosis JSON — passed to bug-worker sessions
   classificationComplexity?: ClassificationComplexity;
+  /**
+   * The classifier's change-kind verdict (Plan-2 lane-engine extension). Optional
+   * and additive: legacy runs without a classifier extension leave it undefined,
+   * and the merge-decision wiring treats an absent verdict field as unavailable
+   * (forces the fail-safe fallback lane). Threaded from ClassifyResult by the
+   * `classify` handler (slice 5b wiring).
+   */
+  classifierChangeKind?: import('./control-plane/lane-engine/types.js').ChangeKind;
+  /**
+   * The classifier's declared-scope verdict (Plan-2 lane-engine extension),
+   * matched against a lane's `scope` qualification. Optional/additive — see
+   * classifierChangeKind.
+   */
+  classifierScope?: string;
+  /**
+   * The deployment this run belongs to (the registry key). Set at run creation +
+   * resume by the daemon (slice 5b boot). Absent ⇒ no deployment configured ⇒ the
+   * merge-decision gate is OFF and `integrate` keeps its unconditional merge
+   * (flag-OFF byte-identity).
+   */
+  deploymentId?: string;
+  /**
+   * The merge decision the `integrate` handler computed for this run (slice 5b).
+   * Carried for audit + the parked-run DecisionRequest builder. Absent until the
+   * gate runs (or always absent when the gate is OFF).
+   */
+  mergeDecision?: import('./control-plane/merge-decision/types.js').MergeDecision;
+  /**
+   * Monotonic epoch for the merge-decision park, mirroring `decisionEpoch` for the
+   * l2-gate. Bumped on each fresh `integrate` park; seeds the deterministic
+   * decision_id (issue-<n>:integrate:<epoch>).
+   */
+  mergeDecisionEpoch?: number;
+  /**
+   * True once the current merge-decision epoch's DecisionRequest block has been
+   * durably published (mirrors `decisionBlockPublished` for the l2-gate). Gates the
+   * retryable publish step; reset on a fresh park / new epoch.
+   */
+  mergeDecisionBlockPublished?: boolean;
   handoffNotes?: Record<string, string>;
   workerClaimId?: string;
   pausedAtPhase?: Phase;
