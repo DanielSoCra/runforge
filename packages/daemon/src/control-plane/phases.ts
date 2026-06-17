@@ -1809,6 +1809,24 @@ export function createPhaseHandlers(
         return 'failure';
       }
 
+      // A configured deployment must OWN this run's repo. Without this guard the
+      // daemon would apply one deployment's lane/risk/autonomy profile to a repo it
+      // does not own. Found-but-not-owned → fail CLOSED (never apply a foreign
+      // profile, and never silently legacy-merge a repo a deployment wrongly claims).
+      if (
+        registry !== undefined &&
+        deploymentId !== undefined &&
+        registryInputs !== undefined &&
+        registryInputs.kind === 'found' &&
+        registry.ownsRepo(deploymentId, owner, repoName) === false
+      ) {
+        console.error(
+          `[integrate] deployment "${deploymentId}" does not own ${owner}/${repoName} — ` +
+            `refusing to apply its profile (failing closed).`,
+        );
+        return 'failure';
+      }
+
       // Flag-OFF: NO deployment configured (no registry or no deployment id) →
       // keep today's unconditional integrateToStaging byte-for-byte.
       if (registryInputs === undefined || deploymentId === undefined) {
