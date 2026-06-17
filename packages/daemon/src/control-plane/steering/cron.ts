@@ -47,18 +47,16 @@ const DOM_RANGE: CronFieldRange = { min: 1, max: 31 };
 const MONTH_RANGE: CronFieldRange = { min: 1, max: 12 };
 const DOW_RANGE: CronFieldRange = { min: 0, max: 6 };
 
-function assertInteger(value: number, token: string): void {
-  if (!Number.isInteger(value)) {
-    throw new Error(`cron: non-integer value "${token}"`);
-  }
-}
+// Only a bare decimal integer is a valid cron number token. Number() coerces ''→0,
+// '1e1'→10, ' 5 '→5, '5.0'→5 — all of which would let typo'd exprs through the
+// fail-closed registration gate (isValidCronExpr), so require /^\d+$/ first.
+const DECIMAL_INT = /^\d+$/;
 
 function parseSingleValue(token: string, range: CronFieldRange): number {
-  const value = Number(token);
-  if (Number.isNaN(value)) {
-    throw new Error(`cron: non-numeric value "${token}"`);
+  if (!DECIMAL_INT.test(token)) {
+    throw new Error(`cron: non-integer value "${token}"`);
   }
-  assertInteger(value, token);
+  const value = Number(token);
   if (value < range.min || value > range.max) {
     throw new Error(`cron: value ${value} out of range ${range.min}-${range.max}`);
   }
@@ -70,11 +68,10 @@ function parseRangeBound(token: string, range: CronFieldRange): number {
 }
 
 function parseStep(token: string): number {
-  const step = Number(token);
-  if (Number.isNaN(step)) {
-    throw new Error(`cron: non-numeric step "${token}"`);
+  if (!DECIMAL_INT.test(token)) {
+    throw new Error(`cron: non-integer step "${token}"`);
   }
-  assertInteger(step, token);
+  const step = Number(token);
   if (step <= 0) {
     throw new Error(`cron: step must be positive, got ${step}`);
   }
@@ -131,7 +128,11 @@ function parseField(field: string, range: CronFieldRange): Set<number> {
         start = range.min;
         end = range.max;
       } else if (rangePart.includes('-')) {
-        const [startToken, endToken] = rangePart.split('-');
+        const bounds = rangePart.split('-');
+        if (bounds.length !== 2) {
+          throw new Error(`cron: malformed range "${rangePart}" (expected exactly one '-')`);
+        }
+        const [startToken, endToken] = bounds;
         if (startToken === undefined || endToken === undefined || startToken === '' || endToken === '') {
           throw new Error(`cron: malformed range "${rangePart}"`);
         }
@@ -146,7 +147,11 @@ function parseField(field: string, range: CronFieldRange): Set<number> {
     }
 
     if (item.includes('-')) {
-      const [startToken, endToken] = item.split('-');
+      const bounds = item.split('-');
+      if (bounds.length !== 2) {
+        throw new Error(`cron: malformed range "${item}" (expected exactly one '-')`);
+      }
+      const [startToken, endToken] = bounds;
       if (startToken === undefined || endToken === undefined || startToken === '' || endToken === '') {
         throw new Error(`cron: malformed range "${item}"`);
       }

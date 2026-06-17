@@ -198,6 +198,16 @@ describe('cronMatchesAt — malformed expression throws (programmer error)', () 
   it('a step field with repeated "/" throws, never silently parsed as */5 (codex)', () => {
     expect(() => cronMatchesAt('*/5/2 * * * *', JAN1_0000)).toThrow();
   });
+
+  it('Number()-coercible non-integer tokens throw, not silently coerced (codex)', () => {
+    expect(() => cronMatchesAt('/5 * * * *', JAN1_0000)).toThrow(); // empty range token → not 0
+    expect(() => cronMatchesAt('1e1 * * * *', JAN1_0000)).toThrow(); // exponent → not minute 10
+    expect(() => cronMatchesAt('5.0 * * * *', JAN1_0000)).toThrow(); // decimal → not 5
+  });
+
+  it('a range with extra bounds throws, never silently parsed as a-b (codex)', () => {
+    expect(() => cronMatchesAt('0 1-2-3 * * *', JAN1_0000)).toThrow();
+  });
 });
 
 describe('cronDue — window existence (lower < m <= now)', () => {
