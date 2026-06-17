@@ -18,6 +18,15 @@ export interface ClassifyResult {
     | 'rate-limited'
     | 'containment-breach';
   complexity?: ClassificationResult['complexity'];
+  /**
+   * Plan-2 lane-engine extension — the classifier's change-kind + declared-scope
+   * verdict, surfaced for the `classify` handler to write onto RunState
+   * (classifierChangeKind/classifierScope). OPTIONAL/additive: undefined when the
+   * classifier did not emit them, which the merge-decision wiring treats as an
+   * unavailable verdict field (fail-safe).
+   */
+  changeKind?: ClassificationResult['changeKind'];
+  scope?: ClassificationResult['scope'];
 }
 
 /**
@@ -127,11 +136,14 @@ export async function classify(
     return { event: 'success:simple' };
   }
 
-  const { complexity, reasoning } = parsed.data;
+  const { complexity, reasoning, changeKind, scope } = parsed.data;
   console.log(`[classify] Classification: ${complexity} — ${reasoning}`);
 
   return {
     event: complexity === 'simple' ? 'success:simple' : 'success',
     complexity,
+    // Pass through the Plan-2 verdict fields verbatim (undefined when absent).
+    changeKind,
+    scope,
   };
 }

@@ -48,6 +48,16 @@ import {
 import type { DecisionIndexManager } from './decision-escalation/manager.js';
 import { buildL2GateRequest } from './decision-escalation/build-request.js';
 import { GitHubBlockPublisher } from './decision-escalation/github-block-notifier.js';
+import type { DeploymentRegistry } from './deployment-registry/registry.js';
+import {
+  buildMergeDecisionRequest,
+  computeTouchedPaths,
+  decideMerge,
+  observeVerifierStatus,
+} from './merge-decision/index.js';
+import { assignLane, resolveForMode } from './lane-engine/index.js';
+import type { ClassifierVerdict, RiskLevel } from './lane-engine/types.js';
+import type { ClassificationComplexity } from '../types.js';
 
 // Serializes git operations on the shared repoRoot across concurrent pipeline runs.
 // Currently protects detect (which modifies checkout state via git checkout).
@@ -95,6 +105,14 @@ export function createPhaseHandlers(
   phaseLabelMirror?: PhaseLabelMirror,
   decisionManager?: DecisionIndexManager,
   decisionPublisher?: GitHubBlockPublisher,
+  // OPTIONAL deployment registry — the config source the merge-decision live
+  // wiring reads (slice 5b). When undefined (today's call sites + the flag-OFF
+  // path), the `integrate` handler keeps its unconditional integrateToStaging
+  // (byte-identical to pre-5b). Kimi wires the `integrate` handler body to read
+  // `registry` + `run.deploymentId`; this gate only adds the OPTIONAL param so
+  // the wiring integration test can inject a registry while existing call sites
+  // (which omit it) still compile.
+  registry?: DeploymentRegistry,
 ): PhaseHandlerMap {
   const repo = repoName;
   // Lazily constructed only when the decision index is enabled — a disabled
@@ -115,6 +133,26 @@ export function createPhaseHandlers(
   // Restored from run.workspacePath on resume (survives daemon restarts).
   let workspaceCwd: string = mainRepoRoot;
   let workspaceRestored = false;
+
+  /**
+   * Map the legacy classifier complexity onto the lane-engine RiskLevel floor.
+   * Simple work is the least cautious; complex work is the most cautious.
+   * Unknown/absent complexity falls back to the most cautious level (fail-safe).
+   */
+  const classifierLevelFromComplexity = (
+    complexity: ClassificationComplexity | undefined,
+  ): RiskLevel => {
+    switch (complexity) {
+      case 'simple':
+        return 'green';
+      case 'standard':
+        return 'yellow';
+      case 'complex':
+        return 'red';
+      default:
+        return 'red';
+    }
+  };
 
   /** Restore workspaceCwd from persisted run state if not already set. */
   const ensureWorkspace = async (run: RunState) => {
@@ -1053,6 +1091,8 @@ export function createPhaseHandlers(
         activePlugins,
       );
       run.classificationComplexity = result.complexity;
+      run.classifierChangeKind = result.changeKind;
+      run.classifierScope = result.scope;
       return result.event;
     },
 
@@ -1743,38 +1783,201 @@ export function createPhaseHandlers(
       return 'success';
     },
 
-    integrate: async (_run: RunState): Promise<PhaseEvent> => {
+    integrate: async (run: RunState): Promise<PhaseEvent> => {
       console.log(
         `[integrate] Merging ${featureBranch} into ${config.branches.staging}`,
       );
-      // Integration must run in mainRepoRoot (where staging is already checked out),
-      // not workspaceCwd (worktree on featureBranch). Git prohibits checking out a branch
-      // that's already checked out in another worktree — see #412.
-      const result = await integrateToStaging(
-        featureBranch,
-        config.branches.staging,
-        mainRepoRoot,
-      );
-      if (!result.ok) {
-        console.error(`[integrate] Error:`, result.error.message);
-        return 'failure';
-      }
-      if (!result.value.success) {
-        console.error(`[integrate] Failed:`, result.value.error);
-        return 'failure';
-      }
-      if (result.value.pushed) {
-        console.log(
-          `[integrate] Successfully merged ${featureBranch} → ${config.branches.staging} and pushed to origin`,
+
+      // Flag-OFF: no registry, no deployment id, or the deployment is not
+      // registered → keep today's unconditional integrateToStaging byte-for-byte.
+      const deploymentId = run.deploymentId;
+      const registryInputs =
+        registry !== undefined && deploymentId !== undefined
+          ? registry.resolveLaneEngineInputs(deploymentId)
+          : undefined;
+      if (
+        registryInputs === undefined ||
+        registryInputs.kind === 'not-found' ||
+        deploymentId === undefined
+      ) {
+        const result = await integrateToStaging(
+          featureBranch,
+          config.branches.staging,
+          mainRepoRoot,
         );
-      } else if (result.value.pushError) {
+        if (!result.ok) {
+          console.error(`[integrate] Error:`, result.error.message);
+          return 'failure';
+        }
+        if (!result.value.success) {
+          console.error(`[integrate] Failed:`, result.value.error);
+          return 'failure';
+        }
+        if (result.value.pushed === true) {
+          console.log(
+            `[integrate] Successfully merged ${featureBranch} → ${config.branches.staging} and pushed to origin`,
+          );
+        } else if (
+          result.value.pushError !== undefined &&
+          result.value.pushError !== ''
+        ) {
+          console.warn(
+            `[integrate] Merged locally but push failed (non-fatal): ${result.value.pushError}`,
+          );
+        } else {
+          console.log(
+            `[integrate] Successfully merged to ${config.branches.staging}`,
+          );
+        }
+        return 'success';
+      }
+
+      // Flag-ON: gather live inputs and ask the pure decision core.
+      const { laneSet, riskPathMap, defaultMinLevel, mode } = registryInputs.inputs;
+      const verdict: ClassifierVerdict | null =
+        run.classificationComplexity !== undefined
+          ? {
+              complexity: run.classificationComplexity,
+              changeKind: run.classifierChangeKind,
+              scope: run.classifierScope,
+            }
+          : null;
+      const classifierLevel = classifierLevelFromComplexity(run.classificationComplexity);
+
+      let touchedPaths: string[];
+      try {
+        touchedPaths = await computeTouchedPaths(
+          featureBranch,
+          config.branches.staging,
+          mainRepoRoot,
+        );
+      } catch (e) {
         console.warn(
-          `[integrate] Merged locally but push failed (non-fatal): ${result.value.pushError}`,
+          `[integrate] Failed to compute touched paths (failing closed): ${e instanceof Error ? e.message : String(e)}`,
         );
-      } else {
-        console.log(
-          `[integrate] Successfully merged to ${config.branches.staging}`,
+        return 'failure';
+      }
+
+      // Resolve the assigned lane so we can observe its declared verifier.
+      const resolvedSet = resolveForMode(laneSet, mode);
+      const assignment = assignLane(resolvedSet, verdict);
+      const assignedLane =
+        resolvedSet.lanes.find((l) => l.name === assignment.lane) ??
+        resolvedSet.lanes.find((l) => l.name === resolvedSet.mostCautiousLane);
+      const verifierStatus = observeVerifierStatus(assignedLane?.verifier);
+
+      // Human-gated autonomy: default-deny unless the registry records widening.
+      const autonomyWidened = (level: RiskLevel, _lane: string): boolean => {
+        if (deploymentId === undefined) return false;
+        const readings = registry?.readAutonomyState(deploymentId, level) ?? [];
+        return readings.some((r) => r.level === 'widened');
+      };
+
+      // v1 proxy: a run that reached integrate with no recorded failure is
+      // treated as having passed its gate-set. If we cannot tell, fail-safe.
+      const validationPassed = run.lastFailure === undefined;
+
+      // v1: real compliance dispatch is deferred; no path is forced here.
+      const complianceForced = false;
+
+      const decision = decideMerge({
+        laneSet,
+        riskPathMap,
+        defaultMinLevel,
+        mode,
+        verdict,
+        classifierLevel,
+        touchedPaths,
+        verifierStatus,
+        validationPassed,
+        autonomyWidened,
+        complianceForced,
+      });
+      run.mergeDecision = decision;
+
+      if (decision.kind === 'auto-merge') {
+        run.pausedAtPhase = undefined;
+        const result = await integrateToStaging(
+          featureBranch,
+          config.branches.staging,
+          mainRepoRoot,
         );
+        if (!result.ok) {
+          console.error(`[integrate] Error:`, result.error.message);
+          return 'failure';
+        }
+        if (!result.value.success) {
+          console.error(`[integrate] Failed:`, result.value.error);
+          return 'failure';
+        }
+        if (result.value.pushed === true) {
+          console.log(
+            `[integrate] Successfully merged ${featureBranch} → ${config.branches.staging} and pushed to origin`,
+          );
+        } else if (
+          result.value.pushError !== undefined &&
+          result.value.pushError !== ''
+        ) {
+          console.warn(
+            `[integrate] Merged locally but push failed (non-fatal): ${result.value.pushError}`,
+          );
+        } else {
+          console.log(
+            `[integrate] Successfully merged to ${config.branches.staging}`,
+          );
+        }
+        return 'success';
+      }
+
+      // escalate / hold → park at integrate and emit a DecisionRequest.
+      console.log(
+        `[integrate] Merge decision for #${workRequest.issueNumber}: ${decision.kind} (${'reason' in decision ? decision.reason : 'awaiting-independent-review'}) — parking`,
+      );
+      const wasAlreadyParked = run.pausedAtPhase === 'integrate';
+      run.pausedAtPhase = 'integrate';
+
+      // Fresh park: bump the merge-decision epoch so each review cycle gets a
+      // new deterministic decision id. Re-scans of an already-parked run keep
+      // the same epoch.
+      if (!wasAlreadyParked) {
+        run.mergeDecisionEpoch = (run.mergeDecisionEpoch ?? 0) + 1;
+        run.mergeDecisionBlockPublished = false;
+      }
+
+      if (
+        decisionManager?.isEnabled() === true &&
+        run.mergeDecisionEpoch !== undefined &&
+        run.mergeDecisionBlockPublished !== true
+      ) {
+        try {
+          const ledger = decisionManager.ledger();
+          const request = buildMergeDecisionRequest(
+            run,
+            run.mergeDecisionEpoch,
+            deploymentId,
+            decision,
+          );
+          const { decision_id } = ledger.raise(request);
+          const published = await resolveDecisionPublisher().ensure({
+            request,
+            octokit,
+            owner,
+            repo,
+            issueNumber: workRequest.issueNumber,
+          });
+          if (published.posted) {
+            await ledger.notify(decision_id);
+            run.mergeDecisionBlockPublished = true;
+          } else {
+            console.warn(
+              `[integrate] decision block not published for #${workRequest.issueNumber} (${published.reason ?? 'unknown'}) — staying parked, will retry`,
+            );
+          }
+        } catch (e) {
+          console.warn(
+            `[integrate] decision-index raise/publish/notify failed (failing closed, run stays parked): ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
       }
       return 'success';
     },

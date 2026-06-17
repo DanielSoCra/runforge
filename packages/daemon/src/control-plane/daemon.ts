@@ -26,6 +26,10 @@ import {
   type FeaturePipelineWorkType,
 } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
+import {
+  createDeploymentRegistry,
+  type DeploymentRegistry,
+} from './deployment-registry/index.js';
 import { ensureWorkspaceRepo } from './workspace-bootstrap.js';
 import { DecisionIndexManager } from './decision-escalation/manager.js';
 import { readDecisionIndexConfig } from './decision-escalation/config.js';
@@ -268,6 +272,22 @@ export async function startDaemon(
     await bootReconcile(decisionManager);
   } catch (e) {
     return err(e instanceof Error ? e : new Error(String(e)));
+  }
+
+  // 2c. Deployment registry (optional, flag-gated). A malformed deployment
+  // profile is rejected at registration; the registry is left empty so the
+  // integrate handler falls back to its flag-OFF unconditional merge.
+  const deploymentRegistry = createDeploymentRegistry();
+  if (config.deployment !== undefined) {
+    const registered = deploymentRegistry.register(
+      config.deployment.id,
+      config.deployment,
+    );
+    if (!registered.ok) {
+      console.error(
+        `[daemon] Deployment registration failed for ${config.deployment.id}: ${registered.offenders.join('; ')}`,
+      );
+    }
   }
 
   // Validate the control host early (hoisted from the control-server step):
@@ -1070,6 +1090,7 @@ export async function startDaemon(
             knowledgeStore,
             repoManager,
             decisionManager,
+            deploymentRegistry,
           )
             .then((outcome) =>
               handleRunOutcome(outcome, request.issueNumber, owner, name),
@@ -1128,6 +1149,7 @@ export async function startDaemon(
               knowledgeStore,
               repoManager,
               decisionManager,
+              deploymentRegistry,
             )
               .then((outcome) =>
                 handleRunOutcome(outcome, bugRequest.issueNumber, owner, name),
@@ -1187,6 +1209,7 @@ export async function startDaemon(
               knowledgeStore,
               repoManager,
               decisionManager,
+              deploymentRegistry,
             )
               .then((outcome) =>
                 handleRunOutcome(outcome, fpRequest.issueNumber, owner, name),
@@ -1335,6 +1358,7 @@ export async function startDaemon(
     console.log(
       `[daemon] Resuming incomplete run #${run.issueNumber} from phase '${run.phase}'`,
     );
+    run.deploymentId = config.deployment?.id ?? `${runOwner}/${runRepoName}`;
     activeIssues.add(run.issueNumber);
     activeRuns++;
 
@@ -1389,6 +1413,8 @@ export async function startDaemon(
             knowledgeStore,
             phaseLabelMirror,
             decisionManager,
+            undefined,
+            deploymentRegistry,
           );
     const table = getPipeline(run.variant);
 
@@ -1786,6 +1812,7 @@ export async function startDaemon(
       // Re-enter pipeline
       activeIssues.add(run.issueNumber);
       activeRuns++;
+      run.deploymentId = config.deployment?.id ?? `${runOwner}/${runRepoName}`;
       if (repoManager && resumeRepoId) repoManager.notifyRunStart(resumeRepoId);
 
       const notifyOctokit = runOctokit;
@@ -1820,11 +1847,13 @@ export async function startDaemon(
               runWriter ?? undefined,
               run.id,
               repoRoot,
-              configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins,
-              knowledgeStore,
-              phaseLabelMirror,
-              decisionManager,
-            );
+            configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins,
+            knowledgeStore,
+            phaseLabelMirror,
+            decisionManager,
+            undefined,
+            deploymentRegistry,
+          );
       const table = getPipeline(run.variant);
 
       runPipeline(
@@ -2097,6 +2126,7 @@ async function processWorkRequest(
   knowledgeStore?: KnowledgeStore,
   repoManager?: RepoManager | null,
   decisionManager?: DecisionIndexManager,
+  registry?: DeploymentRegistry,
 ): Promise<string> {
   const today = new Date().toISOString().split('T')[0];
   if (today !== dailyRunCountResetDate) {
@@ -2123,6 +2153,7 @@ async function processWorkRequest(
     body: request.body,
     labels: request.labels,
     specRefs: request.specRefs,
+    deploymentId: config.deployment?.id ?? `${owner}/${repoName}`,
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -2219,6 +2250,8 @@ async function processWorkRequest(
           knowledgeStore,
           phaseLabelMirror,
           decisionManager,
+          undefined,
+          registry,
         );
   const table = getPipeline(variant);
 

@@ -491,6 +491,29 @@ export const ConfigSchema = z.object({
       techLeadMaxEntriesPerSection: 50,
       maxConsecutiveTickErrors: 5,
     }),
+  // OPTIONAL deployment profile — the config source for the lane-engine /
+  // merge-decision live wiring (slice 5b). ABSENT by default: with no
+  // `deployment` block the merge-decision gate is OFF and `integrate` keeps its
+  // unconditional merge (flag-OFF byte-identity). When present, the daemon
+  // registers it into the DeploymentRegistry at boot, which RE-PARSES it
+  // authoritatively via parseProfile (lane-set / risk-path / lifecycle-mode
+  // structural validation lives there, not here) — so this schema only asserts
+  // the envelope is object-shaped and carries the required keys. `laneSet` /
+  // `riskPathMap` are passed through as opaque (z.unknown) to avoid duplicating
+  // the lane-engine schema; a malformed lane set is rejected at registry
+  // registration (fail-closed → empty registry → all escalate).
+  deployment: z
+    .object({
+      id: z.string().min(1),
+      laneSet: z.unknown(),
+      riskPathMap: z.unknown(),
+      defaultMinLevel: z.enum(['green', 'yellow', 'orange', 'red']),
+      lifecycleMode: z.string().min(1),
+      complianceReviewers: z
+        .array(z.object({ reviewer: z.string().min(1), condition: z.string().min(1) }))
+        .default([]),
+    })
+    .optional(),
 }).superRefine((config, ctx) => {
   const providers = config.providers;
   if (providers) {
