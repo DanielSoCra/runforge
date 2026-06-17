@@ -540,17 +540,32 @@ export async function startDaemon(
       }
     }
 
+    // Unbound work resolves through defaultProvider then the fallback chain, and
+    // resolution is per-(provider,tier). Build the tier-keyed critical path: for
+    // each tier the default provider serves, the ordered chain providers that
+    // support that tier. Admission must keep every such tier usable.
+    const chainNames = [
+      config.providers.defaultProvider,
+      ...config.providers.fallbackChain,
+    ];
+    const defs = config.providers.definitions;
+    const defaultDef = defs[config.providers.defaultProvider];
+    const criticalChainByTier = new Map<string, string[]>();
+    for (const tier of defaultDef?.supportedModelTiers ?? []) {
+      criticalChainByTier.set(
+        tier,
+        chainNames.filter((n) =>
+          defs[n]?.supportedModelTiers.includes(tier) === true,
+        ),
+      );
+    }
+
     const admission = await admitProviders({
       registry,
       providers,
       requireSmokeProof: true,
       runSmoke,
-      // Unbound work resolves through defaultProvider then the fallback chain —
-      // admission must keep that path usable, not just any single provider.
-      criticalChain: [
-        config.providers.defaultProvider,
-        ...config.providers.fallbackChain,
-      ],
+      criticalChainByTier,
       logger: {
         info: (message) => console.log(message),
         warn: (message) => console.warn(message),

@@ -204,10 +204,10 @@ describe('admitProviders — startup smoke-proof admission gate', () => {
     expect(result.failed).toHaveLength(2);
   });
 
-  it('GATE ON, the default-resolution-path provider fails while an UNRELATED provider passes: aborts (criticalChain unusable, codex)', async () => {
+  it('GATE ON, the default-resolution-path provider fails while an UNRELATED provider passes: aborts (critical chain unusable, codex)', async () => {
     // defaultProvider fails; an unrelated optional provider passes. Zero-admitted
     // would NOT fire (one admitted), but unbound work resolves through the default
-    // path which is now unproven → must abort.
+    // path which is now unproven for TIER → must abort.
     const registry = fakeRegistry();
     const runSmoke = vi.fn(async (p: ProviderDefinition) =>
       p.name === 'codex-default' ? failProof(p.name) : passProof(p.name),
@@ -217,7 +217,7 @@ describe('admitProviders — startup smoke-proof admission gate', () => {
       registry,
       providers: [binding('codex-default', false), binding('claude-side', false)],
       requireSmokeProof: true,
-      criticalChain: ['codex-default'], // defaultProvider + fallbackChain
+      criticalChainByTier: new Map([[TIER, ['codex-default']]]),
       runSmoke,
     });
 
@@ -227,7 +227,7 @@ describe('admitProviders — startup smoke-proof admission gate', () => {
     expect(result.admitted.map((a) => a.providerName)).toEqual(['claude-side']);
   });
 
-  it('GATE ON, default fails but a FALLBACK in the chain passes: does NOT abort (chain absorbs it)', async () => {
+  it('GATE ON, default fails but a FALLBACK serving the same tier passes: does NOT abort (chain absorbs it)', async () => {
     const registry = fakeRegistry();
     const runSmoke = vi.fn(async (p: ProviderDefinition) =>
       p.name === 'codex-default' ? failProof(p.name) : passProof(p.name),
@@ -237,12 +237,38 @@ describe('admitProviders — startup smoke-proof admission gate', () => {
       registry,
       providers: [binding('codex-default', false), binding('claude-fallback', false)],
       requireSmokeProof: true,
-      criticalChain: ['codex-default', 'claude-fallback'],
+      criticalChainByTier: new Map([[TIER, ['codex-default', 'claude-fallback']]]),
       runSmoke,
     });
 
     expect(result.aborted).toBe(false);
     expect(result.admitted.map((a) => a.providerName)).toEqual(['claude-fallback']);
+  });
+
+  it('GATE ON, tier-aware: default(TIER) fails and the only passing fallback serves a DIFFERENT tier → aborts for the unserved tier (codex r3)', async () => {
+    // The fallback passes but for OTHER_TIER only; the default TIER path has no
+    // admitted provider, so a standard-tier unbound task would resolve
+    // provider-unavailable. The per-tier critical check must catch this.
+    const OTHER_TIER: ModelTier = 'standard-capability';
+    const registry = fakeRegistry();
+    const runSmoke = vi.fn(async (p: ProviderDefinition) =>
+      p.name === 'codex-default' ? failProof(p.name) : passProof(p.name),
+    );
+
+    const result = await admitProviders({
+      registry,
+      providers: [
+        { ...binding('codex-default', false), tier: TIER },
+        { ...binding('claude-fallback', false), tier: OTHER_TIER },
+      ],
+      requireSmokeProof: true,
+      // The chain must serve TIER; only codex-default supports TIER and it failed.
+      criticalChainByTier: new Map([[TIER, ['codex-default']]]),
+      runSmoke,
+    });
+
+    expect(result.aborted).toBe(true);
+    expect(result.abortReasons.join(' ')).toContain(TIER);
   });
 
   it('GATE ON, MULTIPLE required providers fail: abortReasons names every offender (ordering/parallelism unobservable)', async () => {
