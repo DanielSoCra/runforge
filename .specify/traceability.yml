@@ -169,7 +169,7 @@ FUNC-AC-COMPLIANCE-GATE:
   status: approved
 
 FUNC-AC-FLEET:
-  children: [ARCH-AC-WINDOW-SCHEDULER]
+  children: [ARCH-AC-WINDOW-SCHEDULER, ARCH-AC-DEPLOYMENT-REGISTRY]
   status: approved
 
 FUNC-AC-MERGE-DECISION:
@@ -309,6 +309,17 @@ ARCH-AC-WINDOW-SCHEDULER:
   parent: FUNC-AC-FLEET
   children: [STACK-AC-WINDOW-SCHEDULER]
   related: [ARCH-AC-SESSION-PROVIDERS]
+  status: draft
+
+# The single per-deployment record the Control Plane reads to run a project
+# from its profile alone. OWNS the config that FEEDS the lane engine + window
+# scheduler (lane set, risk-path map + default minimum, capacity-pool set,
+# lifecycle mode) and the per-deployment autonomy state; the deciders over that
+# config are the siblings, expressed as related.
+ARCH-AC-DEPLOYMENT-REGISTRY:
+  parent: FUNC-AC-FLEET
+  children: [STACK-AC-DEPLOYMENT-REGISTRY]
+  related: [ARCH-AC-LANE-ENGINE, ARCH-AC-WINDOW-SCHEDULER, ARCH-AC-PLUGINS]
   status: draft
 
 ARCH-AC-GOVERNANCE:
@@ -655,6 +666,13 @@ STACK-AC-WINDOW-SCHEDULER:
     - packages/daemon/src/session-runtime/providers/window-scheduler/filter-rank.test.ts
     - packages/daemon/src/session-runtime/providers/window-scheduler/schema.test.ts
     - packages/daemon/src/session-runtime/providers/window-scheduler/ledger.test.ts
+  status: draft
+
+STACK-AC-DEPLOYMENT-REGISTRY:
+  parent: ARCH-AC-DEPLOYMENT-REGISTRY
+  children: []
+  code_paths: []  # DEFERRED to implementation — path-existence validator requires real files
+  test_paths: []  # DEFERRED to implementation — same reason
   status: draft
 
 STACK-AC-OPERATIONAL-SAFETY:
