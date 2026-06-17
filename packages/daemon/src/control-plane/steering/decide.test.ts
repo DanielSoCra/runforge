@@ -64,4 +64,15 @@ describe('checkSpend (bounded by the declared budget)', () => {
     expect(r.kind).toBe('conclude-and-record');
     if (r.kind === 'conclude-and-record') expect(r.reason.length).toBeGreaterThan(0);
   });
+
+  // codex 2026-06-17: PROJECTED spend — a step must not push the waking over budget.
+  it('under budget but the next step would exceed → conclude-and-record (projected)', () => {
+    const r = checkSpend(makeRole({ perWakingBudget: 5000 }), 4900, 200); // 5100 projected
+    expect(r.kind).toBe('conclude-and-record');
+  });
+
+  it('under budget and the next step stays within → proceed', () => {
+    const r = checkSpend(makeRole({ perWakingBudget: 5000 }), 4900, 50); // 4950 projected
+    expect(r.kind).toBe('proceed');
+  });
 });

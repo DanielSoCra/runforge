@@ -70,6 +70,12 @@ export interface Waking {
   id: string;
   roleId: string;
   version: RoleVersion;
+  /**
+   * The frozen role declaration PINNED at open. Authorization (route's grant
+   * check) reads THIS, never the registry's current role — a re-registration that
+   * bumps the version mid-waking must not retro-change an in-flight waking's grants.
+   */
+  role: SteeringRole;
   openedAt: number;
   closedAt?: number;
 }

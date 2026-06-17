@@ -50,13 +50,19 @@ export function decideWake(role: SteeringRole, snapshot: WakeSnapshot): WakeDeci
 
 /**
  * Decide whether the next step of a waking may spend, bounded by the declared
- * `role.perWakingBudget` against the `runningSpend` the cost layer reports.
- * Over-budget (`runningSpend >= perWakingBudget`) returns `conclude-and-record`
- * — the cautious arm that ends the waking CLEANLY, never overspends, never
- * errors. Below budget returns `proceed`. Performs no accounting itself.
+ * `role.perWakingBudget`. Checks PROJECTED spend (`runningSpend + nextStepCost`)
+ * — checking already-spent alone would let a step at 4,900/5,000 proceed for a
+ * 200-cost step and blow the budget. If the projection reaches/exceeds budget,
+ * returns `conclude-and-record` (the cautious arm — ends the waking CLEANLY,
+ * never overspends, never errors); else `proceed`. `nextStepCost` defaults to 0
+ * (a pure already-spent check). Performs no accounting itself.
  */
-export function checkSpend(role: SteeringRole, runningSpend: number): SpendVerdict {
-  return runningSpend >= role.perWakingBudget
+export function checkSpend(
+  role: SteeringRole,
+  runningSpend: number,
+  nextStepCost = 0,
+): SpendVerdict {
+  return runningSpend + nextStepCost >= role.perWakingBudget
     ? { kind: 'conclude-and-record', reason: 'per-waking budget reached' }
     : { kind: 'proceed' };
 }

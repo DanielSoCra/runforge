@@ -133,17 +133,13 @@ describe('SteeringRegistry.route (the only exit — records, never executes)', (
     expect(out.ok).toBe(true);
     if (!out.ok) return;
 
-    const r = reg.route(
-      'product-owner',
-      out.version,
-      'waking-1',
-      'research',
-      'artifact-42',
-    );
+    const w = reg.openWaking('product-owner', 1000);
+    if (!('id' in w)) throw new Error('openWaking failed');
+    const r = reg.route(w.id, 'research', 'artifact-42');
     expect(r.kind).toBe('recorded');
     if (r.kind === 'recorded') {
       expect(r.request.target).toBe('research');
-      expect(r.request.wakingId).toBe('waking-1');
+      expect(r.request.wakingId).toBe(w.id);
       expect(r.request.artifactRef).toBe('artifact-42');
       expect(r.request.version).toEqual(out.version);
     }
@@ -155,14 +151,33 @@ describe('SteeringRegistry.route (the only exit — records, never executes)', (
     expect(out.ok).toBe(true);
     if (!out.ok) return;
 
-    const r = reg.route(
-      'product-owner',
-      out.version,
-      'waking-1',
-      'operator-proposal', // granted at platform level but NOT in this role's grant
-      'artifact-42',
-    );
+    const w = reg.openWaking('product-owner', 1000);
+    if (!('id' in w)) throw new Error('openWaking failed');
+    const r = reg.route(w.id, 'operator-proposal', 'artifact-42'); // platform path, NOT in this role's grant
     expect(r.kind).toBe('rejected');
     if (r.kind === 'rejected') expect(r.reason).toContain('operator-proposal');
+  });
+});
+
+describe('SteeringRegistry.route — version-pin regression (codex 2026-06-17)', () => {
+  it('a waking opened under v1 routes by v1 grant even after re-registration removes it', () => {
+    const reg = new SteeringRegistry(known);
+    expect(reg.register(makeRole({ routingGrant: ['research'] })).ok).toBe(true);
+    const w1 = reg.openWaking('product-owner', 1000); // pins v1 (grant: research)
+    if (!('id' in w1)) throw new Error('openWaking v1 failed');
+    // Re-register the SAME id WITHOUT 'research' (bumps to v2).
+    expect(reg.register(makeRole({ routingGrant: ['operator-proposal'] })).ok).toBe(true);
+    // The in-flight v1 waking still authorizes by its PINNED v1 grant.
+    expect(reg.route(w1.id, 'research', 'a1').kind).toBe('recorded');
+    // A waking opened under v2 does NOT have 'research'.
+    const w2 = reg.openWaking('product-owner', 2000);
+    if (!('id' in w2)) throw new Error('openWaking v2 failed');
+    expect(reg.route(w2.id, 'research', 'a2').kind).toBe('rejected');
+  });
+
+  it('route on an unknown waking → rejected (never executes)', () => {
+    const reg = new SteeringRegistry(known);
+    reg.register(makeRole({ routingGrant: ['research'] }));
+    expect(reg.route('w-nonexistent', 'research', 'a1').kind).toBe('rejected');
   });
 });

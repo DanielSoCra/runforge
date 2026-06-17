@@ -168,6 +168,7 @@ export class SteeringRegistry {
       id: `w-${(this.wakingSeq += 1)}`,
       roleId,
       version: found.version,
+      role: found.role, // pin the frozen declaration for the waking's whole life
       openedAt: now,
     };
     this.wakings.set(waking.id, waking);
@@ -195,22 +196,19 @@ export class SteeringRegistry {
    * returns `{ kind: 'rejected'; reason }` and records nothing dispatched (the
    * rejection is itself recorded against the waking). NEVER executes the workflow.
    */
-  route(
-    roleId: string,
-    version: RoleVersion,
-    wakingId: string,
-    target: string,
-    artifactRef: string,
-  ): RouteResult {
-    const found = this.lookup(roleId);
-    if (found.kind === 'not-found') {
-      return {
-        kind: 'rejected',
-        reason: `role '${roleId}' not found`,
-      };
+  route(wakingId: string, target: string, artifactRef: string): RouteResult {
+    // Authorize against the WAKING's PINNED role/version — never the registry's
+    // current role and never a caller-supplied version. A waking opened under v1
+    // routes by v1's grants even if the role was re-registered to v2 mid-waking.
+    const waking = this.wakings.get(wakingId);
+    if (waking === undefined) {
+      return { kind: 'rejected', reason: `waking '${wakingId}' not found` };
+    }
+    if (waking.closedAt !== undefined) {
+      return { kind: 'rejected', reason: `waking '${wakingId}' is already closed` };
     }
 
-    if (found.role.routingGrant.includes(target) === false) {
+    if (waking.role.routingGrant.includes(target) === false) {
       return {
         kind: 'rejected',
         reason: `target '${target}' is outside the role's routing grant`,
@@ -219,7 +217,7 @@ export class SteeringRegistry {
 
     const request: RouteRequest = {
       wakingId,
-      version,
+      version: waking.version,
       target,
       artifactRef,
     };
