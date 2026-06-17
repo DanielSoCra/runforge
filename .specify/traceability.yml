@@ -190,7 +190,7 @@ FUNC-AC-RUNTIME-ADAPTERS:
   status: approved
 
 FUNC-AC-STEERING:
-  children: []
+  children: [ARCH-AC-STEERING]
   related: [FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, FUNC-AC-FLEET, FUNC-AC-PLUGINS]
   status: approved
 
@@ -320,6 +320,18 @@ ARCH-AC-DEPLOYMENT-REGISTRY:
   parent: FUNC-AC-FLEET
   children: [STACK-AC-DEPLOYMENT-REGISTRY]
   related: [ARCH-AC-LANE-ENGINE, ARCH-AC-WINDOW-SCHEDULER, ARCH-AC-PLUGINS]
+  status: draft
+
+# The registry + scheduler the Control Plane reads to run standing judgment
+# roles from their declarations alone. OWNS the declare -> validate -> freeze ->
+# lookup of SteeringRole data, the RoleVersion attribution anchor, the Waking
+# record, the pure wake/spend deciders, and the routing-grant check. The product-
+# owner and tech-lead roles become the first two declarations under it (related);
+# what they judge stays theirs, the Operator surface owns where proposals land.
+ARCH-AC-STEERING:
+  parent: FUNC-AC-STEERING
+  children: [STACK-AC-STEERING]
+  related: [FUNC-AC-PRODUCT-OWNER, FUNC-AC-TECH-LEAD, FUNC-AC-OPERATOR-SURFACE, FUNC-AC-PLUGINS]
   status: draft
 
 ARCH-AC-GOVERNANCE:
@@ -685,6 +697,13 @@ STACK-AC-WINDOW-SCHEDULER:
 
 STACK-AC-DEPLOYMENT-REGISTRY:
   parent: ARCH-AC-DEPLOYMENT-REGISTRY
+  children: []
+  code_paths: []  # DEFERRED to implementation — path-existence validator requires real files
+  test_paths: []  # DEFERRED to implementation — same reason
+  status: draft
+
+STACK-AC-STEERING:
+  parent: ARCH-AC-STEERING
   children: []
   code_paths: []  # DEFERRED to implementation — path-existence validator requires real files
   test_paths: []  # DEFERRED to implementation — same reason
