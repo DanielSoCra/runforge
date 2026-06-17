@@ -490,9 +490,12 @@ export async function startDaemon(
       modelBinding: string,
     ): Promise<SmokeProof> => {
       const baseAdapter = createProviderAdapter(provider);
-      const workspace = await mkdtemp(
-        join(tmpdir(), `smoke-${provider.name}-`),
-      );
+      // Sanitize the provider name into the temp-dir prefix: provider names are
+      // validated only as non-empty, so a name with a path separator would turn
+      // the prefix into a nested path and make mkdtemp throw ENOENT before the
+      // proof could be recorded. Keep only filename-safe chars (codex).
+      const safeName = provider.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const workspace = await mkdtemp(join(tmpdir(), `smoke-${safeName}-`));
       const smokeAdapter: ProviderAdapter = {
         capabilities: () => baseAdapter.capabilities(),
         abort: (handle) => baseAdapter.abort(handle),
