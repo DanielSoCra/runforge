@@ -115,10 +115,15 @@ export class WindowLedger {
 
     // Plan-2 (repeated-throttle self-correction): count ambiguous throttles on
     // a pool that is not yet exhausted; escalate once the configured threshold
-    // is reached. Any clean signal (short-horizon provider-throttle, estimate,
-    // or window-exhaustion) resets the counter.
+    // is reached. Any clean signal (short-horizon provider-throttle, estimate, or
+    // window-exhaustion) resets the counter. An estimate-bearing report is a
+    // CONSUMPTION observation, never a throttle — exclude it explicitly, else on a
+    // pool declaring BOTH capacity and threshold a clean silent-pool estimate
+    // (which classifySignal also labels `ambiguous`, lacking a retry-after) would
+    // be miscounted as a throttle and falsely exhaust the pool after `threshold`
+    // clean reports.
     if (pool.threshold !== undefined) {
-      if (cls.kind === 'ambiguous') {
+      if (cls.kind === 'ambiguous' && signal.estimate === undefined) {
         if (state.headroom !== 'exhausted') {
           state.throttleCount += 1;
           if (state.throttleCount >= pool.threshold) {

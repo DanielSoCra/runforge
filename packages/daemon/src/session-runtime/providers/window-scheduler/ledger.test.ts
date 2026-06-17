@@ -147,4 +147,20 @@ describe('WindowLedger repeated-throttle self-correction (Plan-2)', () => {
     }
     expect(ledger.snapshot(2_000).headroom('pool-a')).not.toBe('exhausted');
   });
+
+  it('on a pool declaring BOTH capacity and threshold, repeated CLEAN estimate reports below capacity do NOT self-escalate (codex r1)', () => {
+    // Regression: a silent-pool estimate carries no retry-after, so classifySignal
+    // labels it `ambiguous` — but it is a clean consumption observation, not a
+    // throttle. It must reset (never increment) the throttle counter, else a pool
+    // with both options falsely exhausts after `threshold` clean reports.
+    const poolBoth: PoolConfig = { ...poolA, capacity: CAPACITY, threshold: THRESHOLD };
+    const ledger = new WindowLedger([poolBoth]);
+    const belowEstimate = TIGHT_FRACTION * CAPACITY - 1;
+    for (let i = 0; i < THRESHOLD + 2; i += 1) {
+      ledger.reportConsumption(signal({ observedAt: 1_000 + i, estimate: belowEstimate }));
+    }
+    // Never escalated to exhausted by the throttle counter (estimate is clean), and
+    // a below-cap estimate with no evidence is capped at tight (never ample).
+    expect(ledger.snapshot(2_000).headroom('pool-a')).toBe('tight');
+  });
 });
