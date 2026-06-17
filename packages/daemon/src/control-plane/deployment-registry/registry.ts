@@ -69,7 +69,18 @@ export class DeploymentRegistry {
    */
   constructor(fleetCapacity?: Readonly<FleetCapacityConfig>) {
     if (fleetCapacity !== undefined) {
-      this.fleetCapacity = deepFreeze({ ...fleetCapacity });
+      // Validate through the SAME parser as setFleetCapacity — the one-provider-
+      // one-pool invariant is not encoded in the type, so a type-valid-but-
+      // invariant-violating config must not be frozen and served as valid. A
+      // constructor has no outcome channel, so an invalid seed is a programmer
+      // error (bypassing setFleetCapacity) and throws rather than failing open.
+      const outcome = parseFleetCapacity(fleetCapacity.pools);
+      if (!outcome.ok) {
+        throw new Error(
+          `invalid fleet capacity passed to constructor: ${outcome.offenders.join('; ')}`,
+        );
+      }
+      this.fleetCapacity = outcome.fleet;
     }
   }
 
@@ -229,10 +240,15 @@ export class DeploymentRegistry {
       recordedAt: now,
     };
 
-    const newState: AutonomyState = {
+    // Deep-freeze the new state before storing AND returning it: `Readonly` is
+    // compile-time only, so an un-frozen returned object would let a caller mutate
+    // entries/history directly and bypass the authorization + history path that is
+    // the whole point of this method. (Subsequent widenings spread these frozen
+    // collections into fresh mutable copies, so freezing here is safe.)
+    const newState: AutonomyState = deepFreeze({
       entries: { ...state.entries, [riskClass]: target },
       history: [...state.history, record],
-    };
+    });
 
     this.autonomy.set(id, newState);
     return { ok: true, state: newState };
