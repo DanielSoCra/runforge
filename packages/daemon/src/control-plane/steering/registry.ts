@@ -15,6 +15,7 @@
 // registry NEVER executes, merges, or starts implementation — route records a
 // RouteRequest and hands it off, nothing more.
 
+import { createHash } from 'node:crypto';
 import {
   SteeringRoleSchema,
   zodOffenders,
@@ -65,7 +66,10 @@ function stableStringify(value: unknown): string {
 }
 
 function digestRole(data: SteeringRole): string {
-  return `sha-${stableStringify(data)}`;
+  // A BOUNDED content hash — never the stringified declaration itself (which would
+  // leak/duplicate the full charter, instructions, and grants into every persisted
+  // or surfaced RoleVersion). Deterministic: no clock, no randomness.
+  return `sha256-${createHash('sha256').update(stableStringify(data)).digest('hex')}`;
 }
 
 export class SteeringRegistry {
@@ -102,29 +106,38 @@ export class SteeringRegistry {
    */
   register(raw: unknown): RegistrationOutcome {
     const parsed = SteeringRoleSchema.safeParse(raw);
-    if (parsed.success === false) {
-      return { ok: false, offenders: zodOffenders(parsed.error) };
+    const rawObj =
+      typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+    // Collect EVERY offender in one pass — schema errors AND grant-membership
+    // errors — so a declaration with both is rejected completely (the operator
+    // fixes every class at once, not one per reload). Grant checks read the
+    // validated data when the schema passed, else best-effort on the raw arrays.
+    const grantSource: { capabilityGrant?: unknown; routingGrant?: unknown } =
+      parsed.success ? parsed.data : rawObj;
+    const offenders: string[] = parsed.success ? [] : zodOffenders(parsed.error);
+
+    const caps = grantSource.capabilityGrant;
+    if (Array.isArray(caps)) {
+      for (const c of caps) {
+        if (typeof c === 'string' && this.knownCapabilities.has(c) === false) {
+          offenders.push(`capability '${c}' is not a known capability`);
+        }
+      }
     }
-
-    const data = parsed.data;
-    const offenders: string[] = [];
-
-    for (const capability of data.capabilityGrant) {
-      if (this.knownCapabilities.has(capability) === false) {
-        offenders.push(`capability '${capability}' is not a known capability`);
+    const paths = grantSource.routingGrant;
+    if (Array.isArray(paths)) {
+      for (const p of paths) {
+        if (typeof p === 'string' && this.knownPaths.has(p) === false) {
+          offenders.push(`path '${p}' is not a known routing path`);
+        }
       }
     }
 
-    for (const path of data.routingGrant) {
-      if (this.knownPaths.has(path) === false) {
-        offenders.push(`path '${path}' is not a known routing path`);
-      }
-    }
-
-    if (offenders.length > 0) {
+    if (offenders.length > 0 || parsed.success === false) {
       return { ok: false, offenders };
     }
 
+    const data = parsed.data;
     const roleId = data.id;
     const versionNumber = this.nextVersion.get(roleId) ?? 1;
     this.nextVersion.set(roleId, versionNumber + 1);

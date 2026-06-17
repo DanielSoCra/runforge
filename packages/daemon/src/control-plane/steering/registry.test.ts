@@ -181,3 +181,27 @@ describe('SteeringRegistry.route — version-pin regression (codex 2026-06-17)',
     expect(reg.route('w-nonexistent', 'research', 'a1').kind).toBe('rejected');
   });
 });
+
+describe('SteeringRegistry.register — fail-closed completeness (codex 2026-06-17)', () => {
+  it('reports BOTH schema and grant offenders in one rejection (name every offender)', () => {
+    const reg = new SteeringRegistry(known);
+    // Missing charter (schema error) AND an unknown routing path (grant error).
+    const bad = { ...makeRole({ routingGrant: ['totally-unknown-path'] }), charter: undefined };
+    const r = reg.register(bad);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.offenders.length).toBeGreaterThanOrEqual(2);
+      expect(r.offenders.some((o) => o.includes('totally-unknown-path'))).toBe(true);
+    }
+  });
+
+  it('RoleVersion.digest is a bounded hash, not the stringified declaration', () => {
+    const reg = new SteeringRegistry(known);
+    const out = reg.register({ ...makeRole(), charter: 'a very secret and lengthy charter string' });
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.version.digest).toMatch(/^sha256-[0-9a-f]{64}$/);
+      expect(out.version.digest).not.toContain('secret');
+    }
+  });
+});
