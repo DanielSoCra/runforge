@@ -195,9 +195,26 @@ FUNC-AC-STEERING:
   status: approved
 
 FUNC-AC-OPERATOR-SURFACE:
-  children: []
+  children: [ARCH-AC-OPERATOR-SURFACE]
   related: [FUNC-AC-DASHBOARD, FUNC-AC-FLEET, FUNC-AC-DECISION-ESCALATION]
   status: approved
+
+# Operator Surface Decision API — L2/L3 authored 2026-06-18 (the backend
+# prerequisite that unblocks the dashboard: HTTP projection of the decision
+# index read model + ledger answer on the daemon control plane).
+ARCH-AC-OPERATOR-SURFACE:
+  parent: FUNC-AC-OPERATOR-SURFACE
+  children: [STACK-AC-OPERATOR-SURFACE-API]
+  related: [ARCH-AC-DECISION-ESCALATION, ARCH-AC-OPERATOR-AUTH, ARCH-AC-DASHBOARD]
+  status: draft
+
+STACK-AC-OPERATOR-SURFACE-API:
+  parent: ARCH-AC-OPERATOR-SURFACE
+  code_paths:
+    - packages/daemon/src/control-plane/decision-api.ts
+  test_paths:
+    - packages/daemon/src/control-plane/decision-api.test.ts
+  status: draft
 
 # Enacts L0 v6's verifier-gated-autonomy boundary (Delta H); the enforcing L1
 # v6 deferred "to implementation" — created 2026-06-14. L2/L3 authored 2026-06-15

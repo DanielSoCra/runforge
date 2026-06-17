@@ -16,7 +16,7 @@
  * emits a runtime require of the native package — the only runtime load is the
  * manager's dynamic import inside its enabled branch.
  */
-import type { IndexWriter, DecisionView } from '@auto-claude/decision-index';
+import type { IndexWriter, DecisionView, ReadModel } from '@auto-claude/decision-index';
 import type { ResumeMode } from '@auto-claude/decision-protocol';
 
 /** Terminal statuses are excluded from the pending read (mirrors TERMINAL_STATUSES). */
@@ -40,6 +40,11 @@ export interface AnswerResult {
 
 export class DecisionLedger {
   constructor(private readonly writer: IndexWriter) {}
+
+  /** The read-only projection backed by this ledger's writer. */
+  get reader(): ReadModel {
+    return this.writer.reader;
+  }
 
   /**
    * raise — idempotent ingest of a DecisionRequest. A new id is admitted at

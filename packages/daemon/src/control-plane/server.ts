@@ -3,6 +3,9 @@ import { ok, err, type Result } from '../lib/result.js';
 import { getDashboardHtml } from './dashboard.js';
 import { readResults } from './results.js';
 import type { ReleaseProposalResult } from './release.js';
+import type { ListRankedArgs, ListFilters, RankedListItem, DetailView } from '@auto-claude/decision-index';
+import type { AnswerResult } from './decision-escalation/ledger.js';
+import type { HandlerResult, AnswerBody, ErrorBody } from './decision-api.js';
 
 export interface ControlHandlers {
   getStatus: () => unknown;
@@ -16,6 +19,9 @@ export interface ControlHandlers {
   scanIssues?: () => Promise<{ scanned: number }>;
   release?: () => Promise<ReleaseProposalResult>;
   submitIdea?: (submittedBy: string, description: string) => Promise<{ id: string }>;
+  listPendingDecisions?: (query: ListRankedArgs) => HandlerResult<RankedListItem[] | ErrorBody>;
+  getDecisionDetail?: (id: string) => HandlerResult<DetailView | ErrorBody>;
+  answerDecision?: (id: string, body: AnswerBody) => HandlerResult<AnswerResult | ErrorBody>;
   stateDir?: string;
 }
 
@@ -150,6 +156,69 @@ export function createControlServer(
       } else {
         json(res, 501, { error: 'PO agent not configured' });
       }
+    } else if (method === 'GET' && url.pathname === '/decisions/pending') {
+      if (handlers.listPendingDecisions) {
+        try {
+          const query = parseListRankedArgs(url.searchParams);
+          const result = handlers.listPendingDecisions(query);
+          json(res, result.status, result.body);
+        } catch (e: unknown) {
+          console.error('[control-plane] GET /decisions/pending failed:', e);
+          json(res, 503, { error: 'decision index unavailable' });
+        }
+      } else {
+        json(res, 501, { error: 'decision index not configured' });
+      }
+    } else if (method === 'GET' && url.pathname.startsWith('/decisions/') && !url.pathname.endsWith('/answer')) {
+      if (handlers.getDecisionDetail) {
+        const id = url.pathname.slice('/decisions/'.length);
+        if (id.length === 0) {
+          json(res, 404, { error: 'not found' });
+          return;
+        }
+        try {
+          const result = handlers.getDecisionDetail(id);
+          json(res, result.status, result.body);
+        } catch (e: unknown) {
+          console.error('[control-plane] GET /decisions/:id failed:', e);
+          json(res, 503, { error: 'decision index unavailable' });
+        }
+      } else {
+        json(res, 501, { error: 'decision index not configured' });
+      }
+    } else if (method === 'POST' && url.pathname.startsWith('/decisions/') && url.pathname.endsWith('/answer')) {
+      if (handlers.answerDecision) {
+        const id = extractDecisionAnswerId(url.pathname);
+        if (id === undefined) {
+          json(res, 404, { error: 'not found' });
+          return;
+        }
+        const MAX_BODY = 10240; // 10KB
+        let body = '';
+        let oversize = false;
+        req.on('data', (chunk: Buffer) => {
+          body += chunk.toString();
+          if (body.length > MAX_BODY) oversize = true;
+        });
+        req.on('error', () => { json(res, 400, { error: 'request error' }); });
+        req.on('end', () => {
+          if (oversize) { json(res, 413, { error: 'body too large' }); return; }
+          try {
+            const parsed = JSON.parse(body) as AnswerBody;
+            try {
+              const result = handlers.answerDecision!(id, parsed);
+              json(res, result.status, result.body);
+            } catch (e: unknown) {
+              console.error('[control-plane] POST /decisions/:id/answer failed:', e);
+              json(res, 503, { error: 'decision index unavailable' });
+            }
+          } catch {
+            json(res, 400, { error: 'invalid JSON body' });
+          }
+        });
+      } else {
+        json(res, 501, { error: 'decision index not configured' });
+      }
     } else if (method === 'POST' && url.pathname.startsWith('/retry/')) {
       const issue = Number(url.pathname.split('/')[2]);
       if (isNaN(issue)) {
@@ -190,6 +259,39 @@ export function createControlServer(
 
 function isResult(value: unknown): value is Result<void> {
   return typeof value === 'object' && value !== null && 'ok' in value;
+}
+
+function parseListRankedArgs(searchParams: URLSearchParams): ListRankedArgs {
+  if (searchParams.size === 0) return {};
+  const args: ListRankedArgs = {};
+  const filters: ListFilters = {};
+  const status = searchParams.get('filters.status');
+  if (status !== null) filters.status = status.split(',');
+  const riskClass = searchParams.get('filters.risk_class');
+  if (riskClass !== null) filters.risk_class = riskClass.split(',');
+  const deployment = searchParams.get('filters.deployment');
+  if (deployment !== null) filters.deployment = deployment.split(',');
+  if (Object.keys(filters).length > 0) args.filters = filters;
+
+  const focusDeployments = searchParams.get('focusDeployments');
+  if (focusDeployments !== null) {
+    args.focus = {
+      now: new Date(),
+      focusDeployments: focusDeployments.split(','),
+    };
+  }
+
+  const includeSuppressed = searchParams.get('includeSuppressed');
+  if (includeSuppressed === 'true') args.includeSuppressed = true;
+  return args;
+}
+
+function extractDecisionAnswerId(pathname: string): string | undefined {
+  if (!pathname.startsWith('/decisions/')) return undefined;
+  const rest = pathname.slice('/decisions/'.length);
+  if (!rest.endsWith('/answer')) return undefined;
+  const id = rest.slice(0, -'/answer'.length);
+  return id.length > 0 && !id.includes('/') ? id : undefined;
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {

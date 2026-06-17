@@ -50,6 +50,11 @@ import {
   markOverdue,
 } from './decision-escalation/reconcile.js';
 import {
+  listPendingDecisions,
+  getDecisionDetail,
+  answerDecision,
+} from './decision-api.js';
+import {
   parseCockpitAnswer,
   isDecisionOwnedIssue,
   REQUEUE_LABEL,
@@ -1450,6 +1455,12 @@ export async function startDaemon(
         const idea = await poAgent.submitIdea(submittedBy, description);
         return { id: idea.id };
       },
+      listPendingDecisions: (query) =>
+        listPendingDecisions(decisionManager.ledger().reader, query),
+      getDecisionDetail: (id) =>
+        getDecisionDetail(decisionManager.ledger().reader, id),
+      answerDecision: (id, body) =>
+        answerDecision(decisionManager.ledger(), id, body),
     },
     daemonHost,
   );
