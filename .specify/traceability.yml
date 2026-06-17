@@ -705,8 +705,16 @@ STACK-AC-DEPLOYMENT-REGISTRY:
 STACK-AC-STEERING:
   parent: ARCH-AC-STEERING
   children: []
-  code_paths: []  # DEFERRED to implementation — path-existence validator requires real files
-  test_paths: []  # DEFERRED to implementation — same reason
+  code_paths:
+    - packages/daemon/src/control-plane/steering/types.ts
+    - packages/daemon/src/control-plane/steering/schema.ts
+    - packages/daemon/src/control-plane/steering/decide.ts
+    - packages/daemon/src/control-plane/steering/registry.ts
+    - packages/daemon/src/control-plane/steering/index.ts
+  test_paths:
+    - packages/daemon/src/control-plane/steering/schema.test.ts
+    - packages/daemon/src/control-plane/steering/decide.test.ts
+    - packages/daemon/src/control-plane/steering/registry.test.ts
   status: draft
 
 STACK-AC-OPERATIONAL-SAFETY:
