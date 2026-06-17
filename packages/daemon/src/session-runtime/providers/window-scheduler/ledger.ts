@@ -104,6 +104,20 @@ export class WindowLedger {
     }
     state.lastObservedAt = signal.observedAt;
 
+    // Eagerly resolve a PASSED reopen projection so every headroom check below sees
+    // the effective (reopened) state — not the stale `exhausted` the snapshot would
+    // lazily degrade to `unknown`. Without this the stored `state.headroom` and the
+    // snapshot-effective headroom diverge, and e.g. the throttle-count guard would
+    // skip every post-reopen ambiguous throttle (self-correction never re-fires).
+    if (
+      state.headroom === 'exhausted' &&
+      state.reopenProjection !== undefined &&
+      signal.observedAt >= state.reopenProjection
+    ) {
+      state.headroom = 'unknown';
+      state.reopenProjection = undefined;
+    }
+
     // Plan-2 (silent-pool estimate→headroom): derive from the estimate when the
     // pool declares a capacity and the signal is not direct headroom evidence.
     if (pool.capacity !== undefined && signal.estimate !== undefined) {

@@ -163,6 +163,24 @@ describe('WindowLedger repeated-throttle self-correction (Plan-2)', () => {
     expect(ledger.snapshot(2_000).headroom('pool-a')).not.toBe('exhausted');
   });
 
+  it('self-correction RE-FIRES on repeated throttles after a prior projection has passed (codex r3)', () => {
+    // Exhaust the pool with a window-exhaustion projection, then let it pass: the
+    // pool is effectively reopened even though stored headroom still reads
+    // exhausted. Post-reopen ambiguous throttles must be counted again (the guard
+    // must see the EFFECTIVE state), so `threshold` of them re-escalate it.
+    const ledger = new WindowLedger([poolWithThreshold]);
+    ledger.reportExhaustionSignal(signal({ observedAt: 500, retryAfterMs: 500 }), {
+      kind: 'window-exhaustion',
+      reopenProjection: 1_000,
+    });
+    // After the projection (t>=1_000) the pool is reopened (snapshot → unknown).
+    expect(ledger.snapshot(1_500).headroom('pool-a')).not.toBe('exhausted');
+    for (let i = 0; i < THRESHOLD; i += 1) {
+      ledger.reportConsumption(ambiguous(2_000 + i)); // all past the old projection
+    }
+    expect(ledger.snapshot(3_000).headroom('pool-a')).toBe('exhausted');
+  });
+
   it('on a pool declaring BOTH capacity and threshold, repeated CLEAN estimate reports below capacity do NOT self-escalate (codex r1)', () => {
     // Regression: a silent-pool estimate carries no retry-after, so classifySignal
     // labels it `ambiguous` — but it is a clean consumption observation, not a
