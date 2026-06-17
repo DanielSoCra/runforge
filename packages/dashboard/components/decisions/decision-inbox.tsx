@@ -1,0 +1,172 @@
+/**
+ * STACK-AC-OPERATOR-SURFACE-CLIENT — the Operator Surface decisions inbox (read).
+ *
+ * The ranked pending-decisions inbox rendered on the dashboard's default view
+ * (FUNC-AC-OPERATOR-SURFACE: "the default view shows decisions and the briefing").
+ * This is the PRESENTATIONAL core: a pure component that takes a plain
+ * `RankedListItem[]` (mirroring the daemon Decision API's `GET /decisions/pending`
+ * wire shape — see `packages/daemon/src/control-plane/decision-api.ts`) plus an
+ * `unavailable` degraded flag, and renders rows / empty / degraded from props
+ * alone. The server component (`app/(dashboard)/page.tsx`) owns the fetch via the
+ * proxy route (`app/api/decisions/pending/route.ts`); this component owns pixels.
+ *
+ * REDACTION (L2/L3): a `question` (or any `ListField`) is a discriminated union.
+ * A `protected` field carries ONLY its class marker (no resolvable value/ref by
+ * type) and MUST render as "[protected: <class>]" — never a value. The list type
+ * structurally cannot carry a `ref`; the reveal is server-side on the deferred
+ * detail path only.
+ *
+ * SCOPE (7b): the READ inbox list only. The per-decision drill-down detail and
+ * the operator ANSWER flow are deferred follow-ups.
+ *
+ * STUB: not implemented — Kimi implements per the work-order. The body throws so
+ * the RED component test fails for the right reason while the dashboard typechecks.
+ */
+
+/**
+ * The list-surface redaction-typed field. A `protected` field is class-only — it
+ * NEVER carries a resolvable value or ref (that lives only on the detail surface).
+ * Structurally mirrors the daemon `ListField` (decision-index read model).
+ */
+export type ListField =
+  | { kind: 'text'; value: string }
+  | { kind: 'protected'; field: string; class: string };
+
+/**
+ * A ranked inbox row, mirroring the daemon `RankedListItem` wire shape (the fields
+ * the inbox renders). Kept as a dashboard-local type — the dashboard does NOT
+ * depend on `@auto-claude/decision-index`; the boundary is JSON over HTTP.
+ */
+export interface RankedListItem {
+  decision_id: string;
+  status: string;
+  risk_class: string;
+  created_at: string;
+  question: ListField;
+  score: number;
+  why_ranked: string;
+}
+
+export interface DecisionInboxProps {
+  items: RankedListItem[];
+  /** true when the daemon Decision API is unreachable/degraded — render the calm degraded panel. */
+  unavailable?: boolean;
+}
+
+import { Badge } from '@/components/ui/badge';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { AlertTriangle, Inbox } from 'lucide-react';
+
+function riskBadgeVariant(riskClass: string) {
+  switch (riskClass) {
+    case 'RED':
+      return 'destructive';
+    case 'ORANGE':
+      return 'secondary';
+    default:
+      return 'outline';
+  }
+}
+
+function QuestionField({ field }: { field: ListField }) {
+  if (field.kind === 'protected') {
+    return (
+      <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+        [protected: {field.class}] {field.field}
+      </span>
+    );
+  }
+  return <span>{field.value}</span>;
+}
+
+export function DecisionInbox({ items, unavailable }: DecisionInboxProps) {
+  if (unavailable === true) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-muted-foreground" />
+            Decision index unavailable
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Decisions are temporarily unavailable. They will appear here once
+            the connection is restored.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Inbox className="h-5 w-5 text-muted-foreground" />
+            No decisions awaiting you
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            Nothing needs your attention right now.
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const groups = new Map<string, RankedListItem[]>();
+  for (const item of items) {
+    const date = item.created_at.slice(0, 10);
+    const group = groups.get(date) ?? [];
+    group.push(item);
+    groups.set(date, group);
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {Array.from(groups.entries()).map(([date, groupItems]) => (
+        <div key={date} className="flex flex-col gap-3">
+          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {date}
+          </div>
+          {groupItems.map((item) => (
+            <div
+              key={item.decision_id}
+              className="flex flex-col gap-2 rounded-xl border p-4 sm:flex-row sm:items-start sm:justify-between"
+            >
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={riskBadgeVariant(item.risk_class)}>
+                    {item.risk_class}
+                  </Badge>
+                  <time
+                    dateTime={item.created_at}
+                    className="text-xs text-muted-foreground"
+                  >
+                    {new Date(item.created_at).toLocaleTimeString('en-US', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      timeZone: 'UTC',
+                      hour12: false,
+                    })}
+                  </time>
+                </div>
+                <div className="text-sm">
+                  <QuestionField field={item.question} />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
