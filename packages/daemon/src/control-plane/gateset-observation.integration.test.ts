@@ -239,7 +239,10 @@ describe('gate observation — run.passedGates population', () => {
     setupReviewMocks();
     mockGit.mockResolvedValue({ ok: true, value: '   \n  ' }); // whitespace-only diff
     const { handlers } = createHandlers();
-    const run = makeRun();
+    // Seed STALE observations from a prior review cycle — a re-entry with an empty
+    // diff must CLEAR them (no gates ran for the current content), so the verdict
+    // fails closed rather than satisfying from gates that never ran (codex P1).
+    const run = makeRun({ passedGates: ['deterministic', 'quality'] });
 
     const result = await handlers.review!(run);
 

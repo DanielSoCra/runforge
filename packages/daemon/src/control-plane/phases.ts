@@ -1457,6 +1457,12 @@ export function createPhaseHandlers(
       // set, and we must not run gates against the baseline just to observe them.
       if (diff === undefined || diff.trim().length === 0) {
         console.log(`[review] No code changes — skipping all gates`);
+        // Clear any gate observations from a PRIOR review cycle: no gates ran for
+        // the current content, so none may be observed. Without this, a re-entry
+        // (e.g. rework that left an empty diff) would carry stale passedGates and
+        // the lane gate-set verdict could satisfy from gates that never ran for
+        // this content — must fail CLOSED instead (codex).
+        run.passedGates = undefined;
         return 'success';
       }
 
