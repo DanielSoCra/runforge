@@ -144,11 +144,26 @@ describe('listPendingDecisions', () => {
     expect(JSON.stringify(res.body)).not.toContain('protected://');
   });
 
-  it('passes the query (filters/focus) through to the read model', () => {
+  it('passes caller filters/focus through, defaulting status to the awaiting-operator set', () => {
     const lastArgs: { value: ListRankedArgs | undefined } = { value: undefined };
     const query: ListRankedArgs = { filters: { risk_class: ['P1'] } };
     listPendingDecisions(fakeReadModel({ ranked: [], lastArgs }), query);
-    expect(lastArgs.value).toEqual(query);
+    // caller's risk_class survives; status is defaulted to notified/viewed.
+    expect(lastArgs.value?.filters?.risk_class).toEqual(['P1']);
+    expect(lastArgs.value?.filters?.status).toEqual(['notified', 'viewed']);
+  });
+
+  it('defaults the inbox to awaiting-operator statuses (excludes terminal/answered)', () => {
+    const lastArgs: { value: ListRankedArgs | undefined } = { value: undefined };
+    listPendingDecisions(fakeReadModel({ ranked: [], lastArgs }), {});
+    expect(lastArgs.value?.filters?.status).toEqual(['notified', 'viewed']);
+  });
+
+  it('respects an EXPLICIT status filter (does not widen it)', () => {
+    const lastArgs: { value: ListRankedArgs | undefined } = { value: undefined };
+    const query: ListRankedArgs = { filters: { status: ['resumed'] } };
+    listPendingDecisions(fakeReadModel({ ranked: [], lastArgs }), query);
+    expect(lastArgs.value?.filters?.status).toEqual(['resumed']);
   });
 
   it('fail-safe: a throwing read model maps to 503, never rethrows', () => {

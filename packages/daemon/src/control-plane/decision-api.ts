@@ -50,6 +50,16 @@ export interface ErrorBody {
 }
 
 /**
+ * The statuses an item awaiting the Operator carries. Per the decision-index
+ * writer ("only an item awaiting a human (notified/viewed) carries a meaningful
+ * answer"), these — and only these — belong in the default `/decisions/pending`
+ * inbox. `detected` is not yet surfaced; everything from `answered_*` onward is
+ * answered / in-flight / terminal (resumed/superseded/failed) and no longer waits
+ * on the Operator.
+ */
+export const PENDING_DECISION_STATUSES: readonly string[] = ['notified', 'viewed'];
+
+/**
  * GET /decisions/pending — the ranked inbox. Returns `RankedListItem[]` (protected
  * fields class-only, never a resolvable ref). A throwing read model → `503`
  * (index unavailable), never a crash.
@@ -59,7 +69,17 @@ export function listPendingDecisions(
   query: ListRankedArgs,
 ): HandlerResult<RankedListItem[] | ErrorBody> {
   try {
-    return { status: 200, body: readModel.listRanked(query) };
+    // Default the inbox to awaiting-Operator statuses so terminal/answered rows
+    // (resumed/superseded/failed/answered_*) never appear in the default pending
+    // view. An EXPLICIT status filter from the caller is respected (not widened).
+    const effective: ListRankedArgs = {
+      ...query,
+      filters: {
+        ...query.filters,
+        status: query.filters?.status ?? [...PENDING_DECISION_STATUSES],
+      },
+    };
+    return { status: 200, body: readModel.listRanked(effective) };
   } catch {
     return { status: 503, body: { error: 'decision index unavailable' } };
   }
