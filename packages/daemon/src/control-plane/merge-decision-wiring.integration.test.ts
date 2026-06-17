@@ -399,6 +399,29 @@ describe('merge-decision live wiring — integrate handler', () => {
     expect(run.pausedAtPhase).toBeUndefined(); // no silent park
   });
 
+  it('(f) deployment found but does NOT own the run repo → fails CLOSED (no foreign profile, no merge)', async () => {
+    const reg = new DeploymentRegistry();
+    // Registered under DEPLOYMENT_ID but owning a DIFFERENT repo than the run's.
+    const out = reg.register(DEPLOYMENT_ID, {
+      ...makeProfile(),
+      repositories: [{ owner: 'other', name: 'elsewhere' }],
+    });
+    expect(out.ok).toBe(true);
+    const decision = makeDecisionDouble();
+    const { handlers } = createHandlers({
+      config: { deployment: { id: DEPLOYMENT_ID, profile: {} } },
+      registry: reg,
+      decisionManager: decision.manager,
+      decisionPublisher: decision.publisher,
+    });
+    const run = makeRun(); // run is for owner/repo, which this profile does NOT own
+
+    const result = await handlers.integrate!(run);
+
+    expect(result).toBe('failure');
+    expect(mockIntegrate).not.toHaveBeenCalled();
+  });
+
   it('(c) flag-OFF byte-identity: no config.deployment AND no registry → integrate merges unconditionally, no decision logic', async () => {
     const decision = makeDecisionDouble();
     // No deployment block, no registry param → today's behavior.

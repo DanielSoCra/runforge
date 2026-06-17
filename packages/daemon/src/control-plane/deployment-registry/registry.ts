@@ -147,6 +147,20 @@ export class DeploymentRegistry {
   }
 
   /**
+   * Whether the deployment `id`'s profile OWNS the given repository. The live
+   * merge seam uses this to refuse applying one deployment's lane/risk/autonomy
+   * profile to a repo it does not own (the deployment→repository ownership
+   * invariant, enforced at the decision point). Unknown id → false (never throws).
+   */
+  ownsRepo(id: string, owner: string, repo: string): boolean {
+    const profile = this.profiles.get(id);
+    if (profile === undefined) {
+      return false;
+    }
+    return profile.repositories.some((r) => r.owner === owner && r.name === repo);
+  }
+
+  /**
    * Resolve exactly the inputs the Lane Engine reads: { laneSet, riskPathMap,
    * defaultMinLevel, mode } — verbatim from the frozen profile, deciding nothing.
    * Tagged not-found on an unknown id.
