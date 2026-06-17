@@ -200,7 +200,7 @@ export class DeploymentRegistry {
    * is human-gated. Read-only. Tagged not-found is surfaced via an empty/throw-free
    * path — see types; an unknown deployment yields an empty result, not a throw.
    */
-  readAutonomyState(id: string, riskClass?: RiskClass): AutonomyReading[] {
+  readAutonomyState(id: string, riskClass?: RiskClass, lane?: string): AutonomyReading[] {
     const state = this.autonomy.get(id);
     if (state === undefined) {
       return [];
@@ -208,10 +208,18 @@ export class DeploymentRegistry {
 
     const classes = riskClass === undefined ? RISK_CLASSES : [riskClass];
     return classes.map((rc) => {
-      const level = state.entries[rc] ?? 'human-gated';
+      // Effective autonomy for (class, lane): widened if the LEVEL-WIDE grant OR
+      // (when a lane is supplied) the LANE-SPECIFIC grant is widened. Without a
+      // lane this reduces to the level-wide reading (backward compatible).
+      const levelWide = state.entries[rc] ?? 'human-gated';
+      const laneSpecific =
+        lane !== undefined ? (state.laneEntries?.[lane]?.[rc] ?? 'human-gated') : 'human-gated';
+      const level: AutonomyLevel =
+        levelWide === 'widened' || laneSpecific === 'widened' ? 'widened' : 'human-gated';
       const record = this.findAuthorizingRecord(state.history, rc, level);
       return {
         riskClass: rc,
+        ...(lane !== undefined ? { lane } : {}),
         level,
         authorization: record?.authorization,
       };
@@ -231,6 +239,7 @@ export class DeploymentRegistry {
     target: AutonomyLevel,
     authorization: AutonomyAuthorization,
     now: number,
+    lane?: string,
   ): WideningOutcome {
     if (!RISK_CLASSES.includes(riskClass)) {
       return { ok: false, reason: `unknown risk class '${riskClass}'` };
@@ -244,28 +253,40 @@ export class DeploymentRegistry {
       return { ok: false, reason: `unknown deployment '${id}'` };
     }
 
-    const prior = state.entries[riskClass] ?? 'human-gated';
-    const record: WideningRecord = {
-      deploymentId: id,
-      riskClass,
-      prior,
-      next: target,
-      authorization,
-      recordedAt: now,
-    };
+    // A LANE-SPECIFIC grant (lane given) updates laneEntries[lane][riskClass] and
+    // leaves the level-wide entries untouched; a LEVEL-WIDE grant (no lane) updates
+    // entries[riskClass]. The record carries the lane for attribution.
+    let newState: AutonomyState;
+    if (lane !== undefined) {
+      const prior = state.laneEntries?.[lane]?.[riskClass] ?? 'human-gated';
+      newState = {
+        entries: { ...state.entries },
+        laneEntries: {
+          ...state.laneEntries,
+          [lane]: { ...(state.laneEntries?.[lane] ?? {}), [riskClass]: target },
+        },
+        history: [
+          ...state.history,
+          { deploymentId: id, riskClass, lane, prior, next: target, authorization, recordedAt: now },
+        ],
+      };
+    } else {
+      const prior = state.entries[riskClass] ?? 'human-gated';
+      newState = {
+        entries: { ...state.entries, [riskClass]: target },
+        ...(state.laneEntries !== undefined ? { laneEntries: { ...state.laneEntries } } : {}),
+        history: [
+          ...state.history,
+          { deploymentId: id, riskClass, prior, next: target, authorization, recordedAt: now },
+        ],
+      };
+    }
 
-    // Deep-freeze the new state before storing AND returning it: `Readonly` is
-    // compile-time only, so an un-frozen returned object would let a caller mutate
-    // entries/history directly and bypass the authorization + history path that is
-    // the whole point of this method. (Subsequent widenings spread these frozen
-    // collections into fresh mutable copies, so freezing here is safe.)
-    const newState: AutonomyState = deepFreeze({
-      entries: { ...state.entries, [riskClass]: target },
-      history: [...state.history, record],
-    });
-
-    this.autonomy.set(id, newState);
-    return { ok: true, state: newState };
+    // Deep-freeze before storing AND returning (`Readonly` is compile-time only;
+    // an un-frozen handle would let a caller bypass the authorization + history path).
+    const frozen = deepFreeze(newState);
+    this.autonomy.set(id, frozen);
+    return { ok: true, state: frozen };
   }
 
   /**

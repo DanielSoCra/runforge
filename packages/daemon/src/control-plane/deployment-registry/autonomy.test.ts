@@ -141,3 +141,32 @@ describe('autonomy — rejected writes mutate nothing', () => {
     expect(levelOf(reg, 'dep-a', 'orange')).toBe('human-gated');
   });
 });
+
+describe('autonomy — lane-scoped grants (XCUT P1#2: level OR lane)', () => {
+  const levelFor = (
+    reg: DeploymentRegistry,
+    id: string,
+    rc: RiskClass,
+    lane?: string,
+  ): string | undefined =>
+    reg.readAutonomyState(id, rc, lane).find((e) => e.riskClass === rc)?.level;
+
+  it('a LANE-SPECIFIC grant widens only that lane, not other lanes or the level', () => {
+    const reg = new DeploymentRegistry();
+    reg.register('dep-a', makeProfile());
+    const out = reg.recordWidening('dep-a', 'green', 'widened', auth, NOW, 'trivial-docs');
+    expect(out.ok).toBe(true);
+    expect(levelFor(reg, 'dep-a', 'green', 'trivial-docs')).toBe('widened'); // the granted lane
+    expect(levelFor(reg, 'dep-a', 'green', 'risky-feature')).toBe('human-gated'); // a different lane
+    expect(levelFor(reg, 'dep-a', 'green')).toBe('human-gated'); // level-wide read unaffected
+  });
+
+  it('a LEVEL-WIDE grant widens every lane of that class (the FLEET default)', () => {
+    const reg = new DeploymentRegistry();
+    reg.register('dep-a', makeProfile());
+    reg.recordWidening('dep-a', 'green', 'widened', auth, NOW); // no lane → level-wide
+    expect(levelFor(reg, 'dep-a', 'green', 'any-lane')).toBe('widened');
+    expect(levelFor(reg, 'dep-a', 'green', 'other-lane')).toBe('widened');
+    expect(levelFor(reg, 'dep-a', 'green')).toBe('widened');
+  });
+});

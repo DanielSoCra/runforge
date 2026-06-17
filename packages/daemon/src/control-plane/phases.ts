@@ -1896,10 +1896,12 @@ export function createPhaseHandlers(
         resolvedSet.lanes.find((l) => l.name === resolvedSet.mostCautiousLane);
       const verifierStatus = observeVerifierStatus(assignedLane?.verifier);
 
-      // Human-gated autonomy: default-deny unless the registry records widening.
-      const autonomyWidened = (level: RiskLevel, _lane: string): boolean => {
+      // Human-gated autonomy: default-deny unless the registry records widening for
+      // this (level) [level-wide grant] OR this (level, lane) [lane-scoped grant].
+      // Passing the assigned lane lets a deployment scope its grant per lane.
+      const autonomyWidened = (level: RiskLevel, lane: string): boolean => {
         if (deploymentId === undefined) return false;
-        const readings = registry?.readAutonomyState(deploymentId, level) ?? [];
+        const readings = registry?.readAutonomyState(deploymentId, level, lane) ?? [];
         return readings.some((r) => r.level === 'widened');
       };
 
