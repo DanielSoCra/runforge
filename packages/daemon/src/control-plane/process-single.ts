@@ -70,7 +70,7 @@ export async function processSingleIssue(issueNumber: number, configPath: string
   if (config.deployment !== undefined) {
     const registered = deploymentRegistry.register(
       config.deployment.id,
-      config.deployment,
+      config.deployment.profile,
     );
     if (!registered.ok) {
       console.error(
@@ -138,7 +138,7 @@ export async function processSingleIssue(issueNumber: number, configPath: string
     phaseCompletions: {}, checkpoints: [], cost: 0,
     perRunBudget: config.perRunBudget, fixAttempts: [], errorHashes: {},
     body: request.body, labels: request.labels, specRefs: request.specRefs,
-    deploymentId: config.deployment?.id ?? `${owner}/${repo}`,
+    deploymentId: config.deployment?.id,
     startedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   };
   await stateMgr.saveRunState(run);

@@ -322,7 +322,7 @@ describe('merge-decision live wiring — integrate handler', () => {
   it('(a) deployment present, verifier-gated green lane, autonomy NOT widened → parks, raises a DecisionRequest, and does NOT merge', async () => {
     const decision = makeDecisionDouble();
     const { handlers } = createHandlers({
-      config: { deployment: { id: DEPLOYMENT_ID, laneSet: {}, riskPathMap: [], defaultMinLevel: 'green', lifecycleMode: 'velocity', complianceReviewers: [] } },
+      config: { deployment: { id: DEPLOYMENT_ID, profile: {} } },
       registry: registryNotWidened(),
       decisionManager: decision.manager,
       decisionPublisher: decision.publisher,
@@ -345,7 +345,7 @@ describe('merge-decision live wiring — integrate handler', () => {
   it('(b) deployment present, verifier-gated green lane, autonomy WIDENED + validation passed → merges, no DecisionRequest', async () => {
     const decision = makeDecisionDouble();
     const { handlers } = createHandlers({
-      config: { deployment: { id: DEPLOYMENT_ID, laneSet: {}, riskPathMap: [], defaultMinLevel: 'green', lifecycleMode: 'velocity', complianceReviewers: [] } },
+      config: { deployment: { id: DEPLOYMENT_ID, profile: {} } },
       registry: registryWithWidenedGreen(),
       decisionManager: decision.manager,
       decisionPublisher: decision.publisher,
@@ -360,6 +360,25 @@ describe('merge-decision live wiring — integrate handler', () => {
     // No escalation: the run does not park, no DecisionRequest is raised.
     expect(run.pausedAtPhase).toBeUndefined();
     expect(decision.raise).not.toHaveBeenCalled();
+  });
+
+  it('(d) deployment configured (id set) but NOT registered (profile rejected at boot) → fails CLOSED, does NOT merge', async () => {
+    const decision = makeDecisionDouble();
+    // A registry WITHOUT the deployment registered (its profile was rejected at
+    // startup) while run.deploymentId is still set — the operator opted into
+    // policy. This must NEVER fall through to the legacy unconditional merge.
+    const { handlers } = createHandlers({
+      config: { deployment: { id: DEPLOYMENT_ID, profile: {} } },
+      registry: new DeploymentRegistry(),
+      decisionManager: decision.manager,
+      decisionPublisher: decision.publisher,
+    });
+    const run = makeRun();
+
+    const result = await handlers.integrate!(run);
+
+    expect(result).toBe('failure');
+    expect(mockIntegrate).not.toHaveBeenCalled();
   });
 
   it('(c) flag-OFF byte-identity: no config.deployment AND no registry → integrate merges unconditionally, no decision logic', async () => {

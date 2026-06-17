@@ -502,16 +502,19 @@ export const ConfigSchema = z.object({
   // `riskPathMap` are passed through as opaque (z.unknown) to avoid duplicating
   // the lane-engine schema; a malformed lane set is rejected at registry
   // registration (fail-closed → empty registry → all escalate).
+  // A registered deployment: an id + the FULL DeploymentProfile envelope, carried
+  // OPAQUELY (`profile: z.unknown()`) and validated by the registry's `parseProfile`
+  // (the single authoritative validator — config must not duplicate, or partially
+  // restate, the profile schema). `parseProfile`'s strict envelope does NOT include
+  // `id` and DOES require repositories/laneSet/riskPathMap/defaultMinLevel/
+  // lifecycleMode/complianceReviewers/honestAutomation/budget/landing/
+  // capabilityBindings; the daemon registers `register(deployment.id, deployment.profile)`.
+  // A malformed profile is rejected at registration → empty registry → the
+  // integrate handler fails CLOSED for that configured deployment.
   deployment: z
     .object({
       id: z.string().min(1),
-      laneSet: z.unknown(),
-      riskPathMap: z.unknown(),
-      defaultMinLevel: z.enum(['green', 'yellow', 'orange', 'red']),
-      lifecycleMode: z.string().min(1),
-      complianceReviewers: z
-        .array(z.object({ reviewer: z.string().min(1), condition: z.string().min(1) }))
-        .default([]),
+      profile: z.unknown(),
     })
     .optional(),
 }).superRefine((config, ctx) => {

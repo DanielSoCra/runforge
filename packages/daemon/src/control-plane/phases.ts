@@ -1788,18 +1788,28 @@ export function createPhaseHandlers(
         `[integrate] Merging ${featureBranch} into ${config.branches.staging}`,
       );
 
-      // Flag-OFF: no registry, no deployment id, or the deployment is not
-      // registered → keep today's unconditional integrateToStaging byte-for-byte.
       const deploymentId = run.deploymentId;
       const registryInputs =
         registry !== undefined && deploymentId !== undefined
           ? registry.resolveLaneEngineInputs(deploymentId)
           : undefined;
-      if (
-        registryInputs === undefined ||
-        registryInputs.kind === 'not-found' ||
-        deploymentId === undefined
-      ) {
+
+      // Configured-but-unregistered: a deployment id is set AND a registry exists,
+      // but the id resolves not-found — the profile was rejected at startup. The
+      // operator OPTED INTO merge-decision policy for this deployment, so fail
+      // CLOSED: hold the change for them rather than falling through to the legacy
+      // unconditional merge (which would auto-merge with NO decision/escalation).
+      if (registryInputs !== undefined && registryInputs.kind === 'not-found') {
+        console.error(
+          `[integrate] deployment "${deploymentId ?? '?'}" is configured but not registered ` +
+            `(its profile was rejected at startup) — holding the merge. Fix the deployment profile.`,
+        );
+        return 'failure';
+      }
+
+      // Flag-OFF: NO deployment configured (no registry or no deployment id) →
+      // keep today's unconditional integrateToStaging byte-for-byte.
+      if (registryInputs === undefined || deploymentId === undefined) {
         const result = await integrateToStaging(
           featureBranch,
           config.branches.staging,

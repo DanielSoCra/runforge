@@ -281,7 +281,7 @@ export async function startDaemon(
   if (config.deployment !== undefined) {
     const registered = deploymentRegistry.register(
       config.deployment.id,
-      config.deployment,
+      config.deployment.profile,
     );
     if (!registered.ok) {
       console.error(
@@ -1358,7 +1358,7 @@ export async function startDaemon(
     console.log(
       `[daemon] Resuming incomplete run #${run.issueNumber} from phase '${run.phase}'`,
     );
-    run.deploymentId = config.deployment?.id ?? `${runOwner}/${runRepoName}`;
+    run.deploymentId = config.deployment?.id;
     activeIssues.add(run.issueNumber);
     activeRuns++;
 
@@ -1812,7 +1812,7 @@ export async function startDaemon(
       // Re-enter pipeline
       activeIssues.add(run.issueNumber);
       activeRuns++;
-      run.deploymentId = config.deployment?.id ?? `${runOwner}/${runRepoName}`;
+      run.deploymentId = config.deployment?.id;
       if (repoManager && resumeRepoId) repoManager.notifyRunStart(resumeRepoId);
 
       const notifyOctokit = runOctokit;
@@ -2153,7 +2153,7 @@ async function processWorkRequest(
     body: request.body,
     labels: request.labels,
     specRefs: request.specRefs,
-    deploymentId: config.deployment?.id ?? `${owner}/${repoName}`,
+    deploymentId: config.deployment?.id,
     startedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
