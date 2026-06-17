@@ -2,11 +2,14 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, GitFork, Activity, CircleDot, DollarSign, Users, Settings, Terminal, Zap, LogOut, Newspaper, Rocket } from 'lucide-react';
+import { LayoutDashboard, GitFork, Activity, CircleDot, DollarSign, Users, Settings, Terminal, Zap, LogOut, Newspaper, Rocket, Inbox } from 'lucide-react';
 import { signOut } from '@/actions/auth';
 
 const nav = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+  // The operator surface (FUNC-AC-OPERATOR-SURFACE): the calm pane of decisions
+  // awaiting the operator + the daily briefing — placed prominently for steering.
+  { href: '/steering', label: 'Steering', icon: Inbox },
   { href: '/briefing', label: 'Briefing', icon: Newspaper },
   { href: '/runs', label: 'Runs', icon: Activity },
   { href: '/issues', label: 'Issues', icon: CircleDot },
