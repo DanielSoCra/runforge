@@ -532,6 +532,14 @@ export async function startDaemon(
       }
     };
 
+    // One binding per (provider, tier) — the granularity the registry gates
+    // resolve() on. The proven model is the provider's declared `model` (else the
+    // tier label). NOTE (scoped limitation): per-role `roleModels.<role>.model`
+    // overrides within a tier are NOT individually proven — the smoke gate is
+    // per-(provider,tier), not per-model. Proving role-specific model bindings is a
+    // separate enhancement to the gate's granularity (registry + smoke key), not
+    // this startup-wiring task; it still proves strictly more than the gate-off
+    // default (which proves nothing).
     const providers: ProviderAdmissionBinding[] = [];
     for (const provider of Object.values(config.providers.definitions)) {
       for (const tier of provider.supportedModelTiers) {

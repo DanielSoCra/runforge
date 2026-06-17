@@ -175,7 +175,26 @@ export async function admitProviders(
   const abortReasons: string[] = [];
 
   for (const binding of opts.providers) {
-    const proof = await opts.runSmoke(binding.provider, binding.modelBinding);
+    // A throwing runSmoke (e.g. the daemon's adapter construction rejects for a
+    // provider kind) is a FAILED proof, not a startup crash: treat it like any
+    // failed proving run so the required→abort / optional→degrade + cleanup path
+    // still runs. Never let an injected I/O reject escape the orchestrator. (codex)
+    let proof: SmokeProof;
+    try {
+      proof = await opts.runSmoke(binding.provider, binding.modelBinding);
+    } catch (e) {
+      opts.logger?.warn?.(
+        `[admission] ${binding.provider.name} (${binding.modelBinding}) proving run threw: ${e instanceof Error ? e.message : String(e)} — treating as failed`,
+      );
+      proof = {
+        providerName: binding.provider.name,
+        modelBinding: binding.modelBinding,
+        responded: false,
+        observableChange: false,
+        passed: false,
+        cause: 'smoke-failed',
+      };
+    }
     if (proof.passed === true) {
       opts.registry.markSmokeProof(binding.provider.name, binding.tier);
       admitted.push({

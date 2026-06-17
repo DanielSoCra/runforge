@@ -302,6 +302,51 @@ describe('admitProviders — startup smoke-proof admission gate', () => {
     expect(result.abortReasons.join(' ')).toContain(TIER);
   });
 
+  it('GATE ON, a runSmoke that THROWS is treated as a failed proof, not a crash (codex r6)', async () => {
+    // The daemon's runSmoke can reject (e.g. adapter construction throws for a
+    // provider kind). That must degrade/abort like any failed proof — never let
+    // the exception escape admitProviders and bypass cleanup/abort handling.
+    const registry = fakeRegistry();
+    const runSmoke = vi.fn(async (p: ProviderDefinition) => {
+      if (p.name === 'codex-required') throw new Error('adapter boom');
+      return passProof(p.name);
+    });
+
+    const result = await admitProviders({
+      registry,
+      providers: [binding('codex-required', true), binding('claude-impl', true)],
+      requireSmokeProof: true,
+      runSmoke,
+    });
+
+    // Did not throw; the throwing required provider is a failure → abort names it.
+    expect(result.aborted).toBe(true);
+    expect(result.abortReasons).toContain('codex-required');
+    expect(registry.failures).toContainEqual({ name: 'codex-required', tier: TIER });
+    expect(result.failed.map((f) => f.providerName)).toContain('codex-required');
+    // The other provider still admitted normally.
+    expect(result.admitted.map((a) => a.providerName)).toContain('claude-impl');
+  });
+
+  it('GATE ON, an OPTIONAL provider whose runSmoke throws degrades (others pass) — not fatal', async () => {
+    const registry = fakeRegistry();
+    const runSmoke = vi.fn(async (p: ProviderDefinition) => {
+      if (p.name === 'opt-throws') throw new Error('adapter boom');
+      return passProof(p.name);
+    });
+
+    const result = await admitProviders({
+      registry,
+      providers: [binding('codex-impl', true), binding('opt-throws', false)],
+      requireSmokeProof: true,
+      runSmoke,
+    });
+
+    expect(result.aborted).toBe(false);
+    expect(result.failed.map((f) => f.providerName)).toEqual(['opt-throws']);
+    expect(result.admitted.map((a) => a.providerName)).toEqual(['codex-impl']);
+  });
+
   it('GATE ON, MULTIPLE required providers fail: abortReasons names every offender (ordering/parallelism unobservable)', async () => {
     const registry = fakeRegistry();
     const runSmoke = vi.fn(async (p: ProviderDefinition) => failProof(p.name));
