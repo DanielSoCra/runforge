@@ -611,6 +611,7 @@ STACK-AC-SESSION-PROVIDERS:
     - packages/daemon/src/session-runtime/providers/resume-state.ts
     - packages/daemon/src/session-runtime/providers/smoke-test.ts
     - packages/daemon/src/session-runtime/providers/safety-baseline.ts
+    - packages/daemon/src/session-runtime/providers/startup-admission.ts
     - packages/daemon/src/session-runtime/adapters/types.ts
     - packages/daemon/src/session-runtime/adapters/index.ts
     - packages/daemon/src/session-runtime/adapters/cli.ts
@@ -623,6 +624,7 @@ STACK-AC-SESSION-PROVIDERS:
     - packages/daemon/src/session-runtime/providers/resume-state.test.ts
     - packages/daemon/src/session-runtime/providers/smoke-test.test.ts
     - packages/daemon/src/session-runtime/providers/safety-baseline.test.ts
+    - packages/daemon/src/session-runtime/providers/startup-admission.test.ts
     - packages/daemon/src/session-runtime/adapters/index.test.ts
     - packages/daemon/src/session-runtime/adapters/codex-cli.test.ts
     - packages/daemon/src/session-runtime/adapters/contract-v2.test.ts

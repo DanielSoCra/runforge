@@ -180,6 +180,10 @@ vi.mock('../session-runtime/runtime.js', () => {
   return {
     SessionRuntime: class {
       spawnSession = mockSpawnSession;
+      getProviderRegistry = () => ({
+        markSmokeProof: vi.fn(),
+        markSmokeFailed: vi.fn(),
+      });
     },
     preloadPromptCache: async () => 0,
   };
@@ -876,6 +880,66 @@ describe('daemon', () => {
       await startDaemon('config.json');
 
       expect(mockRemoteControl.start).not.toHaveBeenCalled();
+    });
+
+    it('aborts startup when smoke-proof admission fails a required provider', async () => {
+      const failingAdapter = {
+        spawn: vi.fn().mockResolvedValue(
+          err({ message: 'spawn codex ENOENT' }),
+        ),
+        resume: vi.fn(),
+        abort: vi.fn(),
+        capabilities: vi.fn().mockReturnValue({
+          nativeGuardHooks: false,
+          structuredOutput: false,
+          exactCostReporting: false,
+          sessionContinuation: false,
+        }),
+      };
+      vi.doMock('../session-runtime/adapters/index.js', () => ({
+        createProviderAdapter: vi.fn().mockReturnValue(failingAdapter),
+        createAdapter: vi.fn(),
+        CliAdapter: class {},
+        CodexCliAdapter: class {},
+        PiCliAdapter: class {},
+      }));
+
+      mockLoadConfig.mockResolvedValue(
+        ok(
+          makeConfig({
+            providers: {
+              defaultProvider: 'codex-impl',
+              fallbackChain: [],
+              requireSmokeProof: true,
+              definitions: {
+                'codex-impl': {
+                  name: 'codex-impl',
+                  adapterClass: 'process-based',
+                  providerKind: 'codex-cli',
+                  supportedModelTiers: ['higher-capability'],
+                  required: true,
+                  cliTool: 'codex',
+                  model: 'gpt-5.5',
+                  executionFlags: [],
+                  env: {},
+                },
+              },
+            },
+          }),
+        ),
+      );
+
+      const { startDaemon } = await loadDaemon();
+      const result = await startDaemon('config.json');
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error.message).toContain('codex-impl');
+        expect(result.error.message).toContain('failed smoke proof');
+      }
+      expect(mockServerStart).not.toHaveBeenCalled();
+
+      vi.doUnmock('../session-runtime/adapters/index.js');
     });
   });
 

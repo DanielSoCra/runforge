@@ -4,6 +4,14 @@ import { Octokit } from '@octokit/rest';
 import { loadConfig, type Config } from '../config.js';
 import { SessionRuntime } from '../session-runtime/runtime.js';
 import { CostTracker } from '../session-runtime/cost.js';
+import { createProviderAdapter } from '../session-runtime/adapters/index.js';
+import type { ProviderAdapter } from '../session-runtime/adapters/index.js';
+import { DEFAULT_POLICY } from '../session-runtime/containment-hooks.js';
+import {
+  admitProviders,
+  type ProviderAdmissionBinding,
+} from '../session-runtime/providers/startup-admission.js';
+import { smokeTest, type SmokeProof } from '../session-runtime/providers/smoke-test.js';
 import { killAllManagedProcessGroups } from '../session-runtime/managed-processes.js';
 import { ImplementationCoordinator } from '../implementation/coordinator.js';
 import { StateManager } from './state.js';
@@ -56,7 +64,12 @@ import { createPhaseLabelMirror } from './phase-labels.js';
 import { getPipeline, getStartPhase } from './fsm.js';
 import { selectVariant } from './variants.js';
 import { notify } from './notify.js';
-import type { RunState, RuntimeSourceStatus, WorkRequest } from '../types.js';
+import type {
+  ProviderDefinition,
+  RunState,
+  RuntimeSourceStatus,
+  WorkRequest,
+} from '../types.js';
 import { ok, err, type Result } from '../lib/result.js';
 import {
   buildRuntimeSourcePolicy,
@@ -110,7 +123,8 @@ import { TechProposalStore } from '../coordination/tech-lead/proposal-store.js';
 import { assembleSignalDigest } from '../coordination/tech-lead/signal-digest.js';
 import { isTerminalStatus } from '../coordination/tech-lead/proposal-lifecycle.js';
 import { readJsonSafe, writeJsonSafe } from '../lib/json-store.js';
-import { mkdir } from 'fs/promises';
+import { mkdir, mkdtemp, rm, stat } from 'fs/promises';
+import { tmpdir } from 'os';
 import type { Proposal, IdeaSubmission } from '../coordination/types.js';
 import {
   buildProductOwnerSessionVariables,
@@ -460,6 +474,92 @@ export async function startDaemon(
     perRunBudget: config.perRunBudget, // per-run budget is repo-specific, handled per-run
   });
   const runtime = new SessionRuntime(config, costTracker);
+
+  // 3a. Startup smoke-proof admission (opt-in; gate-off path is a byte-identical
+  // NO-OP). Each configured provider/model binding is proven in a disposable
+  // workspace before the daemon binds the control server. Required providers
+  // that fail abort startup; optional failures are degraded but not fatal.
+  if (config.providers?.requireSmokeProof === true) {
+    const registry = runtime.getProviderRegistry();
+    const skipPermissions =
+      config.autonomous === true ||
+      process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'] === '1';
+
+    const runSmoke = async (
+      provider: ProviderDefinition,
+      modelBinding: string,
+    ): Promise<SmokeProof> => {
+      const baseAdapter = createProviderAdapter(provider);
+      const workspace = await mkdtemp(
+        join(tmpdir(), `smoke-${provider.name}-`),
+      );
+      const smokeAdapter: ProviderAdapter = {
+        capabilities: () => baseAdapter.capabilities(),
+        abort: (handle) => baseAdapter.abort(handle),
+        resume: (def, prompt, continuationId, options) =>
+          baseAdapter.resume(def, prompt, continuationId, {
+            ...options,
+            cwd: workspace,
+            containmentPolicy: DEFAULT_POLICY,
+            skipPermissions,
+          }),
+        spawn: (def, prompt, options) =>
+          baseAdapter.spawn(def, prompt, {
+            ...options,
+            cwd: workspace,
+            containmentPolicy: DEFAULT_POLICY,
+            skipPermissions,
+          }),
+      };
+      try {
+        return await smokeTest(provider, modelBinding, {
+          adapter: smokeAdapter,
+          observedChange: async () => {
+            try {
+              await stat(join(workspace, 'smoke-proof.txt'));
+              return true;
+            } catch {
+              return false;
+            }
+          },
+        });
+      } finally {
+        await rm(workspace, { recursive: true, force: true }).catch(() => {});
+      }
+    };
+
+    const providers: ProviderAdmissionBinding[] = [];
+    for (const provider of Object.values(config.providers.definitions)) {
+      for (const tier of provider.supportedModelTiers) {
+        providers.push({
+          provider,
+          modelBinding: provider.model ?? tier,
+          tier,
+          required: provider.required === true,
+        });
+      }
+    }
+
+    const admission = await admitProviders({
+      registry,
+      providers,
+      requireSmokeProof: true,
+      runSmoke,
+      logger: {
+        info: (message) => console.log(message),
+        warn: (message) => console.warn(message),
+        error: (message) => console.error(message),
+      },
+    });
+
+    if (admission.aborted === true) {
+      return err(
+        new Error(
+          `Startup aborted: required provider(s) failed smoke proof: ${admission.abortReasons.join(', ')}`,
+        ),
+      );
+    }
+  }
   const batchClassifierConfig: BatchClassifierConfig = {
     maxBatchSize: config.classifierBatchSize,
     fallbackOnFailure: true,
