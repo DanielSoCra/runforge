@@ -115,7 +115,11 @@ function parseField(field: string, range: CronFieldRange): Set<number> {
     }
 
     if (item.includes('/')) {
-      const [rangePart, stepToken] = item.split('/');
+      const stepParts = item.split('/');
+      if (stepParts.length !== 2) {
+        throw new Error(`cron: malformed step item "${item}" (expected exactly one '/')`);
+      }
+      const [rangePart, stepToken] = stepParts;
       if (stepToken === undefined || rangePart === undefined) {
         throw new Error(`cron: malformed step item "${item}"`);
       }
@@ -192,6 +196,20 @@ function parseCronExpression(expr: string): {
     domField,
     dowField,
   };
+}
+
+/**
+ * Whether `expr` is a parseable 5-field cron expression. For FAIL-CLOSED validation
+ * at registration: a malformed cron must be rejected as an offender, never accepted
+ * and then thrown at the first wake evaluation. Parses every field (no short-circuit).
+ */
+export function isValidCronExpr(expr: string): boolean {
+  try {
+    parseCronExpression(expr);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

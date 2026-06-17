@@ -152,6 +152,15 @@ describe('parseRole — cron rhythm is now supported (re-enabled, follow-up #15)
     }
   });
 
+  it('a MALFORMED cron expr is rejected at registration, not accepted then thrown at wake (codex)', () => {
+    const r = parseRole(
+      { ...validRole, wakeRhythm: { kind: 'cron', expr: 'not a cron' } },
+      version,
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.offenders.some((o) => o.toLowerCase().includes('cron'))).toBe(true);
+  });
+
   it('the returned cron role is deep-frozen (top level and the wakeRhythm)', () => {
     const r = parseRole(
       { ...validRole, wakeRhythm: { kind: 'cron', expr: '*/15 * * * *' } },

@@ -194,6 +194,10 @@ describe('cronMatchesAt — malformed expression throws (programmer error)', () 
   it('an out-of-range value throws (day-of-week 7)', () => {
     expect(() => cronMatchesAt('0 0 * * 7', JAN1_0000)).toThrow();
   });
+
+  it('a step field with repeated "/" throws, never silently parsed as */5 (codex)', () => {
+    expect(() => cronMatchesAt('*/5/2 * * * *', JAN1_0000)).toThrow();
+  });
 });
 
 describe('cronDue — window existence (lower < m <= now)', () => {

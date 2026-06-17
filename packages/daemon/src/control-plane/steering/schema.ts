@@ -12,6 +12,7 @@
 
 import { z } from 'zod';
 import type { SteeringRole, RegistrationOutcome, RoleVersion } from './types.js';
+import { isValidCronExpr } from './cron.js';
 
 /**
  * The wake-rhythm discriminated union, declarative + real. `interval.everyMs` is
@@ -117,6 +118,17 @@ function assembleRole(
   data: z.infer<typeof SteeringRoleSchema>,
   version: RoleVersion,
 ): RegistrationOutcome {
+  // Fail CLOSED on a malformed cron expression at REGISTRATION — the schema only
+  // checks the cron shape (a non-empty string), so an unparseable expr (e.g.
+  // "not a cron") would freeze ok and then throw at the first decideWake. Reject it
+  // as an offender here instead of scheduling an unintended/throwing cadence.
+  if (data.wakeRhythm.kind === 'cron' && isValidCronExpr(data.wakeRhythm.expr) === false) {
+    return {
+      ok: false,
+      offenders: [`wakeRhythm.expr: "${data.wakeRhythm.expr}" is not a valid cron expression`],
+    };
+  }
+
   const role = deepFreeze(data) as SteeringRole;
   return { ok: true, role, version };
 }

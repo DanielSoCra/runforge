@@ -15,6 +15,7 @@ export { decideWake, checkSpend } from './decide.js';
 export {
   cronMatchesAt,
   cronDue,
+  isValidCronExpr,
   CRON_SEARCH_CAP_MINUTES,
   MINUTE_MS,
 } from './cron.js';
