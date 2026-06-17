@@ -110,6 +110,8 @@ export interface FleetCapacityConfig {
 export interface WideningRecord {
   deploymentId: string;
   riskClass: RiskClass;
+  /** The lane this grant is scoped to; absent for a LEVEL-WIDE grant. */
+  lane?: string;
   prior: AutonomyLevel;
   next: AutonomyLevel;
   authorization: AutonomyAuthorization;
@@ -117,18 +119,24 @@ export interface WideningRecord {
 }
 
 /**
- * The one mutable slice of a deployment's profile: per-risk-class autonomy.
- * Default (a class with no recorded widening) is human-gated; only classes that
- * have moved appear in `entries`. `history` is the append-only WideningRecord log.
+ * The one mutable slice of a deployment's profile: autonomy. A grant is either
+ * LEVEL-WIDE (keyed by risk class in `entries`) or LANE-SPECIFIC (keyed by lane
+ * then risk class in `laneEntries`) — FUNC-AC-MERGE-DECISION grants autonomy "for
+ * a given risk level OR lane". A (class, lane) is effectively widened when the
+ * level-wide entry OR the lane-specific entry is widened. Default is human-gated.
+ * `history` is the append-only WideningRecord log.
  */
 export interface AutonomyState {
   entries: Partial<Record<RiskClass, AutonomyLevel>>;
+  laneEntries?: Record<string, Partial<Record<RiskClass, AutonomyLevel>>>;
   history: WideningRecord[];
 }
 
 /** A read of one class's autonomy, with the authorization on record (if any). */
 export interface AutonomyReading {
   riskClass: RiskClass;
+  /** The lane scope this reading was resolved for, if a lane was supplied. */
+  lane?: string;
   level: AutonomyLevel;
   authorization?: AutonomyAuthorization;
 }

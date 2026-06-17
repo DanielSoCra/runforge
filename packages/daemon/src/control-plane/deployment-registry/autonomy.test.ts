@@ -141,3 +141,60 @@ describe('autonomy — rejected writes mutate nothing', () => {
     expect(levelOf(reg, 'dep-a', 'orange')).toBe('human-gated');
   });
 });
+
+describe('autonomy — lane-scoped grants (XCUT P1#2: level OR lane)', () => {
+  const levelFor = (
+    reg: DeploymentRegistry,
+    id: string,
+    rc: RiskClass,
+    lane?: string,
+  ): string | undefined =>
+    reg.readAutonomyState(id, rc, lane).find((e) => e.riskClass === rc)?.level;
+
+  it('a LANE-SPECIFIC grant widens only that lane, not other lanes or the level', () => {
+    const reg = new DeploymentRegistry();
+    reg.register('dep-a', makeProfile());
+    const out = reg.recordWidening('dep-a', 'green', 'widened', auth, NOW, 'trivial');
+    expect(out.ok).toBe(true);
+    expect(levelFor(reg, 'dep-a', 'green', 'trivial')).toBe('widened'); // the granted lane
+    expect(levelFor(reg, 'dep-a', 'green', 'standard')).toBe('human-gated'); // a different lane
+    expect(levelFor(reg, 'dep-a', 'green')).toBe('human-gated'); // level-wide read unaffected
+  });
+
+  it('a LEVEL-WIDE grant widens every lane of that class (the FLEET default)', () => {
+    const reg = new DeploymentRegistry();
+    reg.register('dep-a', makeProfile());
+    reg.recordWidening('dep-a', 'green', 'widened', auth, NOW); // no lane → level-wide
+    expect(levelFor(reg, 'dep-a', 'green', 'trivial')).toBe('widened');
+    expect(levelFor(reg, 'dep-a', 'green', 'standard')).toBe('widened');
+    expect(levelFor(reg, 'dep-a', 'green')).toBe('widened');
+  });
+
+  it('a LEVEL-WIDE demotion re-gates lane-specific grants for that class (demote-on-red)', () => {
+    const reg = new DeploymentRegistry();
+    reg.register('dep-a', makeProfile());
+    reg.recordWidening('dep-a', 'green', 'widened', auth, NOW, 'trivial'); // lane-specific
+    expect(levelFor(reg, 'dep-a', 'green', 'trivial')).toBe('widened');
+    // A level-wide demotion (no lane) must re-gate the lane too — otherwise a
+    // demote-on-red / operator reversal would silently leave the lane widened.
+    const demote = reg.recordWidening('dep-a', 'green', 'human-gated', auth, NOW + 1000);
+    expect(levelFor(reg, 'dep-a', 'green', 'trivial')).toBe('human-gated');
+    // The revoked lane grant is recorded (demote-on-red stays reconstructable).
+    expect(demote.ok).toBe(true);
+    if (demote.ok) {
+      const laneRevocation = demote.state.history.find(
+        (h) => h.lane === 'trivial' && h.riskClass === 'green' && h.next === 'human-gated',
+      );
+      expect(laneRevocation?.prior).toBe('widened');
+    }
+  });
+
+  it('a grant for an UNDECLARED lane is rejected (typo/stale lane never silently recorded)', () => {
+    const reg = new DeploymentRegistry();
+    reg.register('dep-a', makeProfile());
+    const out = reg.recordWidening('dep-a', 'green', 'widened', auth, NOW, 'no-such-lane');
+    expect(out.ok).toBe(false);
+    // Nothing recorded — a later read for that (typo'd) lane stays human-gated.
+    expect(levelFor(reg, 'dep-a', 'green', 'no-such-lane')).toBe('human-gated');
+  });
+});
