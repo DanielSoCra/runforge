@@ -139,7 +139,11 @@ describe('parseCockpitAnswer', () => {
       '```',
     ].join('\n');
     const result = parseCockpitAnswer([{ body: liveBody }], 'issue-3:l2-gate:1');
-    expect(result).toEqual({ choice: 'approve', feedbackBody: liveBody });
+    expect(result).toEqual({
+      choice: 'approve',
+      rawChosenOption: 'approve',
+      feedbackBody: liveBody,
+    });
   });
 
   it('does NOT match a different decision_id even when the minimal JSON is identical (marker binds the id)', () => {
