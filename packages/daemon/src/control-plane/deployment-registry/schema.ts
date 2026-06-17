@@ -187,6 +187,28 @@ export function parseProfile(id: string, raw: unknown): RegistrationOutcome {
     offenders.push(`lifecycleMode '${env.data.lifecycleMode}' is not a declared phase`);
   }
 
+  // Cross-field (XCUT P2#1): when gate-set definitions are declared, every lane's
+  // gate-set reference — across ALL lifecycle modes — must name a defined gate set.
+  // A dangling reference is a malformed pack; reject it at activation rather than
+  // accepting it and parking every affected change at integrate (fail at the door,
+  // not at runtime).
+  if (env.success && lanes.ok && env.data.gateSets !== undefined) {
+    const defined = new Set(Object.keys(env.data.gateSets));
+    for (const lane of lanes.laneSet.lanes) {
+      const refs =
+        typeof lane.gateSet === 'string'
+          ? [lane.gateSet]
+          : Object.values(lane.gateSet);
+      for (const ref of refs) {
+        if (!defined.has(ref)) {
+          offenders.push(
+            `lane '${lane.name}' references undefined gate set '${ref}'`,
+          );
+        }
+      }
+    }
+  }
+
   if (!env.success || !lanes.ok || offenders.length > 0) {
     return { ok: false, offenders };
   }

@@ -357,24 +357,23 @@ describe('gate-set verdict live wiring — integrate handler', () => {
     expect(decision.raise).not.toHaveBeenCalled();
   });
 
-  it('(d) gateSets declared but the lane\'s named set is MISSING from the map → fail-closed (parks, does NOT merge)', async () => {
-    const decision = makeDecisionDouble();
-    // gateSets exists but does NOT contain 'gate1-deterministic-only' (the auto
-    // lane's set) — a declared-but-dangling reference must not silently pass.
-    const { handlers } = createHandlers({
-      config: { deployment: { id: DEPLOYMENT_ID, profile: {} } },
-      registry: registryWidenedGreen({
-        'some-other-set': { required: ['deterministic'] },
-      }),
-      decisionManager: decision.manager,
-      decisionPublisher: decision.publisher,
-    });
-    const run = makeRun({ passedGates: ['deterministic', 'spec-compliance', 'quality', 'security'] });
-
-    await handlers.integrate!(run);
-
-    expect(mockIntegrate).not.toHaveBeenCalled();
-    expect(run.pausedAtPhase).toBe('integrate');
-    expect(decision.raise).toHaveBeenCalledTimes(1);
+  it('(d) a declared-but-dangling lane→gate-set reference is REJECTED at registration — it never reaches integrate (codex)', () => {
+    // A dangling reference (gateSets declared but missing a lane's named set) is
+    // caught at pack activation by parseProfile, so it can never reach the
+    // integrate seam through a registered profile. This is the stronger placement
+    // of the fail-closed guard (at the door, not at runtime). The integrate
+    // handler keeps a `definition===undefined → false` fail-close as pure
+    // defense-in-depth, but a registered profile can no longer produce that state.
+    const reg = new DeploymentRegistry();
+    const out = reg.register(
+      DEPLOYMENT_ID,
+      makeProfile({ 'some-other-set': { required: ['deterministic'] } }),
+    );
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      const joined = out.offenders.join('\n');
+      expect(joined).toContain('gate1-deterministic-only');
+      expect(joined).toContain('full-ladder');
+    }
   });
 });

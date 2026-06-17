@@ -110,7 +110,11 @@ describe('deployment config — gateSets definitions schema', () => {
   it('the parsed gateSets definitions are deep-frozen with the profile', () => {
     const raw = {
       ...baseProfile(),
-      gateSets: { 'gate1-deterministic-only': { required: ['deterministic'] } },
+      // Both lane-referenced sets must be defined (a dangling ref is now rejected).
+      gateSets: {
+        'gate1-deterministic-only': { required: ['deterministic'] },
+        'full-ladder': { required: ['deterministic', 'quality'] },
+      },
     };
     const r = parseProfile('dep-a', raw);
     expect(r.ok).toBe(true);
@@ -118,5 +122,32 @@ describe('deployment config — gateSets definitions schema', () => {
       expect(Object.isFrozen(r.profile.gateSets)).toBe(true);
       expect(Object.isFrozen(r.profile.gateSets['gate1-deterministic-only'])).toBe(true);
     }
+  });
+
+  it('rejects a DANGLING lane→gate-set reference at parse time (codex): a lane names a gate set absent from gateSets', () => {
+    // The baseProfile's `standard` lane references `full-ladder`; declare gateSets
+    // WITHOUT it. A dangling reference must fail pack activation (named offender),
+    // not silently register and park every affected change at integrate.
+    const raw = {
+      ...baseProfile(),
+      gateSets: { 'gate1-deterministic-only': { required: ['deterministic'] } },
+    };
+    const r = parseProfile('dep-a', raw);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.offenders.join('\n')).toContain('full-ladder');
+      expect(r.offenders.join('\n')).toContain('standard');
+    }
+  });
+
+  it('accepts when EVERY lane gate-set reference is defined (no dangling)', () => {
+    const raw = {
+      ...baseProfile(),
+      gateSets: {
+        'gate1-deterministic-only': { required: ['deterministic'] },
+        'full-ladder': { required: ['deterministic', 'quality'] },
+      },
+    };
+    expect(parseProfile('dep-a', raw).ok).toBe(true);
   });
 });

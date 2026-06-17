@@ -1447,11 +1447,16 @@ export function createPhaseHandlers(
         console.warn(`[review] Failed to load spec content:`, e);
       }
 
-      // Skip all gates only when the diff could not be loaded at all. An empty
-      // diff still means the pipeline reached review, and the lane-specific
-      // gate-set verdict needs the observed gate results to decide at integrate.
-      if (diff === undefined) {
-        console.log(`[review] Diff unavailable — skipping all gates`);
+      // Skip all gates if there's no diff (e.g., spec-only tasks with no code
+      // changes). Running gate1 tests against the baseline codebase would fail on
+      // pre-existing test failures unrelated to this branch — and spec tasks don't
+      // modify code. This keeps the legacy (no-gateSets) path inert. NB for the
+      // lane gate-set verdict (#19): an empty diff records NO passed gates, so a
+      // deployment whose lane gate-set requires gates fails CLOSED at integrate
+      // (escalates) — correct: a no-code change must not auto-merge under a gate
+      // set, and we must not run gates against the baseline just to observe them.
+      if (diff === undefined || diff.trim().length === 0) {
+        console.log(`[review] No code changes — skipping all gates`);
         return 'success';
       }
 

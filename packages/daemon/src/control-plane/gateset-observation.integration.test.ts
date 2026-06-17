@@ -177,7 +177,9 @@ describe('gate observation — run.passedGates population', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     releaseDetectLock();
-    mockGit.mockResolvedValue({ ok: true, value: '' });
+    // A NON-empty diff so the review handler actually runs gates (an empty diff
+    // skips all gates — the legacy no-code path — and records no passed gates).
+    mockGit.mockResolvedValue({ ok: true, value: 'diff --git a/f b/f\n+code' });
   });
   afterEach(() => {
     releaseDetectLock();
@@ -227,6 +229,23 @@ describe('gate observation — run.passedGates population', () => {
 
     expect(run.passedGates).toContain('deterministic');
     expect(run.passedGates ?? []).not.toContain('security');
+  });
+
+  it('an EMPTY diff skips all gates and does NOT populate passedGates (legacy skip preserved, codex)', async () => {
+    // No-code/spec-only work: gate1 against the baseline would fail on pre-existing
+    // failures, so review skips all gates and returns success. No gates ran ⇒
+    // passedGates stays unset; a lane gate-set requiring gates then fails CLOSED at
+    // integrate rather than this run auto-merging on phantom observations.
+    setupReviewMocks();
+    mockGit.mockResolvedValue({ ok: true, value: '   \n  ' }); // whitespace-only diff
+    const { handlers } = createHandlers();
+    const run = makeRun();
+
+    const result = await handlers.review!(run);
+
+    expect(result).toBe('success');
+    expect(run.passedGates ?? []).toEqual([]);
+    expect(mockRunReview).not.toHaveBeenCalled();
   });
 
   it('holdout handler APPENDS holdout to run.passedGates when scenarios pass', async () => {
