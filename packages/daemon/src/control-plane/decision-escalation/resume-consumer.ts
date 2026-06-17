@@ -97,8 +97,7 @@ function escapeRegExp(s: string): string {
 /**
  * Extract the chosen option from a DecisionResponse comment body IF its EFFECT
  * MARKER binds `pm-cockpit:effect:<decisionId>:write_response` AND its minimal
- * fenced JSON carries `chosen_option` ∈ {approve, reject} (the legacy integrate id
- * `approve-merge` is accepted as an `approve` alias for backward-compat).
+ * fenced JSON carries `chosen_option` ∈ {approve, reject}.
  *
  * The decision_id binding is AUTHORITATIVE via the marker — that is the cockpit's
  * own deterministic effect id (`<decision_id>:write_response:<idempotency_key>`
@@ -137,12 +136,6 @@ function extractMatchingChoice(
   if (typeof obj !== 'object' || obj === null) return null;
   const chosen = (obj as { chosen_option?: unknown }).chosen_option;
   if (chosen === 'approve' || chosen === 'reject') return chosen;
-  // Backward-compat: integrate DecisionRequests published before the option id was
-  // aligned to `approve` (the l2-gate convention) declared `approve-merge`. An
-  // operator who answered such a still-parked run wrote `chosen_option:
-  // "approve-merge"`; recognize it as an approve so the rename never strands an
-  // already-answered run. (l2-gate never emits this id, so the alias is inert there.)
-  if (chosen === 'approve-merge') return 'approve';
   return null;
 }
 
