@@ -121,19 +121,25 @@ export class WindowLedger {
    * a hint), degrading to `unknown` — never auto-`ample` without new evidence.
    */
   snapshot(now: number): LedgerSnapshot {
-    const states = new Map(this.states);
+    // Eagerly resolve an IMMUTABLE view: copy each pool's headroom VALUE (not the
+    // PoolState object reference) into a fresh map, applying the reopen projection
+    // at `now`. Copying values — not references — is what isolates the snapshot
+    // from later in-place markExhausted() mutations of the ledger's own PoolState
+    // objects (a shallow Map copy would share them and let mutations bleed back).
+    const resolved = new Map<string, Headroom>();
+    for (const [name, state] of this.states) {
+      // Reopen is a hint, not a gate: once `now` reaches the projection the pool is
+      // dispatchable again as 'unknown' (rebuilt from new evidence only — never
+      // auto-'ample'). `>=` so it resumes AT the projected reopen, not one tick later.
+      const reopened =
+        state.headroom === 'exhausted' &&
+        state.reopenProjection !== undefined &&
+        now >= state.reopenProjection;
+      resolved.set(name, reopened ? 'unknown' : state.headroom);
+    }
     return {
       headroom(pool: string): Headroom {
-        const state = states.get(pool);
-        if (state === undefined) {
-          return 'unknown';
-        }
-        if (state.headroom === 'exhausted' && state.reopenProjection !== undefined) {
-          if (now > state.reopenProjection) {
-            return 'unknown';
-          }
-        }
-        return state.headroom;
+        return resolved.get(pool) ?? 'unknown';
       },
     };
   }

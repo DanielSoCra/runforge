@@ -27,7 +27,10 @@ export function classifySignal(sig: QuotaSignal, pool: PoolConfig): SignalClass 
   const isLongHorizon = retryAfterMs !== undefined && retryAfterMs >= longHorizonThreshold;
 
   if (isLongHorizon || sig.windowWording === true) {
-    const reopenAfter = retryAfterMs ?? pool.window.lengthMs;
+    // When wording alone is decisive, retryAfterMs may be 0/absent — fall back to
+    // the full window length so reopenProjection is never the observation instant
+    // (observedAt + 0), which would invite an immediate-retry tight-loop.
+    const reopenAfter = retryAfterMs !== undefined && retryAfterMs > 0 ? retryAfterMs : pool.window.lengthMs;
     return { kind: 'window-exhaustion', reopenProjection: sig.observedAt + reopenAfter };
   }
 
