@@ -297,13 +297,29 @@ export class DeploymentRegistry {
       // lane-specific widenings for that class. Otherwise readAutonomyState's
       // (level-wide OR lane-specific) would leave a lane still reading `widened`, and
       // a demote-on-red / operator reversal would silently fail to re-gate it.
+      // Per-lane revocation records: each lane grant the demotion clears gets its
+      // OWN append-only record (its true prior + lane), so demote-on-red stays fully
+      // reconstructable from history — not just the single level-wide record below.
+      const revocations: WideningRecord[] = [];
       let laneEntries = state.laneEntries;
       if (target === 'human-gated' && laneEntries !== undefined) {
         const cleared: Record<string, Partial<Record<RiskClass, AutonomyLevel>>> = {};
         for (const [ln, classes] of Object.entries(laneEntries)) {
           const kept: Partial<Record<RiskClass, AutonomyLevel>> = {};
           for (const [c, lvl] of Object.entries(classes)) {
-            if (c !== riskClass) kept[c as RiskClass] = lvl;
+            if (c !== riskClass) {
+              kept[c as RiskClass] = lvl;
+            } else if (lvl !== 'human-gated') {
+              revocations.push({
+                deploymentId: id,
+                riskClass,
+                lane: ln,
+                prior: lvl,
+                next: 'human-gated',
+                authorization,
+                recordedAt: now,
+              });
+            }
           }
           cleared[ln] = kept;
         }
@@ -316,6 +332,7 @@ export class DeploymentRegistry {
         ...(laneEntries !== undefined ? { laneEntries } : {}),
         history: [
           ...state.history,
+          ...revocations,
           { deploymentId: id, riskClass, prior, next: target, authorization, recordedAt: now },
         ],
       };
