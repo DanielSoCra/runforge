@@ -58,6 +58,17 @@ describe('parseCockpitAnswer', () => {
     expect(result?.choice).toBe('approve');
   });
 
+  it('normalizes the legacy integrate `approve-merge` option id to approve (rollout compat, codex)', () => {
+    // A run parked under the pre-rename integrate option id has a stored request
+    // whose approve option is `approve-merge`; the cockpit answers with that id.
+    // It must resume as an approve (ledger.answer does not validate against
+    // options, so the parse-time normalization is the complete fix).
+    const comments = [
+      { body: decisionResponseComment(DECISION_ID, 'approve-merge') },
+    ];
+    expect(parseCockpitAnswer(comments, DECISION_ID)?.choice).toBe('approve');
+  });
+
   it('recognizes a reject DecisionResponse and exposes the raw comment body as feedback', () => {
     const comments = [
       { body: decisionResponseComment(DECISION_ID, 'reject') },

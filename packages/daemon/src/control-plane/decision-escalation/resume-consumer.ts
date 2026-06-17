@@ -97,7 +97,8 @@ function escapeRegExp(s: string): string {
 /**
  * Extract the chosen option from a DecisionResponse comment body IF its EFFECT
  * MARKER binds `pm-cockpit:effect:<decisionId>:write_response` AND its minimal
- * fenced JSON carries `chosen_option` ∈ {approve, reject}.
+ * fenced JSON carries `chosen_option` ∈ {approve, reject} (the legacy integrate id
+ * `approve-merge` is normalized to `approve` for rollout backward-compat).
  *
  * The decision_id binding is AUTHORITATIVE via the marker — that is the cockpit's
  * own deterministic effect id (`<decision_id>:write_response:<idempotency_key>`
@@ -136,6 +137,16 @@ function extractMatchingChoice(
   if (typeof obj !== 'object' || obj === null) return null;
   const chosen = (obj as { chosen_option?: unknown }).chosen_option;
   if (chosen === 'approve' || chosen === 'reject') return chosen;
+  // Backward-compat (rollout safety): an integrate run parked on a build BEFORE the
+  // approve option id was aligned to `approve` has a stored DecisionRequest whose
+  // approve option is `approve-merge`, so the cockpit writes `chosen_option:
+  // "approve-merge"`. Normalize it to `approve` here so the rename never strands an
+  // in-flight parked-then-answered run. This parse-time normalization is the COMPLETE
+  // fix: ledger.answer() records the chosen option verbatim and does NOT validate it
+  // against the stored options[] (see ledger.ts answer()), so answering `approve`
+  // for a request whose stored option was `approve-merge` is accepted. (l2-gate never
+  // emits `approve-merge`, so the alias is inert there.)
+  if (chosen === 'approve-merge') return 'approve';
   return null;
 }
 

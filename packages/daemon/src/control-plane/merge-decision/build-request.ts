@@ -131,12 +131,11 @@ export function buildMergeDecisionRequest(
     risk_class: toDecisionRiskClass(decision.effectiveRisk),
     question: `Approve the merge for issue #${run.issueNumber}?`,
     context,
-    // Option ids MUST be {approve, reject}: parseCockpitAnswer recognizes only
-    // those literals, and the ledger validates the operator's choice against these
-    // stored ids — so the published id, the consumed id, and the answered id all
-    // agree end-to-end. (No backward-compat path for a pre-rename `approve-merge`
-    // is needed: the integrate resume arm did not exist before this change, so no
-    // run was ever parked-then-answered under the old id awaiting a resume.)
+    // Option ids are {approve, reject}: parseCockpitAnswer recognizes those
+    // literals, so the published id and the consumed choice agree for every new
+    // park. (Runs parked on a build before this rename used `approve-merge`;
+    // parseCockpitAnswer normalizes that legacy id to `approve` so a rollout never
+    // strands an in-flight parked-then-answered run.)
     options: [
       { id: 'approve', label: 'Approve the merge and resume the pipeline.' },
       { id: 'reject', label: 'Reject and send back for rework.' },
