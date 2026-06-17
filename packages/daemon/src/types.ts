@@ -438,6 +438,20 @@ export interface RunState {
    * reviewer flagged (#4). Each entry is a human-readable "[gate] description".
    */
   reviewFindings?: string[];
+  /**
+   * The gate keys that RAN and PASSED for this run — the OBSERVED verdict the
+   * lane-specific gate-set check (XCUT P2#1) consumes at `integrate`. The review
+   * handler records the passing `gateResults[].gate` keys; the holdout handler
+   * appends `'holdout'` when its scenarios pass. Values are drawn from the gate
+   * vocabulary (`GateKey`): the four review `GateType`s plus `'holdout'`.
+   *
+   * Optional + additive: a run that never recorded any passing gate (legacy runs,
+   * or a deployment with no `gateSets` declared) leaves it undefined, and the
+   * integrate verdict treats an absent field as the empty set (fail-closed only
+   * when a gate-set actually requires a gate). The integrate handler reads it as
+   * `run.passedGates ?? []`.
+   */
+  passedGates?: string[];
   /** Counter for l3-compliance failure attempts (every failure path); capped to prevent infinite cross-phase loop. */
   l3ComplianceAttempts?: number;
   activePhaseLabel?: string;

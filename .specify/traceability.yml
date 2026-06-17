@@ -644,6 +644,9 @@ STACK-AC-LANE-ENGINE:
     - packages/daemon/src/control-plane/lane-engine/resolve-mode.ts
     - packages/daemon/src/control-plane/lane-engine/eligibility.ts
     - packages/daemon/src/control-plane/lane-engine/earn-in.ts
+    # lane-specific gate-set verdict (XCUT P2#1): pure `gateSetVerdict` — the
+    # OBSERVED gate-set verdict the integrate seam feeds into the merge decision.
+    - packages/daemon/src/control-plane/lane-engine/gate-set.ts
     - packages/daemon/src/control-plane/lane-engine/index.ts
     # merge-decision composition core (slice 5a): the lane engine driving ONE decision
     - packages/daemon/src/control-plane/merge-decision/types.ts
