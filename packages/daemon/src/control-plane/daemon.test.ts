@@ -3963,6 +3963,71 @@ describe('daemon', () => {
         expect(mockRunPipeline).toHaveBeenCalled();
       });
 
+      it('APPROVE (pre-rename park): a stored request whose approve option is the legacy `approve-merge` resumes — the daemon answers the ledger with the RAW id so state-machine option validation passes (codex P1)', async () => {
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 32).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+
+        const parkedRun = makeIntegrateParkedRun({ mergeDecisionEpoch: 1 });
+        mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'answered' }], state: 'open' },
+        });
+        // The operator answered with the legacy displayed option id.
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment('issue-100:integrate:1', 'approve-merge')],
+        });
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+
+        // Seed a request whose stored options use the PRE-RENAME approve id. The
+        // state machine validates the answered chosen_option against THESE options,
+        // so the daemon must answer with `approve-merge`, not the normalized id.
+        const decision = {
+          kind: 'escalate',
+          effectiveRisk: 'green',
+        } as unknown as MergeDecision;
+        const built = buildMergeDecisionRequest(
+          {
+            issueNumber: 100,
+            variant: 'feature',
+            repoOwner: 'test-owner',
+            repoName: 'test-repo',
+          } as unknown as Parameters<typeof buildMergeDecisionRequest>[0],
+          1,
+          'test-owner/test-repo',
+          decision,
+        );
+        const legacyReq = {
+          ...built,
+          options: [
+            { id: 'approve-merge', label: 'Approve the merge and resume the pipeline.' },
+            { id: 'reject', label: 'Reject and send back for rework.' },
+          ],
+        };
+        const { decision_id } = manager.ledger().raise(legacyReq);
+        await manager.ledger().notify(decision_id);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        const resumedSave = mockStateMgr.saveRunState.mock.calls
+          .map((c) => c[0] as Record<string, unknown>)
+          .find((s) => s.issueNumber === 100 && s.pausedAtPhase === undefined);
+        expect(resumedSave).toBeDefined();
+        expect(resumedSave?.phase).toBe('integrate');
+        expect(resumedSave?.mergeDecisionApprovedEpoch).toBe(1);
+        // The ledger ACCEPTED the raw `approve-merge` answer and reached resumed —
+        // it would have thrown AnswerRejectedError on a normalized `approve`.
+        expect(manager.ledger().statusOf(decision_id)).toBe('resumed');
+        expect(mockRunPipeline).toHaveBeenCalled();
+      });
+
       it('REJECT: cockpit reject routes to implement with mergeDecisionFeedback captured + mergeDecisionBlockPublished reset, ledger answered+resumed', async () => {
         manager = new DecisionIndexManager({
           enabled: true,

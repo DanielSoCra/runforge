@@ -1923,9 +1923,15 @@ export async function startDaemon(
       );
 
       // CRASH-SAFE ORDERING (1/2): record the operator's answer in the ledger
-      // BEFORE mutating run state. FAIL-CLOSED: ledger throw -> stay parked.
+      // BEFORE mutating run state. Answer with the RAW chosen_option (not the
+      // normalized choice): the decision-index state machine validates the answered
+      // id against the stored options[], so a pre-rename park whose stored approve
+      // id is `approve-merge` must be answered with `approve-merge`, not `approve`.
+      // FAIL-CLOSED: ledger throw -> stay parked.
       try {
-        decisionManager.ledger().answer(decisionId, answer.choice, 'operator');
+        decisionManager
+          .ledger()
+          .answer(decisionId, answer.rawChosenOption, 'operator');
       } catch (e) {
         console.warn(
           `[daemon] resumeParkedRuns: decision-index answer failed for #${run.issueNumber} (failing closed, staying parked): ${e instanceof Error ? e.message : String(e)}`,
