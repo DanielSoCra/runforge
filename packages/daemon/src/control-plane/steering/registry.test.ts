@@ -204,4 +204,18 @@ describe('SteeringRegistry.register — fail-closed completeness (codex 2026-06-
       expect(out.version.digest).not.toContain('secret');
     }
   });
+
+  it('a rejected registration does NOT burn a version — the next valid one is v1 (codex round 4)', () => {
+    const reg = new SteeringRegistry(known);
+    // A cron rhythm is rejected in assemble (after schema/grant pass) — must not
+    // advance the version/activation counters.
+    const rejected = reg.register({ ...makeRole(), wakeRhythm: { kind: 'cron', expr: '0 * * * *' } });
+    expect(rejected.ok).toBe(false);
+    const ok = reg.register(makeRole()); // valid interval, same id
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.version.version).toBe(1);
+      expect(ok.version.activatedAt).toBe(1);
+    }
+  });
 });

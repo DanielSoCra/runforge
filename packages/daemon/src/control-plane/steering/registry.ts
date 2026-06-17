@@ -139,18 +139,22 @@ export class SteeringRegistry {
 
     const data = parsed.data;
     const roleId = data.id;
+    // CANDIDATE version — do NOT commit the version/activation counters until
+    // parseRole returns ok. An activation rejected in assemble (e.g. an unsupported
+    // cron rhythm) must not burn a version number or an activation tick: a failed
+    // registration leaves registry state untouched (fail-closed atomicity).
     const versionNumber = this.nextVersion.get(roleId) ?? 1;
-    this.nextVersion.set(roleId, versionNumber + 1);
-
     const version: RoleVersion = {
       roleId,
       version: versionNumber,
-      activatedAt: (this.activationClock += 1),
+      activatedAt: this.activationClock + 1,
       digest: digestRole(data),
     };
 
     const outcome = parseRole(raw, version);
     if (outcome.ok === true) {
+      this.nextVersion.set(roleId, versionNumber + 1);
+      this.activationClock += 1;
       this.roles.set(roleId, { role: outcome.role, version: outcome.version });
     }
     return outcome;

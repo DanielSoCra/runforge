@@ -63,7 +63,11 @@ export function checkSpend(
   runningSpend: number,
   nextStepCost = 0,
 ): SpendVerdict {
-  return runningSpend + nextStepCost >= role.perWakingBudget
+  // Already at/over the cap concludes; an additional step concludes only if it
+  // would STRICTLY exceed the budget. A step that exactly fits the remaining
+  // budget is allowed — never strand the last unit.
+  return runningSpend >= role.perWakingBudget ||
+    runningSpend + nextStepCost > role.perWakingBudget
     ? { kind: 'conclude-and-record', reason: 'per-waking budget reached' }
     : { kind: 'proceed' };
 }

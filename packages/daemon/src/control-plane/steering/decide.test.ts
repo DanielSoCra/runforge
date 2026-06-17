@@ -75,4 +75,11 @@ describe('checkSpend (bounded by the declared budget)', () => {
     const r = checkSpend(makeRole({ perWakingBudget: 5000 }), 4900, 50); // 4950 projected
     expect(r.kind).toBe('proceed');
   });
+
+  // codex round 4: a step that EXACTLY fits the remaining budget is allowed —
+  // conclude only on STRICT overspend, never strand the last unit.
+  it('a step that exactly fits the remaining budget → proceed', () => {
+    const r = checkSpend(makeRole({ perWakingBudget: 5000 }), 4900, 100); // 5000 == budget
+    expect(r.kind).toBe('proceed');
+  });
 });
