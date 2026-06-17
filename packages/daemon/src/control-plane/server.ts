@@ -167,9 +167,19 @@ export function createControlServer(
       } else {
         json(res, 501, { error: 'decision index not configured' });
       }
-    } else if (method === 'GET' && url.pathname.startsWith('/decisions/') && !url.pathname.endsWith('/answer')) {
+    } else if (method === 'GET' && url.pathname.startsWith('/decisions/')) {
       if (handlers.getDecisionDetail) {
-        const id = url.pathname.slice('/decisions/'.length);
+        // Decision ids contain colons (e.g. `issue-42:l2-gate:1`); a client encodes
+        // them into the path, and URL.pathname preserves the escapes — decode before
+        // lookup or a valid decision 404s. A malformed escape (e.g. a lone `%`) is a
+        // bad id → 404, never a 500.
+        let id: string;
+        try {
+          id = decodeURIComponent(url.pathname.slice('/decisions/'.length));
+        } catch {
+          json(res, 404, { error: 'not found' });
+          return;
+        }
         if (id.length === 0) {
           json(res, 404, { error: 'not found' });
           return;

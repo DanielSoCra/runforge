@@ -54,6 +54,24 @@ describe('ControlServer', () => {
     expect(body.paused).toBe(true);
   });
 
+  it('GET /decisions/:id decodes a URL-encoded decision id before lookup (codex)', async () => {
+    let receivedId: string | undefined;
+    const { server, start } = createControlServer(PORT + 20, {
+      ...handlers,
+      getDecisionDetail: (id: string) => {
+        receivedId = id;
+        return { status: 404, body: { error: 'unknown decision' } };
+      },
+    });
+    serverRef = server;
+    await start();
+    // Decision ids carry colons; the client percent-encodes them in the path.
+    const encoded = encodeURIComponent('issue-42:l2-gate:1');
+    const res = await fetch(`http://127.0.0.1:${PORT + 20}/decisions/${encoded}`);
+    expect(res.status).toBe(404); // handler's verdict; the point is the decoded id reached it
+    expect(receivedId).toBe('issue-42:l2-gate:1');
+  });
+
   it('POST /resume can reject a blocked resume', async () => {
     const { server, start } = createControlServer(PORT + 13, {
       ...handlers,
