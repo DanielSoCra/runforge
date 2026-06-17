@@ -1280,6 +1280,17 @@ export function createPhaseHandlers(
       console.log(
         `[implement] specRefs=[${effectiveRefs.join(',')}] specifyRoot=${specifyRoot} specContent.length=${specContent.length}`,
       );
+      // #9: an integrate merge-decision REJECT routes back here for rework with
+      // the Operator's send-back reason in run.mergeDecisionFeedback. Deliver it on
+      // the SAME channel the coordinator already consumes (reviewFindings), tagged
+      // so the worker knows it is an operator hold, then clear it (one-shot — later
+      // implement retries are driven by review findings, not the original send-back).
+      const sendBack = run.mergeDecisionFeedback;
+      const implementFindings =
+        sendBack !== undefined && sendBack !== ''
+          ? [`[operator-send-back] ${sendBack}`, ...(run.reviewFindings ?? [])]
+          : run.reviewFindings;
+      run.mergeDecisionFeedback = undefined;
       const result = await coordinator.implement(
         workRequest,
         featureBranch,
@@ -1294,8 +1305,9 @@ export function createPhaseHandlers(
           specContent,
           baseBranch: config.branches.staging,
           // #4: feed back findings from the prior review cycle so re-implement
-          // is not blind to what the reviewer flagged.
-          reviewFindings: run.reviewFindings,
+          // is not blind to what the reviewer flagged. #9: also carries the
+          // Operator's integrate send-back reason on its first post-reject pass.
+          reviewFindings: implementFindings,
         },
       );
       if (!result.ok) {
@@ -1947,7 +1959,11 @@ export function createPhaseHandlers(
       });
       run.mergeDecision = decision;
 
-      if (decision.kind === 'auto-merge') {
+      if (
+        decision.kind === 'auto-merge' ||
+        (run.mergeDecisionEpoch !== undefined &&
+          run.mergeDecisionApprovedEpoch === run.mergeDecisionEpoch)
+      ) {
         run.pausedAtPhase = undefined;
         const result = await integrateToStaging(
           featureBranch,
@@ -1961,6 +1977,11 @@ export function createPhaseHandlers(
         if (!result.value.success) {
           console.error(`[integrate] Failed:`, result.value.error);
           return 'failure';
+        }
+        // After a successful operator-approved merge, clear the one-shot override
+        // so a later re-entry cannot re-consume it.
+        if (run.mergeDecisionApprovedEpoch === run.mergeDecisionEpoch) {
+          run.mergeDecisionApprovedEpoch = undefined;
         }
         if (result.value.pushed === true) {
           console.log(

@@ -34,6 +34,7 @@ import { ensureWorkspaceRepo } from './workspace-bootstrap.js';
 import { DecisionIndexManager } from './decision-escalation/manager.js';
 import { readDecisionIndexConfig } from './decision-escalation/config.js';
 import { decisionIdFor } from './decision-escalation/build-request.js';
+import { decisionIdFor as mergeDecisionIdFor } from './merge-decision/build-request.js';
 import {
   bootReconcile,
   supersedeIfMoot,
@@ -1509,8 +1510,13 @@ export async function startDaemon(
         );
         continue;
       }
-      if (run.pausedAtPhase !== 'l2-gate') {
-        // Only l2-gate parking is handled here; other parks are not yet defined
+      if (run.pausedAtPhase === 'l2-gate') {
+        // Keep the l2-gate branch as the primary path; integrate handled below.
+      } else if (run.pausedAtPhase === 'integrate') {
+        await resumeIntegrateParkedRun(run, runOwner, runRepoName);
+        continue;
+      } else {
+        // Only l2-gate and integrate parking are handled here.
         continue;
       }
 
@@ -1813,6 +1819,189 @@ export async function startDaemon(
       }
 
       // Re-enter pipeline
+      await reenterPipeline(run, runOwner, runRepoName, resumeRepoId, runOctokit, phaseLabelMirror);
+    }
+
+    async function resumeIntegrateParkedRun(
+      run: RunState,
+      runOwner: string,
+      runRepoName: string,
+    ): Promise<void> {
+      // Resolve token and Octokit once for all operations on this run.
+      const resumeRepoId = repoManager?.getRepoId(runOwner, runRepoName) ?? '';
+      const resumeToken =
+        repoManager && resumeRepoId
+          ? await repoManager.resolveTokenForRepo(resumeRepoId)
+          : process.env.GITHUB_TOKEN;
+      const runOctokit = new Octokit({ auth: resumeToken });
+      const phaseLabelMirror = createPhaseLabelMirror(
+        runOctokit,
+        runOwner,
+        runRepoName,
+      );
+
+      // Fetch current issue state from GitHub.
+      let issueState: string;
+      try {
+        const { data: issue } = await runOctokit.issues.get({
+          owner: runOwner,
+          repo: runRepoName,
+          issue_number: run.issueNumber,
+        });
+        issueState = issue.state ?? 'open';
+      } catch (e) {
+        console.warn(
+          `[daemon] resumeParkedRuns: failed to fetch issue state for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        return;
+      }
+
+      // Decision id for this integrate park cycle (epoch defaults to 1 for runs
+      // parked before mergeDecisionEpoch existed). Resolve ONCE and persist it onto
+      // the run so the same concrete epoch keys the decision id, the approve
+      // override, AND the integrate handler's `mergeDecisionEpoch !== undefined`
+      // honor check — otherwise an approved run lacking the field would re-park with
+      // the ledger already `resumed` and strand. Phase is baked into the builder.
+      const mergeEpoch = run.mergeDecisionEpoch ?? 1;
+      run.mergeDecisionEpoch = mergeEpoch;
+      const decisionId = mergeDecisionIdFor(`issue-${run.issueNumber}`, mergeEpoch);
+
+      // Moot decision: the issue this parked run was awaiting was CLOSED
+      // out-of-band — its integrate decision can never be answered.
+      if (issueState === 'closed' && decisionManager.isEnabled()) {
+        try {
+          await supersedeIfMoot(decisionManager.ledger(), decisionId);
+        } catch (e) {
+          console.warn(
+            `[daemon] resumeParkedRuns: supersede-on-moot for closed #${run.issueNumber} failed (continuing): ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+        return;
+      }
+
+      // The integrate park requires the decision index enabled; there is no
+      // legacy-label dual path.
+      if (!decisionManager.isEnabled()) {
+        return;
+      }
+
+      // IDEMPOTENCY GUARD: if this decision was already driven to terminal
+      // `resumed`, do NOT re-consume / re-requeue.
+      let alreadyResumed = false;
+      try {
+        alreadyResumed =
+          decisionManager.ledger().statusOf(decisionId) === 'resumed';
+      } catch (e) {
+        console.warn(
+          `[daemon] resumeParkedRuns: statusOf failed for #${run.issueNumber} (failing closed, staying parked): ${e instanceof Error ? e.message : String(e)}`,
+        );
+        return;
+      }
+      if (alreadyResumed) return;
+
+      let comments: Array<{ body?: string | null }> = [];
+      try {
+        const res = await runOctokit.issues.listComments({
+          owner: runOwner,
+          repo: runRepoName,
+          issue_number: run.issueNumber,
+          per_page: 100,
+        });
+        comments = res.data ?? [];
+      } catch (e) {
+        console.warn(
+          `[daemon] resumeParkedRuns: failed to fetch comments for cockpit answer on #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        return;
+      }
+
+      const answer = parseCockpitAnswer(comments, decisionId);
+      if (!answer) return; // no authoritative DecisionResponse yet — stay parked
+
+      console.log(
+        `[daemon] resumeParkedRuns: cockpit answer (${answer.choice}) recognized for #${run.issueNumber} via DecisionResponse (integrate)`,
+      );
+
+      // CRASH-SAFE ORDERING (1/2): record the operator's answer in the ledger
+      // BEFORE mutating run state. Answer with the RAW chosen_option (not the
+      // normalized choice): the decision-index state machine validates the answered
+      // id against the stored options[], so a pre-rename park whose stored approve
+      // id is `approve-merge` must be answered with `approve-merge`, not `approve`.
+      // FAIL-CLOSED: ledger throw -> stay parked.
+      try {
+        decisionManager
+          .ledger()
+          .answer(decisionId, answer.rawChosenOption, 'operator');
+      } catch (e) {
+        console.warn(
+          `[daemon] resumeParkedRuns: decision-index answer failed for #${run.issueNumber} (failing closed, staying parked): ${e instanceof Error ? e.message : String(e)}`,
+        );
+        return;
+      }
+
+      if (answer.choice === 'approve') {
+        run.mergeDecisionApprovedEpoch = mergeEpoch;
+        run.phase = 'integrate';
+      } else {
+        // REJECT: capture operator feedback and route back to implement for rework.
+        const MAX_FEEDBACK_LENGTH = 4000;
+        run.mergeDecisionFeedback = answer.feedbackBody
+          .replace(/\{\{[\w-]+\}\}/g, '')
+          .slice(0, MAX_FEEDBACK_LENGTH);
+        run.phase = 'implement';
+        run.mergeDecisionBlockPublished = false;
+      }
+      run.pausedAtPhase = undefined;
+
+      // DURABLE COMMIT: persist the requeue BEFORE driving the ledger to resumed.
+      await stateMgr.saveRunState(run);
+
+      // Strip the cockpit `ready` requeue label AFTER the durable save (mirrors the
+      // l2-gate branch). The integrate park is decision-index-owned, but `ready`
+      // aliases the daemon's NEW-work label — leaving it set lets detectReadyWork
+      // reclaim this issue and start a DUPLICATE run if decision-owned detection is
+      // ever unavailable or the body marker is stripped. Best-effort: a missing
+      // label is fine; comments/markers are kept as audit + idempotency evidence.
+      try {
+        await runOctokit.issues.removeLabel({
+          owner: runOwner,
+          repo: runRepoName,
+          issue_number: run.issueNumber,
+          name: REQUEUE_LABEL,
+        });
+      } catch {
+        /* label may not exist — ignore */
+      }
+
+      // CRASH-SAFE ORDERING (2/2): only AFTER the run-state requeue is committed
+      // do we drive the ledger to terminal `resumed`.
+      try {
+        await decisionManager.ledger().advanceToResumed(decisionId, 'requeue');
+      } catch (e) {
+        console.warn(
+          `[daemon] resumeParkedRuns: decision-index advanceToResumed failed for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+
+      // Re-enter pipeline.
+      await reenterPipeline(
+        run,
+        runOwner,
+        runRepoName,
+        resumeRepoId,
+        runOctokit,
+        phaseLabelMirror,
+      );
+    }
+
+    async function reenterPipeline(
+      run: RunState,
+      runOwner: string,
+      runRepoName: string,
+      resumeRepoId: string,
+      runOctokit: Octokit,
+      phaseLabelMirror: ReturnType<typeof createPhaseLabelMirror>,
+    ): Promise<void> {
       activeIssues.add(run.issueNumber);
       activeRuns++;
       run.deploymentId = config.deployment?.id;

@@ -50,8 +50,19 @@ export interface CommentLike {
 
 /** The recognized cockpit answer for a parked decision. */
 export interface CockpitAnswer {
-  /** approve → continue past the gate; reject → loop back to l2-design. */
+  /** approve → continue past the gate; reject → loop back for rework. */
   choice: 'approve' | 'reject';
+  /**
+   * The LITERAL `chosen_option` the operator picked, verbatim from the comment —
+   * which is exactly one of the stored DecisionRequest's option ids (the cockpit
+   * picks from them). Pass THIS to `ledger.answer()`: the decision-index state
+   * machine validates the answered id against the stored `options[]`
+   * (state-machine.ts), so a normalized `choice` would be REJECTED for a request
+   * whose stored approve id differs (e.g. a pre-rename integrate park's
+   * `approve-merge`). `choice` is the semantic for routing; `rawChosenOption` is
+   * the wire value for the ledger.
+   */
+  rawChosenOption: string;
   /**
    * The raw DecisionResponse comment body, surfaced so the daemon can capture
    * rejection feedback (it sanitizes + caps downstream, identically to the
@@ -76,9 +87,13 @@ export function parseCockpitAnswer(
     const body = comment.body;
     if (body == null || body === '') continue;
     if (!body.includes('**DecisionResponse**')) continue;
-    const choice = extractMatchingChoice(body, decisionId);
-    if (choice === null) continue;
-    return { choice, feedbackBody: body };
+    const matched = extractMatchingChoice(body, decisionId);
+    if (matched === null) continue;
+    return {
+      choice: matched.choice,
+      rawChosenOption: matched.raw,
+      feedbackBody: body,
+    };
   }
   return null;
 }
@@ -97,7 +112,8 @@ function escapeRegExp(s: string): string {
 /**
  * Extract the chosen option from a DecisionResponse comment body IF its EFFECT
  * MARKER binds `pm-cockpit:effect:<decisionId>:write_response` AND its minimal
- * fenced JSON carries `chosen_option` ∈ {approve, reject}.
+ * fenced JSON carries `chosen_option` ∈ {approve, reject} (the legacy integrate id
+ * `approve-merge` is normalized to `approve` for rollout backward-compat).
  *
  * The decision_id binding is AUTHORITATIVE via the marker — that is the cockpit's
  * own deterministic effect id (`<decision_id>:write_response:<idempotency_key>`
@@ -115,7 +131,7 @@ function escapeRegExp(s: string): string {
 function extractMatchingChoice(
   body: string,
   decisionId: string,
-): 'approve' | 'reject' | null {
+): { choice: 'approve' | 'reject'; raw: string } | null {
   // (1) AUTHORITATIVE marker binding: the effect marker must name this decision_id
   //     as the write_response target. This is the keying that prevents cross-epoch
   //     and half-written resumes.
@@ -135,7 +151,17 @@ function extractMatchingChoice(
   }
   if (typeof obj !== 'object' || obj === null) return null;
   const chosen = (obj as { chosen_option?: unknown }).chosen_option;
-  if (chosen === 'approve' || chosen === 'reject') return chosen;
+  if (chosen === 'approve' || chosen === 'reject') {
+    return { choice: chosen, raw: chosen };
+  }
+  // Backward-compat (rollout safety): an integrate run parked on a build BEFORE the
+  // approve option id was aligned to `approve` has a stored DecisionRequest whose
+  // approve option is `approve-merge`, so the cockpit writes `chosen_option:
+  // "approve-merge"`. Recognize it (semantic choice `approve`) so the rename never
+  // strands an in-flight parked-then-answered run, but carry the RAW id forward:
+  // the daemon answers the ledger with `raw`, which matches the stored options[]
+  // the state machine validates against. (l2-gate never emits `approve-merge`.)
+  if (chosen === 'approve-merge') return { choice: 'approve', raw: chosen };
   return null;
 }
 

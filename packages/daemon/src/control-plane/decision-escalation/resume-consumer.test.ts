@@ -58,6 +58,27 @@ describe('parseCockpitAnswer', () => {
     expect(result?.choice).toBe('approve');
   });
 
+  it('recognizes the legacy integrate `approve-merge` id as approve but preserves the RAW id for the ledger (rollout compat, codex)', () => {
+    // A run parked under the pre-rename integrate option id has a stored request
+    // whose approve option is `approve-merge`; the cockpit answers with that id.
+    // It must resume as a semantic `approve` (routing) AND carry the raw id so the
+    // daemon answers the ledger with `approve-merge` — the decision-index state
+    // machine validates the answered id against the stored options[].
+    const comments = [
+      { body: decisionResponseComment(DECISION_ID, 'approve-merge') },
+    ];
+    const result = parseCockpitAnswer(comments, DECISION_ID);
+    expect(result?.choice).toBe('approve');
+    expect(result?.rawChosenOption).toBe('approve-merge');
+  });
+
+  it('carries the raw chosen_option verbatim for a current `approve` id too', () => {
+    const comments = [{ body: decisionResponseComment(DECISION_ID, 'approve') }];
+    const result = parseCockpitAnswer(comments, DECISION_ID);
+    expect(result?.choice).toBe('approve');
+    expect(result?.rawChosenOption).toBe('approve');
+  });
+
   it('recognizes a reject DecisionResponse and exposes the raw comment body as feedback', () => {
     const comments = [
       { body: decisionResponseComment(DECISION_ID, 'reject') },
@@ -118,7 +139,11 @@ describe('parseCockpitAnswer', () => {
       '```',
     ].join('\n');
     const result = parseCockpitAnswer([{ body: liveBody }], 'issue-3:l2-gate:1');
-    expect(result).toEqual({ choice: 'approve', feedbackBody: liveBody });
+    expect(result).toEqual({
+      choice: 'approve',
+      rawChosenOption: 'approve',
+      feedbackBody: liveBody,
+    });
   });
 
   it('does NOT match a different decision_id even when the minimal JSON is identical (marker binds the id)', () => {

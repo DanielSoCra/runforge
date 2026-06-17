@@ -8,6 +8,8 @@ import type { Config } from '../config.js';
 import type { WorkRequest } from '../types.js';
 import { DecisionIndexManager } from './decision-escalation/manager.js';
 import { buildL2GateRequest } from './decision-escalation/build-request.js';
+import { buildMergeDecisionRequest } from './merge-decision/build-request.js';
+import type { MergeDecision } from './merge-decision/types.js';
 
 // --- Hoisted mocks (vi.mock factories are hoisted above all other code) ---
 
@@ -3769,6 +3771,392 @@ describe('daemon', () => {
         expect(mockOctokit.issues.removeLabel).toHaveBeenCalledWith(
           expect.objectContaining({ name: 'ready', issue_number: 100 }),
         );
+      });
+    });
+
+    // ----------------------------------------------------------------------
+    // FOLLOW-UP #9: integrate-park resume lifecycle. A run parked at the
+    // `integrate` phase (merge-decision gate held/escalated the change) resumes
+    // ONLY via a cockpit DecisionResponse for `issue-<n>:integrate:<epoch>` (the
+    // integrate park requires the decision index enabled — no legacy-label path).
+    //   - APPROVE → run re-enters `integrate` with mergeDecisionApprovedEpoch set
+    //     to the current mergeDecisionEpoch (the integrate-handler override then
+    //     executes the held merge instead of re-parking).
+    //   - REJECT  → run routes to `implement` with mergeDecisionFeedback captured
+    //     and mergeDecisionBlockPublished reset so a future park re-publishes.
+    // Mirrors the l2-gate cockpit consumer harness; the l2-gate path stays
+    // byte-identical (a separate, parallel branch handles `integrate`).
+    // RED until Kimi adds the integrate branch to resumeParkedRuns.
+    // ----------------------------------------------------------------------
+    describe('integrate park resume (follow-up #9)', () => {
+      let dir: string;
+      let manager: DecisionIndexManager;
+
+      const makeIntegrateParkedRun = (overrides?: Record<string, unknown>) => ({
+        id: 'run-parked-integrate-1',
+        issueNumber: 100,
+        title: 'Parked at integrate',
+        phase: 'paused',
+        pausedAtPhase: 'integrate',
+        variant: 'feature',
+        phaseCompletions: {
+          detect: true,
+          classify: true,
+          'l1-design': true,
+          'l2-design': true,
+          implement: true,
+        },
+        checkpoints: [],
+        cost: 5,
+        perRunBudget: 10,
+        fixAttempts: [],
+        errorHashes: {},
+        repoOwner: 'test-owner',
+        repoName: 'test-repo',
+        body: 'Feature body',
+        labels: ['feature-pipeline'],
+        specRefs: ['FUNC-100'],
+        startedAt: '2026-03-21T00:00:00Z',
+        updatedAt: '2026-03-21T06:00:00Z',
+        // The integrate park bumps this epoch; the resume keys off it.
+        mergeDecisionEpoch: 1,
+        mergeDecisionBlockPublished: true,
+        ...overrides,
+      });
+
+      // The cockpit's DecisionResponse comment, decision_id bound ONLY in the
+      // effect marker, minimal `{ chosen_option }` JSON (same shape the l2-gate
+      // consumer tests use — the marker keys on the decision_id, not the JSON).
+      const decisionResponseComment = (
+        decisionId: string,
+        chosenOption: string,
+      ): { body: string } => {
+        const effectId = `${decisionId}:write_response:idem-${chosenOption}`;
+        const marker = `<!-- pm-cockpit:effect:${effectId}:etag=sha256:etag-abc -->`;
+        const payload = JSON.stringify({ chosen_option: chosenOption });
+        return {
+          body: [marker, '**DecisionResponse**', '```json', payload, '```'].join(
+            '\n',
+          ),
+        };
+      };
+
+      // Seed the merge-decision ledger row to `notified` (the only status answer()
+      // proceeds from) for `issue-<n>:integrate:<epoch>` with epoch=1.
+      const seedNotifiedIntegrate = async (
+        m: DecisionIndexManager,
+        issueNumber: number,
+      ) => {
+        // Only `kind` + `effectiveRisk` are read by the builder (context text +
+        // risk_class mapping); a partial cast is sufficient to seed the row.
+        const decision = {
+          kind: 'escalate',
+          effectiveRisk: 'green',
+        } as unknown as MergeDecision;
+        const req = buildMergeDecisionRequest(
+          {
+            issueNumber,
+            variant: 'feature',
+            repoOwner: 'test-owner',
+            repoName: 'test-repo',
+          } as unknown as Parameters<typeof buildMergeDecisionRequest>[0],
+          1,
+          'test-owner/test-repo',
+          decision,
+        );
+        const { decision_id } = m.ledger().raise(req);
+        await m.ledger().notify(decision_id);
+        return decision_id;
+      };
+
+      beforeEach(() => {
+        dir = mkdtempSync(join(tmpdir(), 'daemon-integrate-park-'));
+      });
+      afterEach(async () => {
+        await manager?.close();
+        rmSync(dir, { recursive: true, force: true });
+      });
+
+      it('APPROVE: cockpit approve re-enters integrate with mergeDecisionApprovedEpoch === mergeDecisionEpoch, pausedAtPhase cleared, ledger answered+resumed', async () => {
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 30).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+
+        const parkedRun = makeIntegrateParkedRun({ mergeDecisionEpoch: 1 });
+        mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'answered' }], state: 'open' },
+        });
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment('issue-100:integrate:1', 'approve')],
+        });
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+        const decisionId = await seedNotifiedIntegrate(manager, 100);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        const resumedSave = mockStateMgr.saveRunState.mock.calls
+          .map((c) => c[0] as Record<string, unknown>)
+          .find((s) => s.issueNumber === 100 && s.pausedAtPhase === undefined);
+        expect(resumedSave).toBeDefined();
+        // Re-enters integrate (NOT advanced past, NOT routed to implement).
+        expect(resumedSave?.phase).toBe('integrate');
+        // The override key: approved epoch === current park epoch (one-shot).
+        expect(resumedSave?.mergeDecisionApprovedEpoch).toBe(1);
+        expect(resumedSave?.mergeDecisionEpoch).toBe(1);
+        // The ledger reached terminal resumed exactly once.
+        expect(manager.ledger().statusOf(decisionId)).toBe('resumed');
+        expect(mockRunPipeline).toHaveBeenCalled();
+        // The cockpit `ready` requeue label is stripped so detectReadyWork cannot
+        // reclaim the resumed issue and start a duplicate run (codex r5).
+        expect(mockOctokit.issues.removeLabel).toHaveBeenCalledWith(
+          expect.objectContaining({ issue_number: 100, name: 'ready' }),
+        );
+      });
+
+      it('APPROVE (legacy/migrated): a parked run with NO mergeDecisionEpoch resolves the epoch to 1 and stores it on BOTH fields so the integrate handler honors it (codex r4)', async () => {
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 31).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+
+        // A run parked before mergeDecisionEpoch existed: the field is absent. The
+        // resume branch must default it to 1 for the decision id AND persist 1 onto
+        // mergeDecisionEpoch + mergeDecisionApprovedEpoch — otherwise the integrate
+        // handler's `mergeDecisionEpoch !== undefined` honor check fails and the
+        // approved run re-parks while the ledger is already `resumed` (stranded).
+        const parkedRun = makeIntegrateParkedRun({ mergeDecisionEpoch: undefined });
+        mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'answered' }], state: 'open' },
+        });
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment('issue-100:integrate:1', 'approve')],
+        });
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+        const decisionId = await seedNotifiedIntegrate(manager, 100);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        const resumedSave = mockStateMgr.saveRunState.mock.calls
+          .map((c) => c[0] as Record<string, unknown>)
+          .find((s) => s.issueNumber === 100 && s.pausedAtPhase === undefined);
+        expect(resumedSave).toBeDefined();
+        expect(resumedSave?.phase).toBe('integrate');
+        // Both fields defaulted to 1 and EQUAL — the override is honorable.
+        expect(resumedSave?.mergeDecisionEpoch).toBe(1);
+        expect(resumedSave?.mergeDecisionApprovedEpoch).toBe(1);
+        expect(manager.ledger().statusOf(decisionId)).toBe('resumed');
+        expect(mockRunPipeline).toHaveBeenCalled();
+      });
+
+      it('APPROVE (pre-rename park): a stored request whose approve option is the legacy `approve-merge` resumes — the daemon answers the ledger with the RAW id so state-machine option validation passes (codex P1)', async () => {
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 32).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+
+        const parkedRun = makeIntegrateParkedRun({ mergeDecisionEpoch: 1 });
+        mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'answered' }], state: 'open' },
+        });
+        // The operator answered with the legacy displayed option id.
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment('issue-100:integrate:1', 'approve-merge')],
+        });
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+
+        // Seed a request whose stored options use the PRE-RENAME approve id. The
+        // state machine validates the answered chosen_option against THESE options,
+        // so the daemon must answer with `approve-merge`, not the normalized id.
+        const decision = {
+          kind: 'escalate',
+          effectiveRisk: 'green',
+        } as unknown as MergeDecision;
+        const built = buildMergeDecisionRequest(
+          {
+            issueNumber: 100,
+            variant: 'feature',
+            repoOwner: 'test-owner',
+            repoName: 'test-repo',
+          } as unknown as Parameters<typeof buildMergeDecisionRequest>[0],
+          1,
+          'test-owner/test-repo',
+          decision,
+        );
+        const legacyReq = {
+          ...built,
+          options: [
+            { id: 'approve-merge', label: 'Approve the merge and resume the pipeline.' },
+            { id: 'reject', label: 'Reject and send back for rework.' },
+          ],
+        };
+        const { decision_id } = manager.ledger().raise(legacyReq);
+        await manager.ledger().notify(decision_id);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        const resumedSave = mockStateMgr.saveRunState.mock.calls
+          .map((c) => c[0] as Record<string, unknown>)
+          .find((s) => s.issueNumber === 100 && s.pausedAtPhase === undefined);
+        expect(resumedSave).toBeDefined();
+        expect(resumedSave?.phase).toBe('integrate');
+        expect(resumedSave?.mergeDecisionApprovedEpoch).toBe(1);
+        // The ledger ACCEPTED the raw `approve-merge` answer and reached resumed —
+        // it would have thrown AnswerRejectedError on a normalized `approve`.
+        expect(manager.ledger().statusOf(decision_id)).toBe('resumed');
+        expect(mockRunPipeline).toHaveBeenCalled();
+      });
+
+      it('REJECT: cockpit reject routes to implement with mergeDecisionFeedback captured + mergeDecisionBlockPublished reset, ledger answered+resumed', async () => {
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 31).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+
+        const parkedRun = makeIntegrateParkedRun({
+          mergeDecisionEpoch: 1,
+          mergeDecisionBlockPublished: true,
+        });
+        mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'answered' }], state: 'open' },
+        });
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment('issue-100:integrate:1', 'reject')],
+        });
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+        const decisionId = await seedNotifiedIntegrate(manager, 100);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        const rejectedSave = mockStateMgr.saveRunState.mock.calls
+          .map((c) => c[0] as Record<string, unknown>)
+          .find((s) => s.issueNumber === 100 && s.pausedAtPhase === undefined);
+        expect(rejectedSave).toBeDefined();
+        // Reject sends the change back for rework (route to implement directly,
+        // mirroring l2-gate reject → l2-design).
+        expect(rejectedSave?.phase).toBe('implement');
+        // Operator feedback reaches the rework cycle.
+        const feedback = rejectedSave?.mergeDecisionFeedback as string;
+        expect(feedback).toBeDefined();
+        expect(feedback).toContain('"chosen_option":"reject"');
+        // Reset so a FUTURE park re-publishes a fresh decision block.
+        expect(rejectedSave?.mergeDecisionBlockPublished).toBe(false);
+        // No approve override is set on a reject.
+        expect(rejectedSave?.mergeDecisionApprovedEpoch).toBeUndefined();
+        expect(manager.ledger().statusOf(decisionId)).toBe('resumed');
+        expect(mockRunPipeline).toHaveBeenCalled();
+      });
+
+      it('NO-ANSWER: notified but NO matching DecisionResponse for this epoch -> stays parked at integrate', async () => {
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 32).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+
+        const parkedRun = makeIntegrateParkedRun({ mergeDecisionEpoch: 1 });
+        mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'answered' }], state: 'open' },
+        });
+        mockOctokit.issues.listComments.mockResolvedValue({
+          // Wrong epoch — not authoritative for this park.
+          data: [decisionResponseComment('issue-100:integrate:2', 'approve')],
+        });
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+        const decisionId = await seedNotifiedIntegrate(manager, 100);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        // Stays parked: no resume-save (pausedAtPhase cleared) happened.
+        const resetSaves = mockStateMgr.saveRunState.mock.calls.filter(
+          (c) =>
+            (c[0] as Record<string, unknown>).issueNumber === 100 &&
+            (c[0] as Record<string, unknown>).pausedAtPhase === undefined,
+        );
+        expect(resetSaves).toHaveLength(0);
+        expect(mockRunPipeline).not.toHaveBeenCalled();
+        expect(manager.ledger().statusOf(decisionId)).toBe('notified');
+      });
+
+      it('CRASH-SAFE: ledger.answer is recorded BEFORE saveRunState on an integrate resume', async () => {
+        manager = new DecisionIndexManager({
+          enabled: true,
+          dbPath: join(dir, 'index.sqlite'),
+          protectedKey: Buffer.alloc(32, 33).toString('base64'),
+          protectedDir: join(dir, 'protected'),
+        });
+
+        const parkedRun = makeIntegrateParkedRun({ mergeDecisionEpoch: 1 });
+        mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'answered' }], state: 'open' },
+        });
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment('issue-100:integrate:1', 'approve')],
+        });
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', { decisionManager: manager });
+        await seedNotifiedIntegrate(manager, 100);
+
+        // Spy on the REAL ledger's answer so its call order can be compared.
+        // seedNotifiedIntegrate above forces ledger init, so the singleton exists.
+        const answerSpy = vi.spyOn(manager.ledger(), 'answer');
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+
+        // Both must have happened, and answer must precede the durable save so a
+        // crash between them never advances on an unrecorded answer.
+        expect(answerSpy).toHaveBeenCalled();
+        const resumeSaveCall = mockStateMgr.saveRunState.mock.calls.findIndex(
+          (c) => {
+            const s = c[0] as Record<string, unknown>;
+            return s.issueNumber === 100 && s.pausedAtPhase === undefined;
+          },
+        );
+        expect(resumeSaveCall).toBeGreaterThanOrEqual(0);
+        const answerOrder = answerSpy.mock.invocationCallOrder[0];
+        const saveOrder =
+          mockStateMgr.saveRunState.mock.invocationCallOrder[resumeSaveCall];
+        expect(answerOrder).toBeDefined();
+        expect(saveOrder).toBeDefined();
+        expect(answerOrder!).toBeLessThan(saveOrder!);
       });
     });
 

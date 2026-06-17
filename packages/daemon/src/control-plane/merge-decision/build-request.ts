@@ -131,8 +131,13 @@ export function buildMergeDecisionRequest(
     risk_class: toDecisionRiskClass(decision.effectiveRisk),
     question: `Approve the merge for issue #${run.issueNumber}?`,
     context,
+    // Option ids are {approve, reject}: parseCockpitAnswer recognizes those
+    // literals, so the published id and the consumed choice agree for every new
+    // park. (Runs parked on a build before this rename used `approve-merge`;
+    // parseCockpitAnswer normalizes that legacy id to `approve` so a rollout never
+    // strands an in-flight parked-then-answered run.)
     options: [
-      { id: 'approve-merge', label: 'Approve the merge and resume the pipeline.' },
+      { id: 'approve', label: 'Approve the merge and resume the pipeline.' },
       { id: 'reject', label: 'Reject and send back for rework.' },
     ],
     consequence_of_no_answer:
