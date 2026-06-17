@@ -23,6 +23,7 @@ import type { ModelTier, ProviderDefinition } from '../../types.js';
 import type { SmokeProof } from './smoke-test.js';
 import {
   admitProviders,
+  buildCriticalChainByTier,
   type AdmissionRegistry,
   type ProviderAdmissionBinding,
 } from './startup-admission.js';
@@ -90,6 +91,36 @@ function fakeRegistry(): AdmissionRegistry & {
     },
   };
 }
+
+describe('buildCriticalChainByTier', () => {
+  const defs: Record<string, ProviderDefinition> = {
+    'codex-default': { ...provider('codex-default', false), supportedModelTiers: ['standard-capability'] },
+    'claude-fallback': { ...provider('claude-fallback', false), supportedModelTiers: ['higher-capability'] },
+  };
+
+  it('includes FALLBACK-ONLY tiers, not just the default provider tiers (codex r5)', () => {
+    // default serves standard-capability only; the fallback serves higher-capability.
+    // An unbound higher-capability request resolves through this chain, so that
+    // tier must be covered too — not only the default provider's tiers.
+    const byTier = buildCriticalChainByTier(defs, ['codex-default', 'claude-fallback']);
+    expect([...byTier.keys()].sort()).toEqual([
+      'higher-capability',
+      'standard-capability',
+    ]);
+    expect(byTier.get('standard-capability')).toEqual(['codex-default']);
+    expect(byTier.get('higher-capability')).toEqual(['claude-fallback']);
+  });
+
+  it('maps each tier to the chain providers (in order) that declare it', () => {
+    const both: Record<string, ProviderDefinition> = {
+      a: { ...provider('a', false), supportedModelTiers: ['standard-capability', 'higher-capability'] },
+      b: { ...provider('b', false), supportedModelTiers: ['higher-capability'] },
+    };
+    const byTier = buildCriticalChainByTier(both, ['a', 'b']);
+    expect(byTier.get('standard-capability')).toEqual(['a']);
+    expect(byTier.get('higher-capability')).toEqual(['a', 'b']);
+  });
+});
 
 describe('admitProviders — startup smoke-proof admission gate', () => {
   it('GATE OFF (requireSmokeProof !== true): NO-OP — runSmoke called 0 times, result.skipped true', async () => {

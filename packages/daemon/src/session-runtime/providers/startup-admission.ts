@@ -120,6 +120,38 @@ export interface AdmissionResult {
 }
 
 /**
+ * Build the tier-keyed critical resolution path for {@link admitProviders} from a
+ * provider-definition map and the ordered default-resolution chain (the registry's
+ * `defaultProvider` followed by its `fallbackChain`).
+ *
+ * The chain must serve EVERY tier ANY chain provider declares — an unbound request
+ * for a fallback-only tier still resolves through this chain, so that tier needs a
+ * proven provider too (not just the tiers the default provider supports). Each tier
+ * maps to the chain providers (in chain order) that declare it.
+ */
+export function buildCriticalChainByTier(
+  definitions: Record<string, ProviderDefinition>,
+  chainNames: readonly string[],
+): Map<string, string[]> {
+  const tiers = new Set<ModelTier>();
+  for (const name of chainNames) {
+    for (const tier of definitions[name]?.supportedModelTiers ?? []) {
+      tiers.add(tier);
+    }
+  }
+  const byTier = new Map<string, string[]>();
+  for (const tier of tiers) {
+    byTier.set(
+      tier,
+      chainNames.filter(
+        (n) => definitions[n]?.supportedModelTiers.includes(tier) === true,
+      ),
+    );
+  }
+  return byTier;
+}
+
+/**
  * Run the startup smoke-proof admission pass.
  *
  * @see AdmitProvidersOptions for the gate / no-op contract.

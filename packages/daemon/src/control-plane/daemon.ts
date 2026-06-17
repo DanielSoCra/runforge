@@ -9,6 +9,7 @@ import type { ProviderAdapter } from '../session-runtime/adapters/index.js';
 import { DEFAULT_POLICY } from '../session-runtime/containment-hooks.js';
 import {
   admitProviders,
+  buildCriticalChainByTier,
   type ProviderAdmissionBinding,
 } from '../session-runtime/providers/startup-admission.js';
 import { smokeTest, type SmokeProof } from '../session-runtime/providers/smoke-test.js';
@@ -544,24 +545,17 @@ export async function startDaemon(
     }
 
     // Unbound work resolves through defaultProvider then the fallback chain, and
-    // resolution is per-(provider,tier). Build the tier-keyed critical path: for
-    // each tier the default provider serves, the ordered chain providers that
-    // support that tier. Admission must keep every such tier usable.
+    // resolution is per-(provider,tier). Build the tier-keyed critical path so
+    // admission keeps EVERY tier any chain provider serves usable (incl.
+    // fallback-only tiers — an unbound request for one still resolves here).
     const chainNames = [
       config.providers.defaultProvider,
       ...config.providers.fallbackChain,
     ];
-    const defs = config.providers.definitions;
-    const defaultDef = defs[config.providers.defaultProvider];
-    const criticalChainByTier = new Map<string, string[]>();
-    for (const tier of defaultDef?.supportedModelTiers ?? []) {
-      criticalChainByTier.set(
-        tier,
-        chainNames.filter((n) =>
-          defs[n]?.supportedModelTiers.includes(tier) === true,
-        ),
-      );
-    }
+    const criticalChainByTier = buildCriticalChainByTier(
+      config.providers.definitions,
+      chainNames,
+    );
 
     const admission = await admitProviders({
       registry,
