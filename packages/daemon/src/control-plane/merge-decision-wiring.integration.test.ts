@@ -455,6 +455,60 @@ describe('merge-decision live wiring — integrate handler', () => {
     expect(decision.raise).toHaveBeenCalled();
   });
 
+  // --- operator-approved resume override (follow-up #9) ---------------------
+  // After the resume branch sets run.mergeDecisionApprovedEpoch on an operator
+  // APPROVE, a run re-entering integrate must MERGE (execute the held merge) via
+  // the override — NOT re-park — even though autonomy is NOT widened (the operator
+  // decided manually). The override is epoch-keyed + one-shot.
+  it('(h) operator-approved resume (mergeDecisionApprovedEpoch === mergeDecisionEpoch) MERGES instead of re-parking, even when autonomy NOT widened', async () => {
+    const decision = makeDecisionDouble();
+    const { handlers } = createHandlers({
+      config: { deployment: { id: DEPLOYMENT_ID, profile: {} } },
+      // NOT widened → decideMerge returns escalate/hold; WITHOUT the override this
+      // run would re-park. The operator-approved override must merge it anyway.
+      registry: registryNotWidened(),
+      decisionManager: decision.manager,
+      decisionPublisher: decision.publisher,
+    });
+    // The resume branch set the approved epoch to the current park epoch.
+    const run = makeRun({ mergeDecisionEpoch: 1, mergeDecisionApprovedEpoch: 1 });
+
+    const result = await handlers.integrate!(run);
+
+    expect(result).toBe('success');
+    // The held merge executes via the existing seam — the operator approved it.
+    expect(mockIntegrate).toHaveBeenCalledWith('feature/42', 'staging', expect.any(String));
+    // It MUST NOT re-park nor re-raise a DecisionRequest.
+    expect(run.pausedAtPhase).toBeUndefined();
+    expect(decision.raise).not.toHaveBeenCalled();
+    // One-shot: the override is cleared after a successful operator-approved merge
+    // so a later re-entry cannot re-consume it.
+    expect(run.mergeDecisionApprovedEpoch).toBeUndefined();
+  });
+
+  it('(i) one-shot/epoch: a STALE mergeDecisionApprovedEpoch (≠ current mergeDecisionEpoch) does NOT merge — it re-parks/escalates', async () => {
+    const decision = makeDecisionDouble();
+    const { handlers } = createHandlers({
+      config: { deployment: { id: DEPLOYMENT_ID, profile: {} } },
+      registry: registryNotWidened(),
+      decisionManager: decision.manager,
+      decisionPublisher: decision.publisher,
+    });
+    // Current epoch is 2 (a fresh park) but the approved flag is for a prior
+    // epoch (1) — a stale, already-consumed approval. It must NOT authorize a merge.
+    const run = makeRun({ mergeDecisionEpoch: 2, mergeDecisionApprovedEpoch: 1 });
+
+    const result = await handlers.integrate!(run);
+
+    expect(result).toBe('success');
+    // No merge: the stale approval is ignored, the run re-parks for a fresh decision.
+    expect(mockIntegrate).not.toHaveBeenCalled();
+    expect(run.pausedAtPhase).toBe('integrate');
+    expect(decision.raise).toHaveBeenCalled();
+    // The stale flag is left untouched (NOT cleared) — only a matching epoch consumes.
+    expect(run.mergeDecisionApprovedEpoch).toBe(1);
+  });
+
   it('(c) flag-OFF byte-identity: no config.deployment AND no registry → integrate merges unconditionally, no decision logic', async () => {
     const decision = makeDecisionDouble();
     // No deployment block, no registry param → today's behavior.

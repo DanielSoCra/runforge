@@ -132,7 +132,7 @@ export function buildMergeDecisionRequest(
     question: `Approve the merge for issue #${run.issueNumber}?`,
     context,
     options: [
-      { id: 'approve-merge', label: 'Approve the merge and resume the pipeline.' },
+      { id: 'approve', label: 'Approve the merge and resume the pipeline.' },
       { id: 'reject', label: 'Reject and send back for rework.' },
     ],
     consequence_of_no_answer:

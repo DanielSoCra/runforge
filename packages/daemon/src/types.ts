@@ -401,6 +401,20 @@ export interface RunState {
    * retryable publish step; reset on a fresh park / new epoch.
    */
   mergeDecisionBlockPublished?: boolean;
+  /**
+   * Set by the resume branch on an operator APPROVE of an `integrate` park
+   * (follow-up #9). The `integrate` handler executes the merge — instead of
+   * re-parking — only when this `=== run.mergeDecisionEpoch`, then clears it.
+   * Epoch-keyed so the override is one-shot and crash-safe: a stale value
+   * (`!== mergeDecisionEpoch`) never authorizes a merge.
+   */
+  mergeDecisionApprovedEpoch?: number;
+  /**
+   * The operator's rejection feedback for an `integrate` park, fed into the
+   * rework cycle when a held change is sent back (mirrors `l2Feedback`). Captured
+   * by the resume branch on REJECT and routed back to `implement`.
+   */
+  mergeDecisionFeedback?: string;
   handoffNotes?: Record<string, string>;
   workerClaimId?: string;
   pausedAtPhase?: Phase;

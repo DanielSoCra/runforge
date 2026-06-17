@@ -1947,7 +1947,11 @@ export function createPhaseHandlers(
       });
       run.mergeDecision = decision;
 
-      if (decision.kind === 'auto-merge') {
+      if (
+        decision.kind === 'auto-merge' ||
+        (run.mergeDecisionEpoch !== undefined &&
+          run.mergeDecisionApprovedEpoch === run.mergeDecisionEpoch)
+      ) {
         run.pausedAtPhase = undefined;
         const result = await integrateToStaging(
           featureBranch,
@@ -1961,6 +1965,11 @@ export function createPhaseHandlers(
         if (!result.value.success) {
           console.error(`[integrate] Failed:`, result.value.error);
           return 'failure';
+        }
+        // After a successful operator-approved merge, clear the one-shot override
+        // so a later re-entry cannot re-consume it.
+        if (run.mergeDecisionApprovedEpoch === run.mergeDecisionEpoch) {
+          run.mergeDecisionApprovedEpoch = undefined;
         }
         if (result.value.pushed === true) {
           console.log(
