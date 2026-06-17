@@ -1857,11 +1857,14 @@ export async function startDaemon(
       }
 
       // Decision id for this integrate park cycle (epoch defaults to 1 for runs
-      // parked before mergeDecisionEpoch existed). Phase is baked into the builder.
-      const decisionId = mergeDecisionIdFor(
-        `issue-${run.issueNumber}`,
-        run.mergeDecisionEpoch ?? 1,
-      );
+      // parked before mergeDecisionEpoch existed). Resolve ONCE and persist it onto
+      // the run so the same concrete epoch keys the decision id, the approve
+      // override, AND the integrate handler's `mergeDecisionEpoch !== undefined`
+      // honor check — otherwise an approved run lacking the field would re-park with
+      // the ledger already `resumed` and strand. Phase is baked into the builder.
+      const mergeEpoch = run.mergeDecisionEpoch ?? 1;
+      run.mergeDecisionEpoch = mergeEpoch;
+      const decisionId = mergeDecisionIdFor(`issue-${run.issueNumber}`, mergeEpoch);
 
       // Moot decision: the issue this parked run was awaiting was CLOSED
       // out-of-band — its integrate decision can never be answered.
@@ -1931,7 +1934,7 @@ export async function startDaemon(
       }
 
       if (answer.choice === 'approve') {
-        run.mergeDecisionApprovedEpoch = run.mergeDecisionEpoch;
+        run.mergeDecisionApprovedEpoch = mergeEpoch;
         run.phase = 'integrate';
       } else {
         // REJECT: capture operator feedback and route back to implement for rework.
