@@ -211,12 +211,22 @@ export class DeploymentRegistry {
       // Effective autonomy for (class, lane): widened if the LEVEL-WIDE grant OR
       // (when a lane is supplied) the LANE-SPECIFIC grant is widened. Without a
       // lane this reduces to the level-wide reading (backward compatible).
+      const laneVal = lane !== undefined ? state.laneEntries?.[lane]?.[rc] : undefined;
       const levelWide = state.entries[rc] ?? 'human-gated';
-      const laneSpecific =
-        lane !== undefined ? (state.laneEntries?.[lane]?.[rc] ?? 'human-gated') : 'human-gated';
+      const laneSpecific = laneVal ?? 'human-gated';
       const level: AutonomyLevel =
         levelWide === 'widened' || laneSpecific === 'widened' ? 'widened' : 'human-gated';
-      const record = this.findAuthorizingRecord(state.history, rc, level);
+      // Attribute to the scope that determined the reading (lane-specific takes
+      // precedence when widened; an explicit lane entry owns a human-gated read).
+      const scopeLane =
+        level === 'widened'
+          ? laneSpecific === 'widened'
+            ? lane
+            : undefined
+          : laneVal !== undefined
+            ? lane
+            : undefined;
+      const record = this.findAuthorizingRecord(state.history, rc, level, scopeLane);
       return {
         riskClass: rc,
         ...(lane !== undefined ? { lane } : {}),
@@ -272,9 +282,27 @@ export class DeploymentRegistry {
       };
     } else {
       const prior = state.entries[riskClass] ?? 'human-gated';
+      // A level-wide DEMOTION re-gates the class EVERYWHERE — it must also clear any
+      // lane-specific widenings for that class. Otherwise readAutonomyState's
+      // (level-wide OR lane-specific) would leave a lane still reading `widened`, and
+      // a demote-on-red / operator reversal would silently fail to re-gate it.
+      let laneEntries = state.laneEntries;
+      if (target === 'human-gated' && laneEntries !== undefined) {
+        const cleared: Record<string, Partial<Record<RiskClass, AutonomyLevel>>> = {};
+        for (const [ln, classes] of Object.entries(laneEntries)) {
+          const kept: Partial<Record<RiskClass, AutonomyLevel>> = {};
+          for (const [c, lvl] of Object.entries(classes)) {
+            if (c !== riskClass) kept[c as RiskClass] = lvl;
+          }
+          cleared[ln] = kept;
+        }
+        laneEntries = cleared;
+      } else if (laneEntries !== undefined) {
+        laneEntries = { ...laneEntries };
+      }
       newState = {
         entries: { ...state.entries, [riskClass]: target },
-        ...(state.laneEntries !== undefined ? { laneEntries: { ...state.laneEntries } } : {}),
+        ...(laneEntries !== undefined ? { laneEntries } : {}),
         history: [
           ...state.history,
           { deploymentId: id, riskClass, prior, next: target, authorization, recordedAt: now },
@@ -306,10 +334,20 @@ export class DeploymentRegistry {
     history: WideningRecord[],
     riskClass: RiskClass,
     level: AutonomyLevel,
+    scopeLane?: string,
   ): WideningRecord | undefined {
+    // Match the SCOPE that determined the reading: a lane-specific reading attributes
+    // to a record with that lane; a level-wide reading attributes to a record with no
+    // lane. (record.lane === scopeLane: both undefined for level-wide, both the lane
+    // for lane-specific.) Keeps the audit trail accurate across scopes.
     for (let i = history.length - 1; i >= 0; i--) {
       const record = history[i];
-      if (record !== undefined && record.riskClass === riskClass && record.next === level) {
+      if (
+        record !== undefined &&
+        record.riskClass === riskClass &&
+        record.next === level &&
+        record.lane === scopeLane
+      ) {
         return record;
       }
     }

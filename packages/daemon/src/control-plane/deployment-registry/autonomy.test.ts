@@ -169,4 +169,15 @@ describe('autonomy — lane-scoped grants (XCUT P1#2: level OR lane)', () => {
     expect(levelFor(reg, 'dep-a', 'green', 'other-lane')).toBe('widened');
     expect(levelFor(reg, 'dep-a', 'green')).toBe('widened');
   });
+
+  it('a LEVEL-WIDE demotion re-gates lane-specific grants for that class (demote-on-red)', () => {
+    const reg = new DeploymentRegistry();
+    reg.register('dep-a', makeProfile());
+    reg.recordWidening('dep-a', 'green', 'widened', auth, NOW, 'trivial-docs'); // lane-specific
+    expect(levelFor(reg, 'dep-a', 'green', 'trivial-docs')).toBe('widened');
+    // A level-wide demotion (no lane) must re-gate the lane too — otherwise a
+    // demote-on-red / operator reversal would silently leave the lane widened.
+    reg.recordWidening('dep-a', 'green', 'human-gated', auth, NOW + 1000);
+    expect(levelFor(reg, 'dep-a', 'green', 'trivial-docs')).toBe('human-gated');
+  });
 });
