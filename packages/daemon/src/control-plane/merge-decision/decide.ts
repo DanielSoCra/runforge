@@ -54,8 +54,8 @@ export function decideMerge(input: MergeDecisionInput): MergeDecision {
     modeResolution: resolvedSet.resolution,
   });
 
-  const effectiveRisk: RiskLevel =
-    eligibility.kind === 'eligible' ? eligibility.effectiveRisk : eligibility.effectiveRisk;
+  // Both Eligibility arms carry effectiveRisk.
+  const effectiveRisk: RiskLevel = eligibility.effectiveRisk;
 
   const base = {
     lane,
@@ -68,8 +68,18 @@ export function decideMerge(input: MergeDecisionInput): MergeDecision {
   // 9-rule, first-match-wins, fail-safe precedence.
 
   // 1. verifier gate !== verifier-gated → escalate verifier-withheld.
+  //    (A falsifying verifier must EXIST and be runnable.)
   if (verifierGate.kind !== 'verifier-gated') {
     return { kind: 'escalate', reason: 'verifier-withheld', ...base };
+  }
+
+  // 1b. verification did not pass → escalate verification-not-passed.
+  //     The verifier gate proves a falsifying verifier exists; this proves it
+  //     RAN and PASSED. FUNC-AC-MERGE-DECISION: "no verification means no
+  //     autonomous proceed" — a green change proceeds "on proof alone", and
+  //     proof is the lane's gate-set actually passing. Fail-safe on false.
+  if (input.validationPassed !== true) {
+    return { kind: 'escalate', reason: 'verification-not-passed', ...base, eligibility };
   }
 
   // 2. complianceForced === true → escalate compliance-forced.
@@ -95,8 +105,10 @@ export function decideMerge(input: MergeDecisionInput): MergeDecision {
     return { kind: 'escalate', reason: 'risk-ineligible', ...base, eligibility };
   }
 
-  // 6. autonomyWidened(effectiveRisk) !== true → escalate autonomy-not-widened.
-  if (input.autonomyWidened(effectiveRisk) !== true) {
+  // 6. autonomy not widened for this (level, lane) → escalate autonomy-not-widened.
+  //    Pass the assigned lane so a deployment may scope its grant per lane as
+  //    well as per level (a per-level grant ignores the lane argument).
+  if (input.autonomyWidened(effectiveRisk, lane.name) !== true) {
     return { kind: 'escalate', reason: 'autonomy-not-widened', ...base, eligibility };
   }
 

@@ -40,14 +40,24 @@ export interface MergeDecisionInput {
   classifierLevel: RiskLevel;
   /** What the change ACTUALLY touched (merge-base diff in the live layer). */
   touchedPaths: string[];
-  /** The observed verifier status fed to the verifier gate. */
+  /** The observed verifier status fed to the verifier gate (does a falsifying
+   *  verifier EXIST and is it runnable). Distinct from `validationPassed`. */
   verifierStatus: VerifierStatus;
   /**
-   * Whether autonomy is widened for a given effective risk level. The
-   * human-gated default is `() => false` — the safe-by-default arm. Pure
-   * predicate so the decision stays deterministic.
+   * Whether the lane's gate-set verification actually RAN and PASSED for this
+   * change. The verifier gate proves a falsifying verifier exists; this proves
+   * it passed. FUNC-AC-MERGE-DECISION: "no verification means no autonomous
+   * proceed" — auto-merge requires `true`. False/unknown escalates (fail-safe).
    */
-  autonomyWidened: (level: RiskLevel) => boolean;
+  validationPassed: boolean;
+  /**
+   * Whether autonomy is widened for a given effective risk level AND lane. The
+   * human-gated default is `() => false` — the safe-by-default arm. `lane` is
+   * the assigned lane's name so a deployment may grant autonomy per risk level
+   * OR per lane (FUNC-AC-MERGE-DECISION: "a given risk level or lane"); a
+   * per-level grant simply ignores the lane argument. Pure + deterministic.
+   */
+  autonomyWidened: (level: RiskLevel, lane: string) => boolean;
   /** Whether a compliance review is mandated for this change (escalates). */
   complianceForced: boolean;
 }
@@ -59,6 +69,7 @@ export interface MergeDecisionInput {
  */
 export type MergeDecisionReason =
   | 'verifier-withheld'
+  | 'verification-not-passed'
   | 'compliance-forced'
   | 'out-of-scope'
   | 'lane-fallback-most-cautious'

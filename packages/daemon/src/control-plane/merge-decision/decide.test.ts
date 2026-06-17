@@ -78,6 +78,7 @@ function happyInput(over: Partial<MergeDecisionInput> = {}): MergeDecisionInput 
     classifierLevel: 'green',
     touchedPaths: ['docs/readme.md'],
     verifierStatus: GOOD_STATUS,
+    validationPassed: true,
     autonomyWidened: () => true,
     complianceForced: false,
     ...over,
@@ -100,6 +101,14 @@ describe('decideMerge — precedence (fail-safe, first-match-wins)', () => {
     );
     expect(r.kind).toBe('escalate');
     if (r.kind === 'escalate') expect(r.reason).toBe('verifier-withheld');
+  });
+
+  it('1c. verifier gated but validation NOT passed → escalate verification-not-passed', () => {
+    // A falsifying verifier exists + is runnable (gate passes), but the lane's
+    // gate-set has not passed — "no verification means no autonomous proceed".
+    const r = decideMerge(happyInput({ validationPassed: false }));
+    expect(r.kind).toBe('escalate');
+    if (r.kind === 'escalate') expect(r.reason).toBe('verification-not-passed');
   });
 
   it('2. compliance forced (verifier OK) → escalate compliance-forced', () => {
