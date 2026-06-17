@@ -711,11 +711,13 @@ STACK-AC-STEERING:
     - packages/daemon/src/control-plane/steering/types.ts
     - packages/daemon/src/control-plane/steering/schema.ts
     - packages/daemon/src/control-plane/steering/decide.ts
+    - packages/daemon/src/control-plane/steering/cron.ts
     - packages/daemon/src/control-plane/steering/registry.ts
     - packages/daemon/src/control-plane/steering/index.ts
   test_paths:
     - packages/daemon/src/control-plane/steering/schema.test.ts
     - packages/daemon/src/control-plane/steering/decide.test.ts
+    - packages/daemon/src/control-plane/steering/cron.test.ts
     - packages/daemon/src/control-plane/steering/registry.test.ts
   status: draft
 

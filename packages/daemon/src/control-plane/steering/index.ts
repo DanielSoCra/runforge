@@ -13,6 +13,12 @@ export {
 } from './schema.js';
 export { decideWake, checkSpend } from './decide.js';
 export {
+  cronMatchesAt,
+  cronDue,
+  CRON_SEARCH_CAP_MINUTES,
+  MINUTE_MS,
+} from './cron.js';
+export {
   SteeringRegistry,
   createSteeringRegistry,
   type KnownTargets,

@@ -117,20 +117,6 @@ function assembleRole(
   data: z.infer<typeof SteeringRoleSchema>,
   version: RoleVersion,
 ): RegistrationOutcome {
-  // FAIL CLOSED on cron until a pure cron decider lands. decideWake cannot yet
-  // evaluate a cron expression, so accepting a cron role would leave it silently
-  // INERT (parsed but never waking) — worse than a clear rejection. Reject it with
-  // a named offender so the operator knows cron is unsupported, rather than
-  // declaring a role that never runs. (The pure cron decider is a tracked follow-up.)
-  if (data.wakeRhythm.kind === 'cron') {
-    return {
-      ok: false,
-      offenders: [
-        'wakeRhythm: cron rhythm is not yet supported — use an interval rhythm (a pure cron decider is a follow-up)',
-      ],
-    };
-  }
-
   const role = deepFreeze(data) as SteeringRole;
   return { ok: true, role, version };
 }

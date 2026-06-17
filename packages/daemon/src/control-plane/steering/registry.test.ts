@@ -207,9 +207,11 @@ describe('SteeringRegistry.register — fail-closed completeness (codex 2026-06-
 
   it('a rejected registration does NOT burn a version — the next valid one is v1 (codex round 4)', () => {
     const reg = new SteeringRegistry(known);
-    // A cron rhythm is rejected in assemble (after schema/grant pass) — must not
-    // advance the version/activation counters.
-    const rejected = reg.register({ ...makeRole(), wakeRhythm: { kind: 'cron', expr: '0 * * * *' } });
+    // A non-positive budget is rejected at schema validation — must not advance the
+    // version/activation counters. (Was a cron rhythm before follow-up #15 re-enabled
+    // cron; a rejected-at-schema offender keeps proving the no-burn invariant without
+    // depending on cron being unsupported.)
+    const rejected = reg.register({ ...makeRole(), perWakingBudget: 0 });
     expect(rejected.ok).toBe(false);
     const ok = reg.register(makeRole()); // valid interval, same id
     expect(ok.ok).toBe(true);

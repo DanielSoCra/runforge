@@ -122,16 +122,45 @@ describe('parseRole — fail-closed rejections (real zod .strict())', () => {
     expect(r.ok).toBe(false);
   });
 
-  it('a valid-shape cron rhythm is REJECTED (unsupported — fail closed, never silently inert)', () => {
-    // The schema accepts the cron SHAPE, but decideWake cannot evaluate a cron
-    // expression yet, so a cron role would parse and then never wake. Registration
-    // fails closed with a clear offender rather than accepting an inert role.
-    // (A pure cron decider is a tracked follow-up; until then, cron is rejected.)
+  it('a malformed cron rhythm (non-string expr) is rejected', () => {
     const r = parseRole(
-      { ...validRole, wakeRhythm: { kind: 'cron', expr: '0 * * * *' } },
+      { ...validRole, wakeRhythm: { kind: 'cron', expr: 42 } },
       version,
     );
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.offenders.some((o) => o.toLowerCase().includes('cron'))).toBe(true);
+    if (!r.ok) expect(r.offenders.join()).toContain('expr');
+  });
+});
+
+describe('parseRole — cron rhythm is now supported (re-enabled, follow-up #15)', () => {
+  // FLIPPED: cron used to be REJECTED at assemble (no evaluator existed). With the
+  // pure cron evaluator (cron.ts) in place, a valid-shape cron rhythm now PARSES
+  // and deep-freezes exactly like an interval rhythm — no longer inert, no longer
+  // rejected. RED until the implementer removes the cron rejection in assembleRole.
+  it('a valid cron rhythm parses → ok: true and carries the version', () => {
+    const r = parseRole(
+      { ...validRole, wakeRhythm: { kind: 'cron', expr: '0 9 * * *' } },
+      version,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.role.wakeRhythm.kind).toBe('cron');
+      if (r.role.wakeRhythm.kind === 'cron') {
+        expect(r.role.wakeRhythm.expr).toBe('0 9 * * *');
+      }
+      expect(r.version).toEqual(version);
+    }
+  });
+
+  it('the returned cron role is deep-frozen (top level and the wakeRhythm)', () => {
+    const r = parseRole(
+      { ...validRole, wakeRhythm: { kind: 'cron', expr: '*/15 * * * *' } },
+      version,
+    );
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(Object.isFrozen(r.role)).toBe(true);
+      expect(Object.isFrozen(r.role.wakeRhythm)).toBe(true);
+    }
   });
 });

@@ -46,6 +46,40 @@ describe('decideWake (pure over the snapshot)', () => {
     const r = decideWake(role, { now: 11_000, lastWakingAt: 10_000 });
     expect(r.kind).toBe('due');
   });
+
+  // ── cron rhythm (re-enabled, follow-up #15) ───────────────────────────────
+  // RED until the implementer wires the cron arm to call cronDue. The cron arm
+  // must delegate to the pure evaluator — NOT keep returning the old fixed
+  // "cron not supported" not-due.
+  it('cron rhythm whose fire elapsed in the window → due', () => {
+    // Hourly cron; last waking at 08:30, now at 09:30 → the 09:00 fire lies inside
+    // (08:30, 09:30] → due.
+    const role = makeRole({ wakeRhythm: { kind: 'cron', expr: '0 * * * *' } });
+    const r = decideWake(role, {
+      now: Date.UTC(2024, 0, 1, 9, 30),
+      lastWakingAt: Date.UTC(2024, 0, 1, 8, 30),
+    });
+    expect(r.kind).toBe('due');
+  });
+
+  it('cron rhythm with no fire in the window → not-due', () => {
+    // Hourly cron; last waking at 09:05, now at 09:55 → no HH:00 minute in
+    // (09:05, 09:55] → not-due (a real cron evaluation, not the old fixed reject).
+    const role = makeRole({ wakeRhythm: { kind: 'cron', expr: '0 * * * *' } });
+    const r = decideWake(role, {
+      now: Date.UTC(2024, 0, 1, 9, 55),
+      lastWakingAt: Date.UTC(2024, 0, 1, 9, 5),
+    });
+    expect(r.kind).toBe('not-due');
+  });
+
+  it('first-ever cron wake at a matching minute → due', () => {
+    // lastWakingAt undefined, now exactly at the 09:00 daily fire → due via the
+    // one-minute lookback (the cron analogue of "first-ever interval is due").
+    const role = makeRole({ wakeRhythm: { kind: 'cron', expr: '0 9 * * *' } });
+    const r = decideWake(role, { now: Date.UTC(2024, 0, 1, 9, 0) });
+    expect(r.kind).toBe('due');
+  });
 });
 
 describe('checkSpend (bounded by the declared budget)', () => {
