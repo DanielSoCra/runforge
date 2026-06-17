@@ -49,10 +49,12 @@ import type { DecisionIndexManager } from './decision-escalation/manager.js';
 import { buildL2GateRequest } from './decision-escalation/build-request.js';
 import { GitHubBlockPublisher } from './decision-escalation/github-block-notifier.js';
 import type { DeploymentRegistry } from './deployment-registry/registry.js';
+import type { ComplianceReviewer } from './deployment-registry/types.js';
 import {
   buildMergeDecisionRequest,
   computeTouchedPaths,
   decideMerge,
+  evaluateComplianceForced,
   observeVerifierStatus,
 } from './merge-decision/index.js';
 import { assignLane, resolveForMode } from './lane-engine/index.js';
@@ -1913,8 +1915,22 @@ export function createPhaseHandlers(
       // escalate an already-green run. A finer per-lane gate-set verdict is a follow-up.)
       const validationPassed = true;
 
-      // v1: real compliance dispatch is deferred; no path is forced here.
-      const complianceForced = false;
+      // Compliance lens: force the change to the Operator when a touched path is
+      // governed by one of the deployment's compliance reviewers (condition read as
+      // a path glob). Composes with and OVERRIDES autonomy (FUNC-AC-MERGE-DECISION).
+      // Full reviewer dispatch/verdict is FUNC-AC-COMPLIANCE-GATE's concern; this is
+      // the merge-decision lens composition. (deploymentId/registry are defined here
+      // — the not-found / not-owned / flag-OFF cases returned earlier.)
+      let complianceForced = false;
+      if (registry !== undefined && deploymentId !== undefined) {
+        const declared = registry.readDeclaredData(deploymentId, 'complianceReviewers');
+        if (declared.kind === 'found' && Array.isArray(declared.value)) {
+          complianceForced = evaluateComplianceForced(
+            declared.value as ComplianceReviewer[],
+            touchedPaths,
+          );
+        }
+      }
 
       const decision = decideMerge({
         laneSet,

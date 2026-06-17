@@ -13,3 +13,4 @@ export {
 } from './build-request.js';
 export { observeVerifierStatus } from './observe-verifier.js';
 export { computeTouchedPaths } from './touched-paths.js';
+export { evaluateComplianceForced } from './compliance.js';
