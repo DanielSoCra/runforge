@@ -12,6 +12,7 @@
 
 import { z } from 'zod';
 import type { SteeringRole, RegistrationOutcome, RoleVersion } from './types.js';
+import { isValidCronExpr } from './cron.js';
 
 /**
  * The wake-rhythm discriminated union, declarative + real. `interval.everyMs` is
@@ -117,17 +118,14 @@ function assembleRole(
   data: z.infer<typeof SteeringRoleSchema>,
   version: RoleVersion,
 ): RegistrationOutcome {
-  // FAIL CLOSED on cron until a pure cron decider lands. decideWake cannot yet
-  // evaluate a cron expression, so accepting a cron role would leave it silently
-  // INERT (parsed but never waking) — worse than a clear rejection. Reject it with
-  // a named offender so the operator knows cron is unsupported, rather than
-  // declaring a role that never runs. (The pure cron decider is a tracked follow-up.)
-  if (data.wakeRhythm.kind === 'cron') {
+  // Fail CLOSED on a malformed cron expression at REGISTRATION — the schema only
+  // checks the cron shape (a non-empty string), so an unparseable expr (e.g.
+  // "not a cron") would freeze ok and then throw at the first decideWake. Reject it
+  // as an offender here instead of scheduling an unintended/throwing cadence.
+  if (data.wakeRhythm.kind === 'cron' && isValidCronExpr(data.wakeRhythm.expr) === false) {
     return {
       ok: false,
-      offenders: [
-        'wakeRhythm: cron rhythm is not yet supported — use an interval rhythm (a pure cron decider is a follow-up)',
-      ],
+      offenders: [`wakeRhythm.expr: "${data.wakeRhythm.expr}" is not a valid cron expression`],
     };
   }
 

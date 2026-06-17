@@ -8,6 +8,7 @@
 // `now` rule). The bodies are STUBBED to throw 'not implemented'; the implementer
 // (Kimi) fills them to satisfy the immovable acceptance tests in decide.test.ts.
 
+import { cronDue } from './cron.js';
 import type {
   SteeringRole,
   WakeSnapshot,
@@ -36,11 +37,17 @@ export function decideWake(role: SteeringRole, snapshot: WakeSnapshot): WakeDeci
         : { kind: 'not-due', reason: 'interval not elapsed' };
     }
     case 'cron': {
-      // Unreachable in practice: cron rhythms are rejected at registration (see
-      // schema.ts assembleRole — fail-closed until a pure cron decider lands), so a
-      // frozen role never carries a cron rhythm. Kept for switch exhaustiveness and
-      // defense in depth; not-due is the cautious arm if one ever reaches here.
-      return { kind: 'not-due', reason: 'cron not supported (rejected at registration)' };
+      // First-ever wake is due for EVERY rhythm (see this function's contract) —
+      // a newly activated cron role performs its initial scan on activation, then
+      // settles into its cron cadence. `cronDue`'s primitive one-minute lookback
+      // would otherwise leave e.g. a daily `0 9 * * *` role first seen at 10:00
+      // idle until tomorrow's fire. Mirror the interval arm's `elapsed === Infinity`.
+      if (snapshot.lastWakingAt === undefined) {
+        return { kind: 'due', reason: 'first-ever cron wake' };
+      }
+      return cronDue(role.wakeRhythm.expr, snapshot)
+        ? { kind: 'due', reason: 'cron fire elapsed' }
+        : { kind: 'not-due', reason: 'no cron fire in window' };
     }
     default: {
       const _exhaustive: never = role.wakeRhythm;
