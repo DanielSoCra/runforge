@@ -50,6 +50,10 @@ import {
   markOverdue,
 } from './decision-escalation/reconcile.js';
 import {
+  listPendingDecisions,
+  getDecisionDetail,
+} from './decision-api.js';
+import {
   parseCockpitAnswer,
   isDecisionOwnedIssue,
   REQUEUE_LABEL,
@@ -1450,6 +1454,14 @@ export async function startDaemon(
         const idea = await poAgent.submitIdea(submittedBy, description);
         return { id: idea.id };
       },
+      // READ API (slice 7a). `.ledger()` throws when the index is disabled/broken;
+      // it is called lazily inside the closure so the route's try/catch maps it to
+      // a clean 503. (The operator ANSWER flow is a follow-up that reuses the
+      // decision-escalation resume path, not a direct ledger write here.)
+      listPendingDecisions: (query) =>
+        listPendingDecisions(decisionManager.ledger().reader, query),
+      getDecisionDetail: (id) =>
+        getDecisionDetail(decisionManager.ledger().reader, id),
     },
     daemonHost,
   );

@@ -3,6 +3,8 @@ import { ok, err, type Result } from '../lib/result.js';
 import { getDashboardHtml } from './dashboard.js';
 import { readResults } from './results.js';
 import type { ReleaseProposalResult } from './release.js';
+import type { ListRankedArgs, ListFilters, RankedListItem, DetailView } from '@auto-claude/decision-index';
+import type { HandlerResult, ErrorBody } from './decision-api.js';
 
 export interface ControlHandlers {
   getStatus: () => unknown;
@@ -16,6 +18,8 @@ export interface ControlHandlers {
   scanIssues?: () => Promise<{ scanned: number }>;
   release?: () => Promise<ReleaseProposalResult>;
   submitIdea?: (submittedBy: string, description: string) => Promise<{ id: string }>;
+  listPendingDecisions?: (query: ListRankedArgs) => HandlerResult<RankedListItem[] | ErrorBody>;
+  getDecisionDetail?: (id: string) => HandlerResult<DetailView | ErrorBody>;
   stateDir?: string;
 }
 
@@ -150,6 +154,46 @@ export function createControlServer(
       } else {
         json(res, 501, { error: 'PO agent not configured' });
       }
+    } else if (method === 'GET' && url.pathname === '/decisions/pending') {
+      if (handlers.listPendingDecisions) {
+        try {
+          const query = parseListRankedArgs(url.searchParams);
+          const result = handlers.listPendingDecisions(query);
+          json(res, result.status, result.body);
+        } catch (e: unknown) {
+          console.error('[control-plane] GET /decisions/pending failed:', e);
+          json(res, 503, { error: 'decision index unavailable' });
+        }
+      } else {
+        json(res, 501, { error: 'decision index not configured' });
+      }
+    } else if (method === 'GET' && url.pathname.startsWith('/decisions/')) {
+      if (handlers.getDecisionDetail) {
+        // Decision ids contain colons (e.g. `issue-42:l2-gate:1`); a client encodes
+        // them into the path, and URL.pathname preserves the escapes — decode before
+        // lookup or a valid decision 404s. A malformed escape (e.g. a lone `%`) is a
+        // bad id → 404, never a 500.
+        let id: string;
+        try {
+          id = decodeURIComponent(url.pathname.slice('/decisions/'.length));
+        } catch {
+          json(res, 404, { error: 'not found' });
+          return;
+        }
+        if (id.length === 0) {
+          json(res, 404, { error: 'not found' });
+          return;
+        }
+        try {
+          const result = handlers.getDecisionDetail(id);
+          json(res, result.status, result.body);
+        } catch (e: unknown) {
+          console.error('[control-plane] GET /decisions/:id failed:', e);
+          json(res, 503, { error: 'decision index unavailable' });
+        }
+      } else {
+        json(res, 501, { error: 'decision index not configured' });
+      }
     } else if (method === 'POST' && url.pathname.startsWith('/retry/')) {
       const issue = Number(url.pathname.split('/')[2]);
       if (isNaN(issue)) {
@@ -190,6 +234,31 @@ export function createControlServer(
 
 function isResult(value: unknown): value is Result<void> {
   return typeof value === 'object' && value !== null && 'ok' in value;
+}
+
+function parseListRankedArgs(searchParams: URLSearchParams): ListRankedArgs {
+  if (searchParams.size === 0) return {};
+  const args: ListRankedArgs = {};
+  const filters: ListFilters = {};
+  const status = searchParams.get('filters.status');
+  if (status !== null) filters.status = status.split(',');
+  const riskClass = searchParams.get('filters.risk_class');
+  if (riskClass !== null) filters.risk_class = riskClass.split(',');
+  const deployment = searchParams.get('filters.deployment');
+  if (deployment !== null) filters.deployment = deployment.split(',');
+  if (Object.keys(filters).length > 0) args.filters = filters;
+
+  const focusDeployments = searchParams.get('focusDeployments');
+  if (focusDeployments !== null) {
+    args.focus = {
+      now: new Date(),
+      focusDeployments: focusDeployments.split(','),
+    };
+  }
+
+  const includeSuppressed = searchParams.get('includeSuppressed');
+  if (includeSuppressed === 'true') args.includeSuppressed = true;
+  return args;
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {
