@@ -108,6 +108,21 @@ describe('WindowLedger silent-pool estimate→headroom (Plan-2)', () => {
     ledger.reportConsumption(signal({ observedAt: 1_000, estimate: 10 * CAPACITY }));
     expect(ledger.snapshot(2_000).headroom('pool-a')).toBe('unknown');
   });
+
+  it('an estimate at/above capacity exhausts even after a PRIOR, now-passed reopen projection (codex r2)', () => {
+    const ledger = new WindowLedger([poolWithCapacity]);
+    // The pool was exhausted earlier with a reopen projection at t=1_000.
+    ledger.reportExhaustionSignal(signal({ observedAt: 500, retryAfterMs: 500 }), {
+      kind: 'window-exhaustion',
+      reopenProjection: 1_000,
+    });
+    // Later, a silent estimate at capacity re-derives exhausted. The STALE (passed)
+    // projection must be cleared so snapshot() does not treat the pool as reopened.
+    ledger.reportConsumption(signal({ observedAt: 2_000, estimate: CAPACITY }));
+    // now (3_000) is past the OLD projection (1_000); without the clear this would
+    // wrongly degrade to 'unknown' (dispatchable).
+    expect(ledger.snapshot(3_000).headroom('pool-a')).toBe('exhausted');
+  });
 });
 
 describe('WindowLedger repeated-throttle self-correction (Plan-2)', () => {

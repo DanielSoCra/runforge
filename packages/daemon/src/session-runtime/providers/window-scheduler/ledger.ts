@@ -109,6 +109,11 @@ export class WindowLedger {
     if (pool.capacity !== undefined && signal.estimate !== undefined) {
       const derived = headroomFromEstimate(signal.estimate, pool.capacity, false);
       state.headroom = derived;
+      // Clear any prior window-exhaustion reopenProjection: the estimate is now the
+      // source of truth for headroom, so a stale projection must not survive. Else a
+      // PASSED projection would make snapshot() treat an estimate-derived `exhausted`
+      // as reopened (now >= projection) and report `unknown` — masking exhaustion.
+      state.reopenProjection = undefined;
       // A derived estimate is a consumption observation, not a throttle: reset.
       this.resetThrottleCount(poolName);
     }
