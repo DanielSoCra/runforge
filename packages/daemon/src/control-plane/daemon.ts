@@ -2096,6 +2096,8 @@ async function preClassifyReadyWork(
         preClassification: {
           event: item.event,
           complexity: item.complexity,
+          changeKind: item.changeKind,
+          scope: item.scope,
           allocatedCost: item.allocatedCost,
           batchSequenceId: result.batchSequenceId,
         },

@@ -1077,6 +1077,8 @@ export function createPhaseHandlers(
           `[classify] Using pre-classification for #${workRequest.issueNumber}`,
         );
         run.classificationComplexity = workRequest.preClassification.complexity;
+        run.classifierChangeKind = workRequest.preClassification.changeKind;
+        run.classifierScope = workRequest.preClassification.scope;
         return workRequest.preClassification.event;
       }
       console.log(

@@ -55,6 +55,11 @@ export interface PreClassification {
     | 'containment-breach'
   >;
   complexity?: ClassificationComplexity;
+  // Lane-qualification verdict fields (carried through batch pre-classification so
+  // a deployment's lane policy that qualifies on changeKind/scope is honored on the
+  // normal daemon path, not just the per-issue classify path).
+  changeKind?: import('./control-plane/lane-engine/types.js').ChangeKind;
+  scope?: string;
   allocatedCost?: number;
   batchSequenceId?: string;
 }
