@@ -139,8 +139,12 @@ function parseField(field: string, range: CronFieldRange): Set<number> {
         start = parseRangeBound(startToken, range);
         end = parseRangeBound(endToken, range);
       } else {
-        start = parseRangeBound(rangePart, range);
-        end = range.max;
+        // Only `*/s` and `a-b/s` are supported. A bare stepped single value like
+        // `5/10` is NOT in the dialect — reject it rather than silently expand it to
+        // `5-59/10` (which would schedule an unintended cadence past the fail-closed gate).
+        throw new Error(
+          `cron: stepped single value "${item}" is not supported (use */s or a-b/s)`,
+        );
       }
       addRange(set, start, end, step, range);
       continue;

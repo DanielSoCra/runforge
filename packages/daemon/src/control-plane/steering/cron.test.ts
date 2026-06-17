@@ -208,6 +208,10 @@ describe('cronMatchesAt — malformed expression throws (programmer error)', () 
   it('a range with extra bounds throws, never silently parsed as a-b (codex)', () => {
     expect(() => cronMatchesAt('0 1-2-3 * * *', JAN1_0000)).toThrow();
   });
+
+  it('a stepped single value (n/s) is unsupported and throws, not expanded to n-max/s (codex)', () => {
+    expect(() => cronMatchesAt('5/10 * * * *', JAN1_0000)).toThrow();
+  });
 });
 
 describe('cronDue — window existence (lower < m <= now)', () => {
