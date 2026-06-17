@@ -111,6 +111,21 @@ describe('decideMerge — precedence (fail-safe, first-match-wins)', () => {
     if (r.kind === 'escalate') expect(r.reason).toBe('verification-not-passed');
   });
 
+  it('1d. validation-failed AND compliance-forced → reports compliance-forced (weightier reason)', () => {
+    // Compliance "composes with and overrides"; when several escalate reasons
+    // apply, the weightier operator-hold reason is the one recorded.
+    const r = decideMerge(happyInput({ validationPassed: false, complianceForced: true }));
+    expect(r.kind).toBe('escalate');
+    if (r.kind === 'escalate') expect(r.reason).toBe('compliance-forced');
+  });
+
+  it('1e. validation-failed AND out-of-scope → reports out-of-scope (weightier reason)', () => {
+    // The scope tripwire "no config may weaken" outranks a gate-set failure.
+    const r = decideMerge(happyInput({ validationPassed: false, touchedPaths: ['src/secret/k.ts'] }));
+    expect(r.kind).toBe('escalate');
+    if (r.kind === 'escalate') expect(r.reason).toBe('out-of-scope');
+  });
+
   it('2. compliance forced (verifier OK) → escalate compliance-forced', () => {
     const r = decideMerge(happyInput({ complianceForced: true }));
     expect(r.kind).toBe('escalate');

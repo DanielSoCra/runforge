@@ -73,15 +73,6 @@ export function decideMerge(input: MergeDecisionInput): MergeDecision {
     return { kind: 'escalate', reason: 'verifier-withheld', ...base };
   }
 
-  // 1b. verification did not pass → escalate verification-not-passed.
-  //     The verifier gate proves a falsifying verifier exists; this proves it
-  //     RAN and PASSED. FUNC-AC-MERGE-DECISION: "no verification means no
-  //     autonomous proceed" — a green change proceeds "on proof alone", and
-  //     proof is the lane's gate-set actually passing. Fail-safe on false.
-  if (input.validationPassed !== true) {
-    return { kind: 'escalate', reason: 'verification-not-passed', ...base, eligibility };
-  }
-
   // 2. complianceForced === true → escalate compliance-forced.
   if (input.complianceForced === true) {
     return { kind: 'escalate', reason: 'compliance-forced', ...base };
@@ -90,6 +81,19 @@ export function decideMerge(input: MergeDecisionInput): MergeDecision {
   // 3. tripwire out-of-scope → escalate out-of-scope.
   if (eligibility.kind === 'escalate' && eligibility.reason === 'out-of-scope') {
     return { kind: 'escalate', reason: 'out-of-scope', ...base, eligibility };
+  }
+
+  // 3b. verification did not pass → escalate verification-not-passed.
+  //     The verifier gate proves a falsifying verifier exists; this proves it
+  //     RAN and PASSED. FUNC-AC-MERGE-DECISION: "no verification means no
+  //     autonomous proceed" — a green change proceeds "on proof alone", and
+  //     proof is the lane's gate-set actually passing. Ranked BELOW the
+  //     compliance lens ("composes with and overrides") and the scope tripwire
+  //     ("no config may weaken") so the weightier operator-hold reason is the
+  //     one recorded when several apply — but ABOVE every proceed arm, so a
+  //     validation-failed change can never auto-merge. Fail-safe on false.
+  if (input.validationPassed !== true) {
+    return { kind: 'escalate', reason: 'verification-not-passed', ...base, eligibility };
   }
 
   // 4. fallback-most-cautious assignment → escalate lane-fallback-most-cautious.
