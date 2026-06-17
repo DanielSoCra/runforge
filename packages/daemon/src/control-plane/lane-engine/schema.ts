@@ -1,6 +1,7 @@
 // packages/daemon/src/control-plane/lane-engine/schema.ts
 import { z } from 'zod';
 import type { LaneSet } from './types.js';
+import { VerifierDeclarationSchema } from './verifier-gate/schema.js';
 
 const Complexity = z.enum(['simple', 'standard', 'complex']);
 const ChangeKind = z.enum([
@@ -51,6 +52,10 @@ const LaneDefinitionSchema = z
     mergePolicy: byMode(MergePolicy),
     postMergeReview: BatchReviewPolicy.optional(),
     earnIn: EarnInPolicy.optional(),
+    // The lane's optional falsifiable-oracle declaration (verifier-gate's own
+    // .strict() schema). A lane without it can never earn auto-merge — the
+    // merge-decision gate escalates `verifier-withheld`.
+    verifier: VerifierDeclarationSchema.optional(),
   })
   .strict();
 

@@ -620,7 +620,7 @@ STACK-AC-SESSION-PROVIDERS:
 STACK-AC-LANE-ENGINE:
   parent: ARCH-AC-LANE-ENGINE
   children: []
-  code_paths:  # pure evaluation core (Plan 1); pipeline integration is Plan 2
+  code_paths:  # pure evaluation core (Plan 1) + merge-decision composition core (Plan 2, slice 5a)
     - packages/daemon/src/control-plane/lane-engine/types.ts
     - packages/daemon/src/control-plane/lane-engine/match.ts
     - packages/daemon/src/control-plane/lane-engine/risk.ts
@@ -631,8 +631,15 @@ STACK-AC-LANE-ENGINE:
     - packages/daemon/src/control-plane/lane-engine/eligibility.ts
     - packages/daemon/src/control-plane/lane-engine/earn-in.ts
     - packages/daemon/src/control-plane/lane-engine/index.ts
+    # merge-decision composition core (slice 5a): the lane engine driving ONE decision
+    - packages/daemon/src/control-plane/merge-decision/types.ts
+    - packages/daemon/src/control-plane/merge-decision/decide.ts
+    - packages/daemon/src/control-plane/merge-decision/risk-class.ts
+    - packages/daemon/src/control-plane/merge-decision/index.ts
   test_paths:
     - packages/daemon/src/control-plane/lane-engine/**/*.test.ts
+    - packages/daemon/src/control-plane/merge-decision/decide.test.ts
+    - packages/daemon/src/control-plane/merge-decision/risk-class.test.ts
   status: draft
 
 STACK-AC-VERIFIER-GATE:

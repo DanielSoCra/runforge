@@ -1,5 +1,7 @@
 // packages/daemon/src/control-plane/lane-engine/types.ts
 
+import type { VerifierDeclaration } from './verifier-gate/types.js';
+
 /** Risk levels, ordered least → most cautious. */
 export type RiskLevel = 'green' | 'yellow' | 'orange' | 'red';
 
@@ -50,6 +52,13 @@ export interface LaneDefinition {
   mergePolicy: ByMode<MergePolicy>;
   postMergeReview?: BatchReviewPolicy;
   earnIn?: EarnInPolicy;
+  /**
+   * The falsifiable oracle this lane declares for verifier-gated autonomy. A
+   * lane with no verifier withholds autonomy (the merge-decision gate escalates
+   * `verifier-withheld`). Optional so existing packs without a declaration stay
+   * valid — they simply never earn auto-merge.
+   */
+  verifier?: VerifierDeclaration;
 }
 
 /** A validated, frozen set of lanes for one deployment + its declared phases. */
@@ -69,6 +78,8 @@ export interface ResolvedLane {
   mergePolicy: MergePolicy;
   postMergeReview?: BatchReviewPolicy;
   earnIn?: EarnInPolicy;
+  /** Carried through mode resolution unchanged (the verifier is mode-invariant). */
+  verifier?: VerifierDeclaration;
 }
 
 export interface ModeResolution {
