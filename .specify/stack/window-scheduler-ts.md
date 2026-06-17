@@ -7,8 +7,16 @@ version: 1
 layer: 3
 stack: typescript
 references: ARCH-AC-WINDOW-SCHEDULER
-code_paths: []  # DEFERRED to implementation — path-existence validator requires real files (cf. STACK-AC-SESSION-PROVIDERS v2 planned-file note)
-test_paths: []  # DEFERRED to implementation — same reason
+code_paths:  # pure module (Plan 1 + Plan-2 pure extensions); live registry/runtime wiring + provenance persistence is the separate integration slice
+  - packages/daemon/src/session-runtime/providers/window-scheduler/types.ts
+  - packages/daemon/src/session-runtime/providers/window-scheduler/headroom.ts
+  - packages/daemon/src/session-runtime/providers/window-scheduler/classify.ts
+  - packages/daemon/src/session-runtime/providers/window-scheduler/ledger.ts
+  - packages/daemon/src/session-runtime/providers/window-scheduler/filter-rank.ts
+  - packages/daemon/src/session-runtime/providers/window-scheduler/schema.ts
+  - packages/daemon/src/session-runtime/providers/window-scheduler/index.ts
+test_paths:
+  - packages/daemon/src/session-runtime/providers/window-scheduler/**/*.test.ts
 ---
 
 # STACK-AC-WINDOW-SCHEDULER — Capacity-Pool Window Scheduler (TypeScript)

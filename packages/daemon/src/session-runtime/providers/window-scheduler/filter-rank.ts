@@ -33,5 +33,21 @@ export function filterAndRankByWindow(
   const excludePools = [
     ...new Set(candidates.filter((c) => snap.headroom(c.pool) === 'exhausted').map((c) => c.pool)),
   ];
-  return { eligible: ranked, excludePools };
+
+  let earliestReopenProjection: number | undefined;
+  if (live.length === 0 && snap.reopenProjection !== undefined) {
+    for (const candidate of candidates) {
+      if (snap.headroom(candidate.pool) === 'exhausted') {
+        const projection = snap.reopenProjection(candidate.pool);
+        if (
+          projection !== undefined &&
+          (earliestReopenProjection === undefined || projection < earliestReopenProjection)
+        ) {
+          earliestReopenProjection = projection;
+        }
+      }
+    }
+  }
+
+  return { eligible: ranked, excludePools, earliestReopenProjection };
 }
