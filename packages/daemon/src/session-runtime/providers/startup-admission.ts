@@ -93,9 +93,12 @@ export interface FailedProvider {
  *
  * - `skipped` is `true` ONLY on the gate-OFF no-op path.
  * - `aborted` is `true` when at least one REQUIRED provider failed its proving
- *   run; `abortReasons` names the offending providers. The orchestrator does NOT
- *   throw — the daemon reads `aborted` and decides to abort startup.
- * - Optional providers that fail land in `failed` but never set `aborted`.
+ *   run, OR when ZERO providers were admitted (no usable provider — e.g. only
+ *   optional providers configured and all failed); `abortReasons` names the
+ *   offending required providers and/or the no-provider-admitted reason. The
+ *   orchestrator does NOT throw — the daemon reads `aborted` and aborts startup.
+ * - Optional providers that fail land in `failed`; they set `aborted` only via the
+ *   zero-admitted rule, never individually.
  */
 export interface AdmissionResult {
   admitted: AdmittedProvider[];
@@ -162,11 +165,23 @@ export async function admitProviders(
     }
   }
 
-  const aborted = abortReasons.length > 0;
-  if (!aborted && admitted.length > 0) {
-    opts.logger?.info?.(
-      `[admission] ${admitted.length} provider(s) admitted`,
+  // No usable provider was admitted (the common case: only OPTIONAL providers are
+  // configured and they all failed their proving run). With smoke-proofing ON the
+  // registry now gates every resolve() on a proof that does not exist, so the
+  // daemon would start but resolve `provider-unavailable` for all work — a live
+  // but useless daemon. Treat zero-admitted as a startup-contract abort even when
+  // no provider was marked `required` (codex). A genuinely empty provider list
+  // (nothing to prove) is a misconfiguration and likewise aborts.
+  if (admitted.length === 0 && abortReasons.length === 0) {
+    abortReasons.push('no provider passed smoke admission');
+    opts.logger?.error?.(
+      `[admission] no provider passed smoke admission — startup cannot dispatch work`,
     );
+  }
+
+  const aborted = abortReasons.length > 0;
+  if (!aborted) {
+    opts.logger?.info?.(`[admission] ${admitted.length} provider(s) admitted`);
   }
 
   return {

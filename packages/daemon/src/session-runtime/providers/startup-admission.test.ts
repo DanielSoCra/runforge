@@ -184,6 +184,26 @@ describe('admitProviders — startup smoke-proof admission gate', () => {
     expect(result.admitted.map((a) => a.providerName)).toEqual(['codex-impl']);
   });
 
+  it('GATE ON, ALL providers OPTIONAL and ALL fail: aborts (zero admitted → no usable provider, codex)', async () => {
+    // With smoke-proofing ON the registry gates every resolve() on a proof; if
+    // nothing is admitted the daemon would start but resolve provider-unavailable
+    // for all work. Zero-admitted must abort even though no provider was required.
+    const registry = fakeRegistry();
+    const runSmoke = vi.fn(async (p: ProviderDefinition) => failProof(p.name));
+
+    const result = await admitProviders({
+      registry,
+      providers: [binding('claude-opt', false), binding('codex-opt', false)],
+      requireSmokeProof: true,
+      runSmoke,
+    });
+
+    expect(result.aborted).toBe(true);
+    expect(result.abortReasons).toContain('no provider passed smoke admission');
+    expect(result.admitted).toEqual([]);
+    expect(result.failed).toHaveLength(2);
+  });
+
   it('GATE ON, MULTIPLE required providers fail: abortReasons names every offender (ordering/parallelism unobservable)', async () => {
     const registry = fakeRegistry();
     const runSmoke = vi.fn(async (p: ProviderDefinition) => failProof(p.name));
