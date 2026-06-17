@@ -4,8 +4,7 @@ import { getDashboardHtml } from './dashboard.js';
 import { readResults } from './results.js';
 import type { ReleaseProposalResult } from './release.js';
 import type { ListRankedArgs, ListFilters, RankedListItem, DetailView } from '@auto-claude/decision-index';
-import type { AnswerResult } from './decision-escalation/ledger.js';
-import type { HandlerResult, AnswerBody, ErrorBody } from './decision-api.js';
+import type { HandlerResult, ErrorBody } from './decision-api.js';
 
 export interface ControlHandlers {
   getStatus: () => unknown;
@@ -21,7 +20,6 @@ export interface ControlHandlers {
   submitIdea?: (submittedBy: string, description: string) => Promise<{ id: string }>;
   listPendingDecisions?: (query: ListRankedArgs) => HandlerResult<RankedListItem[] | ErrorBody>;
   getDecisionDetail?: (id: string) => HandlerResult<DetailView | ErrorBody>;
-  answerDecision?: (id: string, body: AnswerBody) => HandlerResult<AnswerResult | ErrorBody>;
   stateDir?: string;
 }
 
@@ -186,39 +184,6 @@ export function createControlServer(
       } else {
         json(res, 501, { error: 'decision index not configured' });
       }
-    } else if (method === 'POST' && url.pathname.startsWith('/decisions/') && url.pathname.endsWith('/answer')) {
-      if (handlers.answerDecision) {
-        const id = extractDecisionAnswerId(url.pathname);
-        if (id === undefined) {
-          json(res, 404, { error: 'not found' });
-          return;
-        }
-        const MAX_BODY = 10240; // 10KB
-        let body = '';
-        let oversize = false;
-        req.on('data', (chunk: Buffer) => {
-          body += chunk.toString();
-          if (body.length > MAX_BODY) oversize = true;
-        });
-        req.on('error', () => { json(res, 400, { error: 'request error' }); });
-        req.on('end', () => {
-          if (oversize) { json(res, 413, { error: 'body too large' }); return; }
-          try {
-            const parsed = JSON.parse(body) as AnswerBody;
-            try {
-              const result = handlers.answerDecision!(id, parsed);
-              json(res, result.status, result.body);
-            } catch (e: unknown) {
-              console.error('[control-plane] POST /decisions/:id/answer failed:', e);
-              json(res, 503, { error: 'decision index unavailable' });
-            }
-          } catch {
-            json(res, 400, { error: 'invalid JSON body' });
-          }
-        });
-      } else {
-        json(res, 501, { error: 'decision index not configured' });
-      }
     } else if (method === 'POST' && url.pathname.startsWith('/retry/')) {
       const issue = Number(url.pathname.split('/')[2]);
       if (isNaN(issue)) {
@@ -284,14 +249,6 @@ function parseListRankedArgs(searchParams: URLSearchParams): ListRankedArgs {
   const includeSuppressed = searchParams.get('includeSuppressed');
   if (includeSuppressed === 'true') args.includeSuppressed = true;
   return args;
-}
-
-function extractDecisionAnswerId(pathname: string): string | undefined {
-  if (!pathname.startsWith('/decisions/')) return undefined;
-  const rest = pathname.slice('/decisions/'.length);
-  if (!rest.endsWith('/answer')) return undefined;
-  const id = rest.slice(0, -'/answer'.length);
-  return id.length > 0 && !id.includes('/') ? id : undefined;
 }
 
 function json(res: ServerResponse, status: number, body: unknown): void {

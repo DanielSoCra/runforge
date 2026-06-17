@@ -15,6 +15,8 @@ test_paths:
 
 # STACK-AC-OPERATOR-SURFACE-API — Operator Surface Decision API (TypeScript)
 
+> **Implemented scope (slice 7a = READ).** The shipped handlers are `listPendingDecisions` + `getDecisionDetail` (the `code_paths`/`test_paths` above). `answerDecision` is specified below as the target but is **deferred to the answer follow-up**: an answer must resume the parked run via the decision-escalation DecisionResponse transport (`resumeParkedRuns`), not a direct `ledger.answer()` (a parallel ledger write records an answer the resume loop never sees → the run strands). The answer sections below document that target design and are NOT yet in `decision-api.ts`.
+
 ## Pattern
 
 **Pure-ish handler functions returning `{ status, body }`, wired into the control server by a thin route adapter.** The Decision API is three functions — `listPendingDecisions`, `getDecisionDetail`, `answerDecision` — each taking its injected dependency (the decision index `ReadModel` for reads, the `DecisionLedger` for the answer) plus the request params, and returning a typed `{ status: number; body: ... }`. This is chosen over inline route closures (the existing `server.ts` style) precisely so the behavior is unit-testable WITHOUT binding a port or issuing `fetch` — the handler is the unit under test, and the control-server route is a one-line adapter that calls the handler and pipes its result through the existing `json(res, status, body)` writer. It mirrors how the lane-engine and verifier-gate keep the *decision* in a pure function and the *I/O* at the edge.

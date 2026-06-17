@@ -1,28 +1,23 @@
 /**
  * RED behavioral gate for STACK-AC-OPERATOR-SURFACE-API — the daemon control-plane
- * Decision API handler functions (ARCH-AC-OPERATOR-SURFACE).
+ * Decision API READ handlers (ARCH-AC-OPERATOR-SURFACE).
  *
- * These tests inject HAND-ROLLED fakes for the read model and the answerer, so the
- * handlers are exercised WITHOUT a live HTTP server or the native decision-index.
- * They are RED at handoff (the handler bodies throw 'not implemented') and GREEN
- * only when the three handlers implement the L2/L3 contract:
+ * These tests inject a HAND-ROLLED read-model fake, so the handlers are exercised
+ * WITHOUT a live HTTP server or the native decision-index. They pin the L2/L3
+ * read contract:
  *   - list: ranked rows, redaction-by-type (no resolvable ref leaks), 503 on throw
  *   - detail: 200 with the revealed DetailView, 404 unknown, 503 on throw
- *   - answer: chosen_option XOR answer (400), delegate to ledger, 404 unknown,
- *             409 answered-once conflict, 200 applied, 503 on throw
  *
- * DO NOT weaken these tests to make them pass — implement the handlers.
+ * SCOPE (7a): READ ONLY. The operator ANSWER flow is a follow-up that reuses the
+ * existing decision-escalation resume path (a direct ledger write here would
+ * record an answer the resume loop never sees). DO NOT weaken these tests.
  */
 import { describe, it, expect } from 'vitest';
 import type { RankedListItem, DetailView, ListRankedArgs } from '@auto-claude/decision-index';
-import type { AnswerResult } from './decision-escalation/ledger.js';
 import {
   listPendingDecisions,
   getDecisionDetail,
-  answerDecision,
   type DecisionReadModel,
-  type DecisionAnswerer,
-  type AnswerBody,
 } from './decision-api.js';
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
@@ -121,36 +116,6 @@ function throwingReadModel(): DecisionReadModel {
   };
 }
 
-/** An answerer fake recording its call and returning a seeded `AnswerResult`. */
-function fakeAnswerer(result: AnswerResult, sink?: { calls: unknown[] }): DecisionAnswerer {
-  return {
-    answer(decisionId: string, chosenOption: string, answerer: string, now?: string): AnswerResult {
-      sink?.calls.push({ decisionId, chosenOption, answerer, now });
-      return result;
-    },
-  };
-}
-
-/** An answerer fake that throws a named answered-once conflict (matched by name). */
-function conflictingAnswerer(): DecisionAnswerer {
-  return {
-    answer(): AnswerResult {
-      const e = new Error('answer conflicts with one already recorded');
-      e.name = 'AnsweredOnceConflictError';
-      throw e;
-    },
-  };
-}
-
-/** An answerer fake that throws a generic failure (index unavailable). */
-function throwingAnswerer(): DecisionAnswerer {
-  return {
-    answer(): AnswerResult {
-      throw new Error('decision index unavailable');
-    },
-  };
-}
-
 // ── listPendingDecisions ─────────────────────────────────────────────────────
 
 describe('listPendingDecisions', () => {
@@ -215,68 +180,6 @@ describe('getDecisionDetail', () => {
     let res: { status: number; body: unknown } | undefined;
     expect(() => {
       res = getDecisionDetail(throwingReadModel(), 'd-1');
-    }).not.toThrow();
-    expect(res?.status).toBe(503);
-  });
-});
-
-// ── answerDecision ───────────────────────────────────────────────────────────
-
-describe('answerDecision', () => {
-  it('returns 200 and delegates a chosen_option to the ledger', () => {
-    const sink = { calls: [] as unknown[] };
-    const ledger = fakeAnswerer({ applied: true, status: 'answered_pending_source_write' }, sink);
-    const body: AnswerBody = { chosen_option: 'approve', answerer: 'operator' };
-    const res = answerDecision(ledger, 'd-1', body);
-    expect(res.status).toBe(200);
-    expect((res.body as AnswerResult).applied).toBe(true);
-    expect(sink.calls).toHaveLength(1);
-    expect((sink.calls[0] as { chosenOption: string }).chosenOption).toBe('approve');
-  });
-
-  it('accepts a free-form answer and delegates it through the ledger answer path', () => {
-    const sink = { calls: [] as unknown[] };
-    const ledger = fakeAnswerer({ applied: true, status: 'answered_pending_source_write' }, sink);
-    const res = answerDecision(ledger, 'd-1', { answer: 'do the thing', answerer: 'operator' });
-    expect(res.status).toBe(200);
-    expect(sink.calls).toHaveLength(1);
-  });
-
-  it('returns 400 when the body carries BOTH chosen_option and answer', () => {
-    const sink = { calls: [] as unknown[] };
-    const ledger = fakeAnswerer({ applied: true, status: 'x' }, sink);
-    const res = answerDecision(ledger, 'd-1', { chosen_option: 'approve', answer: 'also this' });
-    expect(res.status).toBe(400);
-    // a malformed body must NOT reach the durable ledger transport.
-    expect(sink.calls).toHaveLength(0);
-  });
-
-  it('returns 400 when the body carries NEITHER chosen_option nor answer', () => {
-    const sink = { calls: [] as unknown[] };
-    const ledger = fakeAnswerer({ applied: true, status: 'x' }, sink);
-    const res = answerDecision(ledger, 'd-1', { answerer: 'operator' });
-    expect(res.status).toBe(400);
-    expect(sink.calls).toHaveLength(0);
-  });
-
-  it('returns 404 when the ledger reports the row missing (status unknown)', () => {
-    const ledger = fakeAnswerer({ applied: false, status: 'unknown' });
-    const res = answerDecision(ledger, 'gone', { chosen_option: 'approve' });
-    expect(res.status).toBe(404);
-  });
-
-  it('returns 409 on an answered-once conflict from the ledger', () => {
-    let res: { status: number; body: unknown } | undefined;
-    expect(() => {
-      res = answerDecision(conflictingAnswerer(), 'd-1', { chosen_option: 'reject' });
-    }).not.toThrow();
-    expect(res?.status).toBe(409);
-  });
-
-  it('fail-safe: a throwing ledger (index unavailable) maps to 503, never rethrows', () => {
-    let res: { status: number; body: unknown } | undefined;
-    expect(() => {
-      res = answerDecision(throwingAnswerer(), 'd-1', { chosen_option: 'approve' });
     }).not.toThrow();
     expect(res?.status).toBe(503);
   });
