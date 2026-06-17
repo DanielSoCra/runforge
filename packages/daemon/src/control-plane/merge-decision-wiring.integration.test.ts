@@ -381,6 +381,24 @@ describe('merge-decision live wiring — integrate handler', () => {
     expect(mockIntegrate).not.toHaveBeenCalled();
   });
 
+  it('(e) configured + non-auto decision but decision index DISABLED → fails CLOSED, no silent park, no merge', async () => {
+    // registry present (configured, not widened) but NO decisionManager → there is
+    // no surface to escalate to. The run must fail closed, not silently park and
+    // not merge.
+    const { handlers } = createHandlers({
+      config: { deployment: { id: DEPLOYMENT_ID, profile: {} } },
+      registry: registryNotWidened(),
+      // decisionManager omitted → isEnabled() !== true
+    });
+    const run = makeRun();
+
+    const result = await handlers.integrate!(run);
+
+    expect(result).toBe('failure');
+    expect(mockIntegrate).not.toHaveBeenCalled();
+    expect(run.pausedAtPhase).toBeUndefined(); // no silent park
+  });
+
   it('(c) flag-OFF byte-identity: no config.deployment AND no registry → integrate merges unconditionally, no decision logic', async () => {
     const decision = makeDecisionDouble();
     // No deployment block, no registry param → today's behavior.

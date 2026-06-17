@@ -1013,7 +1013,10 @@ export async function startDaemon(
         if (decisionManager.isEnabled()) {
           try {
             for (const p of await stateMgr.findParkedRuns()) {
-              if (p.pausedAtPhase === 'l2-gate')
+              // l2-gate AND integrate parks are decision-owned: new-work detection
+              // must not double-spawn them. (The integrate-park operator-answer →
+              // re-enter resume itself lands with follow-up #9.)
+              if (p.pausedAtPhase === 'l2-gate' || p.pausedAtPhase === 'integrate')
                 parkedDecisionIssues.add(p.issueNumber);
             }
           } catch (e) {

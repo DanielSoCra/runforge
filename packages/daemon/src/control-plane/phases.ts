@@ -1939,6 +1939,22 @@ export function createPhaseHandlers(
         return 'success';
       }
 
+      // escalate / hold → the change must reach the Operator. Without an ENABLED
+      // decision index there is no surface to escalate to, so parking would strand
+      // the run silently (no approve/reject path). A CONFIGURED deployment must
+      // therefore FAIL CLOSED here (held + visible as a failed run), never silently
+      // park and never fall through to a merge. Enable the decision index to operate
+      // configured deployments. (The operator-answer → re-enter resume lifecycle for
+      // integrate parks lands with follow-up #9, decision-escalation INTEGRATION.)
+      if (decisionManager?.isEnabled() !== true) {
+        console.error(
+          `[integrate] Merge decision for #${workRequest.issueNumber} is ${decision.kind} but the ` +
+            `decision index is disabled — cannot surface it for approval; holding (failing closed). ` +
+            `Enable the decision index to operate configured deployments.`,
+        );
+        return 'failure';
+      }
+
       // escalate / hold → park at integrate and emit a DecisionRequest.
       console.log(
         `[integrate] Merge decision for #${workRequest.issueNumber}: ${decision.kind} (${'reason' in decision ? decision.reason : 'awaiting-independent-review'}) — parking`,
