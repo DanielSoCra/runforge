@@ -164,6 +164,11 @@ export async function answerDecision(
   body: AnswerBody,
 ): Promise<HandlerResult<{ answered: true; chosen_option: string } | ErrorBody>> {
   try {
+    // A malformed request body (JSON `null`, a primitive, an array) is a 400 —
+    // never let it throw on `body.chosen_option` and masquerade as a 503 outage.
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      return { status: 400, body: { error: 'answer body must be an object' } };
+    }
     const detail = deps.readModel.detail(decisionId);
     if (detail === undefined) {
       return { status: 404, body: { error: 'unknown decision' } };

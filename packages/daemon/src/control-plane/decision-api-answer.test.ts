@@ -157,6 +157,20 @@ describe('answerDecision', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('a malformed body (JSON null / non-object) → 400, NOT a 503 outage (codex)', async () => {
+    const rm = fakeReadModel({ 'd-1': detailView('d-1', 'notified') });
+    const { publisher, calls } = recordingPublisher();
+    // a client sending JSON `null` must read as a bad request, never a phantom
+    // index-unavailable 503 (which it would if `body.chosen_option` threw).
+    const res = await answerDecision(
+      deps(rm, publisher),
+      'd-1',
+      null as unknown as { chosen_option?: string },
+    );
+    expect(res.status).toBe(400);
+    expect(calls).toHaveLength(0);
+  });
+
   it('non-answerable status (already answered/terminal) → 409 (never publishes)', async () => {
     const rm = fakeReadModel({ 'd-1': detailView('d-1', 'resumed') });
     const { publisher, calls } = recordingPublisher();

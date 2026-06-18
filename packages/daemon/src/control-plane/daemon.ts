@@ -160,16 +160,21 @@ export interface StartDaemonOptions {
 }
 
 /**
- * Resolve the gate issue number from a decision's `source_url`
+ * Resolve the gate issue's repo coordinates from a decision's `source_url`
  * (`https://github.com/<owner>/<repo>/issues/<n>`), or `null` when it is not a
- * recognizable issue URL. Used to target the DecisionResponse comment at the right
- * gate issue when answering via the resume transport.
+ * recognizable GitHub issue URL. The DecisionResponse must be posted to the
+ * decision's OWN repo (not the seed `config.repo`): `resumeParkedRuns` polls the
+ * run's repo, so a multi-repo deployment answering an imported repo's decision
+ * must target that repo's issue or the answer is never observed.
  */
-function issueNumberFromSourceUrl(sourceUrl: string): number | null {
-  const m = /\/issues\/(\d+)(?:[/?#]|$)/.exec(sourceUrl);
+function repoCoordsFromSourceUrl(
+  sourceUrl: string,
+): { owner: string; repo: string; issueNumber: number } | null {
+  const m = /github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)(?:[/?#]|$)/.exec(sourceUrl);
   if (m === null) return null;
-  const n = Number(m[1]);
-  return Number.isInteger(n) ? n : null;
+  const n = Number(m[3]);
+  if (!Number.isInteger(n)) return null;
+  return { owner: m[1]!, repo: m[2]!, issueNumber: n };
 }
 
 export async function startDaemon(
@@ -1494,15 +1499,22 @@ export async function startDaemon(
                 if (detail === undefined) {
                   throw new Error(`answerDecision: unknown decision ${decisionId}`);
                 }
-                const issueNumber = issueNumberFromSourceUrl(detail.source_url);
-                if (issueNumber === null) {
+                // Post to the decision's OWN repo (from source_url), resolving that
+                // repo's token via the repo manager — NOT the seed config.repo, or a
+                // multi-repo answer lands on the wrong issue and the run strands.
+                const coords = repoCoordsFromSourceUrl(detail.source_url);
+                if (coords === null) {
                   throw new Error(
-                    `answerDecision: could not resolve issue number from ${detail.source_url}`,
+                    `answerDecision: could not resolve repo/issue from ${detail.source_url}`,
                   );
                 }
-                const answerOctokit = new Octokit({
-                  auth: process.env.GITHUB_TOKEN,
-                });
+                const { owner, repo, issueNumber } = coords;
+                const repoId = repoManager?.getRepoId(owner, repo) ?? '';
+                const answerToken =
+                  repoManager !== null && repoId !== ''
+                    ? await repoManager.resolveTokenForRepo(repoId)
+                    : process.env.GITHUB_TOKEN;
+                const answerOctokit = new Octokit({ auth: answerToken });
                 await postDecisionResponse({
                   decisionId,
                   chosenOption,
@@ -1510,8 +1522,8 @@ export async function startDaemon(
                   // matcher anchors on `write_response\b`, so any suffix is recognized.
                   idempotencyKey: `op-${decisionId}`,
                   createComment: (args) => answerOctokit.issues.createComment(args),
-                  owner: config.repo?.owner ?? '',
-                  repo: config.repo?.name ?? '',
+                  owner,
+                  repo,
                   issueNumber,
                 });
               },
