@@ -1,17 +1,13 @@
-// packages/daemon/src/control-plane/merge-decision/build-request.ts
-//
 // buildMergeDecisionRequest — constructs the full `DecisionRequest` the daemon
 // emits when a run PARKS at the `integrate` phase because the merge-decision
 // gate returned `escalate` or `hold` (rather than `auto-merge`). It is the merge
 // path's sibling to `decision-escalation/build-request.ts`'s buildL2GateRequest
-// (the l2-gate authoring-approval request) — SAME shape, SAME schema gate, SAME
-// fail-closed sensitivity policy; only the phase, risk_class derivation, options,
-// and structured context differ.
+// (the l2-gate authoring-approval request) — SAME shape, SAME schema gate;
+// only the phase, risk_class derivation, options, and structured context differ.
 //
-// STUB — Kimi fills the body. The acceptance contract (build-request.test.ts) is
-// IMMOVABLE: the returned object must parse through the REAL DecisionRequestSchema
-// AND pass assertFullyClassified (the schema + the canonical-path completeness
-// check are the gate — never a hand-maintained field list).
+// The acceptance contract (build-request.test.ts) is IMMOVABLE: the returned
+// object must parse through the REAL DecisionRequestSchema (the schema IS the
+// gate — never a hand-maintained field list).
 //
 // Required behaviour (mirror buildL2GateRequest verbatim except where noted):
 //   - phase = 'integrate' (NOT 'l2-gate').
@@ -24,8 +20,6 @@
 //   - run_id = runRef; worker_session_id = run.workerClaimId ?? `run-<n>`.
 //   - deployment = the passed `deployment` string (the registry key / `owner/repo`).
 //   - source_url = the issue URL from run.repoOwner/run.repoName/run.issueNumber.
-//   - field_sensitivity = every canonical SENSITIVITY_FIELD_PATHS entry → 'internal'
-//     (the control-plane carries NO PHI — fail-closed, never 'phi'/'secret').
 //   - SECURITY: context/question carry ONLY structured, known-safe text — NEVER
 //     run.l2Feedback / run.handoffNotes / run.report or raw failure messages, which
 //     can carry arbitrary worker output rendered verbatim by downstream sinks.
@@ -37,9 +31,7 @@
 
 import {
   DecisionRequestSchema,
-  SENSITIVITY_FIELD_PATHS,
   type DecisionRequest,
-  type SensitivityClass,
 } from '@auto-claude/decision-protocol';
 import type { RunState } from '../../types.js';
 import type { MergeDecision } from './types.js';
@@ -89,17 +81,6 @@ function issueUrlFor(run: RunState): string {
   return `https://github.com/${owner}/${repo}/issues/${run.issueNumber}`;
 }
 
-/**
- * Fully-classified field_sensitivity map: every canonical path -> `internal`.
- * Built from `SENSITIVITY_FIELD_PATHS` (the source of truth `assertFullyClassified`
- * checks) so it can never drift out of sync with the protocol.
- */
-function fullSensitivity(): Record<string, SensitivityClass> {
-  const map: Record<string, SensitivityClass> = {};
-  for (const path of SENSITIVITY_FIELD_PATHS) map[path] = 'internal';
-  return map;
-}
-
 export function buildMergeDecisionRequest(
   run: RunState,
   epoch: number,
@@ -147,7 +128,6 @@ export function buildMergeDecisionRequest(
     answer_schema: { kind: 'option' as const },
     resume_mode: 'requeue' as const,
     idempotency_key: decisionId,
-    field_sensitivity: fullSensitivity(),
   };
 
   return DecisionRequestSchema.parse(request);

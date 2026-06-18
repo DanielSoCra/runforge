@@ -80,35 +80,6 @@ function makeRequest(overrides: Record<string, unknown> = {}) {
     answer_schema: { kind: 'option' },
     resume_mode: 'requeue',
     idempotency_key: 'issue-42:l2-gate:1',
-    field_sensitivity: Object.fromEntries(
-      [
-        'decision_id',
-        'protocol_version',
-        'source_url',
-        'source_etag',
-        'source_event_id',
-        'deployment',
-        'run_id',
-        'worker_session_id',
-        'phase',
-        'risk_class',
-        'question',
-        'context',
-        'options[].id',
-        'options[].label',
-        'options[].detail',
-        'recommended_option',
-        'consequence_of_no_answer',
-        'reversibility',
-        'expires_at',
-        'answer_schema',
-        'resume_mode',
-        'idempotency_key',
-        'trace_id',
-        'agent_version',
-        'skill_version',
-      ].map((p) => [p, 'internal']),
-    ),
     ...overrides,
   });
 }
@@ -231,24 +202,12 @@ describe('validateRenderedBlock (fail-closed gate)', () => {
   });
 
   it('rejects a block whose JSON is missing a required field (no false-accept)', () => {
-    // hand-build a block with a request missing `field_sensitivity`
+    // hand-build a block with a request missing `context`
     const bad = { decision_id: 'x', source_url: 'u', deployment: 'd' };
     const block = `${BLOCK_START}\n\`\`\`json\n${JSON.stringify(bad, null, 2)}\n\`\`\`\n${BLOCK_END}`;
     const res = validateRenderedBlock(block);
     expect(res.valid).toBe(false);
     expect(res.reason).toBeTruthy();
-  });
-
-  it('rejects a block with an INCOMPLETE field_sensitivity map (assertFullyClassified)', () => {
-    // schema-shaped but sensitivity map omits several canonical paths
-    const partial = makeRequest();
-    const stripped = {
-      ...partial,
-      field_sensitivity: { decision_id: 'internal' },
-    };
-    const block = `${BLOCK_START}\n\`\`\`json\n${JSON.stringify(stripped, null, 2)}\n\`\`\`\n${BLOCK_END}`;
-    const res = validateRenderedBlock(block);
-    expect(res.valid).toBe(false);
   });
 });
 
@@ -256,10 +215,10 @@ describe('GitHubBlockPublisher.ensure', () => {
   it('FAIL-CLOSED: a malformed/incomplete request is NOT written (no GitHub API call)', async () => {
     const octokit = makeOctokit();
     const pub = new GitHubBlockPublisher();
-    // a request missing field_sensitivity paths fails the fail-closed gate
+    // a request missing required fields fails the fail-closed gate
     const badRequest = {
       ...makeRequest(),
-      field_sensitivity: { decision_id: 'internal' },
+      context: undefined,
     } as unknown as DecisionRequest;
     const res = await pub.ensure({
       request: badRequest,

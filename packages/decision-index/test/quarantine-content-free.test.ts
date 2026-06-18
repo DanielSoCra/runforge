@@ -3,17 +3,11 @@ import { readFileSync, readdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeTempDb, type TempDb, TEST_PROTECTED_KEY } from "./helpers/temp-db.js";
-import { ProtectedStore } from "../src/protected-store.js";
+import { ProtectedStore } from "@auto-claude/sanitizer-redaction";
 import { SqliteQuarantine } from "../src/quarantine.js";
 import { ingest, NotAdmittedError } from "../src/ingest.js";
 import { decisions, quarantineEvents } from "../src/schema.js";
-import { PROTOCOL_VERSION, SENSITIVITY_FIELD_PATHS } from "@auto-claude/decision-protocol";
-
-function baseClassification(): Record<string, string> {
-  const m: Record<string, string> = {};
-  for (const p of SENSITIVITY_FIELD_PATHS) m[p] = "internal";
-  return m;
-}
+import { PROTOCOL_VERSION } from "@auto-claude/decision-protocol";
 
 function rawRequest(overrides: Partial<Record<string, unknown>> = {}): any {
   return {
@@ -40,18 +34,16 @@ function rawRequest(overrides: Partial<Record<string, unknown>> = {}): any {
     trace_id: "trace-1",
     agent_version: "1.0.0",
     skill_version: "0.1.0",
-    field_sensitivity: baseClassification(),
     ...overrides,
   };
 }
 
 /**
- * CRITICAL C2 — the QUARANTINE path must never write a classified phi/secret
- * field value as plaintext into quarantine_events / the SQLite file. The prior
- * fix redacted the ADMITTED path but the failed-admission (quarantine) path
- * still forwarded the RAW request.source_url / request.source_event_id.
+ * CRITICAL C2 — the QUARANTINE path must never write request content as plaintext
+ * into quarantine_events / the SQLite file. Quarantine is content-free: only the
+ * reason and a content-free reference are recorded.
  */
-describe("quarantine is content-free even for classified phi fields (Finding C2)", () => {
+describe("quarantine is content-free (schema-invalid + protocol-version-mismatch only)", () => {
   let protectedDir: string;
   let store: ProtectedStore;
   let t: TempDb;
@@ -85,56 +77,39 @@ describe("quarantine is content-free even for classified phi fields (Finding C2)
     }
   }
 
-  it("incomplete classification + source_url classified phi -> quarantine stores NO source_url plaintext", () => {
-    const PHI_URL = "https://example.test/patient/JohnDoe-DOB-1980-01-02";
-    const PHI_EVENT = "evt-patient-JaneRoe-SSN-000-00-0000";
-    const raw = rawRequest();
-    raw.source_url = PHI_URL;
-    raw.source_event_id = PHI_EVENT;
-    raw.field_sensitivity["source_url"] = "phi";
-    raw.field_sensitivity["source_event_id"] = "phi";
-    // make admission FAIL on the completeness gate (drop an unrelated path)
-    delete raw.field_sensitivity["context"];
+  it("schema-invalid request -> quarantine stores NO request content plaintext", () => {
+    const SENSITIVE_QUESTION = "Patient John Doe SSN 123-45-6789?";
+    const SENSITIVE_CONTEXT = "PHI-VALUE-zzz";
+    const raw = rawRequest({ question: SENSITIVE_QUESTION, context: SENSITIVE_CONTEXT });
+    // Remove a required field so schema validation fails.
+    delete raw.question;
 
     expect(() => ingest(raw, { db: t.db, protectedStore: store, quarantine })).toThrow(
       NotAdmittedError,
     );
     expect(t.db.select().from(decisions).all()).toHaveLength(0);
-    assertNoPlaintext([PHI_URL, PHI_EVENT]);
+    const q = t.db.select().from(quarantineEvents).all();
+    expect(q).toHaveLength(1);
+    expect(q[0]!.reason).toBe("schema_invalid");
+    assertNoPlaintext([SENSITIVE_CONTEXT]);
   });
 
-  it("incomplete classification + source_url UNCLASSIFIED (missing entry) -> fail-closed, quarantine stores NO source_url plaintext", () => {
-    // Residual C2: when field_sensitivity has NO entry for source_url, the prior
-    // quarantineId() returned the RAW value (cls undefined -> not isProtected ->
-    // forwarded). Unknown classification must be treated as SENSITIVE (fail-closed).
-    const UNKNOWN_URL = "https://example.test/patient/UnknownClass-DOB-1975-09-09";
-    const UNKNOWN_EVENT = "evt-unknown-class-SSN-111-22-3333";
-    const raw = rawRequest();
-    raw.source_url = UNKNOWN_URL;
-    raw.source_event_id = UNKNOWN_EVENT;
-    // No explicit class for source_url / source_event_id -> incomplete map.
-    delete raw.field_sensitivity["source_url"];
-    delete raw.field_sensitivity["source_event_id"];
+  it("protocol_version mismatch -> quarantine stores NO request content plaintext", () => {
+    const SENSITIVE_QUESTION = "Patient Jane Roe DOB 1990-03-04?";
+    const SENSITIVE_CONTEXT = "PHI-VALUE-aaa";
+    const raw = rawRequest({
+      protocol_version: "9.9.9",
+      question: SENSITIVE_QUESTION,
+      context: SENSITIVE_CONTEXT,
+    });
 
     expect(() => ingest(raw, { db: t.db, protectedStore: store, quarantine })).toThrow(
       NotAdmittedError,
     );
     expect(t.db.select().from(decisions).all()).toHaveLength(0);
-    assertNoPlaintext([UNKNOWN_URL, UNKNOWN_EVENT]);
-  });
-
-  it("operational-sensitive failure + source_url classified secret -> quarantine stores NO source_url plaintext", () => {
-    const SECRET_URL = "https://example.test/secret-token-abc-99999";
-    const raw = rawRequest();
-    raw.source_url = SECRET_URL;
-    raw.field_sensitivity["source_url"] = "secret";
-    // trigger the operational-sensitive quarantine branch
-    raw.field_sensitivity["run_id"] = "phi";
-
-    expect(() => ingest(raw, { db: t.db, protectedStore: store, quarantine })).toThrow(
-      NotAdmittedError,
-    );
-    expect(t.db.select().from(decisions).all()).toHaveLength(0);
-    assertNoPlaintext([SECRET_URL]);
+    const q = t.db.select().from(quarantineEvents).all();
+    expect(q).toHaveLength(1);
+    expect(q[0]!.reason).toBe("protocol_version_mismatch");
+    assertNoPlaintext([SENSITIVE_CONTEXT]);
   });
 });

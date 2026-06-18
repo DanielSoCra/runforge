@@ -3,17 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeTempDb, type TempDb, TEST_PROTECTED_KEY } from "./helpers/temp-db.js";
-import { ProtectedStore } from "../src/protected-store.js";
+import { ProtectedStore } from "@auto-claude/sanitizer-redaction";
 import { SqliteQuarantine } from "../src/quarantine.js";
 import { ingest, NotAdmittedError } from "../src/ingest.js";
 import { decisions, quarantineEvents } from "../src/schema.js";
-import { PROTOCOL_VERSION, SENSITIVITY_FIELD_PATHS } from "@auto-claude/decision-protocol";
-
-function baseClassification(): Record<string, string> {
-  const m: Record<string, string> = {};
-  for (const p of SENSITIVITY_FIELD_PATHS) m[p] = "internal";
-  return m;
-}
+import { PROTOCOL_VERSION } from "@auto-claude/decision-protocol";
 
 function rawRequest(overrides: Partial<Record<string, unknown>> = {}): any {
   return {
@@ -40,7 +34,6 @@ function rawRequest(overrides: Partial<Record<string, unknown>> = {}): any {
     trace_id: "trace-1",
     agent_version: "1.0.0",
     skill_version: "0.1.0",
-    field_sensitivity: baseClassification(),
     ...overrides,
   };
 }

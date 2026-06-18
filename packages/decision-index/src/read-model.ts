@@ -1,8 +1,11 @@
 import { eq } from "drizzle-orm";
-import type { ItemStatus, SensitivityClass, Reversibility } from "@auto-claude/decision-protocol";
+import type { ItemStatus, Reversibility } from "@auto-claude/decision-protocol";
 import type { Db } from "./db.js";
 import { decisions, auditLog, decisionResponses, protectedRefs } from "./schema.js";
 import { score, type FocusContext } from "./priority.js";
+
+/** Legacy protected-store class label. Kept local so the read model never imports a sanitizer plugin. */
+type ProtectedClass = string;
 
 export interface DecisionView {
   decision_id: string;
@@ -37,11 +40,11 @@ export interface AuditView {
  */
 export type ListField =
   | { kind: "text"; value: string }
-  | { kind: "protected"; field: string; class: SensitivityClass };
+  | { kind: "protected"; field: string; class: ProtectedClass };
 
 export type DetailField =
   | { kind: "text"; value: string }
-  | { kind: "protected"; field: string; class: SensitivityClass; ref: string };
+  | { kind: "protected"; field: string; class: ProtectedClass; ref: string };
 
 export interface ListOption {
   id: string;
@@ -201,35 +204,35 @@ export class ReadModel {
   // ── slice-4 dashboard surface (ADDITIONS; the methods above stay unchanged) ──
 
   /** Map a ulid -> its protected_refs class for a single decision. */
-  private protectedClasses(decisionId: string): Map<string, SensitivityClass> {
-    const m = new Map<string, SensitivityClass>();
+  private protectedClasses(decisionId: string): Map<string, ProtectedClass> {
+    const m = new Map<string, ProtectedClass>();
     for (const ref of this.db
       .select()
       .from(protectedRefs)
       .where(eq(protectedRefs.decision_id, decisionId))
       .all()) {
-      m.set(ref.ulid, ref.class as SensitivityClass);
+      m.set(ref.ulid, ref.class as ProtectedClass);
     }
     return m;
   }
 
   /** Resolve a stored column value to a LIST field (class only, no ref). */
-  private listField(field: string, value: string, classes: Map<string, SensitivityClass>): ListField {
+  private listField(field: string, value: string, classes: Map<string, ProtectedClass>): ListField {
     if (value.startsWith(PROTECTED_PREFIX)) {
       const ulid = value.slice(PROTECTED_PREFIX.length);
-      return { kind: "protected", field, class: classes.get(ulid) ?? ("secret" as SensitivityClass) };
+      return { kind: "protected", field, class: classes.get(ulid) ?? "secret" };
     }
     return { kind: "text", value };
   }
 
   /** Resolve a stored column value to a DETAIL field (carries the resolvable ref). */
-  private detailField(field: string, value: string, classes: Map<string, SensitivityClass>): DetailField {
+  private detailField(field: string, value: string, classes: Map<string, ProtectedClass>): DetailField {
     if (value.startsWith(PROTECTED_PREFIX)) {
       const ulid = value.slice(PROTECTED_PREFIX.length);
       return {
         kind: "protected",
         field,
-        class: classes.get(ulid) ?? ("secret" as SensitivityClass),
+        class: classes.get(ulid) ?? "secret",
         ref: value,
       };
     }

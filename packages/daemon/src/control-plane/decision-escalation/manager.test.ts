@@ -3,16 +3,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as decisionIndex from '@auto-claude/decision-index';
-import { SENSITIVITY_FIELD_PATHS } from '@auto-claude/decision-protocol';
 import { DecisionIndexManager } from './manager.js';
 
 const TEST_PROTECTED_KEY = Buffer.alloc(32).toString('base64');
-
-function fullSensitivity(): Record<string, 'public' | 'internal' | 'phi' | 'secret'> {
-  const map: Record<string, 'public' | 'internal' | 'phi' | 'secret'> = {};
-  for (const p of SENSITIVITY_FIELD_PATHS) map[p] = 'internal';
-  return map;
-}
 
 function makeRequest(): Record<string, unknown> {
   return {
@@ -37,7 +30,6 @@ function makeRequest(): Record<string, unknown> {
     answer_schema: { kind: 'option' },
     resume_mode: 'requeue',
     idempotency_key: 'issue-7:l2-gate:1',
-    field_sensitivity: fullSensitivity(),
   };
 }
 

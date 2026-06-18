@@ -4,7 +4,7 @@ import { makeTempDb, type TempDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { makeOutbox, answerItem } from "./helpers/effect-driver.js";
 import { IndexWriter } from "../src/index-writer.js";
-import { ProtectedStore } from "../src/protected-store.js";
+import { ProtectedStore } from "@auto-claude/sanitizer-redaction";
 import { SqliteQuarantine } from "../src/quarantine.js";
 import { FakeNotifier } from "../src/adapters/fakes/fake-notifier.js";
 import { FakeSourceSink } from "../src/adapters/fakes/fake-source-sink.js";
@@ -97,40 +97,21 @@ describe("IMPORTANT 3 — no fabricated supersede etag (fail-closed instead)", (
       answer_schema: { kind: "option" },
       resume_mode: "requeue",
       idempotency_key: "idem-1",
-      field_sensitivity: undefined,
     };
     if (etag !== undefined) r.source_etag = etag;
     return r;
-  }
-
-  function fullClassification(): Record<string, string> {
-    // imported lazily to avoid a cycle; classify everything internal.
-    const paths = [
-      "decision_id","protocol_version","source_url","source_etag","source_event_id","deployment",
-      "run_id","worker_session_id","phase","risk_class","question","context","options[].id",
-      "options[].label","options[].detail","recommended_option","consequence_of_no_answer",
-      "reversibility","expires_at","answer_schema","resume_mode","idempotency_key","trace_id",
-      "agent_version","skill_version",
-    ];
-    const m: Record<string, string> = {};
-    for (const p of paths) m[p] = "internal";
-    return m;
   }
 
   it("observeRequest: a different-content edit with NO concrete incoming source_etag does NOT fabricate a supersede", () => {
     const w = makeWriter();
     const id = "01HOBS00000000000000000001";
     // admit with a concrete etag.
-    const r1 = rawRequest(id, "etag-original");
-    r1.field_sensitivity = fullClassification();
-    w.observeRequest(r1);
+    w.observeRequest(rawRequest(id, "etag-original"));
     expect(w.reader.get(id)!.status).toBe("detected");
 
     // a re-observation WITHOUT a source_etag (cannot prove a real change) must NOT
     // fabricate `"source-edited"` and supersede. Fail-closed: no supersede.
-    const r2 = rawRequest(id, undefined, "EDITED");
-    r2.field_sensitivity = fullClassification();
-    const out = w.observeRequest(r2);
+    const out = w.observeRequest(rawRequest(id, undefined, "EDITED"));
     expect(out.outcome).not.toBe("superseded");
     const view = w.reader.get(id)!;
     expect(view.status).toBe("detected"); // still non-terminal, not superseded
@@ -140,13 +121,9 @@ describe("IMPORTANT 3 — no fabricated supersede etag (fail-closed instead)", (
   it("observeRequest: a different CONCRETE source_etag supersedes with that exact etag", () => {
     const w = makeWriter();
     const id = "01HOBS00000000000000000002";
-    const r1 = rawRequest(id, "etag-original");
-    r1.field_sensitivity = fullClassification();
-    w.observeRequest(r1);
+    w.observeRequest(rawRequest(id, "etag-original"));
 
-    const r2 = rawRequest(id, "etag-new-concrete", "EDITED");
-    r2.field_sensitivity = fullClassification();
-    const out = w.observeRequest(r2);
+    const out = w.observeRequest(rawRequest(id, "etag-new-concrete", "EDITED"));
     expect(out.outcome).toBe("superseded");
     const view = w.reader.get(id)!;
     expect(view.status).toBe("superseded");

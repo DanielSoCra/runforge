@@ -6,27 +6,8 @@ import {
   DecisionResponseSchema,
   AnswerSchemaSchema,
   PROTOCOL_VERSION,
-  SENSITIVITY_FIELD_PATHS,
-  OPERATIONAL_FIELD_PATHS,
-  REDACTABLE_FIELD_PATHS,
-  assertFullyClassified,
-  IncompleteClassificationError,
-  sensitivityRank,
-  allowedSinks,
   buildDecisionRequestJsonSchema,
 } from "../src/index.js";
-
-/**
- * A fully-valid, fully-classified DecisionRequest used as the base for mutation.
- * `field_sensitivity` must contain every canonical path including nested ones.
- */
-function fullClassification(): Record<string, string> {
-  const map: Record<string, string> = {};
-  for (const p of SENSITIVITY_FIELD_PATHS) {
-    map[p] = "internal";
-  }
-  return map;
-}
 
 function validRequest(): unknown {
   return {
@@ -56,7 +37,6 @@ function validRequest(): unknown {
     trace_id: "trace-1",
     agent_version: "1.2.3",
     skill_version: "0.1.0",
-    field_sensitivity: fullClassification(),
   };
 }
 
@@ -67,84 +47,16 @@ describe("PROTOCOL_VERSION", () => {
 });
 
 describe("DecisionRequest round-trip", () => {
-  it("parses a fully-valid, fully-classified request", () => {
+  it("parses a fully-valid request", () => {
     const parsed = DecisionRequestSchema.parse(validRequest());
     expect(parsed.decision_id).toBe("01HXYZABCDEFGHJKMNPQRSTVWX");
     expect(parsed.options).toHaveLength(2);
-    expect(() => assertFullyClassified(parsed)).not.toThrow();
-  });
-});
-
-describe("sensitivity ordering + sinks", () => {
-  it("orders public < internal < phi < secret", () => {
-    expect(sensitivityRank("public")).toBeLessThan(sensitivityRank("internal"));
-    expect(sensitivityRank("internal")).toBeLessThan(sensitivityRank("phi"));
-    expect(sensitivityRank("phi")).toBeLessThan(sensitivityRank("secret"));
   });
 
-  it("routes phi/secret to protected store only", () => {
-    expect(allowedSinks("public")).toContain("all");
-    expect(allowedSinks("internal")).toContain("all");
-    expect(allowedSinks("phi")).toEqual(["protected"]);
-    expect(allowedSinks("secret")).toEqual(["protected"]);
-  });
-});
-
-describe("assertFullyClassified (fail-closed)", () => {
-  it("throws with the missing TOP-LEVEL path", () => {
-    const req = validRequest() as any;
-    delete req.field_sensitivity["question"];
+  it("parses a request WITHOUT field_sensitivity (content-agnostic ingest)", () => {
+    const req = validRequest() as Record<string, unknown>;
     const parsed = DecisionRequestSchema.parse(req);
-    try {
-      assertFullyClassified(parsed);
-      throw new Error("expected throw");
-    } catch (e) {
-      expect(e).toBeInstanceOf(IncompleteClassificationError);
-      expect((e as IncompleteClassificationError).missingPaths).toContain("question");
-    }
-  });
-
-  it("throws with the missing NESTED options[].label path", () => {
-    const req = validRequest() as any;
-    delete req.field_sensitivity["options[].label"];
-    const parsed = DecisionRequestSchema.parse(req);
-    try {
-      assertFullyClassified(parsed);
-      throw new Error("expected throw");
-    } catch (e) {
-      expect(e).toBeInstanceOf(IncompleteClassificationError);
-      expect((e as IncompleteClassificationError).missingPaths).toContain("options[].label");
-    }
-  });
-
-  it("a partial map is invalid even if other paths are present", () => {
-    const req = validRequest() as any;
-    req.field_sensitivity = { decision_id: "internal" };
-    const parsed = DecisionRequestSchema.parse(req);
-    expect(() => assertFullyClassified(parsed)).toThrow(IncompleteClassificationError);
-  });
-});
-
-describe("source_url is operational (A8/C4)", () => {
-  it("source_url is in OPERATIONAL_FIELD_PATHS (never redactable)", () => {
-    expect(OPERATIONAL_FIELD_PATHS).toContain("source_url");
-  });
-  it("source_url is NOT in REDACTABLE_FIELD_PATHS", () => {
-    expect(REDACTABLE_FIELD_PATHS).not.toContain("source_url");
-  });
-});
-
-describe("deployment is operational (CRITICAL 1)", () => {
-  // The read model + dashboard render `deployment` as a plain queryable string
-  // (filter dropdown / card / detail). If it were ever classified phi/secret it
-  // would become a `protected://<ulid>` ref rendered as a plaintext token (or
-  // break the filter). So like source_url it must be an OPERATIONAL field —
-  // classifying it phi/secret is rejected at ingest, never redacted.
-  it("deployment is in OPERATIONAL_FIELD_PATHS (never redactable)", () => {
-    expect(OPERATIONAL_FIELD_PATHS).toContain("deployment");
-  });
-  it("deployment is NOT in REDACTABLE_FIELD_PATHS", () => {
-    expect(REDACTABLE_FIELD_PATHS).not.toContain("deployment");
+    expect(parsed.decision_id).toBe("01HXYZABCDEFGHJKMNPQRSTVWX");
   });
 });
 
@@ -186,10 +98,6 @@ describe("DecisionResponse", () => {
     expect(r.answer).toEqual({ foo: "bar" });
   });
 
-  // FIX (verdict fix_before_flag_on / decision-response.ts:8): the schema used
-  // z.object() (allows extras) + at-least-one refine, so a {both} payload was
-  // valid-but-ambiguous and unknown extras passed silently. Harden to
-  // z.strictObject() + XOR (exactly one of chosen_option / answer).
   it("REJECTS a payload carrying BOTH chosen_option and answer (XOR)", () => {
     expect(() =>
       DecisionResponseSchema.parse({

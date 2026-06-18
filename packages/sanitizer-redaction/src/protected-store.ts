@@ -10,9 +10,10 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { ulid } from "ulid";
-import type { SensitivityClass } from "@auto-claude/decision-protocol";
-import type { Db } from "./db.js";
+import { type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { protectedRefs } from "./schema.js";
+
+export type Db = BetterSQLite3Database<any>;
 
 export class ProtectedIntegrityError extends Error {
   constructor(message: string) {
@@ -33,15 +34,15 @@ export interface ProtectedStoreOptions {
 export interface PutArgs {
   decision_id: string;
   field: string;
-  class: SensitivityClass;
+  class: string;
   plaintext: string;
 }
 
 const REF_PREFIX = "protected://";
 const ALGO = "aes-256-gcm";
-const MAGIC = Buffer.from("PMPS2\0"); // versioned blob header (v2: HKDF subkeys + AAD binding)
+const MAGIC = Buffer.from("PMPS2\0");
 const HKDF_HASH = "sha256";
-const SALT = Buffer.from("pm-cockpit-protected-store"); // fixed, non-secret HKDF salt
+const SALT = Buffer.from("pm-cockpit-protected-store");
 
 interface BoundMeta {
   ulid: string;
@@ -50,23 +51,6 @@ interface BoundMeta {
   class: string;
 }
 
-/**
- * Encrypted, integrity-protected store for phi/secret values. The SQLite index
- * holds only `protected://<ulid>` + class (via protected_refs). Blobs live as
- * files OUTSIDE SQLite, each carrying its own keyed-HMAC integrity tag so a
- * plaintext hash never needs to live in the DB.
- *
- * Crypto (Finding 8):
- *  - The master key is NEVER used directly. Three independent subkeys are
- *    derived via HKDF: encKey (AES-256-GCM), macKey (blob HMAC), respKey
- *    (response-hash HMAC). Same-key-for-cipher-and-MAC is avoided.
- *  - The stable metadata (ulid|decision_id|field|class) is bound as BOTH the
- *    GCM AAD and the HMAC input, so a relabelled/relocated blob fails to
- *    decrypt/verify (no confused-deputy).
- *
- * Blob layout: MAGIC | iv(12) | gcmTag(16) | hmac(32) | ciphertext
- * AAD = MAGIC | meta;  HMAC covers MAGIC | meta | iv | gcmTag | ciphertext.
- */
 export class ProtectedStore {
   private readonly encKey: Buffer;
   private readonly macKey: Buffer;
@@ -91,12 +75,10 @@ export class ProtectedStore {
     mkdirSync(this.dir, { recursive: true });
   }
 
-  /** HKDF-derive a 32-byte subkey from the master key for a labelled purpose. */
   private subkey(master: Buffer, label: string): Buffer {
     return Buffer.from(hkdfSync(HKDF_HASH, master, SALT, Buffer.from(`pmps:${label}`), 32));
   }
 
-  /** Canonical, length-prefixed encoding of the bound metadata. */
   private metaBytes(m: BoundMeta): Buffer {
     const parts = [m.ulid, m.decision_id, m.field, m.class];
     const chunks: Buffer[] = [];
@@ -150,13 +132,6 @@ export class ProtectedStore {
     return REF_PREFIX + id;
   }
 
-  /**
-   * Keyed-HMAC over canonical content, using a subkey distinct from the cipher
-   * and blob-MAC keys. Used for the answered-once response hash so a low-entropy
-   * PHI/secret answer never yields a guessable plaintext-derived (bare SHA-256)
-   * hash in SQLite (Finding 3 / §61). Deterministic -> idempotent replay still
-   * matches.
-   */
   responseHmac(canonical: string): string {
     return createHmac("sha256", this.respKey).update(canonical).digest("hex");
   }
@@ -179,7 +154,6 @@ export class ProtectedStore {
     return true;
   }
 
-  /** Look up the bound metadata for a ref from protected_refs. */
   private metaOf(id: string): BoundMeta {
     const row = this.db
       .select()

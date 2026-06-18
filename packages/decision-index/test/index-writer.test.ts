@@ -4,20 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeTempDb, type TempDb, TEST_PROTECTED_KEY } from "./helpers/temp-db.js";
 import { IndexWriter } from "../src/index-writer.js";
-import { ProtectedStore } from "../src/protected-store.js";
+import { ProtectedStore } from "@auto-claude/sanitizer-redaction";
 import { SqliteQuarantine } from "../src/quarantine.js";
 import { FakeNotifier } from "../src/adapters/fakes/fake-notifier.js";
 import { FakeSourceSink } from "../src/adapters/fakes/fake-source-sink.js";
 import { FakeResumeDispatcher } from "../src/adapters/fakes/fake-resume-dispatcher.js";
-import { PROTOCOL_VERSION, SENSITIVITY_FIELD_PATHS } from "@auto-claude/decision-protocol";
+import { PROTOCOL_VERSION } from "@auto-claude/decision-protocol";
 
 const NOW = "2026-05-27T03:00:00.000Z";
-
-function fullClassification(): Record<string, string> {
-  const m: Record<string, string> = {};
-  for (const p of SENSITIVITY_FIELD_PATHS) m[p] = "internal";
-  return m;
-}
 
 function rawRequest(id: string): unknown {
   return {
@@ -41,7 +35,6 @@ function rawRequest(id: string): unknown {
     answer_schema: { kind: "option" },
     resume_mode: "mid_run",
     idempotency_key: "idem-1",
-    field_sensitivity: fullClassification(),
   };
 }
 
@@ -146,19 +139,6 @@ describe("IndexWriter facade", () => {
     // exactly ONE `opened` event — the answer path did not re-open the viewed item.
     const opens = writer.reader.audit(decision_id).filter((a) => a.event === "opened");
     expect(opens).toHaveLength(1);
-  });
-
-  it("admit redacts phi before the first SQLite write (no plaintext in file)", () => {
-    const raw = rawRequest("01HXYZABCDEFGHJKMNPQRSTV98") as any;
-    raw.context = "PHI-VALUE-zzz";
-    raw.field_sensitivity["context"] = "phi";
-    writer.admit(raw);
-    t.db.$client.pragma("wal_checkpoint(TRUNCATE)");
-    const files = readdirSync(t.dir).filter((f) => f.includes(".sqlite"));
-    for (const f of files) {
-      const bytes = require("node:fs").readFileSync(join(t.dir, f)).toString("latin1");
-      expect(bytes.includes("PHI-VALUE-zzz")).toBe(false);
-    }
   });
 
   it("the public package surface exports only the reader for non-writers (no raw write internals)", async () => {

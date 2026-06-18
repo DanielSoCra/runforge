@@ -47,13 +47,9 @@ export {
   type PriorityResult,
 } from "./priority.js";
 
-// Protected store + quarantine are construction-time dependencies of IndexWriter.
-export {
-  ProtectedStore,
-  ProtectedIntegrityError,
-  defaultProtectedDir,
-  type ProtectedStoreOptions,
-} from "./protected-store.js";
+// Protected store is an internal construction-time dependency of IndexWriter;
+// it is intentionally NOT exported from the package surface. Redaction/sanitization
+// plugins live in separate packages selected per deployment.
 export {
   SqliteQuarantine,
   FakeQuarantine,

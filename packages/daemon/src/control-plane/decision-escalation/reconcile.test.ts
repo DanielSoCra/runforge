@@ -6,7 +6,6 @@ import {
   createIndexWriter,
   type IndexWriter,
 } from '@auto-claude/decision-index';
-import { SENSITIVITY_FIELD_PATHS } from '@auto-claude/decision-protocol';
 import { LogNotifier, RecordingSourceSink, AckResumeDispatcher } from './adapters.js';
 import { DecisionLedger } from './ledger.js';
 import { bootReconcile, supersedeIfMoot, markOverdue } from './reconcile.js';
@@ -14,12 +13,6 @@ import type { DecisionIndexManager } from './manager.js';
 
 const TEST_PROTECTED_KEY = Buffer.alloc(32).toString('base64');
 const FIXED_NOW = '2026-06-02T00:00:00.000Z';
-
-function fullSensitivity(): Record<string, 'public' | 'internal' | 'phi' | 'secret'> {
-  const map: Record<string, 'public' | 'internal' | 'phi' | 'secret'> = {};
-  for (const p of SENSITIVITY_FIELD_PATHS) map[p] = 'internal';
-  return map;
-}
 
 function makeRequest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -45,7 +38,6 @@ function makeRequest(overrides: Record<string, unknown> = {}): Record<string, un
     answer_schema: { kind: 'option' },
     resume_mode: 'requeue',
     idempotency_key: 'issue-42:l2-gate:1',
-    field_sensitivity: fullSensitivity(),
     ...overrides,
   };
 }
