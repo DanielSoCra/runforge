@@ -4,7 +4,7 @@ import { getDashboardHtml } from './dashboard.js';
 import { readResults } from './results.js';
 import type { ReleaseProposalResult } from './release.js';
 import type { ListRankedArgs, ListFilters, RankedListItem, DetailView } from '@auto-claude/decision-index';
-import type { HandlerResult, ErrorBody } from './decision-api.js';
+import type { HandlerResult, ErrorBody, AnswerBody } from './decision-api.js';
 
 export interface ControlHandlers {
   getStatus: () => unknown;
@@ -20,6 +20,10 @@ export interface ControlHandlers {
   submitIdea?: (submittedBy: string, description: string) => Promise<{ id: string }>;
   listPendingDecisions?: (query: ListRankedArgs) => HandlerResult<RankedListItem[] | ErrorBody>;
   getDecisionDetail?: (id: string) => HandlerResult<DetailView | ErrorBody>;
+  answerDecision?: (
+    id: string,
+    body: AnswerBody,
+  ) => Promise<HandlerResult<{ answered: true; chosen_option: string } | ErrorBody>>;
   stateDir?: string;
 }
 
@@ -191,6 +195,55 @@ export function createControlServer(
           console.error('[control-plane] GET /decisions/:id failed:', e);
           json(res, 503, { error: 'decision index unavailable' });
         }
+      } else {
+        json(res, 501, { error: 'decision index not configured' });
+      }
+    } else if (
+      method === 'POST' &&
+      url.pathname.startsWith('/decisions/') &&
+      url.pathname.endsWith('/answer')
+    ) {
+      if (handlers.answerDecision) {
+        // Path is `/decisions/<id>/answer`; the id contains colons (e.g.
+        // `issue-42:l2-gate:1`), URL-encoded by the client. Strip the prefix and
+        // the `/answer` suffix, then decode — a malformed escape or empty id is a
+        // bad id → 404, never a 500 (mirrors the GET detail decode).
+        const encoded = url.pathname.slice('/decisions/'.length, -'/answer'.length);
+        let id: string;
+        try {
+          id = decodeURIComponent(encoded);
+        } catch {
+          json(res, 404, { error: 'not found' });
+          return;
+        }
+        if (id.length === 0) {
+          json(res, 404, { error: 'not found' });
+          return;
+        }
+        const MAX_BODY = 10240; // 10KB
+        let rawBody = '';
+        let oversize = false;
+        req.on('data', (chunk: Buffer) => {
+          rawBody += chunk.toString();
+          if (rawBody.length > MAX_BODY) oversize = true;
+        });
+        req.on('error', () => { json(res, 400, { error: 'request error' }); });
+        req.on('end', () => {
+          if (oversize) { json(res, 413, { error: 'body too large' }); return; }
+          let parsed: AnswerBody;
+          try {
+            parsed = JSON.parse(rawBody) as AnswerBody;
+          } catch {
+            json(res, 400, { error: 'invalid JSON body' });
+            return;
+          }
+          handlers.answerDecision!(id, parsed).then((result) => {
+            json(res, result.status, result.body);
+          }).catch((e: unknown) => {
+            console.error('[control-plane] POST /decisions/:id/answer failed:', e);
+            json(res, 503, { error: 'decision index unavailable' });
+          });
+        });
       } else {
         json(res, 501, { error: 'decision index not configured' });
       }

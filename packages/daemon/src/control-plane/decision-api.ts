@@ -6,13 +6,14 @@
  * pending-decisions inbox and read a single decision in full (server-side reveal)
  * — the backend prerequisite that unblocks the surface (ARCH-AC-OPERATOR-SURFACE).
  *
- * SCOPE (7a): READ ONLY. The operator ANSWER flow is intentionally NOT a parallel
- * ledger-write here — an answer must resume the parked run, and the proven resume
- * engine (`resumeParkedRuns`) is driven by the decision-escalation
- * DecisionResponse transport, not a direct `ledger.answer()`. Routing an answer
- * through a second path would record an answer the resume loop never sees (the run
- * strands). The answer flow therefore lands in a follow-up that reuses the
- * existing decision-escalation resume path (FUNC-AC-DECISION-ESCALATION).
+ * ANSWER (7c): the operator ANSWER flow is NOT a parallel ledger-write — an answer
+ * must resume the parked run, and the proven resume engine (`resumeParkedRuns`) is
+ * driven by the decision-escalation DecisionResponse transport, not a direct
+ * `ledger.answer()`. Routing an answer through a second path would record an answer
+ * the resume loop never sees (the run strands). So `answerDecision` validates the
+ * chosen option against the decision's detail and POSTS a DecisionResponse comment
+ * (via the injected publisher) that the EXISTING `resumeParkedRuns` loop recognizes
+ * on its next tick — ZERO change to `resumeParkedRuns`/`parseCockpitAnswer`.
  *
  * Each handler takes its NARROW read-model dependency plus request params and
  * returns a typed `{ status, body }`, so the behavior is unit-testable WITHOUT
@@ -100,6 +101,91 @@ export function getDecisionDetail(
       return { status: 404, body: { error: 'unknown decision' } };
     }
     return { status: 200, body: view };
+  } catch {
+    return { status: 503, body: { error: 'decision index unavailable' } };
+  }
+}
+
+// ── answerDecision (7c) ──────────────────────────────────────────────────────
+
+/**
+ * The answer request body. The operator surface submits exactly one
+ * `chosen_option` that must be one of the decision's offered options. (The free-
+ * form `answer` slot from the prior direct-ledger design is not part of the
+ * resume-transport answer: the resume loop's `parseCockpitAnswer` recognizes a
+ * `chosen_option` only.)
+ */
+export interface AnswerBody {
+  chosen_option?: string;
+}
+
+/**
+ * The statuses a decision may be answered from — the awaiting-Operator set. A
+ * decision that is `detected` (not yet surfaced) or anything from `answered_*`
+ * onward (answered / in-flight / terminal) is NOT answerable: an answer then is a
+ * `409` conflict (the answered-once / out-of-band-resolved invariant). Mirrors
+ * `PENDING_DECISION_STATUSES` — the only statuses that carry a meaningful answer.
+ */
+export const ANSWERABLE_DECISION_STATUSES: readonly string[] = ['notified', 'viewed'];
+
+/**
+ * The narrow publisher dependency `answerDecision` needs: post the DecisionResponse
+ * comment the resume loop recognizes. Injected so the handler is unit-testable
+ * WITHOUT GitHub (the gate fakes it) and so the handler holds NO ledger-write
+ * authority — it can only publish the comment transport the resume loop drives.
+ * `decisionId` carries the issue/epoch the publisher resolves the gate issue from.
+ */
+export interface DecisionAnswerPublisher {
+  publish(args: { decisionId: string; chosenOption: 'approve' | 'reject' }): Promise<void>;
+}
+
+/** The dependencies `answerDecision` injects: the read-model (for validation) + the publisher. */
+export interface AnswerDeps {
+  readModel: DecisionReadModel;
+  publisher: DecisionAnswerPublisher;
+}
+
+/**
+ * POST /decisions/:id/answer — record the Operator's answer by POSTING a
+ * DecisionResponse the resume loop recognizes (NEVER a direct `ledger.answer()`).
+ *
+ *   (a) look up the decision's `detail`; unknown id → `404`;
+ *   (b) only answerable when status ∈ {notified, viewed}, else `409` (conflict);
+ *   (c) validate `body.chosen_option` is present AND one of the decision's
+ *       `options[].id`; absent/invalid → `400`;
+ *   (d) publish the DecisionResponse via the injected publisher; return `200`.
+ *
+ * FAIL-SAFE: any throw (read-model disabled/broken, publisher GitHub error) →
+ * `503`; the handler never rethrows, so a wired route can never crash the server.
+ */
+export async function answerDecision(
+  deps: AnswerDeps,
+  decisionId: string,
+  body: AnswerBody,
+): Promise<HandlerResult<{ answered: true; chosen_option: string } | ErrorBody>> {
+  try {
+    const detail = deps.readModel.detail(decisionId);
+    if (detail === undefined) {
+      return { status: 404, body: { error: 'unknown decision' } };
+    }
+    if (!ANSWERABLE_DECISION_STATUSES.includes(detail.status)) {
+      return { status: 409, body: { error: 'decision is not answerable' } };
+    }
+    const chosen = body.chosen_option;
+    if (
+      chosen === undefined ||
+      !detail.options.some((option) => option.id === chosen)
+    ) {
+      return {
+        status: 400,
+        body: { error: 'chosen_option must be one of the decision options' },
+      };
+    }
+    await deps.publisher.publish({
+      decisionId,
+      chosenOption: chosen as 'approve' | 'reject',
+    });
+    return { status: 200, body: { answered: true, chosen_option: chosen } };
   } catch {
     return { status: 503, body: { error: 'decision index unavailable' } };
   }

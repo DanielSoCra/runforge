@@ -208,12 +208,20 @@ ARCH-AC-OPERATOR-SURFACE:
   related: [ARCH-AC-DECISION-ESCALATION, ARCH-AC-OPERATOR-AUTH, ARCH-AC-DASHBOARD]
   status: draft
 
+# answer flow (slice 7c) added 2026-06-18: Option A — the answer POSTS a
+# DecisionResponse comment the existing resumeParkedRuns loop recognizes (never a
+# direct ledger.answer). answer-publisher.ts is the transport (pure builder +
+# injected post); answerDecision (decision-api.ts) validates option/status then
+# publishes.
 STACK-AC-OPERATOR-SURFACE-API:
   parent: ARCH-AC-OPERATOR-SURFACE
   code_paths:
     - packages/daemon/src/control-plane/decision-api.ts
+    - packages/daemon/src/control-plane/decision-escalation/answer-publisher.ts
   test_paths:
     - packages/daemon/src/control-plane/decision-api.test.ts
+    - packages/daemon/src/control-plane/decision-api-answer.test.ts
+    - packages/daemon/src/control-plane/decision-escalation/answer-publisher.test.ts
   status: draft
 
 # Operator Surface Client (dashboard) — L3 authored 2026-06-18 (slice 7b: the

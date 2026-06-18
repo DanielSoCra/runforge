@@ -52,7 +52,9 @@ import {
 import {
   listPendingDecisions,
   getDecisionDetail,
+  answerDecision,
 } from './decision-api.js';
+import { postDecisionResponse } from './decision-escalation/answer-publisher.js';
 import {
   parseCockpitAnswer,
   isDecisionOwnedIssue,
@@ -155,6 +157,19 @@ export interface StartDaemonOptions {
    * coverage). Production constructs one from `readDecisionIndexConfig(stateDir)`.
    */
   decisionManager?: DecisionIndexManager;
+}
+
+/**
+ * Resolve the gate issue number from a decision's `source_url`
+ * (`https://github.com/<owner>/<repo>/issues/<n>`), or `null` when it is not a
+ * recognizable issue URL. Used to target the DecisionResponse comment at the right
+ * gate issue when answering via the resume transport.
+ */
+function issueNumberFromSourceUrl(sourceUrl: string): number | null {
+  const m = /\/issues\/(\d+)(?:[/?#]|$)/.exec(sourceUrl);
+  if (m === null) return null;
+  const n = Number(m[1]);
+  return Number.isInteger(n) ? n : null;
 }
 
 export async function startDaemon(
@@ -1462,6 +1477,49 @@ export async function startDaemon(
         listPendingDecisions(decisionManager.ledger().reader, query),
       getDecisionDetail: (id) =>
         getDecisionDetail(decisionManager.ledger().reader, id),
+      // ANSWER (7c). Option A: the operator answer POSTS a DecisionResponse comment
+      // that the existing `resumeParkedRuns` loop recognizes on its next tick — NOT
+      // a direct `ledger.answer()` (which would record an answer the resume loop
+      // never sees and strand the run). The read model is resolved lazily inside the
+      // handler (`.ledger()` throws → mapped to 503). The publisher resolves the gate
+      // issue from the decision's `source_url` and posts via the run's octokit.
+      answerDecision: (id, body) =>
+        answerDecision(
+          {
+            readModel: decisionManager.ledger().reader,
+            publisher: {
+              async publish({ decisionId, chosenOption }) {
+                const reader = decisionManager.ledger().reader;
+                const detail = reader.detail(decisionId);
+                if (detail === undefined) {
+                  throw new Error(`answerDecision: unknown decision ${decisionId}`);
+                }
+                const issueNumber = issueNumberFromSourceUrl(detail.source_url);
+                if (issueNumber === null) {
+                  throw new Error(
+                    `answerDecision: could not resolve issue number from ${detail.source_url}`,
+                  );
+                }
+                const answerOctokit = new Octokit({
+                  auth: process.env.GITHUB_TOKEN,
+                });
+                await postDecisionResponse({
+                  decisionId,
+                  chosenOption,
+                  // a deterministic, operator-surface idempotency suffix; the resume
+                  // matcher anchors on `write_response\b`, so any suffix is recognized.
+                  idempotencyKey: `op-${decisionId}`,
+                  createComment: (args) => answerOctokit.issues.createComment(args),
+                  owner: config.repo?.owner ?? '',
+                  repo: config.repo?.name ?? '',
+                  issueNumber,
+                });
+              },
+            },
+          },
+          id,
+          body,
+        ),
     },
     daemonHost,
   );
