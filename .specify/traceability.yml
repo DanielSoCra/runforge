@@ -136,11 +136,24 @@ ARCH-AC-DECISION-ESCALATION:
   children: [STACK-AC-DECISION-ESCALATION-STORE, STACK-AC-DECISION-ESCALATION-EMITTER]
   status: draft
 
-# Sanitization architecture (input-boundary content sanitization). L3
-# STACK-AC-SANITIZATION + code_paths land with the @auto-claude/sanitization
-# package (Slice 2); the path-existence validator requires real files first.
+# Sanitization architecture (input-boundary content sanitization).
 ARCH-AC-SANITIZATION:
   parent: FUNC-AC-DECISION-ESCALATION
+  children: [STACK-AC-SANITIZATION]
+  status: draft
+
+STACK-AC-SANITIZATION:
+  parent: ARCH-AC-SANITIZATION
+  code_paths:
+    - packages/sanitization/src/types.ts
+    - packages/sanitization/src/config.ts
+    - packages/sanitization/src/pipeline.ts
+    - packages/sanitization/src/registry.ts
+    - packages/sanitization/src/index.ts
+  test_paths:
+    - packages/sanitization/test/pipeline.test.ts
+    - packages/sanitization/test/registry.test.ts
+    - packages/sanitization/test/config.test.ts
   status: draft
 
 # code_paths/test_paths wired in once the implementation landed the files (the
