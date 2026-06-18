@@ -1,5 +1,11 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+
+// The inbox mounts the per-row answer control, which calls useRouter().refresh()
+// on a successful answer — mock next/navigation so it renders without an
+// app-router context in jsdom.
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+
 import {
   DecisionInbox,
   type RankedListItem,

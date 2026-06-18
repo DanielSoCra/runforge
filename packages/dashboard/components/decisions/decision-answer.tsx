@@ -28,6 +28,7 @@
  */
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -211,6 +212,7 @@ export function DecisionAnswer({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [answered, setAnswered] = useState(false);
+  const router = useRouter();
 
   async function handleAnswer(decisionId: string, chosenOption: string) {
     setPending(true);
@@ -226,6 +228,11 @@ export function DecisionAnswer({
     if (result.ok) {
       setAnswered(true);
       onAnswered?.(decisionId);
+      // Re-fetch the server-rendered inbox: the answered decision is no longer
+      // notified/viewed, so the next /decisions/pending drops it. Without this, on
+      // the live Steering page (no onAnswered parent) the row would linger until a
+      // manual reload.
+      router.refresh();
       return;
     }
 
