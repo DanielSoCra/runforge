@@ -128,12 +128,19 @@ FUNC-AC-RUNTIME-SOURCE-ISOLATION:
 # v-next: amended to v2 (operator notes + run verbs); v2.2 re-approved by the
 # Operator 2026-06-14 alongside the L0 v6 delta enactment.
 FUNC-AC-DECISION-ESCALATION:
-  children: [ARCH-AC-DECISION-ESCALATION]
-  status: approved
+  children: [ARCH-AC-DECISION-ESCALATION, ARCH-AC-SANITIZATION]
+  status: draft
 
 ARCH-AC-DECISION-ESCALATION:
   parent: FUNC-AC-DECISION-ESCALATION
   children: [STACK-AC-DECISION-ESCALATION-STORE, STACK-AC-DECISION-ESCALATION-EMITTER]
+  status: draft
+
+# Sanitization architecture (input-boundary content sanitization). L3
+# STACK-AC-SANITIZATION + code_paths land with the @auto-claude/sanitization
+# package (Slice 2); the path-existence validator requires real files first.
+ARCH-AC-SANITIZATION:
+  parent: FUNC-AC-DECISION-ESCALATION
   status: draft
 
 # code_paths/test_paths wired in once the implementation landed the files (the

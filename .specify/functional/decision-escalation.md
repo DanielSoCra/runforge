@@ -2,8 +2,8 @@
 id: FUNC-AC-DECISION-ESCALATION
 type: functional
 domain: auto-claude
-status: approved
-version: 2
+status: draft
+version: 3
 layer: 1
 ---
 
@@ -14,6 +14,8 @@ layer: 1
 > **Spec history (v2.1, 2026-06-11, alignment interview):** Adds the **technology-selection / baseline-decision class** to the always-escalate set, with a shape requirement: a request of this class must arrive as a researched decision brief — a highly informed set of options with trade-offs and a recommendation the Operator can decide from directly. Day-to-day implementation choices (naming, schemas, code structure) are explicitly excluded from escalation; they are the platform's to make and record.
 >
 > **Spec history (v2.2, 2026-06-14, L0 v6 enactment):** Re-approval pass, no content change. The Operator re-approves the v2/v2.1 content alongside the L0 v6 delta enactment; the always-escalate set defined here (including the technology-selection class) is the set L0 v6's pre-approved earn-in auto-promotion is explicitly barred from crossing. This sets `status: approved`.
+>
+> **Spec history (v3, 2026-06-18, confidentiality becomes a configurable capability):** Content confidentiality changes from an always-on guarantee to a **capability that is off by default**. The platform recognizes and withholds confidential or secret content only where a deployment has been set up for it; with none set up, decision content is recorded and shown as provided. Rationale: the prior always-on rule was domain baggage carried in from another product and did nothing for the default deployment; recognizing sensitive content belongs to how a deployment is set up, not a rule every request must satisfy. The always-escalate set (the technology-selection class) is unchanged. `status: draft` pending Operator re-approval.
 
 ## Problem Statement
 
@@ -64,10 +66,15 @@ The same need exists in the other direction. Today the Operator can only influen
 - When the run proceeds
 - Then it makes such choices itself and records them in its work; routine development choices never become decision requests, and the technology-selection class is never widened to cover them — the class exists for foundations, not for the day-to-day
 
-**Scenario: Sensitive content is withheld**
-- Given a decision request would carry confidential or secret information
-- When the request is recorded or shown anywhere
+**Scenario: Sensitive content is withheld when the platform is set up to recognize it**
+- Given the platform has been set up, for a given deployment, to recognize confidential or secret information in incoming decision content
+- When a decision request would carry such content
 - Then that content is kept out of the shared item and its notifications, and is revealed only to the authorized Operator when viewing the request
+
+**Scenario: Content is recorded as provided when no recognition is set up**
+- Given the platform has not been set up to recognize confidential or secret content for a deployment
+- When a decision request is recorded
+- Then its content is recorded and shown as provided, with nothing withheld
 
 **Scenario: Unanswered request is re-surfaced**
 - Given a decision request has passed its deadline with no answer
@@ -130,7 +137,7 @@ The same need exists in the other direction. Today the Operator can only influen
 - The Operator answers with a single choice, and the run continues or restarts without further intervention
 - An answer takes effect exactly once, even when submitted more than once or from more than one place
 - Baseline technology decisions reach the Operator as decision-brief-shaped requests — researched options, trade-offs, a recommendation — and are never made autonomously; ordinary day-to-day implementation choices never reach the inbox as decisions
-- Confidential and secret content never appears in shared items, notifications, or run history
+- Where the platform has been set up to recognize confidential or secret content, that content never appears in shared items, notifications, or run history and is shown only to the authorized Operator; where it has not, content is recorded and shown as provided
 - No decision request is silently lost; each one ends answered, withdrawn, or overdue-and-re-surfaced
 - A coordinator overseeing several teams can read, prioritize, and route any team's request and its answer without knowing that team's internals
 - The Operator can steer a heading-wrong run without killing it: a note reaches exactly the run it addresses, exactly once, at its next phase boundary, and demonstrably changes what the run does from there
@@ -142,7 +149,7 @@ The same need exists in the other direction. Today the Operator can only influen
 - A run must not continue or repeat any work before the Operator's answer has been durably recorded
 - The Operator must always be told whether answering continues the exact run or restarts it, so a possible repeat of partial work is never a surprise
 - Decisions that are hard to reverse or that cause effects outside the system must be marked as such in the request
-- Confidential and secret information carried in a request must follow the same confidentiality rules as the rest of the system and never be exposed to anyone but the authorized Operator
+- Recognizing and withholding confidential or secret content is a capability the platform applies only where a deployment has been set up for it, and is not applied by default; where it is applied, such content must follow the same confidentiality rules as the rest of the system and never be exposed to anyone but the authorized Operator
 - A decision request must be understandable and routable on its own, independent of the team that raised it
 - The **technology-selection / baseline-decision class belongs to the always-escalate set**: no earned autonomy, lane policy, lifecycle phase, or learned behavior reduces its escalation; a request of this class must carry a researched option set with trade-offs and a recommendation before it is surfaced; and the class covers foundational choices (databases, hosting and cloud providers, reasoning-model vendors, comparable load-bearing technology) — never day-to-day implementation choices, which are explicitly excluded from escalation
 - Existing human-required signals must remain understandable while the uniform requests are introduced
