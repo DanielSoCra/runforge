@@ -33,6 +33,20 @@ export type ListField =
   | { kind: 'protected'; field: string; class: string };
 
 /**
+ * A single answerable choice on a decision, mirroring the daemon `ListOption` wire
+ * shape (`packages/decision-index/src/read-model.ts`). The `label` is itself a
+ * redaction-typed `ListField` — an option label CAN be protected, so the answer
+ * dialog renders it through the SAME redaction discrimination as the question and
+ * never prints a protected value. `id` is the stable choice key submitted as
+ * `chosen_option` (the answerable transport recognizes `approve`/`reject`).
+ */
+export interface ListOption {
+  id: string;
+  label: ListField;
+  detail?: ListField;
+}
+
+/**
  * A ranked inbox row, mirroring the daemon `RankedListItem` wire shape (the fields
  * the inbox renders). Kept as a dashboard-local type — the dashboard does NOT
  * depend on `@auto-claude/decision-index`; the boundary is JSON over HTTP.
@@ -43,6 +57,13 @@ export interface RankedListItem {
   risk_class: string;
   created_at: string;
   question: ListField;
+  /**
+   * The answerable choices for this decision (approve/reject); drives the answer
+   * dialog. Optional on the row type so the read-inbox fixtures (which predate the
+   * answer flow) stay structurally valid; the daemon wire shape always carries it,
+   * and the answer dialog treats a missing/empty list as "no choices to offer".
+   */
+  options?: ListOption[];
   score: number;
   why_ranked: string;
 }
@@ -51,6 +72,8 @@ export interface DecisionInboxProps {
   items: RankedListItem[];
   /** true when the daemon Decision API is unreachable/degraded — render the calm degraded panel. */
   unavailable?: boolean;
+  /** optional callback fired when a decision is answered through the row control. */
+  onAnswered?: (decisionId: string) => void;
 }
 
 import { Badge } from '@/components/ui/badge';
@@ -61,6 +84,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { AlertTriangle, Inbox } from 'lucide-react';
+import { DecisionAnswer } from './decision-answer';
 
 /**
  * Map the wire `risk_class` (`P0|P1|P2|P3` — decision-protocol `RISK_CLASSES`)
@@ -96,7 +120,7 @@ function QuestionField({ field }: { field: ListField }) {
   return <span>{field.value}</span>;
 }
 
-export function DecisionInbox({ items, unavailable }: DecisionInboxProps) {
+export function DecisionInbox({ items, unavailable, onAnswered }: DecisionInboxProps) {
   if (unavailable === true) {
     return (
       <Card>
@@ -177,6 +201,9 @@ export function DecisionInbox({ items, unavailable }: DecisionInboxProps) {
                 <div className="text-sm">
                   <QuestionField field={item.question} />
                 </div>
+              </div>
+              <div className="flex shrink-0 items-start pt-1 sm:pt-0">
+                <DecisionAnswer decision={item} onAnswered={onAnswered} />
               </div>
             </div>
           </div>
