@@ -109,30 +109,11 @@ return NextResponse.json(json, { status: res.status });         // 200/400/404/4
 ```
 
 ```tsx
-// components/decisions/decision-answer.tsx — pure dialog (no fetch) + fetch wrapper, split for the gate.
-function DecisionAnswerDialog({ decision, onAnswer, pending, error }: DecisionAnswerDialogProps) {
-  return (
-    <Dialog>
-      <DialogTrigger asChild><Button>Answer</Button></DialogTrigger>
-      <DialogContent>
-        <AnswerOptionLabel field={decision.question} />        {/* redaction-discriminated */}
-        {decision.options?.map((o) => (
-          <Button key={o.id} disabled={pending} onClick={() => onAnswer(decision.decision_id, o.id)}>
-            <AnswerOptionLabel field={o.label} />              {/* protected label → [protected: class] */}
-          </Button>
-        ))}
-        {error && <p className="text-sm text-muted-foreground">{error}</p>}
-      </DialogContent>
-    </Dialog>
-  );
-}
-async function submitDecisionAnswer(decisionId: string, chosenOption: AnswerChoice): Promise<AnswerResult> {
-  const res = await fetch('/api/decisions/answer', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ decision_id: decisionId, chosen_option: chosenOption }),
-  });
-  return { ok: res.ok, status: res.status, error: res.ok ? undefined : (await res.json()).error };
-}
+// components/decisions/decision-answer.tsx — split so the gate tests the dialog
+// without network: a PURE Dialog_(decision, onAnswer, pending, error)_ rendering
+// options via <AnswerOptionLabel> (protected → [protected: class]); a fetch wrapper
+// submitDecisionAnswer→POST /api/decisions/answer (typed AnswerResult, never throws);
+// a thin client wrapper owning pending→answered(disabled confirm)/error state.
 ```
 
 ## Gotchas
