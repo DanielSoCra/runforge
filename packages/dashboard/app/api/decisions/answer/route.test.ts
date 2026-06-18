@@ -10,11 +10,11 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const authMocks = vi.hoisted(() => ({
-  requireDashboardUser: vi.fn(),
+  requireDashboardAdmin: vi.fn(),
 }));
 
 vi.mock('@/lib/auth/require-session', () => ({
-  requireDashboardUser: authMocks.requireDashboardUser,
+  requireDashboardAdmin: authMocks.requireDashboardAdmin,
   getDashboardAuthError: (error: unknown) => {
     const message = error instanceof Error ? error.message : 'Forbidden';
     const status =
@@ -35,9 +35,9 @@ let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   vi.resetModules();
   vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
-  authMocks.requireDashboardUser.mockReset();
-  authMocks.requireDashboardUser.mockResolvedValue({
-    user: { id: 'viewer-1', role: 'viewer' },
+  authMocks.requireDashboardAdmin.mockReset();
+  authMocks.requireDashboardAdmin.mockResolvedValue({
+    user: { id: 'admin-1', role: 'admin' },
   });
   fetchMock = vi.fn();
   globalThis.fetch = fetchMock as typeof fetch;
@@ -68,7 +68,7 @@ const ENCODED_ID = encodeURIComponent(DECISION_ID);
 
 describe('POST /api/decisions/answer', () => {
   it('rejects with 401 when there is no authenticated session', async () => {
-    authMocks.requireDashboardUser.mockRejectedValueOnce(
+    authMocks.requireDashboardAdmin.mockRejectedValueOnce(
       authError('Unauthorized', 401),
     );
     const { POST } = await import('./route.js');
@@ -80,7 +80,7 @@ describe('POST /api/decisions/answer', () => {
   });
 
   it('rejects with 403 when the operator lacks an app-owned role', async () => {
-    authMocks.requireDashboardUser.mockRejectedValueOnce(
+    authMocks.requireDashboardAdmin.mockRejectedValueOnce(
       authError('Access denied — ask an admin to invite you', 403),
     );
     const { POST } = await import('./route.js');
@@ -88,6 +88,13 @@ describe('POST /api/decisions/answer', () => {
     const res = await POST(makeRequest({ decision_id: 'dec-1', chosen_option: 'approve' }));
 
     expect(res.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a JSON null / non-object body with 400, never a thrown 500 (codex)', async () => {
+    const { POST } = await import('./route.js');
+    const res = await POST(makeRequest(null));
+    expect(res.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

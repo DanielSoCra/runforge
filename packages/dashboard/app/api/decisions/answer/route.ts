@@ -21,13 +21,16 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import {
   getDashboardAuthError,
-  requireDashboardUser,
+  requireDashboardAdmin,
 } from '@/lib/auth/require-session';
 import { daemonFetch, DaemonConfigError } from '@/lib/daemon-fetch';
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    await requireDashboardUser();
+    // Answering a decision is a state-changing mutation (it resumes a parked run),
+    // so it requires the privileged gate — viewers are read-only and must NOT be
+    // able to answer. Mirrors the other daemon mutation proxies.
+    await requireDashboardAdmin();
   } catch (e) {
     const error = getDashboardAuthError(e);
     return NextResponse.json({ error: error.message }, { status: error.status });
@@ -41,6 +44,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { error: 'Invalid JSON body' },
       { status: 400 },
     );
+  }
+  // JSON `null`/primitives/arrays parse successfully but have no fields — guard
+  // before property access so a malformed body is a controlled 400, not a 500.
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
   const decisionId = typeof body.decision_id === 'string' ? body.decision_id : '';
