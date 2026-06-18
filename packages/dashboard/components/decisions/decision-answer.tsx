@@ -28,7 +28,6 @@
  */
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -212,7 +211,6 @@ export function DecisionAnswer({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [answered, setAnswered] = useState(false);
-  const router = useRouter();
 
   async function handleAnswer(decisionId: string, chosenOption: string) {
     setPending(true);
@@ -226,13 +224,16 @@ export function DecisionAnswer({
     setPending(false);
 
     if (result.ok) {
+      // Optimistic confirmation: lock the control to a disabled "Answered" (no
+      // double-answer) and hint the parent. We deliberately do NOT router.refresh()
+      // here — the daemon 200s as soon as it posts the DecisionResponse, but the
+      // resume loop advances the decision index only on a later tick, so an
+      // immediate refetch would race it and resurrect the still-pending row,
+      // dropping this optimistic state. The row leaves on the next natural
+      // /decisions/pending fetch, once the resume loop has advanced it (per the L3
+      // "disable + confirm; row leaves on the next fetch" rule).
       setAnswered(true);
       onAnswered?.(decisionId);
-      // Re-fetch the server-rendered inbox: the answered decision is no longer
-      // notified/viewed, so the next /decisions/pending drops it. Without this, on
-      // the live Steering page (no onAnswered parent) the row would linger until a
-      // manual reload.
-      router.refresh();
       return;
     }
 

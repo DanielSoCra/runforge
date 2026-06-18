@@ -7,10 +7,6 @@ vi.mock('@/actions/briefing', () => ({
   getLatestBriefing: mocks.getLatestBriefing,
 }));
 
-// The inbox's per-row answer control calls useRouter().refresh() on success —
-// mock next/navigation so the page renders without an app-router context.
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
-
 vi.mock('@/lib/daemon-fetch', () => ({
   daemonFetch: mocks.daemonFetch,
   DaemonConfigError: class DaemonConfigError extends Error {},

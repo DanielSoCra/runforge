@@ -1,12 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react';
-
-// The wired control calls useRouter().refresh() on a successful answer (to re-fetch
-// the server-rendered inbox); mock next/navigation so it works without an app-router
-// context in jsdom.
-const routerRefresh = vi.fn();
-vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: routerRefresh }) }));
-
 import {
   DecisionAnswerDialog,
   DecisionAnswer,
@@ -199,13 +192,12 @@ describe('DecisionAnswer (client wrapper — fetch-backed)', () => {
       decision_id: 'dec-answer-1',
       chosen_option: 'approve',
     });
-    // On success the answered decision leaves the pending inbox.
+    // On success the control locks to a disabled "Answered" confirmation (no
+    // double-answer) and hints the parent; the row leaves on the next pending fetch.
     await waitFor(() => {
       expect(onAnswered).toHaveBeenCalledWith('dec-answer-1');
     });
-    // And the server-rendered inbox is refreshed so the row drops even with no
-    // onAnswered parent (the live Steering page) — codex.
-    expect(routerRefresh).toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /answered/i })).toBeDisabled();
   });
 
   it('keeps the row and shows a calm message on a 409 (not answerable)', async () => {
