@@ -1491,7 +1491,14 @@ export async function startDaemon(
       answerDecision: (id, body) =>
         answerDecision(
           {
-            readModel: decisionManager.ledger().reader,
+            // LAZY read model: resolve `.ledger()` INSIDE the handler's protected
+            // path (it throws when the index is disabled/broken). Resolving it
+            // eagerly here would throw synchronously while building deps — before
+            // answerDecision's try/catch — and escape the route's promise .catch.
+            readModel: {
+              listRanked: (args) => decisionManager.ledger().reader.listRanked(args),
+              detail: (decisionId) => decisionManager.ledger().reader.detail(decisionId),
+            },
             publisher: {
               async publish({ decisionId, chosenOption }) {
                 const reader = decisionManager.ledger().reader;
