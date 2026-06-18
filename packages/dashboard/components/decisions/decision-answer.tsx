@@ -80,13 +80,14 @@ interface AnswerOptionLabelProps {
  */
 export function AnswerOptionLabel({ field, context }: AnswerOptionLabelProps): React.ReactElement {
   if (field.kind === 'protected') {
-    // The question uses an invisible zero-width space after the colon so that a
-    // test querying for the option label's `[protected: <class>]` text finds the
-    // option control, not the question, while the visual output is identical.
-    const classGlue = context === 'question' ? ': \u200B' : ': ';
+    // A protected field is rendered class-only and NEVER prints its value \u2014
+    // consistently `[protected: <class>] <field>` for both the question and option
+    // labels (same chip as the inbox). `context` is retained for callers' intent
+    // but does not change the redaction text.
+    void context;
     return (
       <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
-        [protected{classGlue}{field.class}] {field.field}
+        [protected: {field.class}] {field.field}
       </span>
     );
   }

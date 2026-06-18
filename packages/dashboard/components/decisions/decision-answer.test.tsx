@@ -44,7 +44,10 @@ const protectedAnswerable: RankedListItem = {
   status: 'viewed',
   risk_class: 'P0',
   created_at: '2026-06-18T10:15:00.000Z',
-  question: { kind: 'protected', field: 'patient_summary', class: 'phi' },
+  // distinct class from the option below so `[protected: phi]` uniquely identifies
+  // the OPTION label (both render the identical `[protected: <class>]` chip — the
+  // discrimination is by class text, not a rendering quirk).
+  question: { kind: 'protected', field: 'patient_summary', class: 'internal' },
   options: [
     { id: 'approve', label: { kind: 'protected', field: 'discharge_action', class: 'phi' } },
     { id: 'reject', label: { kind: 'text', value: 'Reject' } },
