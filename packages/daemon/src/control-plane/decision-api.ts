@@ -186,10 +186,20 @@ export async function answerDecision(
         body: { error: 'chosen_option must be one of the decision options' },
       };
     }
-    await deps.publisher.publish({
-      decisionId,
-      chosenOption: chosen as 'approve' | 'reject',
-    });
+    // The answer is carried as a DecisionResponse the resume loop consumes, and
+    // parseCockpitAnswer only recognizes `approve`/`reject`. Reject any other
+    // option id with 400 rather than posting a response the loop ignores (which
+    // would 200 the operator while leaving the run parked). This narrows `chosen`
+    // to the publisher's AnswerChoice — no cast needed.
+    if (chosen !== 'approve' && chosen !== 'reject') {
+      return {
+        status: 400,
+        body: {
+          error: 'chosen_option not supported by the answer transport (expected approve or reject)',
+        },
+      };
+    }
+    await deps.publisher.publish({ decisionId, chosenOption: chosen });
     return { status: 200, body: { answered: true, chosen_option: chosen } };
   } catch {
     return { status: 503, body: { error: 'decision index unavailable' } };

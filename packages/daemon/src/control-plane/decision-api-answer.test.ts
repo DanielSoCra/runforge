@@ -157,6 +157,28 @@ describe('answerDecision', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('an option the resume transport cannot carry (in options but not approve/reject) → 400, never publishes (codex)', async () => {
+    // The answer is posted as a DecisionResponse the resume loop consumes, and
+    // parseCockpitAnswer only recognizes approve/reject. A decision offering a
+    // non-approve/reject option must 400 — never 200 with a response the loop
+    // ignores (which would strand the run).
+    const custom = {
+      ...detailView('d-x', 'notified'),
+      options: [
+        { id: 'escalate', label: { kind: 'text' as const, value: 'Escalate' } },
+        { id: 'reject', label: { kind: 'text' as const, value: 'Reject' } },
+      ],
+    } as DetailView;
+    const { publisher, calls } = recordingPublisher();
+    const res = await answerDecision(
+      deps(fakeReadModel({ 'd-x': custom }), publisher),
+      'd-x',
+      { chosen_option: 'escalate' },
+    );
+    expect(res.status).toBe(400);
+    expect(calls).toHaveLength(0);
+  });
+
   it('a malformed body (JSON null / non-object) → 400, NOT a 503 outage (codex)', async () => {
     const rm = fakeReadModel({ 'd-1': detailView('d-1', 'notified') });
     const { publisher, calls } = recordingPublisher();
