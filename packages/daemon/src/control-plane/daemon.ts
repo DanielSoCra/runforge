@@ -52,7 +52,9 @@ import {
 import {
   listPendingDecisions,
   getDecisionDetail,
+  answerDecision,
 } from './decision-api.js';
+import { postDecisionResponse } from './decision-escalation/answer-publisher.js';
 import {
   parseCockpitAnswer,
   isDecisionOwnedIssue,
@@ -155,6 +157,24 @@ export interface StartDaemonOptions {
    * coverage). Production constructs one from `readDecisionIndexConfig(stateDir)`.
    */
   decisionManager?: DecisionIndexManager;
+}
+
+/**
+ * Resolve the gate issue's repo coordinates from a decision's `source_url`
+ * (`https://github.com/<owner>/<repo>/issues/<n>`), or `null` when it is not a
+ * recognizable GitHub issue URL. The DecisionResponse must be posted to the
+ * decision's OWN repo (not the seed `config.repo`): `resumeParkedRuns` polls the
+ * run's repo, so a multi-repo deployment answering an imported repo's decision
+ * must target that repo's issue or the answer is never observed.
+ */
+function repoCoordsFromSourceUrl(
+  sourceUrl: string,
+): { owner: string; repo: string; issueNumber: number } | null {
+  const m = /github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)(?:[/?#]|$)/.exec(sourceUrl);
+  if (m === null) return null;
+  const n = Number(m[3]);
+  if (!Number.isInteger(n)) return null;
+  return { owner: m[1]!, repo: m[2]!, issueNumber: n };
 }
 
 export async function startDaemon(
@@ -1462,6 +1482,63 @@ export async function startDaemon(
         listPendingDecisions(decisionManager.ledger().reader, query),
       getDecisionDetail: (id) =>
         getDecisionDetail(decisionManager.ledger().reader, id),
+      // ANSWER (7c). Option A: the operator answer POSTS a DecisionResponse comment
+      // that the existing `resumeParkedRuns` loop recognizes on its next tick — NOT
+      // a direct `ledger.answer()` (which would record an answer the resume loop
+      // never sees and strand the run). The read model is resolved lazily inside the
+      // handler (`.ledger()` throws → mapped to 503). The publisher resolves the gate
+      // issue from the decision's `source_url` and posts via the run's octokit.
+      answerDecision: (id, body) =>
+        answerDecision(
+          {
+            // LAZY read model: resolve `.ledger()` INSIDE the handler's protected
+            // path (it throws when the index is disabled/broken). Resolving it
+            // eagerly here would throw synchronously while building deps — before
+            // answerDecision's try/catch — and escape the route's promise .catch.
+            readModel: {
+              listRanked: (args) => decisionManager.ledger().reader.listRanked(args),
+              detail: (decisionId) => decisionManager.ledger().reader.detail(decisionId),
+            },
+            publisher: {
+              async publish({ decisionId, chosenOption }) {
+                const reader = decisionManager.ledger().reader;
+                const detail = reader.detail(decisionId);
+                if (detail === undefined) {
+                  throw new Error(`answerDecision: unknown decision ${decisionId}`);
+                }
+                // Post to the decision's OWN repo (from source_url), resolving that
+                // repo's token via the repo manager — NOT the seed config.repo, or a
+                // multi-repo answer lands on the wrong issue and the run strands.
+                const coords = repoCoordsFromSourceUrl(detail.source_url);
+                if (coords === null) {
+                  throw new Error(
+                    `answerDecision: could not resolve repo/issue from ${detail.source_url}`,
+                  );
+                }
+                const { owner, repo, issueNumber } = coords;
+                const repoId = repoManager?.getRepoId(owner, repo) ?? '';
+                const answerToken =
+                  repoManager !== null && repoId !== ''
+                    ? await repoManager.resolveTokenForRepo(repoId)
+                    : process.env.GITHUB_TOKEN;
+                const answerOctokit = new Octokit({ auth: answerToken });
+                await postDecisionResponse({
+                  decisionId,
+                  chosenOption,
+                  // a deterministic, operator-surface idempotency suffix; the resume
+                  // matcher anchors on `write_response\b`, so any suffix is recognized.
+                  idempotencyKey: `op-${decisionId}`,
+                  createComment: (args) => answerOctokit.issues.createComment(args),
+                  owner,
+                  repo,
+                  issueNumber,
+                });
+              },
+            },
+          },
+          id,
+          body,
+        ),
     },
     daemonHost,
   );
