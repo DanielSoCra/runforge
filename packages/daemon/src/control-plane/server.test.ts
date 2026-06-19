@@ -1,14 +1,42 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { createControlServer } from './server.js';
+import { createControlServer, type ControlHandlers } from './server.js';
 import { ok, err } from '../lib/result.js';
 import type { Server } from 'http';
+import type { AddressInfo } from 'net';
 import * as results from './results.js';
 
-const PORT = 19876; // high port unlikely to conflict
 let serverRef: Server | undefined;
 
-afterEach(() => {
-  if (serverRef) { serverRef.close(); serverRef = undefined; }
+// Close a server and await the close, clearing serverRef if it's the one being
+// closed so afterEach doesn't issue a redundant second close (handle leak /
+// timing-dependent failures under load).
+async function closeServer(s: Server): Promise<void> {
+  if (serverRef === s) serverRef = undefined;
+  await new Promise<void>((resolve) => s.close(() => resolve()));
+}
+
+// True ONLY for the "another process grabbed the freed ephemeral port between
+// close and rebind" race. createControlServer.start() (server.ts) reports this
+// in exactly two shapes:
+//   - EADDRINUSE wrapped as a FRESH Error (no .code):
+//       `Instance lock failed — port <port> in use (another instance is running)`
+//   - any other listen error: the original error, which carries `.code`.
+// We match the exact instance-lock message OR a literal EADDRINUSE code — not a
+// loose substring — so a real (non-race) start() failure surfaces immediately
+// instead of being silently retried.
+function isPortRaceError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === 'EADDRINUSE') return true;
+  const msg = error instanceof Error ? error.message : '';
+  return /^Instance lock failed — port \d+ in use/.test(msg);
+}
+
+afterEach(async () => {
+  if (serverRef) {
+    const s = serverRef;
+    serverRef = undefined;
+    await new Promise<void>((resolve) => s.close(() => resolve()));
+  }
 });
 
 const handlers = {
@@ -20,26 +48,30 @@ const handlers = {
   retry: (n: number) => n === 42 ? ok(undefined) : err(new Error('not found')),
 };
 
-async function startServer() {
-  const { server, start } = createControlServer(PORT, handlers);
+// Bind on port 0 so the OS assigns a free ephemeral port; the real port is
+// readable via server.address() only AFTER start() resolves. This eliminates
+// cross-process port collisions from fixed literals.
+async function startServer(overrides: Partial<ControlHandlers> = {}) {
+  const { server, start } = createControlServer(0, { ...handlers, ...overrides });
   serverRef = server;
   const result = await start();
   expect(result.ok).toBe(true);
-  return server;
+  const port = (server.address() as AddressInfo).port;
+  return { server, start, result, port };
 }
 
 describe('ControlServer', () => {
   it('GET /health returns ok', async () => {
-    await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/health`);
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/health`);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toEqual({ ok: true, degraded: false, lastConfigError: null });
   });
 
   it('GET /status returns daemon status', async () => {
-    await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/status`);
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/status`);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.activeRuns).toBe(0);
@@ -47,8 +79,8 @@ describe('ControlServer', () => {
   });
 
   it('POST /pause returns paused', async () => {
-    await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/pause`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/pause`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.paused).toBe(true);
@@ -56,31 +88,25 @@ describe('ControlServer', () => {
 
   it('GET /decisions/:id decodes a URL-encoded decision id before lookup (codex)', async () => {
     let receivedId: string | undefined;
-    const { server, start } = createControlServer(PORT + 20, {
-      ...handlers,
+    const { port } = await startServer({
       getDecisionDetail: (id: string) => {
         receivedId = id;
         return { status: 404, body: { error: 'unknown decision' } };
       },
     });
-    serverRef = server;
-    await start();
     // Decision ids carry colons; the client percent-encodes them in the path.
     const encoded = encodeURIComponent('issue-42:l2-gate:1');
-    const res = await fetch(`http://127.0.0.1:${PORT + 20}/decisions/${encoded}`);
+    const res = await fetch(`http://127.0.0.1:${port}/decisions/${encoded}`);
     expect(res.status).toBe(404); // handler's verdict; the point is the decoded id reached it
     expect(receivedId).toBe('issue-42:l2-gate:1');
   });
 
   it('POST /resume can reject a blocked resume', async () => {
-    const { server, start } = createControlServer(PORT + 13, {
-      ...handlers,
+    const { server, port } = await startServer({
       resume: async () => err(new Error('runtime source unhealthy')),
     });
-    const result = await start();
-    expect(result.ok).toBe(true);
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT + 13}/resume`, {
+      const res = await fetch(`http://127.0.0.1:${port}/resume`, {
         method: 'POST',
         headers: { 'X-Requested-By': 'test' },
       });
@@ -91,94 +117,92 @@ describe('ControlServer', () => {
         error: 'runtime source unhealthy',
       });
     } finally {
-      server.close();
+      await closeServer(server);
     }
   });
 
   it('POST /retry/42 succeeds', async () => {
-    await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/retry/42`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/retry/42`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
     expect(res.status).toBe(200);
   });
 
   it('POST /retry/999 returns 404', async () => {
-    await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/retry/999`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/retry/999`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
     expect(res.status).toBe(404);
   });
 
   it('rejects second instance on same port', async () => {
-    await startServer();
-    const { start: start2, server: server2 } = createControlServer(PORT, handlers);
+    // Server A grabs an OS-assigned ephemeral port; server B then tries to bind
+    // that exact port and must be rejected by the instance lock.
+    const { port } = await startServer();
+    const { start: start2, server: server2 } = createControlServer(port, handlers);
     const result = await start2();
     expect(result.ok).toBe(false);
-    server2.close();
+    // Assert the rejection is specifically the production instance-lock signal
+    // (`Instance lock failed — port <port> in use ...`), so an unrelated
+    // startup regression can't masquerade as a false green.
+    if (!result.ok) {
+      expect(result.error.message).toMatch(/^Instance lock failed — port \d+ in use/);
+    }
+    await closeServer(server2);
   });
 
   it('POST /repos/reload calls reloadRepos and returns count', async () => {
-    const { server, start } = createControlServer(PORT + 2, {
-      ...handlers,
+    const { server, port } = await startServer({
       reloadRepos: async () => ({ active: 3 }),
     });
-    const result = await start();
-    expect(result.ok).toBe(true);
-
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT + 2}/repos/reload`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      const res = await fetch(`http://127.0.0.1:${port}/repos/reload`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.reloaded).toBe(true);
       expect(body.active).toBe(3);
     } finally {
-      server.close();
+      await closeServer(server);
     }
   });
 
   it('POST /remote-control/restart calls restartRemoteControl', async () => {
     const restarted = vi.fn();
-    const { server, start } = createControlServer(PORT + 3, {
-      ...handlers,
+    const { server, port } = await startServer({
       restartRemoteControl: restarted,
     });
-    const result = await start();
-    expect(result.ok).toBe(true);
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT + 3}/remote-control/restart`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      const res = await fetch(`http://127.0.0.1:${port}/remote-control/restart`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.restarted).toBe(true);
       expect(restarted).toHaveBeenCalledOnce();
     } finally {
-      server.close();
+      await closeServer(server);
     }
   });
 
   it('POST /remote-control/restart returns 501 when handler not wired', async () => {
-    await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/remote-control/restart`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/remote-control/restart`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
     expect(res.status).toBe(501);
   });
 
   it('POST /issues/scan calls scanIssues and returns count', async () => {
-    const { server, start } = createControlServer(PORT + 4, {
-      ...handlers,
+    const { server, port } = await startServer({
       scanIssues: async () => ({ scanned: 3 }),
     });
-    const result = await start();
-    expect(result.ok).toBe(true);
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT + 4}/issues/scan`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      const res = await fetch(`http://127.0.0.1:${port}/issues/scan`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.scanned).toBe(3);
     } finally {
-      server.close();
+      await closeServer(server);
     }
   });
 
   it('POST /issues/scan returns 501 when handler not wired', async () => {
-    await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/issues/scan`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/issues/scan`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
     expect(res.status).toBe(501);
   });
 
@@ -190,14 +214,11 @@ describe('ControlServer', () => {
       issueCount: 2,
       totalCost: 3.5,
     });
-    const { server, start } = createControlServer(PORT + 12, {
-      ...handlers,
+    const { server, port } = await startServer({
       release,
     });
-    const result = await start();
-    expect(result.ok).toBe(true);
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT + 12}/release`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      const res = await fetch(`http://127.0.0.1:${port}/release`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({
         status: 'success',
@@ -208,39 +229,66 @@ describe('ControlServer', () => {
       });
       expect(release).toHaveBeenCalledOnce();
     } finally {
-      server.close();
+      await closeServer(server);
     }
   });
 
   it('POST /release returns 501 when handler not wired', async () => {
-    await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/release`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/release`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
     expect(res.status).toBe(501);
   });
 
-  it('allows immediate rebind after close (SO_REUSEADDR / no TIME_WAIT block)', async () => {
-    const server1 = await startServer();
-    // Close the first server and immediately try to rebind the same port
-    await new Promise<void>((resolve) => server1.close(() => resolve()));
-    serverRef = undefined;
-    // If SO_REUSEADDR is not set, this would fail with EADDRINUSE due to TIME_WAIT
-    const { server: server2, start: start2 } = createControlServer(PORT, handlers);
-    serverRef = server2;
-    const result = await start2();
-    expect(result.ok).toBe(true);
+  it('re-listen on the same port succeeds immediately after a clean close', async () => {
+    // This test makes no HTTP request — it only proves a port can be re-bound
+    // right after a clean server.close(), with no lingering instance-lock or
+    // TIME_WAIT block. We pin the port (allocate ephemeral, close, rebind that
+    // exact number) so the rebind exercises the same-port path. Under load
+    // another process can steal the port in the gap between close and rebind,
+    // so we bound-retry on EADDRINUSE with a fresh ephemeral port each attempt.
+    const MAX_ATTEMPTS = 5;
+    let lastErr: unknown;
+    let rebound = false;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS && !rebound; attempt += 1) {
+      // Allocate an ephemeral port via a first bind, capture it, then close.
+      const { server: server1, start: start1 } = createControlServer(0, handlers);
+      const r1 = await start1();
+      expect(r1.ok).toBe(true);
+      const port = (server1.address() as AddressInfo).port;
+      await new Promise<void>((resolve) => server1.close(() => resolve()));
+
+      // Rebind on that exact port.
+      const { server: server2, start: start2 } = createControlServer(port, handlers);
+      const r2 = await start2();
+      if (r2.ok) {
+        serverRef = server2;
+        rebound = true;
+      } else if (isPortRaceError(r2.error)) {
+        // Another process grabbed the freed port between close and rebind.
+        // Retry with a fresh ephemeral allocation.
+        lastErr = r2.error;
+        await closeServer(server2);
+      } else {
+        // Not the stolen-port race — a real rebind/startup regression. Surface
+        // it immediately rather than collapsing it into the generic message.
+        await closeServer(server2);
+        throw r2.error;
+      }
+    }
+    expect(rebound, `rebind failed after ${MAX_ATTEMPTS} attempts: ${String(lastErr)}`).toBe(true);
   });
 
   it('rejects POST without X-Requested-By header (CSRF protection)', async () => {
-    await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/pause`, { method: 'POST' });
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/pause`, { method: 'POST' });
     expect(res.status).toBe(403);
     const body = await res.json();
     expect(body.error).toMatch(/X-Requested-By/);
   });
 
   it('allows POST with X-Requested-By header', async () => {
-    await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/pause`, {
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/pause`, {
       method: 'POST',
       headers: { 'X-Requested-By': 'test' },
     });
@@ -248,8 +296,8 @@ describe('ControlServer', () => {
   });
 
   it('allows GET requests without X-Requested-By header', async () => {
-    await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/health`);
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/health`);
     expect(res.status).toBe(200);
   });
 
@@ -257,9 +305,9 @@ describe('ControlServer', () => {
     const runsError = new Error('disk full');
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const readSpy = vi.spyOn(results, 'readResults').mockRejectedValueOnce(runsError);
-    await startServer();
+    const { port } = await startServer();
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT}/api/runs`);
+      const res = await fetch(`http://127.0.0.1:${port}/api/runs`);
       expect(res.status).toBe(500);
       const body = await res.json();
       expect(body).toEqual({ error: 'read failed' });
@@ -276,21 +324,18 @@ describe('ControlServer', () => {
   it('logs error to console.error when /repos/reload handler fails', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const reloadError = new Error('db connection lost');
-    const { server, start } = createControlServer(PORT + 6, {
-      ...handlers,
+    const { server, port } = await startServer({
       reloadRepos: async () => { throw reloadError; },
     });
-    const result = await start();
-    expect(result.ok).toBe(true);
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT + 6}/repos/reload`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      const res = await fetch(`http://127.0.0.1:${port}/repos/reload`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
       expect(res.status).toBe(500);
       expect(spy).toHaveBeenCalledWith(
         '[control-plane] POST /repos/reload failed:',
         reloadError,
       );
     } finally {
-      server.close();
+      await closeServer(server);
       spy.mockRestore();
     }
   });
@@ -298,21 +343,18 @@ describe('ControlServer', () => {
   it('logs error to console.error when /issues/scan handler fails', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const scanError = new Error('GitHub API rate limited');
-    const { server, start } = createControlServer(PORT + 7, {
-      ...handlers,
+    const { server, port } = await startServer({
       scanIssues: async () => { throw scanError; },
     });
-    const result = await start();
-    expect(result.ok).toBe(true);
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT + 7}/issues/scan`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      const res = await fetch(`http://127.0.0.1:${port}/issues/scan`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
       expect(res.status).toBe(500);
       expect(spy).toHaveBeenCalledWith(
         '[control-plane] POST /issues/scan failed:',
         scanError,
       );
     } finally {
-      server.close();
+      await closeServer(server);
       spy.mockRestore();
     }
   });
@@ -320,11 +362,12 @@ describe('ControlServer', () => {
   it('binds to custom host when provided (Docker compatibility)', async () => {
     // Regression test for #147: daemon must accept a configurable bind host
     // so it can bind 0.0.0.0 in Docker for cross-container access
-    const { server, start } = createControlServer(PORT + 8, handlers, '0.0.0.0');
+    const { server, start } = createControlServer(0, handlers, '0.0.0.0');
     const result = await start();
     expect(result.ok).toBe(true);
+    const port = (server.address() as AddressInfo).port;
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT + 8}/health`);
+      const res = await fetch(`http://127.0.0.1:${port}/health`);
       expect(res.status).toBe(200);
       // Verify the server actually bound to 0.0.0.0, not the default
       const addr = server.address();
@@ -332,17 +375,18 @@ describe('ControlServer', () => {
         expect(addr.address).toBe('0.0.0.0');
       }
     } finally {
-      server.close();
+      await closeServer(server);
     }
   });
 
   it('defaults to 127.0.0.1 when no host provided (secure default)', async () => {
     // Regression test for #147: without explicit host, server should bind loopback only
-    const { server, start } = createControlServer(PORT + 9, handlers);
+    const { server, start } = createControlServer(0, handlers);
     const result = await start();
     expect(result.ok).toBe(true);
+    const port = (server.address() as AddressInfo).port;
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT + 9}/health`);
+      const res = await fetch(`http://127.0.0.1:${port}/health`);
       expect(res.status).toBe(200);
       // Verify address is loopback
       const addr = server.address();
@@ -351,56 +395,52 @@ describe('ControlServer', () => {
         expect(addr.address).toBe('127.0.0.1');
       }
     } finally {
-      server.close();
+      await closeServer(server);
     }
   });
 
   it('POST /drain calls drain handler and returns draining:true (#425)', async () => {
     const drain = vi.fn();
-    const { server, start } = createControlServer(PORT + 10, { ...handlers, drain });
-    const result = await start();
-    expect(result.ok).toBe(true);
+    const { server, port } = await startServer({ drain });
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT + 10}/drain`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      const res = await fetch(`http://127.0.0.1:${port}/drain`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body).toEqual({ draining: true });
       expect(drain).toHaveBeenCalledOnce();
     } finally {
-      server.close();
+      await closeServer(server);
     }
   });
 
   it('POST /drain/cancel calls cancelDrain handler and returns draining:false (#425)', async () => {
     const cancelDrain = vi.fn();
-    const { server, start } = createControlServer(PORT + 11, { ...handlers, cancelDrain });
-    const result = await start();
-    expect(result.ok).toBe(true);
+    const { server, port } = await startServer({ cancelDrain });
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT + 11}/drain/cancel`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      const res = await fetch(`http://127.0.0.1:${port}/drain/cancel`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body).toEqual({ draining: false });
       expect(cancelDrain).toHaveBeenCalledOnce();
     } finally {
-      server.close();
+      await closeServer(server);
     }
   });
 
   it('POST /drain rejects missing X-Requested-By (CSRF protection) (#425)', async () => {
-    await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/drain`, { method: 'POST' });
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/drain`, { method: 'POST' });
     expect(res.status).toBe(403);
   });
 
   it('POST /drain/cancel rejects missing X-Requested-By (CSRF protection) (#425)', async () => {
-    await startServer();
-    const res = await fetch(`http://127.0.0.1:${PORT}/drain/cancel`, { method: 'POST' });
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/drain/cancel`, { method: 'POST' });
     expect(res.status).toBe(403);
   });
 
   it('GET /status includes remote_control_state but not remote_control_url', async () => {
-    const { server: s2, start: start2 } = createControlServer(PORT + 1, {
+    const { server: s2, start: start2 } = createControlServer(0, {
       getStatus: () => ({
         activeRuns: 0,
         dailyCost: 0,
@@ -415,14 +455,15 @@ describe('ControlServer', () => {
     });
     const result2 = await start2();
     expect(result2.ok).toBe(true);
+    const port = (s2.address() as AddressInfo).port;
 
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT + 1}/status`);
+      const res = await fetch(`http://127.0.0.1:${port}/status`);
       const body = await res.json();
       expect(body.remote_control_state).toBe('active');
       expect(body.remote_control_url).toBeUndefined();
     } finally {
-      s2.close();
+      await closeServer(s2);
     }
   });
 });

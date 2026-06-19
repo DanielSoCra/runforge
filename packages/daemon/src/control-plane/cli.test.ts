@@ -3,9 +3,14 @@ import { createControlServer } from './server.js';
 import { createCli } from './cli.js';
 import { ok, err } from '../lib/result.js';
 import type { Server } from 'http';
+import type { AddressInfo } from 'net';
 
-const PORT = 19877; // different from server.test.ts to avoid conflicts
 let serverRef: Server | undefined;
+// OS-assigned ephemeral port for the server started in beforeEach. Captured
+// after start() resolves; used for every `-p <port>` CLI arg below. After
+// stopServer() the port is no longer listening, which is exactly what the
+// connection-failure tests need.
+let port = 0;
 
 const handlers = {
   getStatus: () => ({ activeRuns: 0, paused: false }),
@@ -17,10 +22,11 @@ const handlers = {
 };
 
 async function startServer() {
-  const { server, start } = createControlServer(PORT, handlers);
+  const { server, start } = createControlServer(0, handlers);
   serverRef = server;
   const result = await start();
   expect(result.ok).toBe(true);
+  port = (server.address() as AddressInfo).port;
 }
 
 function stopServer(): Promise<void> {
@@ -57,27 +63,27 @@ describe('createCli', () => {
 describe('CLI commands send X-Requested-By header on POST', () => {
   it('pause command succeeds (not 403)', async () => {
     const cli = createCli();
-    await cli.parseAsync(['node', 'auto-claude', 'pause', '-p', String(PORT)]);
+    await cli.parseAsync(['node', 'auto-claude', 'pause', '-p', String(port)]);
     expect(handlers.pause).toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
   });
 
   it('resume command succeeds (not 403)', async () => {
     const cli = createCli();
-    await cli.parseAsync(['node', 'auto-claude', 'resume', '-p', String(PORT)]);
+    await cli.parseAsync(['node', 'auto-claude', 'resume', '-p', String(port)]);
     expect(handlers.resume).toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
   });
 
   it('retry command succeeds (not 403)', async () => {
     const cli = createCli();
-    await cli.parseAsync(['node', 'auto-claude', 'retry', '42', '-p', String(PORT)]);
+    await cli.parseAsync(['node', 'auto-claude', 'retry', '42', '-p', String(port)]);
     expect(process.exitCode).toBeUndefined();
   });
 
   it('status command (GET) succeeds without header', async () => {
     const cli = createCli();
-    await cli.parseAsync(['node', 'auto-claude', 'status', '-p', String(PORT)]);
+    await cli.parseAsync(['node', 'auto-claude', 'status', '-p', String(port)]);
     expect(process.exitCode).toBeUndefined();
   });
 });
@@ -86,7 +92,7 @@ describe('status command', () => {
   it('outputs JSON from /status endpoint', async () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const cli = createCli();
-    await cli.parseAsync(['node', 'auto-claude', 'status', '-p', String(PORT)]);
+    await cli.parseAsync(['node', 'auto-claude', 'status', '-p', String(port)]);
     expect(spy).toHaveBeenCalledWith(JSON.stringify({ activeRuns: 0, paused: false }, null, 2));
     expect(process.exitCode).toBeUndefined();
     spy.mockRestore();
@@ -97,7 +103,7 @@ describe('health command', () => {
   it('outputs JSON from /health endpoint', async () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const cli = createCli();
-    await cli.parseAsync(['node', 'auto-claude', 'health', '-p', String(PORT)]);
+    await cli.parseAsync(['node', 'auto-claude', 'health', '-p', String(port)]);
     expect(spy).toHaveBeenCalledWith(
       JSON.stringify({ ok: true, degraded: false, lastConfigError: null }, null, 2),
     );
@@ -110,7 +116,7 @@ describe('retry command', () => {
   it('sets exitCode on retry failure (issue not found)', async () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const cli = createCli();
-    await cli.parseAsync(['node', 'auto-claude', 'retry', '999', '-p', String(PORT)]);
+    await cli.parseAsync(['node', 'auto-claude', 'retry', '999', '-p', String(port)]);
     expect(process.exitCode).toBe(1);
     spy.mockRestore();
   });
@@ -118,7 +124,7 @@ describe('retry command', () => {
   it('succeeds when issue exists', async () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const cli = createCli();
-    await cli.parseAsync(['node', 'auto-claude', 'retry', '42', '-p', String(PORT)]);
+    await cli.parseAsync(['node', 'auto-claude', 'retry', '42', '-p', String(port)]);
     expect(process.exitCode).toBeUndefined();
     expect(spy).toHaveBeenCalledWith(JSON.stringify({ retrying: 42 }, null, 2));
     spy.mockRestore();
@@ -130,10 +136,10 @@ describe('connection failure handling', () => {
     await stopServer();
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const cli = createCli();
-    await cli.parseAsync(['node', 'auto-claude', 'status', '-p', String(PORT)]);
+    await cli.parseAsync(['node', 'auto-claude', 'status', '-p', String(port)]);
     expect(process.exitCode).toBe(1);
     expect(errSpy).toHaveBeenCalledWith(
-      expect.stringContaining(`Failed to connect to daemon on port ${PORT}`),
+      expect.stringContaining(`Failed to connect to daemon on port ${port}`),
     );
     errSpy.mockRestore();
   });
@@ -142,10 +148,10 @@ describe('connection failure handling', () => {
     await stopServer();
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const cli = createCli();
-    await cli.parseAsync(['node', 'auto-claude', 'pause', '-p', String(PORT)]);
+    await cli.parseAsync(['node', 'auto-claude', 'pause', '-p', String(port)]);
     expect(process.exitCode).toBe(1);
     expect(errSpy).toHaveBeenCalledWith(
-      expect.stringContaining(`Failed to connect to daemon on port ${PORT}`),
+      expect.stringContaining(`Failed to connect to daemon on port ${port}`),
     );
     errSpy.mockRestore();
   });
@@ -185,7 +191,7 @@ describe('pause command output', () => {
   it('outputs paused:true JSON', async () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const cli = createCli();
-    await cli.parseAsync(['node', 'auto-claude', 'pause', '-p', String(PORT)]);
+    await cli.parseAsync(['node', 'auto-claude', 'pause', '-p', String(port)]);
     expect(spy).toHaveBeenCalledWith(JSON.stringify({ paused: true }, null, 2));
     spy.mockRestore();
   });
@@ -195,7 +201,7 @@ describe('resume command output', () => {
   it('outputs paused:false JSON', async () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const cli = createCli();
-    await cli.parseAsync(['node', 'auto-claude', 'resume', '-p', String(PORT)]);
+    await cli.parseAsync(['node', 'auto-claude', 'resume', '-p', String(port)]);
     expect(spy).toHaveBeenCalledWith(JSON.stringify({ paused: false }, null, 2));
     spy.mockRestore();
   });

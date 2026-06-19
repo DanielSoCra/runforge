@@ -3,12 +3,12 @@ import { createControlServer } from './control-plane/server.js';
 import { formatStartupError } from './main.js';
 import { ok, err } from './lib/result.js';
 import type { Server } from 'http';
+import type { AddressInfo } from 'net';
 
 // Regression test for #148: main.ts callApi() must include X-Requested-By
 // header on POST requests, otherwise daemon CSRF middleware returns 403.
 // We test the actual fetch behavior that main.ts uses, not the CLI wrapper.
 
-const PORT = 19899;
 let serverRef: Server | undefined;
 
 const handlers = {
@@ -20,8 +20,12 @@ const handlers = {
   retry: (n: number) => n === 42 ? ok(undefined) : err(new Error('not found')),
 };
 
-afterEach(() => {
-  if (serverRef) { serverRef.close(); serverRef = undefined; }
+afterEach(async () => {
+  if (serverRef) {
+    const s = serverRef;
+    serverRef = undefined;
+    await new Promise<void>((resolve) => s.close(() => resolve()));
+  }
 });
 
 describe('formatStartupError', () => {
@@ -66,25 +70,27 @@ describe('formatStartupError', () => {
 
 describe('main.ts callApi X-Requested-By header (#148)', () => {
   it('POST with X-Requested-By header succeeds (not 403)', async () => {
-    const { server, start } = createControlServer(PORT, handlers);
+    const { server, start } = createControlServer(0, handlers);
     serverRef = server;
     await start();
+    const port = (server.address() as AddressInfo).port;
 
     // Simulate what main.ts callApi does after the fix
     const headers: Record<string, string> = {};
     headers['X-Requested-By'] = 'cli';
-    const res = await fetch(`http://127.0.0.1:${PORT}/pause`, { method: 'POST', headers });
+    const res = await fetch(`http://127.0.0.1:${port}/pause`, { method: 'POST', headers });
     expect(res.status).toBe(200);
     expect(handlers.pause).toHaveBeenCalled();
   });
 
   it('POST without X-Requested-By gets 403 (proves CSRF guard is active)', async () => {
-    const { server, start } = createControlServer(PORT + 1, handlers);
+    const { server, start } = createControlServer(0, handlers);
     serverRef = server;
     await start();
+    const port = (server.address() as AddressInfo).port;
 
     // This is what the old callApi did — no headers
-    const res = await fetch(`http://127.0.0.1:${PORT + 1}/pause`, { method: 'POST' });
+    const res = await fetch(`http://127.0.0.1:${port}/pause`, { method: 'POST' });
     expect(res.status).toBe(403);
   });
 });
