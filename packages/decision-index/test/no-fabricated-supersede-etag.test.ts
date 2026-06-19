@@ -4,6 +4,7 @@ import { makeTempDb, type TempDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { makeOutbox, answerItem } from "./helpers/effect-driver.js";
 import { IndexWriter } from "../src/index-writer.js";
+import { PROTOCOL_VERSION } from "@auto-claude/decision-protocol";
 import { ProtectedStore } from "@auto-claude/sanitizer-redaction";
 import { SqliteQuarantine } from "../src/quarantine.js";
 import { FakeNotifier } from "../src/adapters/fakes/fake-notifier.js";
@@ -79,7 +80,7 @@ describe("IMPORTANT 3 — no fabricated supersede etag (fail-closed instead)", (
   function rawRequest(id: string, etag: string | undefined, question = "Proceed?"): Record<string, unknown> {
     const r: Record<string, unknown> = {
       decision_id: id,
-      protocol_version: "1.0.0",
+      protocol_version: PROTOCOL_VERSION,
       source_url: "https://github.com/o/r/issues/1",
       source_event_id: "evt-1",
       deployment: "dep",
