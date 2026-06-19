@@ -2,7 +2,7 @@
 id: FUNC-AC-DECISION-ESCALATION
 type: functional
 domain: auto-claude
-status: draft
+status: approved
 version: 3
 layer: 1
 ---
@@ -16,6 +16,8 @@ layer: 1
 > **Spec history (v2.2, 2026-06-14, L0 v6 enactment):** Re-approval pass, no content change. The Operator re-approves the v2/v2.1 content alongside the L0 v6 delta enactment; the always-escalate set defined here (including the technology-selection class) is the set L0 v6's pre-approved earn-in auto-promotion is explicitly barred from crossing. This sets `status: approved`.
 >
 > **Spec history (v3, 2026-06-18, confidentiality becomes a configurable capability):** Content confidentiality changes from an always-on guarantee to a **capability that is off by default**. The platform recognizes and withholds confidential or secret content only where a deployment has been set up for it; with none set up, decision content is recorded and shown as provided. Rationale: the prior always-on rule was domain baggage carried in from another product and did nothing for the default deployment; recognizing sensitive content belongs to how a deployment is set up, not a rule every request must satisfy. The always-escalate set (the technology-selection class) is unchanged. `status: draft` pending Operator re-approval.
+>
+> **Spec history (v3 re-approval, 2026-06-19):** The Operator re-approved v3 while authorizing the merge of the sanitization stack (PRs #754–#756); this sets `status: approved`.
 
 ## Problem Statement
 
