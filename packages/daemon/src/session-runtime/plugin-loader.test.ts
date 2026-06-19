@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFile, mkdir, rm } from 'fs/promises';
+import { mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -13,7 +14,7 @@ describe('readPluginsForContext file size cap', () => {
 
   beforeEach(async () => {
     clearRegistryCache(); // Ensure no cached registry from previous tests
-    pluginsDir = join(tmpdir(), `plugin-loader-test-${Date.now()}`);
+    pluginsDir = mkdtempSync(join(tmpdir(), 'plugin-loader-test-'));
     pluginDir = join(pluginsDir, PLUGIN_ID);
     await mkdir(join(pluginDir, 'skills'), { recursive: true });
     await mkdir(join(pluginDir, 'agents'), { recursive: true });
@@ -108,7 +109,7 @@ describe('readPluginsForContext content cache', () => {
 
   beforeEach(async () => {
     clearRegistryCache();
-    pluginsDir = join(tmpdir(), `plugin-loader-cache-test-${Date.now()}`);
+    pluginsDir = mkdtempSync(join(tmpdir(), 'plugin-loader-cache-test-'));
     pluginDir = join(pluginsDir, PLUGIN_ID);
     await mkdir(join(pluginDir, 'skills'), { recursive: true });
     await mkdir(join(pluginDir, 'agents'), { recursive: true });
@@ -185,7 +186,7 @@ describe('readPluginsForContext mcpConfigs loading', () => {
 
   beforeEach(async () => {
     clearRegistryCache();
-    pluginsDir = join(tmpdir(), `plugin-loader-mcp-test-${Date.now()}`);
+    pluginsDir = mkdtempSync(join(tmpdir(), 'plugin-loader-mcp-test-'));
     pluginDir = join(pluginsDir, PLUGIN_ID);
     await mkdir(join(pluginDir, 'skills'), { recursive: true });
     await mkdir(join(pluginDir, 'agents'), { recursive: true });

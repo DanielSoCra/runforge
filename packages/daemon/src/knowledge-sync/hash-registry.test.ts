@@ -1,15 +1,18 @@
 // src/knowledge-sync/hash-registry.test.ts
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { rm } from 'fs/promises';
+import { mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { HashRegistry, computeContentHash } from './hash-registry.js';
 
-const tmpPath = () =>
-  join(
-    tmpdir(),
-    `hash-reg-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`,
-  );
+// Each call creates a fresh unique dir and returns a file path inside it,
+// so no bare file is left in shared /tmp.
+let lastTmpDir: string | undefined;
+const tmpPath = () => {
+  lastTmpDir = mkdtempSync(join(tmpdir(), 'hash-reg-'));
+  return join(lastTmpDir, 'hash-reg.jsonl');
+};
 
 describe('computeContentHash', () => {
   it('produces a hex string', () => {
@@ -46,10 +49,9 @@ describe('HashRegistry', () => {
   });
 
   afterEach(async () => {
-    try {
-      await rm(path);
-    } catch {
-      /* ignore */
+    if (lastTmpDir !== undefined) {
+      await rm(lastTmpDir, { recursive: true, force: true });
+      lastTmpDir = undefined;
     }
   });
 

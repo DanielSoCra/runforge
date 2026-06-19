@@ -1,16 +1,13 @@
 // src/knowledge-sync/sync-service.test.ts
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { writeFile, rm, mkdir } from 'fs/promises';
+import { mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createKnowledgeSyncService } from './sync-service.js';
 import type { KnowledgeStore } from '../knowledge/knowledge-store.js';
 
-const tmpDir = () =>
-  join(
-    tmpdir(),
-    `sync-svc-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  );
+const tmpDir = () => mkdtempSync(join(tmpdir(), 'sync-svc-'));
 
 async function createVault(
   dir: string,

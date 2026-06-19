@@ -1,27 +1,32 @@
 // src/session-runtime/generate-containment-script.test.ts
 import { describe, it, expect } from 'vitest';
 import { execSync } from 'child_process';
-import { writeFileSync, unlinkSync } from 'fs';
+import { writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { generateContainmentScript, validatePolicyPatterns } from './generate-containment-script.js';
 import { DEFAULT_POLICY, policyForAgentType, type ContainmentPolicy } from './containment-hooks.js';
 
 function runHookScript(script: string, toolName: string, toolInput: Record<string, unknown>): { code: number; stderr: string } {
-  const scriptPath = join(tmpdir(), `test-hook-${Date.now()}.mjs`);
-  writeFileSync(scriptPath, script, { mode: 0o755 });
+  const dir = mkdtempSync(join(tmpdir(), 'hook-'));
+  const scriptPath = join(dir, 'hook.mjs');
+  // Best-effort cleanup that can never override the real execSync result/error.
+  const cleanup = () => {
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort temp cleanup */ }
+  };
   const stdinJson = JSON.stringify({ tool_name: toolName, tool_input: toolInput });
   try {
+    writeFileSync(scriptPath, script, { mode: 0o755 });
     execSync(`printf '%s' '${stdinJson.replace(/'/g, "'\\''")}' | node ${scriptPath}`, {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
-    unlinkSync(scriptPath);
     return { code: 0, stderr: '' };
   } catch (e: unknown) {
-    unlinkSync(scriptPath);
     const err = e as { status?: number; stderr?: string };
     return { code: err.status ?? 1, stderr: String(err.stderr ?? '') };
+  } finally {
+    cleanup();
   }
 }
 
@@ -351,21 +356,26 @@ describe('generateContainmentScript', () => {
   });
 
   it('fails closed on malformed JSON input', () => {
-    const scriptPath = join(tmpdir(), `test-hook-failclose-${Date.now()}.mjs`);
-    writeFileSync(scriptPath, script, { mode: 0o755 });
+    const dir = mkdtempSync(join(tmpdir(), 'hook-'));
+    const scriptPath = join(dir, 'hook.mjs');
+    // Best-effort cleanup that can never override the real execSync result/error.
+    const cleanup = () => {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort temp cleanup */ }
+    };
     try {
+      writeFileSync(scriptPath, script, { mode: 0o755 });
       execSync(`echo 'not json' | node ${scriptPath}`, {
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'pipe'],
       });
-      unlinkSync(scriptPath);
       // Should not reach here
       expect(true).toBe(false);
     } catch (e: unknown) {
-      unlinkSync(scriptPath);
       const err = e as { status?: number; stderr?: string };
       expect(err.status).toBe(2);
       expect(String(err.stderr)).toContain('failed to parse input');
+    } finally {
+      cleanup();
     }
   });
 });
