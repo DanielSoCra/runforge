@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { writeFile, mkdir, rm } from 'fs/promises';
+import { writeFile, mkdir, mkdtemp, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { loadPluginRegistry } from './plugin-registry.js';
@@ -31,8 +31,7 @@ describe('loadPluginRegistry malformed JSON', () => {
   let dir: string;
 
   beforeEach(async () => {
-    dir = join(tmpdir(), `plugin-registry-test-${Date.now()}`);
-    await mkdir(dir, { recursive: true });
+    dir = await mkdtemp(join(tmpdir(), 'plugin-registry-test-'));
   });
 
   afterEach(async () => {

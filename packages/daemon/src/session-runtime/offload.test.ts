@@ -1,15 +1,21 @@
 // src/session-runtime/offload.test.ts
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, afterAll } from 'vitest';
 import { maybeOffload } from './offload.js';
 import { readFile, rm } from 'fs/promises';
+import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-const workspacePath = join(tmpdir(), `offload-test-${Date.now()}`);
+const workspacePath = mkdtempSync(join(tmpdir(), 'offload-test-'));
 
 afterEach(async () => {
   // Clean up the .offload directory after each test
   await rm(join(workspacePath, '.offload'), { recursive: true, force: true });
+});
+
+afterAll(async () => {
+  // Remove the mkdtemp root dir so it doesn't leak per test process
+  await rm(workspacePath, { recursive: true, force: true });
 });
 
 describe('maybeOffload', () => {

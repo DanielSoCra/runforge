@@ -1,24 +1,26 @@
 // src/knowledge-sync/manifest.test.ts
 import { describe, it, expect, afterEach } from 'vitest';
 import { writeFile, rm } from 'fs/promises';
+import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { readVaultManifest } from './manifest.js';
 
-const tmp = () =>
-  join(
-    tmpdir(),
-    `manifest-test-${Date.now()}-${Math.random().toString(36).slice(2)}.md`,
-  );
+// Each call creates a fresh unique dir and returns a file path inside it,
+// so no bare file is left in shared /tmp.
+let lastTmpDir: string | undefined;
+const tmp = () => {
+  lastTmpDir = mkdtempSync(join(tmpdir(), 'manifest-test-'));
+  return join(lastTmpDir, 'manifest.md');
+};
 
 describe('readVaultManifest', () => {
   let filePath: string;
 
   afterEach(async () => {
-    try {
-      await rm(filePath);
-    } catch {
-      /* ignore */
+    if (lastTmpDir !== undefined) {
+      await rm(lastTmpDir, { recursive: true, force: true });
+      lastTmpDir = undefined;
     }
   });
 

@@ -1,5 +1,5 @@
 // packages/daemon/src/session-runtime/containment-hooks.test.ts
-import { mkdirSync, symlinkSync, rmSync } from 'node:fs';
+import { mkdtempSync, symlinkSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -479,8 +479,8 @@ describe('checkContainment', () => {
   describe('symlink bypass prevention (SEC-6)', () => {
     // Create a symlink inside the project that points to a real directory.
     // In tests cwd = packages/daemon, so we use patterns relative to that cwd.
-    const symlinkDir = join(tmpdir(), `containment-test-${Date.now()}`);
-    const symlinkPath = join(symlinkDir, 'innocent-link');
+    let symlinkDir: string;
+    let symlinkPath: string;
     // Policy with patterns relative to test cwd (packages/daemon)
     const symlinkPolicy: ContainmentPolicy = {
       blockedPaths: ['src/session-runtime/**'],
@@ -489,7 +489,8 @@ describe('checkContainment', () => {
     };
 
     beforeAll(() => {
-      mkdirSync(symlinkDir, { recursive: true });
+      symlinkDir = mkdtempSync(join(tmpdir(), 'containment-test-'));
+      symlinkPath = join(symlinkDir, 'innocent-link');
       // Symlink points to the session-runtime dir (a blocked target)
       symlinkSync(
         join(process.cwd(), 'src/session-runtime'),
