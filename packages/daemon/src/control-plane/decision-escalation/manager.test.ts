@@ -2,22 +2,16 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PROTOCOL_VERSION } from '@auto-claude/decision-protocol';
 import * as decisionIndex from '@auto-claude/decision-index';
-import { SENSITIVITY_FIELD_PATHS } from '@auto-claude/decision-protocol';
 import { DecisionIndexManager } from './manager.js';
 
 const TEST_PROTECTED_KEY = Buffer.alloc(32).toString('base64');
 
-function fullSensitivity(): Record<string, 'public' | 'internal' | 'phi' | 'secret'> {
-  const map: Record<string, 'public' | 'internal' | 'phi' | 'secret'> = {};
-  for (const p of SENSITIVITY_FIELD_PATHS) map[p] = 'internal';
-  return map;
-}
-
 function makeRequest(): Record<string, unknown> {
   return {
     decision_id: 'issue-7:l2-gate:1',
-    protocol_version: '1.0.0',
+    protocol_version: PROTOCOL_VERSION,
     source_url: 'https://example.test/issues/7',
     source_etag: 'etag-0',
     deployment: 'test',
@@ -37,7 +31,6 @@ function makeRequest(): Record<string, unknown> {
     answer_schema: { kind: 'option' },
     resume_mode: 'requeue',
     idempotency_key: 'issue-7:l2-gate:1',
-    field_sensitivity: fullSensitivity(),
   };
 }
 

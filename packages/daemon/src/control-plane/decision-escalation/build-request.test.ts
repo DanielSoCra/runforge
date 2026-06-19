@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   DecisionRequestSchema,
-  assertFullyClassified,
-  SENSITIVITY_FIELD_PATHS,
   PROTOCOL_VERSION,
 } from '@auto-claude/decision-protocol';
 import type { RunState } from '../../types.js';
@@ -50,22 +48,6 @@ describe('buildL2GateRequest', () => {
     const req = buildL2GateRequest(makeRun(), 1, 'auto-claude', { now: FIXED_NOW });
     const parsed = DecisionRequestSchema.parse(req);
     expect(parsed.decision_id).toBe('issue-42:l2-gate:1');
-  });
-
-  it('passes assertFullyClassified — every canonical path is classified', () => {
-    const req = buildL2GateRequest(makeRun(), 1, 'auto-claude', { now: FIXED_NOW });
-    expect(() => assertFullyClassified(req)).not.toThrow();
-    // Every canonical path present and non-sensitive (no PHI in the control-plane).
-    for (const p of SENSITIVITY_FIELD_PATHS) {
-      expect(req.field_sensitivity[p]).toBe('internal');
-    }
-  });
-
-  it('classifies NO field as phi or secret', () => {
-    const req = buildL2GateRequest(makeRun(), 1, 'auto-claude', { now: FIXED_NOW });
-    for (const cls of Object.values(req.field_sensitivity)) {
-      expect(cls === 'phi' || cls === 'secret').toBe(false);
-    }
   });
 
   it('deterministic decision_id = issue-<n>:l2-gate:<epoch>; idempotency_key derived from it', () => {

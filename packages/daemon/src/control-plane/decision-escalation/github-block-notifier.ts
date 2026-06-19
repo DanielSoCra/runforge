@@ -22,11 +22,8 @@
  * the cross-system delivery.
  *
  * FAIL-CLOSED: the rendered block is validated (committed-protocol JSON shape via
- * the package's own `DecisionRequestSchema` round-trip + `assertFullyClassified`
- * sensitivity-completeness gate) BEFORE any GitHub write. A block that would not
- * validate is NEVER written — the run stays parked. AJV/Zod-shape validation
- * alone does not prove the sensitivity map is complete, so we run both gates on
- * the bytes we are about to write.
+ * the package's own `DecisionRequestSchema` round-trip) BEFORE any GitHub write.
+ * A block that would not validate is NEVER written — the run stays parked.
  *
  * IDEMPOTENT: the body embed is insert-if-absent / replace-the-single-marked-
  * region-in-place / preserve all human content. A re-park (same deterministic
@@ -37,7 +34,6 @@
  */
 import {
   DecisionRequestSchema,
-  assertFullyClassified,
   type DecisionRequest,
 } from '@auto-claude/decision-protocol';
 
@@ -62,17 +58,15 @@ export function renderDecisionBlock(request: DecisionRequest): string {
 /** Result of validating a rendered block before any write (fail-closed gate). */
 export interface BlockValidation {
   valid: boolean;
-  /** machine reason when invalid (never written): malformed_json | schema_invalid | sensitivity_incomplete. */
+  /** machine reason when invalid (never written): malformed_json | schema_invalid. */
   reason?: string;
 }
 
 /**
  * Validate the BYTES we are about to write. Extracts the JSON payload from the
- * rendered block, parses it, runs the package's `DecisionRequestSchema` (the same
- * typed gate the cockpit applies), and then `assertFullyClassified` (the
- * fail-closed §5.1 sensitivity-completeness gate that schema validation alone
- * does not cover). Any failure -> `{valid:false, reason}` and the caller MUST NOT
- * write.
+ * rendered block, parses it, and runs the package's `DecisionRequestSchema` (the
+ * same typed gate the cockpit applies). Any failure -> `{valid:false, reason}`
+ * and the caller MUST NOT write.
  */
 export function validateRenderedBlock(blockText: string): BlockValidation {
   const rawJson = extractBlockJson(blockText);
@@ -85,11 +79,6 @@ export function validateRenderedBlock(blockText: string): BlockValidation {
   }
   const parsed = DecisionRequestSchema.safeParse(obj);
   if (!parsed.success) return { valid: false, reason: 'schema_invalid' };
-  try {
-    assertFullyClassified(parsed.data);
-  } catch {
-    return { valid: false, reason: 'sensitivity_incomplete' };
-  }
   return { valid: true };
 }
 
@@ -191,7 +180,7 @@ export interface EnsureArgs {
 /** Outcome of an ensure() attempt. `posted:false` always means nothing harmful was left half-written for the WRITE phase, and the run should stay parked / retry. */
 export interface PublishResult {
   posted: boolean;
-  /** reason when not posted: schema_invalid | sensitivity_incomplete | malformed_json | write_failed. */
+  /** reason when not posted: schema_invalid | malformed_json | write_failed. */
   reason?: string;
 }
 

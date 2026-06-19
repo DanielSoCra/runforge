@@ -139,7 +139,7 @@ ARCH-AC-DECISION-ESCALATION:
 # Sanitization architecture (input-boundary content sanitization).
 ARCH-AC-SANITIZATION:
   parent: FUNC-AC-DECISION-ESCALATION
-  children: [STACK-AC-SANITIZATION]
+  children: [STACK-AC-SANITIZATION, STACK-AC-SANITIZER-REDACTION]
   status: draft
 
 STACK-AC-SANITIZATION:
@@ -154,6 +154,18 @@ STACK-AC-SANITIZATION:
     - packages/sanitization/test/pipeline.test.ts
     - packages/sanitization/test/registry.test.ts
     - packages/sanitization/test/config.test.ts
+  status: draft
+
+STACK-AC-SANITIZER-REDACTION:
+  parent: ARCH-AC-SANITIZATION
+  code_paths:
+    - packages/sanitizer-redaction/src/protected-store.ts
+    - packages/sanitizer-redaction/src/withholding-sanitizer.ts
+    - packages/sanitizer-redaction/src/schema.ts
+    - packages/sanitizer-redaction/src/index.ts
+  test_paths:
+    - packages/sanitizer-redaction/test/protected-store.test.ts
+    - packages/sanitizer-redaction/test/withholding-sanitizer.test.ts
   status: draft
 
 # code_paths/test_paths wired in once the implementation landed the files (the

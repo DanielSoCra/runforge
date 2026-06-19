@@ -286,6 +286,9 @@ importers:
       '@auto-claude/decision-protocol':
         specifier: workspace:*
         version: link:../decision-protocol
+      '@auto-claude/sanitizer-redaction':
+        specifier: workspace:*
+        version: link:../sanitizer-redaction
       ajv:
         specifier: ^8.20.0
         version: 8.20.0
@@ -340,6 +343,34 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
     devDependencies:
+      '@types/node':
+        specifier: ^25.5.0
+        version: 25.5.0
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/node@25.5.0)(jiti@2.6.1)(jsdom@29.0.0(@noble/hashes@2.2.0))(lightningcss@1.32.0)(msw@2.12.13(@types/node@25.5.0)(typescript@5.9.3))(tsx@4.21.0)
+
+  packages/sanitizer-redaction:
+    dependencies:
+      '@auto-claude/sanitization':
+        specifier: workspace:*
+        version: link:../sanitization
+      better-sqlite3:
+        specifier: ^12.0.0
+        version: 12.10.0
+      drizzle-orm:
+        specifier: ^0.45.2
+        version: 0.45.2(@types/better-sqlite3@7.6.13)(better-sqlite3@12.10.0)(gel@2.2.0)(kysely@0.28.17)(postgres@3.4.9)
+      ulid:
+        specifier: ^2.3.0
+        version: 2.4.0
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.12
+        version: 7.6.13
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0

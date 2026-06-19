@@ -2,15 +2,13 @@
 //
 // IMMOVABLE acceptance contract for buildMergeDecisionRequest (slice 5b, pure
 // builder). Mirrors decision-escalation/build-request.test.ts: the built object
-// must parse through the REAL DecisionRequestSchema AND pass assertFullyClassified
-// (the schema + canonical-path completeness ARE the gate — never a hand-list).
+// must parse through the REAL DecisionRequestSchema (the schema IS the gate —
+// never a hand-maintained field list).
 //
 // RED at handoff: the body throws 'not implemented'. Kimi fills it green.
 import { describe, it, expect } from 'vitest';
 import {
   DecisionRequestSchema,
-  assertFullyClassified,
-  SENSITIVITY_FIELD_PATHS,
   PROTOCOL_VERSION,
 } from '@auto-claude/decision-protocol';
 import type { RunState } from '../../types.js';
@@ -103,25 +101,6 @@ describe('buildMergeDecisionRequest', () => {
     const parsed = DecisionRequestSchema.parse(req);
     expect(parsed.decision_id).toBe('issue-42:integrate:1');
     expect(parsed.phase).toBe('integrate');
-  });
-
-  it('passes assertFullyClassified — every canonical path is classified internal', () => {
-    const req = buildMergeDecisionRequest(makeRun(), 1, 'auto-claude', escalateDecision('green'), {
-      now: FIXED_NOW,
-    });
-    expect(() => assertFullyClassified(req)).not.toThrow();
-    for (const p of SENSITIVITY_FIELD_PATHS) {
-      expect(req.field_sensitivity[p]).toBe('internal');
-    }
-  });
-
-  it('classifies NO field as phi or secret (control-plane carries no PHI)', () => {
-    const req = buildMergeDecisionRequest(makeRun(), 1, 'auto-claude', escalateDecision('green'), {
-      now: FIXED_NOW,
-    });
-    for (const cls of Object.values(req.field_sensitivity)) {
-      expect(cls === 'phi' || cls === 'secret').toBe(false);
-    }
   });
 
   it('deterministic decision_id = issue-<n>:integrate:<epoch>; idempotency_key derived from it', () => {

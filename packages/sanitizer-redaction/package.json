@@ -1,5 +1,5 @@
 {
-  "name": "@auto-claude/decision-index",
+  "name": "@auto-claude/sanitizer-redaction",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -17,18 +17,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@auto-claude/decision-protocol": "workspace:*",
-    "@auto-claude/sanitizer-redaction": "workspace:*",
-    "ajv": "^8.20.0",
+    "@auto-claude/sanitization": "workspace:*",
     "better-sqlite3": "^12.0.0",
     "drizzle-orm": "^0.45.2",
-    "ulid": "^2.3.0",
-    "zod": "^4.3.6"
+    "ulid": "^2.3.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^25.5.0",
-    "drizzle-kit": "^0.30.0",
     "typescript": "^5.0.0",
     "vitest": "^3.2.4"
   }

@@ -9,7 +9,7 @@
           "minLength": 1
         },
         "protocol_version": {
-          "default": "1.0.0",
+          "default": "2.0.0",
           "type": "string",
           "minLength": 1
         },
@@ -155,21 +155,6 @@
         },
         "skill_version": {
           "type": "string"
-        },
-        "field_sensitivity": {
-          "type": "object",
-          "propertyNames": {
-            "type": "string"
-          },
-          "additionalProperties": {
-            "type": "string",
-            "enum": [
-              "public",
-              "internal",
-              "phi",
-              "secret"
-            ]
-          }
         }
       },
       "required": [
@@ -188,8 +173,7 @@
         "expires_at",
         "answer_schema",
         "resume_mode",
-        "idempotency_key",
-        "field_sensitivity"
+        "idempotency_key"
       ],
       "additionalProperties": false
     }

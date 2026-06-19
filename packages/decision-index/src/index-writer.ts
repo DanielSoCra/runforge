@@ -12,14 +12,14 @@ import { withTx } from "./db.js";
 import { decisions, workerSessions } from "./schema.js";
 import { appendAudit, type WorkflowAuditEvent } from "./audit-log.js";
 import { ingest, type IngestDeps, type DecisionRow } from "./ingest.js";
-import type { ProtectedStore } from "./protected-store.js";
+import type { ProtectedStore } from "@auto-claude/sanitizer-redaction";
 import type { Quarantine } from "./quarantine.js";
 import { apply, type ApplyCtx, type ApplyResult } from "./state-machine.js";
 import { Outbox, type RunEffectResult, type RunEffectOptions, type PendingEffect } from "./outbox.js";
 import { ReadModel } from "./read-model.js";
 import { openDb } from "./db.js";
 import { migrate } from "./migrate.js";
-import { ProtectedStore as ProtectedStoreImpl } from "./protected-store.js";
+import { ProtectedStore as ProtectedStoreImpl } from "@auto-claude/sanitizer-redaction";
 import { SqliteQuarantine } from "./quarantine.js";
 import type { Notifier } from "./adapters/notifier.js";
 import type { SourceSink } from "./adapters/source-sink.js";
@@ -166,7 +166,6 @@ export class IndexWriter {
     this.quarantine = deps.quarantine;
     this.ingestDeps = {
       db: deps.db,
-      protectedStore: deps.protectedStore,
       quarantine: deps.quarantine,
       clock: deps.clock,
     };
@@ -337,21 +336,6 @@ export class IndexWriter {
       }
     }
     let answer = ctx.answer;
-    if (answer && (answer.answer_sensitivity === "phi" || answer.answer_sensitivity === "secret")) {
-      if (answer.answer_value !== undefined && answer.answer_ref === undefined) {
-        const plaintextValue = answer.answer_value;
-        const ref = this.protectedStore.put({
-          decision_id: decisionId,
-          field: "answer_value",
-          class: answer.answer_sensitivity,
-          plaintext: JSON.stringify(plaintextValue),
-        });
-        // Finding I7: carry the plaintext in `validate_value` (never stored/hashed)
-        // so apply()'s Ajv validation still runs on the real value after the
-        // raw `answer_value` is cleared. An invalid PHI/secret answer is rejected.
-        answer = { ...answer, answer_ref: ref, answer_value: undefined, validate_value: plaintextValue };
-      }
-    }
     return apply(this.db, decisionId, event, {
       ...ctx,
       answer,

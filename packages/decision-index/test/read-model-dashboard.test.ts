@@ -4,21 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeTempDb, type TempDb, TEST_PROTECTED_KEY } from "./helpers/temp-db.js";
 import { IndexWriter } from "../src/index-writer.js";
-import { ProtectedStore } from "../src/protected-store.js";
+import { ProtectedStore } from "@auto-claude/sanitizer-redaction";
 import { SqliteQuarantine } from "../src/quarantine.js";
 import { FakeNotifier } from "../src/adapters/fakes/fake-notifier.js";
 import { FakeSourceSink } from "../src/adapters/fakes/fake-source-sink.js";
 import { FakeResumeDispatcher } from "../src/adapters/fakes/fake-resume-dispatcher.js";
 import { ReadModel } from "../src/read-model.js";
-import { PROTOCOL_VERSION, SENSITIVITY_FIELD_PATHS } from "@auto-claude/decision-protocol";
+import { PROTOCOL_VERSION } from "@auto-claude/decision-protocol";
+import { eq } from "drizzle-orm";
+import { decisions, protectedRefs } from "../src/schema.js";
 
 const NOW = "2026-05-27T03:00:00.000Z";
-
-function classification(overrides: Record<string, string> = {}): Record<string, string> {
-  const m: Record<string, string> = {};
-  for (const p of SENSITIVITY_FIELD_PATHS) m[p] = "internal";
-  return { ...m, ...overrides };
-}
 
 interface ReqOverrides {
   risk_class?: string;
@@ -26,7 +22,6 @@ interface ReqOverrides {
   resume_mode?: "mid_run" | "requeue";
   created_at?: string;
   expires_at?: string;
-  classification?: Record<string, string>;
   question?: string;
   context?: string;
   reversibility?: string;
@@ -54,8 +49,53 @@ function rawRequest(id: string, o: ReqOverrides = {}): unknown {
     answer_schema: { kind: "option" },
     resume_mode: o.resume_mode ?? "mid_run",
     idempotency_key: `idem-${id}`,
-    field_sensitivity: o.classification ?? classification(),
   };
+}
+
+/** Seed a legacy protected:// row by mutating the admitted SQLite row directly. */
+function seedProtectedQuestion(
+  db: TempDb["db"],
+  decisionId: string,
+  ulid: string,
+  cls: string,
+) {
+  db.insert(protectedRefs)
+    .values({
+      ulid,
+      decision_id: decisionId,
+      field: "question",
+      class: cls,
+      created_at: NOW,
+    })
+    .run();
+  db.update(decisions)
+    .set({ question: `protected://${ulid}` })
+    .where(eq(decisions.decision_id, decisionId))
+    .run();
+}
+
+function seedProtectedOptionLabel(
+  db: TempDb["db"],
+  decisionId: string,
+  ulid: string,
+  cls: string,
+) {
+  db.insert(protectedRefs)
+    .values({
+      ulid,
+      decision_id: decisionId,
+      field: "options[0].label",
+      class: cls,
+      created_at: NOW,
+    })
+    .run();
+  const row = db.select().from(decisions).where(eq(decisions.decision_id, decisionId)).all()[0]!;
+  const options = JSON.parse(row.options_json);
+  options[0].label = `protected://${ulid}`;
+  db.update(decisions)
+    .set({ options_json: JSON.stringify(options) })
+    .where(eq(decisions.decision_id, decisionId))
+    .run();
 }
 
 describe("ReadModel dashboard surface (listRanked / detail) — slice 4", () => {
@@ -112,11 +152,11 @@ describe("ReadModel dashboard surface (listRanked / detail) — slice 4", () => 
     }
   });
 
-  it("list metadata for a PHI field carries {field, class} and NO ref", async () => {
+  it("list metadata for a legacy protected:// field carries {field, class} and NO ref", async () => {
     const id = await notify("01HRMDASH0000000000000PHI", {
-      question: "Patient John Doe SSN 123-45-6789?",
-      classification: classification({ question: "phi" }),
+      question: "will-be-replaced-by-protected-ref",
     });
+    seedProtectedQuestion(t.db, id, "01HLEGACYQUESTION0000000001", "phi");
     const ranked = reader.listRanked({ focus: { now: new Date(NOW) } });
     const row = ranked.find((r) => r.decision_id === id)!;
     expect(row.question.kind).toBe("protected");
@@ -128,17 +168,14 @@ describe("ReadModel dashboard surface (listRanked / detail) — slice 4", () => 
     }
     // a non-protected field is plain text
     expect(row.context.kind).toBe("text");
-    // the raw PHI plaintext must NEVER appear in the list payload
-    expect(JSON.stringify(row)).not.toContain("John Doe");
-    expect(JSON.stringify(row)).not.toContain("123-45-6789");
   });
 
-  it("detail returns the {ref, class} token for a PHI field (no plaintext) and text for the rest", async () => {
+  it("detail returns the {ref, class} token for a legacy protected:// field (no plaintext)", async () => {
     const id = await notify("01HRMDASH0000000000000DET", {
-      question: "Patient John Doe SSN 123-45-6789?",
+      question: "will-be-replaced-by-protected-ref",
       context: "non-sensitive context",
-      classification: classification({ question: "phi" }),
     });
+    seedProtectedQuestion(t.db, id, "01HLEGACYQUESTION0000000002", "phi");
     const detail = reader.detail(id)!;
     expect(detail.decision_id).toBe(id);
     expect(detail.question.kind).toBe("protected");
@@ -146,12 +183,10 @@ describe("ReadModel dashboard surface (listRanked / detail) — slice 4", () => 
       expect(detail.question.class).toBe("phi");
       expect(detail.question.field).toBe("question");
       // detail carries the ref (consumed by the server-only resolver)
-      expect(detail.question.ref.startsWith("protected://")).toBe(true);
+      expect(detail.question.ref).toBe("protected://01HLEGACYQUESTION0000000002");
     }
     expect(detail.context.kind).toBe("text");
     if (detail.context.kind === "text") expect(detail.context.value).toBe("non-sensitive context");
-    // still no plaintext PHI in the detail payload
-    expect(JSON.stringify(detail)).not.toContain("John Doe");
     // detail exposes the full DecisionRequest fields
     expect(detail.reversibility).toBe("reversible");
     expect(detail.options.length).toBe(2);
@@ -159,14 +194,13 @@ describe("ReadModel dashboard surface (listRanked / detail) — slice 4", () => 
     expect(detail.resume_mode).toBe("mid_run");
   });
 
-  it("detail option labels are protected tokens when classified phi", async () => {
-    const id = await notify("01HRMDASH0000000000000OPT", {
-      classification: classification({ "options[].label": "phi" }),
-    });
+  it("detail option labels are protected tokens for legacy protected:// rows", async () => {
+    const id = await notify("01HRMDASH0000000000000OPT");
+    seedProtectedOptionLabel(t.db, id, "01HLEGACYOPTIONLABEL00000001", "phi");
     const detail = reader.detail(id)!;
     expect(detail.options[0]!.label.kind).toBe("protected");
     if (detail.options[0]!.label.kind === "protected") {
-      expect(detail.options[0]!.label.ref.startsWith("protected://")).toBe(true);
+      expect(detail.options[0]!.label.ref).toBe("protected://01HLEGACYOPTIONLABEL00000001");
       expect(detail.options[0]!.label.class).toBe("phi");
     }
     // the list also redacts option labels to {field, class} with no ref

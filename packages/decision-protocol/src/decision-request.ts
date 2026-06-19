@@ -1,9 +1,6 @@
 import { z } from "zod";
 import { PROTOCOL_VERSION } from "./protocol-version.js";
-import { SENSITIVITY_CLASSES } from "./sensitivity.js";
 import { RISK_CLASSES, RESUME_MODES, REVERSIBILITY } from "./state-machine-types.js";
-
-export const SensitivityClassSchema = z.enum(SENSITIVITY_CLASSES);
 
 export const OptionSchema = z.strictObject({
   id: z.string().min(1),
@@ -22,13 +19,6 @@ export const AnswerSchemaSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("json"), schema: z.record(z.string(), z.unknown()) }),
 ]);
 export type AnswerSchema = z.infer<typeof AnswerSchemaSchema>;
-
-/**
- * Required, complete field_sensitivity map. Completeness against the canonical
- * path list is enforced separately by assertFullyClassified (fail-closed gate);
- * here we only constrain the value type.
- */
-export const FieldSensitivitySchema = z.record(z.string(), SensitivityClassSchema);
 
 export const DecisionRequestSchema = z.strictObject({
   decision_id: z.string().min(1),
@@ -54,7 +44,6 @@ export const DecisionRequestSchema = z.strictObject({
   trace_id: z.string().optional(),
   agent_version: z.string().optional(),
   skill_version: z.string().optional(),
-  field_sensitivity: FieldSensitivitySchema,
 });
 
 export type DecisionRequest = z.infer<typeof DecisionRequestSchema>;

@@ -3,12 +3,11 @@
  * emits when a run parks at the `l2-gate` phase awaiting Operator approval.
  *
  * The output is a COMPLETE object that the REAL `DecisionRequestSchema.parse()`
- * accepts AND `assertFullyClassified()` passes — we validate against the schema
- * itself rather than hand-maintaining a field list (the schema is the gate).
+ * accepts — we validate against the schema itself rather than hand-maintaining
+ * a field list (the schema is the gate).
  *
- * SECURITY (§5.1, fail-closed): the control-plane carries NO PHI, so every
- * canonical field is classified `internal` (the non-sensitive operational
- * class). `context`/`question` contain ONLY structured, known-safe text — never
+ * SECURITY (§5.1, fail-closed): the control-plane carries NO PHI.
+ * `context`/`question` contain ONLY structured, known-safe text — never
  * `run.l2Feedback`, `run.handoffNotes`, `run.report`, or raw failure messages.
  * Those free-text fields can carry arbitrary worker output and must not be
  * copied verbatim into a request that downstream sinks (dashboard, notifiers)
@@ -16,9 +15,7 @@
  */
 import {
   DecisionRequestSchema,
-  SENSITIVITY_FIELD_PATHS,
   type DecisionRequest,
-  type SensitivityClass,
 } from '@auto-claude/decision-protocol';
 import type { RunState } from '../../types.js';
 
@@ -27,14 +24,6 @@ const L2_GATE_PHASE = 'l2-gate';
 
 /** Default request lifetime when the caller does not pin `expiresAt`. */
 const DEFAULT_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-
-/**
- * Non-sensitive operational class for every field. The sensitivity enum is
- * `public | internal | phi | secret` — there is no `operational` value — so the
- * non-sensitive control-plane class is `internal` (matches the package's own
- * test fixtures).
- */
-const OPERATIONAL_CLASS: SensitivityClass = 'internal';
 
 export interface BuildL2GateRequestOpts {
   /** Override the source URL (e.g. a PR url instead of the issue url). */
@@ -64,17 +53,6 @@ function issueUrlFor(run: RunState): string {
   const owner = run.repoOwner ?? 'unknown-owner';
   const repo = run.repoName ?? 'unknown-repo';
   return `https://github.com/${owner}/${repo}/issues/${run.issueNumber}`;
-}
-
-/**
- * Fully-classified field_sensitivity map: every canonical path -> `internal`.
- * Built from `SENSITIVITY_FIELD_PATHS` (the source of truth `assertFullyClassified`
- * checks) so it can never drift out of sync with the protocol.
- */
-function fullSensitivity(): Record<string, SensitivityClass> {
-  const map: Record<string, SensitivityClass> = {};
-  for (const path of SENSITIVITY_FIELD_PATHS) map[path] = OPERATIONAL_CLASS;
-  return map;
 }
 
 /**
@@ -136,7 +114,6 @@ export function buildL2GateRequest(
     answer_schema: { kind: 'option' as const },
     resume_mode: 'requeue' as const,
     idempotency_key: decisionId,
-    field_sensitivity: fullSensitivity(),
     // protocol_version is omitted — the schema defaults it to PROTOCOL_VERSION.
   };
 

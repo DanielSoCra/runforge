@@ -1,3 +1,4 @@
+import { PROTOCOL_VERSION } from "@auto-claude/decision-protocol";
 import type { Db } from "../../src/db.js";
 import { decisions } from "../../src/schema.js";
 import type { DecisionRow } from "../../src/ingest.js";
@@ -17,7 +18,7 @@ export function seedDecision(db: Db, o: SeedOverrides = {}): string {
   const now = "2026-05-27T00:00:00.000Z";
   const row: DecisionRow = {
     decision_id: id,
-    protocol_version: "1.0.0",
+    protocol_version: PROTOCOL_VERSION,
     status: o.status ?? "detected",
     source_url: "https://example.test/1",
     source_etag: "etag-0",
