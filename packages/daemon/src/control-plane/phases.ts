@@ -57,6 +57,8 @@ import {
   evaluateComplianceForced,
   observeVerifierStatus,
 } from './merge-decision/index.js';
+import type { DecisionOption, DecisionRequest } from '@auto-claude/decision-protocol';
+import { SanitizationPipeline } from '@auto-claude/sanitization';
 import { assignLane, gateSetVerdict, resolveForMode } from './lane-engine/index.js';
 import type { ClassifierVerdict, GateSetDefinitions, RiskLevel } from './lane-engine/types.js';
 import type { ClassificationComplexity } from '../types.js';
@@ -115,6 +117,9 @@ export function createPhaseHandlers(
   // the wiring integration test can inject a registry while existing call sites
   // (which omit it) still compile.
   registry?: DeploymentRegistry,
+  // OPTIONAL input-boundary sanitization pipeline. Default = identity, keeping
+  // the raise path byte-identical when no deployment configures sanitizers.
+  sanitizationPipeline?: SanitizationPipeline,
 ): PhaseHandlerMap {
   const repo = repoName;
   // Lazily constructed only when the decision index is enabled — a disabled
@@ -135,6 +140,40 @@ export function createPhaseHandlers(
   // Restored from run.workspacePath on resume (survives daemon restarts).
   let workspaceCwd: string = mainRepoRoot;
   let workspaceRestored = false;
+
+  // Default pipeline is the identity (empty). Callers that omit it stay on the
+  // byte-identical raise path; configured deployments pass a real pipeline.
+  const pipeline = sanitizationPipeline ?? new SanitizationPipeline([]);
+
+  /**
+   * Apply the input-boundary sanitization pipeline to a DecisionRequest before
+   * it is raised. When the pipeline is empty the original request is returned
+   * unchanged, preserving today's raise path.
+   */
+  async function sanitizeDecisionRequest(
+    request: DecisionRequest,
+  ): Promise<DecisionRequest> {
+    if (pipeline.isEmpty) {
+      return request;
+    }
+    const content: Record<string, unknown> = {
+      question: request.question,
+      context: request.context,
+      consequence_of_no_answer: request.consequence_of_no_answer,
+      options: request.options,
+    };
+    const result = await pipeline.run({
+      content,
+      deploymentRef: request.deployment,
+    });
+    return {
+      ...request,
+      question: result.content.question as string,
+      context: result.content.context as string,
+      consequence_of_no_answer: result.content.consequence_of_no_answer as string,
+      options: result.content.options as DecisionOption[],
+    };
+  }
 
   /**
    * Map the legacy classifier complexity onto the lane-engine RiskLevel floor.
@@ -750,9 +789,10 @@ export function createPhaseHandlers(
             run.decisionEpoch,
             `${owner}/${repo}`,
           );
-          const { decision_id } = ledger.raise(request);
+          const sanitized = await sanitizeDecisionRequest(request);
+          const { decision_id } = ledger.raise(sanitized);
           const published = await resolveDecisionPublisher().ensure({
-            request,
+            request: sanitized,
             octokit,
             owner,
             repo,
@@ -2083,9 +2123,10 @@ export function createPhaseHandlers(
             deploymentId,
             decision,
           );
-          const { decision_id } = ledger.raise(request);
+          const sanitized = await sanitizeDecisionRequest(request);
+          const { decision_id } = ledger.raise(sanitized);
           const published = await resolveDecisionPublisher().ensure({
-            request,
+            request: sanitized,
             octokit,
             owner,
             repo,

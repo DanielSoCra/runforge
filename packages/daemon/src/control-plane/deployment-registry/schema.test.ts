@@ -115,6 +115,22 @@ describe('parseProfile — fail-closed rejections (real zod / composed parsers)'
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.offenders.join()).toContain('lifecycleMode');
   });
+
+  it('sanitizers is optional; omitted ⇒ profile.sanitizers is undefined', () => {
+    const r = parseProfile('dep-a', validProfile);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.profile.sanitizers).toBeUndefined();
+  });
+
+  it('sanitizers parses with a withholding binding', () => {
+    const withSanitizers = structuredClone(validProfile) as Record<string, unknown>;
+    withSanitizers.sanitizers = [{ plugin: 'withholding' }];
+    const r = parseProfile('dep-a', withSanitizers);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.profile.sanitizers).toEqual([{ plugin: 'withholding' }]);
+    }
+  });
 });
 
 // --- Fleet capacity ---------------------------------------------------------

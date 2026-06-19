@@ -7,6 +7,7 @@ import { StateManager } from './state.js';
 import { createWorkDetector, type FeaturePipelineWorkType } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
 import { createDeploymentRegistry } from './deployment-registry/index.js';
+import { buildSanitizationPipelineForDeployment } from './sanitization/build-pipeline.js';
 import { runPipeline } from './pipeline.js';
 import { getPipeline, getStartPhase } from './fsm.js';
 import { selectVariant } from './variants.js';
@@ -144,6 +145,10 @@ export async function processSingleIssue(issueNumber: number, configPath: string
   await stateMgr.saveRunState(run);
 
   console.log(`[process] Running pipeline for #${issueNumber}: ${request.title}`);
+  const sanitizationPipeline = buildSanitizationPipelineForDeployment(
+    deploymentRegistry,
+    config.deployment?.id,
+  );
   const handlers = createPhaseHandlers(
     config,
     owner,
@@ -162,6 +167,7 @@ export async function processSingleIssue(issueNumber: number, configPath: string
     undefined,
     undefined,
     deploymentRegistry,
+    sanitizationPipeline,
   );
   const table = getPipeline(variant);
   const result = await runPipeline(run, table, handlers, stateMgr, costTracker, undefined, undefined, phaseLabelMirror);
