@@ -2,10 +2,10 @@
 //
 // Regression guard for the two concurrent-load flake patterns fixed in the
 // ephemeral-ports (#757) and unique-temp-dirs (#758) PRs. The shared self-hosted
-// runner runs multiple branch CIs + the daemon's own `pnpm test` gate at once, so
+// runner runs multiple branch CIs + every package's `pnpm test` gate at once, so
 // any test that grabs a *shared* OS resource by a fixed name collides across
-// processes and flakes. This meta-test scans the daemon test sources and fails if
-// either anti-pattern is reintroduced:
+// processes and flakes. This meta-test scans EVERY package's test sources and
+// fails if either anti-pattern is reintroduced:
 //
 //   RC-1  A hard-coded TCP port bound by a real server (createControlServer /
 //         createDegradedServer / .listen(<literal>)). Fixed ports collide ->
@@ -15,7 +15,10 @@
 //         unique across concurrent processes (same millisecond) -> path collision.
 //         Correct pattern: mkdtemp(join(tmpdir(), 'prefix-')).
 //
-// Scope: the daemon package only (the proven flake locus). The check is a textual
+// Scope: the entire monorepo (every packages/**/*.test.ts). #757-759 proved the
+// pattern on the daemon, but the shared self-hosted runner runs every package's
+// tests concurrently, so the same fixed-name collision flakes any package — the
+// guard belongs repo-wide, not just on the daemon. The check is a textual
 // heuristic, not an AST pass, so it intentionally errs toward NOT flagging when a
 // value is dynamic (a variable / port 0 / mkdtemp) and only fires on the concrete
 // literal smells the original flaky tests used.
@@ -24,7 +27,9 @@ import { readdirSync, readFileSync } from 'fs';
 import { join, dirname, relative } from 'path';
 import { fileURLToPath } from 'url';
 
-const SRC_DIR = dirname(fileURLToPath(import.meta.url)); // packages/daemon/src
+// This guard lives in the daemon package but scans the WHOLE monorepo: from
+// packages/daemon/src up two levels to packages/, then recurses every package.
+const PACKAGES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..'); // packages/
 const SELF = 'test-hygiene.test.ts';
 
 function listTestFiles(dir: string): string[] {
@@ -32,7 +37,7 @@ function listTestFiles(dir: string): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === 'node_modules') continue;
+      if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === 'build') continue;
       out.push(...listTestFiles(full));
     } else if (entry.name.endsWith('.test.ts') && entry.name !== SELF) {
       out.push(full);
@@ -84,13 +89,14 @@ export function findHygieneViolations(rawSrc: string, label: string): string[] {
   return violations;
 }
 
-describe('test hygiene: no concurrent-load flake anti-patterns in daemon tests', () => {
+describe('test hygiene: no concurrent-load flake anti-patterns in any package tests', () => {
   it('binds no fixed TCP ports and builds no Date.now()-based temp paths', () => {
-    const files = listTestFiles(SRC_DIR);
-    // Sanity: the scan actually found the test tree (guard isn't vacuously empty).
-    expect(files.length).toBeGreaterThan(50);
+    const files = listTestFiles(PACKAGES_DIR);
+    // Sanity: the scan actually found the monorepo test tree (guard isn't
+    // vacuously empty). The daemon package alone has >200 test files.
+    expect(files.length).toBeGreaterThan(100);
     const violations = files.flatMap((f) =>
-      findHygieneViolations(readFileSync(f, 'utf8'), relative(SRC_DIR, f)),
+      findHygieneViolations(readFileSync(f, 'utf8'), relative(PACKAGES_DIR, f)),
     );
     expect(violations, `\n${violations.join('\n')}\n`).toEqual([]);
   });
