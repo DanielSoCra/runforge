@@ -32,13 +32,12 @@ describe("withholding sanitizer", () => {
     expect(s.name).toBe("withholding");
     const r = await s.sanitize({ content: { question: "secret", context: "keep" }, subjectRef: "d1" });
     expect(r.content.context).toBe("keep");
-    // withheld field stays present, replaced by the safe marker (not dropped)
-    expect(r.content.question).toBe("[WITHHELD]");
+    // withheld field's VALUE becomes the protected:// ref (read-model contract), not a marker.
+    expect(r.content.question as string).toMatch(/^protected:\/\//);
     expect(r.withholdings).toHaveLength(1);
     const w = r.withholdings[0]!;
     expect(w.field).toBe("question");
-    expect(w.marker).toBe("[WITHHELD]");
-    expect(w.ref).toMatch(/^protected:\/\//);
+    expect(w.ref).toBe(r.content.question);
     expect(ctx.store.get(w.ref)).toBe(JSON.stringify("secret"));
   });
 

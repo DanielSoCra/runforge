@@ -37,6 +37,10 @@ function fakeStore(): { store: ProtectedStore; puts: PutArgs[] } {
       puts.push(args);
       return `protected://fake-${puts.length}`;
     },
+    findRefForField(decision_id: string, field: string): string | undefined {
+      const idx = puts.findIndex((p) => p.decision_id === decision_id && p.field === field);
+      return idx === -1 ? undefined : `protected://fake-${idx + 1}`;
+    },
     get: (ref: string) => puts[Number(ref.split('-')[1]) - 1]!.plaintext,
     responseHmac: (c: string) => `hmac:${c.length}`,
     verifyIntegrity: () => true as const,
@@ -66,7 +70,8 @@ describe('buildSanitizationPipeline', () => {
     expect(pipeline.isEmpty).toBe(false);
 
     const result = await pipeline.run({ content: { context: 'SENSITIVE' }, subjectRef: 'D-1' });
-    expect(result.content.context).toBe('[WITHHELD]');
+    // stored value is the protected:// ref (read-model contract), recoverable via the store.
+    expect(result.content.context as string).toMatch(/^protected:\/\//);
     expect(result.withholdings).toHaveLength(1);
     expect(puts[0]!.decision_id).toBe('D-1');
     expect(JSON.parse(puts[0]!.plaintext)).toBe('SENSITIVE');

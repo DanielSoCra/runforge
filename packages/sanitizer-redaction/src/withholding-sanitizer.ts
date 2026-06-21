@@ -38,11 +38,6 @@ export function createWithholdingSanitizer(options: WithholdingSanitizerOptions)
     name: "withholding",
     sanitize(input: SanitizationInput): SanitizationResult {
       const content = input.content;
-      const decision_id = input.subjectRef;
-      if (decision_id === undefined || decision_id === "") {
-        throw new Error("WithholdingSanitizer requires input.subjectRef to be a non-empty string");
-      }
-
       const transformed: SanitizableContent = {};
       const withholdings: Withholding[] = [];
 
@@ -52,18 +47,36 @@ export function createWithholdingSanitizer(options: WithholdingSanitizerOptions)
           continue;
         }
 
-        const value = content[key];
-        const ref = options.store.put({
-          decision_id,
-          field: key,
-          class: cls,
-          plaintext: JSON.stringify(value),
-        });
+        // A field must be withheld → a stable subject key is required to store it and
+        // later reveal it. Checked here (not up-front) so pure pass-through content with
+        // no selected field never needs a subjectRef.
+        const subjectRef = input.subjectRef;
+        if (subjectRef === undefined || subjectRef === "") {
+          throw new Error(
+            "WithholdingSanitizer requires input.subjectRef to withhold a field",
+          );
+        }
 
-        // Keep the field present with the safe marker as its value — the request
-        // shape still requires it and the marker is the displayed placeholder. The
-        // original is recoverable only via the Withholding's protected:// ref.
-        transformed[key] = marker;
+        const value = content[key];
+        // Idempotent per (subjectRef, field): reuse an existing ref instead of minting a
+        // new one. The raise→publish→notify path is retryable, so without reuse each retry
+        // would write a duplicate blob + protected_refs row and change the stored value
+        // (making the re-raise look 'edited' and the reveal ambiguous). Reuse keeps the
+        // re-raised content byte-identical and storage bounded.
+        const ref =
+          options.store.findRefForField(subjectRef, key) ??
+          options.store.put({
+            decision_id: subjectRef,
+            field: key,
+            class: cls,
+            plaintext: JSON.stringify(value),
+          });
+
+        // The STORED value is the protected:// ref, NOT the marker: the decision read-model
+        // detects a protected field by `value.startsWith("protected://")` and resolves the
+        // class + reveal ref from that stored value. The marker is carried in the Withholding
+        // record for surfaces that don't resolve refs.
+        transformed[key] = ref;
         withholdings.push({ field: key, marker, ref });
       }
 

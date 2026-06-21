@@ -145,10 +145,26 @@ export async function processSingleIssue(issueNumber: number, configPath: string
   await stateMgr.saveRunState(run);
 
   console.log(`[process] Running pipeline for #${issueNumber}: ${request.title}`);
-  const sanitizationPipeline = buildSanitizationPipelineForDeployment(
-    deploymentRegistry,
-    config.deployment?.id,
-  );
+  // The single-issue CLI path does not wire the decision index (no ledger / protected store),
+  // so it cannot supply the store a withholding sanitizer needs. Build the pipeline WITHOUT a
+  // store: an unconfigured deployment gets the identity pipeline; a deployment that activates
+  // withholding fails CLOSED here with a clear, actionable error (run via the daemon) rather
+  // than an opaque throw deep in the factory.
+  let sanitizationPipeline: ReturnType<typeof buildSanitizationPipelineForDeployment>;
+  try {
+    sanitizationPipeline = buildSanitizationPipelineForDeployment(
+      deploymentRegistry,
+      config.deployment?.id,
+    );
+  } catch (e) {
+    return err(
+      new Error(
+        `[process] Single-issue CLI cannot activate the deployment's configured sanitizer ` +
+          `(${e instanceof Error ? e.message : String(e)}). Sanitizer activation requires the ` +
+          `decision index, which this path does not wire — run this deployment via the daemon.`,
+      ),
+    );
+  }
   const handlers = createPhaseHandlers(
     config,
     owner,
