@@ -165,6 +165,7 @@ export function createPhaseHandlers(
     const result = await pipeline.run({
       content,
       deploymentRef: request.deployment,
+      subjectRef: request.decision_id,
     });
     return {
       ...request,

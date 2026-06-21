@@ -10,6 +10,13 @@ import {
   SanitizationPipeline,
   SanitizerRegistry,
 } from '@auto-claude/sanitization';
+import { createWithholdingFactory } from '@auto-claude/sanitizer-redaction';
+import type { ProtectedStore } from '@auto-claude/sanitizer-redaction';
+
+export interface BuildSanitizationPipelineOptions {
+  /** The ledger's protected store; required when a profile activates withholding. */
+  protectedStore?: ProtectedStore;
+}
 
 /**
  * Build the input-boundary sanitization pipeline for a deployment profile.
@@ -17,27 +24,26 @@ import {
  * - No profile, no sanitizers, or an empty binding list ⇒ identity pipeline
  *   (`isEmpty === true`). This is the default today and keeps the raise path
  *   byte-identical.
- * - The "withholding" redaction sanitizer is registered by name, but this slice
- *   does not wire the ProtectedStore it requires. Activating it in a deployment
- *   profile therefore fails closed with a clear error; Slice 5 will supply the
- *   store binding.
+ * - The "withholding" redaction sanitizer is registered when a ProtectedStore is
+ *   supplied. Activating it in a deployment profile without a store fails closed.
  */
 export function buildSanitizationPipeline(
   profile?: Readonly<DeploymentProfile>,
+  opts?: BuildSanitizationPipelineOptions,
 ): SanitizationPipeline {
   const registry = new SanitizerRegistry();
+  const store = opts?.protectedStore;
 
-  // Slice 4 placeholder: the redaction sanitizer needs a ProtectedStore, which
-  // is not wired yet. Register the name so deployments can declare it, but fail
-  // closed if they actually try to activate it without the store plumbing.
   registry.register(
     'withholding',
-    () => {
-      throw new Error(
-        'redaction sanitizer requires store wiring (withholding is registered but not bound in this slice)',
-      );
-    },
-    '@auto-claude/sanitizer-redaction withholding sanitizer (store wiring pending)',
+    store
+      ? createWithholdingFactory(store)
+      : () => {
+          throw new Error(
+            'withholding sanitizer requires a ProtectedStore, but the decision index is disabled or unavailable',
+          );
+        },
+    '@auto-claude/sanitizer-redaction withholding sanitizer',
   );
 
   return registry.build(profile?.sanitizers ?? []);
@@ -50,12 +56,14 @@ export function buildSanitizationPipeline(
 export function buildSanitizationPipelineForDeployment(
   registry: DeploymentRegistry | undefined,
   deploymentId: string | undefined,
+  opts?: BuildSanitizationPipelineOptions,
 ): SanitizationPipeline {
   if (registry === undefined || deploymentId === undefined) {
-    return buildSanitizationPipeline(undefined);
+    return buildSanitizationPipeline(undefined, opts);
   }
   const result = registry.lookup(deploymentId);
   return buildSanitizationPipeline(
     result.kind === 'found' ? result.profile : undefined,
+    opts,
   );
 }

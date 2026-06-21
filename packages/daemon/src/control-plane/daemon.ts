@@ -44,6 +44,7 @@ import {
 } from './sanitization/build-pipeline.js';
 import { ensureWorkspaceRepo } from './workspace-bootstrap.js';
 import { DecisionIndexManager } from './decision-escalation/manager.js';
+import type { ProtectedStore } from '@auto-claude/sanitizer-redaction';
 import { readDecisionIndexConfig } from './decision-escalation/config.js';
 import { decisionIdFor } from './decision-escalation/build-request.js';
 import { decisionIdFor as mergeDecisionIdFor } from './merge-decision/build-request.js';
@@ -317,6 +318,16 @@ export async function startDaemon(
     return err(e instanceof Error ? e : new Error(String(e)));
   }
 
+  // The protected store is required when a deployment profile activates the
+  // withholding sanitizer. A disabled or broken index yields undefined here;
+  // build-pipeline fails closed if withholding is configured without a store.
+  let protectedStore: ProtectedStore | undefined;
+  try {
+    protectedStore = decisionManager.protectedStore();
+  } catch {
+    protectedStore = undefined;
+  }
+
   // 2c. Deployment registry (optional, flag-gated). A malformed deployment
   // profile is rejected at registration; the registry is left empty so the
   // integrate handler falls back to its flag-OFF unconditional merge.
@@ -339,6 +350,7 @@ export async function startDaemon(
   const sanitizationPipeline = buildSanitizationPipelineForDeployment(
     deploymentRegistry,
     config.deployment?.id,
+    { protectedStore },
   );
 
   // Validate the control host early (hoisted from the control-server step):
@@ -1261,6 +1273,7 @@ export async function startDaemon(
             repoManager,
             decisionManager,
             deploymentRegistry,
+            protectedStore,
           )
             .then((outcome) =>
               handleRunOutcome(outcome, request.issueNumber, owner, name),
@@ -2555,6 +2568,7 @@ async function processWorkRequest(
   repoManager?: RepoManager | null,
   decisionManager?: DecisionIndexManager,
   registry?: DeploymentRegistry,
+  protectedStore?: ProtectedStore,
 ): Promise<string> {
   const today = new Date().toISOString().split('T')[0];
   if (today !== dailyRunCountResetDate) {
@@ -2654,6 +2668,7 @@ async function processWorkRequest(
   const perRunSanitizationPipeline = buildSanitizationPipelineForDeployment(
     registry,
     config.deployment?.id,
+    { protectedStore },
   );
   const handlers =
     variant === 'website'
