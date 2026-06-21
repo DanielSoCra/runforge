@@ -272,12 +272,16 @@ STACK-AC-OPERATOR-SURFACE-CLIENT:
     - packages/dashboard/app/api/decisions/answer/route.ts
     - packages/dashboard/components/decisions/decision-inbox.tsx
     - packages/dashboard/components/decisions/decision-answer.tsx
+    - packages/dashboard/components/decisions/decision-detail.tsx
     - packages/dashboard/app/(dashboard)/steering/page.tsx
+    - packages/dashboard/app/api/decisions/[id]/route.ts
   test_paths:
     - packages/dashboard/components/decisions/decision-inbox.test.tsx
     - packages/dashboard/components/decisions/decision-answer.test.tsx
+    - packages/dashboard/components/decisions/decision-detail.test.tsx
     - packages/dashboard/app/api/decisions/pending/route.test.ts
     - packages/dashboard/app/api/decisions/answer/route.test.ts
+    - packages/dashboard/app/api/decisions/[id]/route.test.ts
     - packages/dashboard/app/(dashboard)/steering/page.test.tsx
   status: draft
 
