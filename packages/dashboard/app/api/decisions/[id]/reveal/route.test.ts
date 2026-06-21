@@ -90,6 +90,14 @@ describe('POST /api/decisions/[id]/reveal', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('rejects an over-cap body with 413 (bounded read, no daemon call)', async () => {
+    const { POST } = await import('./route.js');
+    const huge = { ref: 'x'.repeat(11_000) }; // > 10KB
+    const res = await POST(makeRequest(huge), ctx());
+    expect(res.status).toBe(413);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('forwards to the daemon reveal path with the percent-encoded id, ref + actor; returns daemon 200', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ field: 'context', value: 'TOP-SECRET' }), { status: 200 }),

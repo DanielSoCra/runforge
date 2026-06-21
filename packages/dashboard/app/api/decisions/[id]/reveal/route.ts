@@ -28,6 +28,41 @@ interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
+const MAX_BODY_BYTES = 10240; // 10KB — the reveal payload is a tiny {ref}
+
+/**
+ * Read the request body with a hard byte cap, independent of the Content-Length
+ * header — a chunked or header-spoofed request cannot bypass the limit. Throws
+ * `Error('BODY_TOO_LARGE')` past the cap (stops reading the stream).
+ */
+async function readBoundedText(request: NextRequest, maxBytes: number): Promise<string> {
+  const stream = request.body;
+  if (!stream) return '';
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new Error('BODY_TOO_LARGE');
+      }
+      chunks.push(value);
+    }
+  }
+  if (total === 0) return '';
+  const buf = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    buf.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(buf);
+}
+
 export async function POST(
   request: NextRequest,
   ctx: RouteContext,
@@ -43,22 +78,23 @@ export async function POST(
 
   const actor = session.user.email ?? session.user.id;
 
-  // Reject an oversized body before buffering it (the reveal payload is a tiny
-  // {ref}); mirrors the daemon's 10KB cap so a large admin request can't be
-  // fully buffered before validation.
-  const contentLength = Number(request.headers.get('content-length') ?? '0');
-  if (Number.isFinite(contentLength) && contentLength > 10240) {
-    return NextResponse.json({ error: 'Body too large' }, { status: 413 });
+  // Read the body under a hard 10KB cap (independent of Content-Length, so a
+  // chunked/spoofed-length admin request can't force unbounded buffering).
+  let raw: string;
+  try {
+    raw = await readBoundedText(request, MAX_BODY_BYTES);
+  } catch (e) {
+    if (e instanceof Error && e.message === 'BODY_TOO_LARGE') {
+      return NextResponse.json({ error: 'Body too large' }, { status: 413 });
+    }
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 
   let body: { ref?: unknown };
   try {
-    body = (await request.json()) as typeof body;
+    body = JSON.parse(raw) as typeof body;
   } catch {
-    return NextResponse.json(
-      { error: 'Invalid JSON body' },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
