@@ -273,19 +273,33 @@ export function createControlServer(
         }
         const MAX_BODY = 10240; // 10KB
         let rawBody = '';
-        let oversize = false;
+        let bytes = 0;
+        let responded = false;
+        const respond = (status: number, body: unknown): void => {
+          if (responded) return;
+          responded = true;
+          json(res, status, body);
+        };
         req.on('data', (chunk: Buffer) => {
+          if (responded) return;
+          bytes += chunk.length;
+          // Enforce the cap BEFORE buffering, so an oversized body is never fully
+          // read into memory; stop reading the request once we respond 413.
+          if (bytes > MAX_BODY) {
+            respond(413, { error: 'body too large' });
+            req.destroy();
+            return;
+          }
           rawBody += chunk.toString();
-          if (rawBody.length > MAX_BODY) oversize = true;
         });
-        req.on('error', () => { json(res, 400, { error: 'request error' }); });
+        req.on('error', () => { respond(400, { error: 'request error' }); });
         req.on('end', () => {
-          if (oversize) { json(res, 413, { error: 'body too large' }); return; }
+          if (responded) return;
           let parsed: RevealBody;
           try {
             parsed = JSON.parse(rawBody) as RevealBody;
           } catch {
-            json(res, 400, { error: 'invalid JSON body' });
+            respond(400, { error: 'invalid JSON body' });
             return;
           }
           // The daemon itself is not role-aware; the dashboard enforces admin-only.
@@ -301,10 +315,10 @@ export function createControlServer(
               : (actorHeader ?? 'daemon');
           try {
             const result = handlers.revealProtected!(id, parsed, actor);
-            json(res, result.status, result.body);
+            respond(result.status, result.body);
           } catch (e: unknown) {
             console.error('[control-plane] POST /decisions/:id/reveal failed:', e);
-            json(res, 503, { error: 'decision index unavailable' });
+            respond(503, { error: 'decision index unavailable' });
           }
         });
       } else {

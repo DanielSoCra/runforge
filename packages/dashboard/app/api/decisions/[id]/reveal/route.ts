@@ -43,6 +43,14 @@ export async function POST(
 
   const actor = session.user.email ?? session.user.id;
 
+  // Reject an oversized body before buffering it (the reveal payload is a tiny
+  // {ref}); mirrors the daemon's 10KB cap so a large admin request can't be
+  // fully buffered before validation.
+  const contentLength = Number(request.headers.get('content-length') ?? '0');
+  if (Number.isFinite(contentLength) && contentLength > 10240) {
+    return NextResponse.json({ error: 'Body too large' }, { status: 413 });
+  }
+
   let body: { ref?: unknown };
   try {
     body = (await request.json()) as typeof body;
