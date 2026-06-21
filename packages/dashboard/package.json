@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint --suppressions-location .eslint-suppressions.json",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
