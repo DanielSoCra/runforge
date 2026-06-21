@@ -346,12 +346,27 @@ export async function startDaemon(
 
   // 2d. Input-boundary sanitization pipeline (default = identity). Built once
   // from the active deployment profile; omitted or empty bindings keep the
-  // decision-raise path byte-identical to today.
-  const sanitizationPipeline = buildSanitizationPipelineForDeployment(
-    deploymentRegistry,
-    config.deployment?.id,
-    { protectedStore },
-  );
+  // decision-raise path byte-identical to today. A profile that activates a
+  // sanitizer whose prerequisite is unavailable (e.g. withholding without a
+  // protected store because the decision index is disabled) throws here; fail
+  // CLOSED via the Result rather than letting an unhandled throw abort boot.
+  let sanitizationPipeline: ReturnType<typeof buildSanitizationPipelineForDeployment>;
+  try {
+    sanitizationPipeline = buildSanitizationPipelineForDeployment(
+      deploymentRegistry,
+      config.deployment?.id,
+      { protectedStore },
+    );
+  } catch (e) {
+    return err(
+      new Error(
+        `[daemon] Failed to build the input-boundary sanitization pipeline ` +
+          `(a deployment activates a sanitizer whose prerequisite is unavailable — ` +
+          `e.g. withholding requires the decision index / protected store): ` +
+          `${e instanceof Error ? e.message : String(e)}`,
+      ),
+    );
+  }
 
   // Validate the control host early (hoisted from the control-server step):
   // the throwaway degraded server binds it during the startup-degraded window,

@@ -58,18 +58,30 @@ export function createWithholdingSanitizer(options: WithholdingSanitizerOptions)
         }
 
         const value = content[key];
-        // Idempotent per (subjectRef, field): reuse an existing ref instead of minting a
-        // new one. The raise→publish→notify path is retryable, so without reuse each retry
-        // would write a duplicate blob + protected_refs row and change the stored value
-        // (making the re-raise look 'edited' and the reveal ambiguous). Reuse keeps the
-        // re-raised content byte-identical and storage bounded.
+        const serialized = JSON.stringify(value);
+        // Idempotent per (subjectRef, field), but ONLY when the content is unchanged: the
+        // raise→publish→notify path is retryable, so reusing the prior ref for an identical
+        // value keeps the re-raised content byte-identical (ledger sees 'unchanged') and
+        // storage bounded. If the field was EDITED (same decision_id, new value), the prior
+        // value must NOT be reused — that would hide the edit and reveal stale plaintext — so
+        // we mint a fresh ref reflecting the new value. A missing/corrupt prior blob also
+        // falls through to a fresh mint.
+        const existingRef = options.store.findRefForField(subjectRef, key);
+        let reuseRef: string | undefined;
+        if (existingRef !== undefined) {
+          try {
+            if (options.store.get(existingRef) === serialized) reuseRef = existingRef;
+          } catch {
+            /* prior blob unreadable — mint a fresh ref below */
+          }
+        }
         const ref =
-          options.store.findRefForField(subjectRef, key) ??
+          reuseRef ??
           options.store.put({
             decision_id: subjectRef,
             field: key,
             class: cls,
-            plaintext: JSON.stringify(value),
+            plaintext: serialized,
           });
 
         // The STORED value is the protected:// ref, NOT the marker: the decision read-model

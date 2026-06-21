@@ -38,8 +38,12 @@ function fakeStore(): { store: ProtectedStore; puts: PutArgs[] } {
       return `protected://fake-${puts.length}`;
     },
     findRefForField(decision_id: string, field: string): string | undefined {
-      const idx = puts.findIndex((p) => p.decision_id === decision_id && p.field === field);
-      return idx === -1 ? undefined : `protected://fake-${idx + 1}`;
+      for (let i = puts.length - 1; i >= 0; i--) {
+        if (puts[i]!.decision_id === decision_id && puts[i]!.field === field) {
+          return `protected://fake-${i + 1}`;
+        }
+      }
+      return undefined;
     },
     get: (ref: string) => puts[Number(ref.split('-')[1]) - 1]!.plaintext,
     responseHmac: (c: string) => `hmac:${c.length}`,

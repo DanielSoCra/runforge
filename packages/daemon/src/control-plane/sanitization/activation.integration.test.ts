@@ -131,6 +131,18 @@ describe('sanitizer activation — end-to-end withhold -> raise -> read-model ->
     writer.close();
   });
 
+  it('an EDITED field (same id, changed value) mints a fresh ref revealing the new value', async () => {
+    const { writer } = makeWriter();
+    const pipeline = buildSanitizationPipeline(profileWith(['context']), {
+      protectedStore: writer.protectedStore,
+    });
+    const a = await pipeline.run({ content: { context: 'OLD' }, subjectRef: 'issue-9:l2-gate:1' });
+    const b = await pipeline.run({ content: { context: 'NEW' }, subjectRef: 'issue-9:l2-gate:1' });
+    expect(b.content.context).not.toBe(a.content.context);
+    expect(JSON.parse(writer.protectedStore.get(b.content.context as string))).toBe('NEW');
+    writer.close();
+  });
+
   it('exposes the protected store only when the index is enabled (fail-closed otherwise)', async () => {
     const disabled = new DecisionIndexManager({
       enabled: false,

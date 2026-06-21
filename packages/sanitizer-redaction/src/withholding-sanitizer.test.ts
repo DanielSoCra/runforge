@@ -24,8 +24,13 @@ function fakeStore() {
       return `protected://fake-${puts.length}`;
     },
     findRefForField(decision_id: string, field: string): string | undefined {
-      const idx = puts.findIndex((p) => p.decision_id === decision_id && p.field === field);
-      return idx === -1 ? undefined : `protected://fake-${idx + 1}`;
+      // newest-first, matching the real store (latest ref wins so edits converge).
+      for (let i = puts.length - 1; i >= 0; i--) {
+        if (puts[i]!.decision_id === decision_id && puts[i]!.field === field) {
+          return `protected://fake-${i + 1}`;
+        }
+      }
+      return undefined;
     },
     get(ref: string): string {
       return puts[Number(ref.split("-")[1]) - 1]!.plaintext;
@@ -63,6 +68,20 @@ describe("withholding sanitizer — protected-ref contract", () => {
     const second = sanitizer.sanitize({ content: { secret: "S" }, subjectRef: "D-1" });
     expect(second.content.secret).toBe(first.content.secret); // same ref => raise sees unchanged
     expect(puts).toHaveLength(1); // stored once, not per retry
+  });
+
+  it("re-withholds an EDITED field (same subjectRef, changed value) with a fresh ref — no stale reuse", () => {
+    const { store, puts } = fakeStore();
+    const sanitizer = createWithholdingSanitizer({ fields: ["secret"], store });
+    const a = sanitizer.sanitize({ content: { secret: "A" }, subjectRef: "D-1" });
+    const b = sanitizer.sanitize({ content: { secret: "B" }, subjectRef: "D-1" }); // edited value
+    expect(b.content.secret).not.toBe(a.content.secret); // new ref reflects the edit
+    expect(puts).toHaveLength(2);
+    expect(JSON.parse(store.get(b.content.secret as string))).toBe("B");
+    // a subsequent retry of the edited value reuses the latest ref (converges, no growth)
+    const c = sanitizer.sanitize({ content: { secret: "B" }, subjectRef: "D-1" });
+    expect(c.content.secret).toBe(b.content.secret);
+    expect(puts).toHaveLength(2);
   });
 
   it("passes content through unchanged (and needs no subjectRef) when no field is selected", () => {
