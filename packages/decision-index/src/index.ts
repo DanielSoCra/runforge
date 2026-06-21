@@ -60,6 +60,7 @@ export {
 
 // Error types callers may need to distinguish.
 export { NotAdmittedError } from "./ingest.js";
+export { RevealRefNotFoundError } from "./index-writer.js";
 export {
   AnswerRejectedError,
   AnsweredOnceConflictError,

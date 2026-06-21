@@ -57,6 +57,7 @@ import {
   listPendingDecisions,
   getDecisionDetail,
   answerDecision,
+  revealProtected,
 } from './decision-api.js';
 import { postDecisionResponse } from './decision-escalation/answer-publisher.js';
 import {
@@ -1524,6 +1525,17 @@ export async function startDaemon(
         listPendingDecisions(decisionManager.ledger().reader, query),
       getDecisionDetail: (id) =>
         getDecisionDetail(decisionManager.ledger().reader, id),
+      // REVEAL (5b). Decrypts a protected ref that belongs to the decision.
+      // decisionManager.ledger() is called lazily inside the closure so a
+      // disabled/broken index maps to 503 rather than crashing the server.
+      revealProtected: (id, body, actor) =>
+        revealProtected(
+          (decisionId, ref, revealActor) =>
+            decisionManager.ledger().revealProtected(decisionId, ref, revealActor),
+          id,
+          body,
+          actor,
+        ),
       // ANSWER (7c). Option A: the operator answer POSTS a DecisionResponse comment
       // that the existing `resumeParkedRuns` loop recognizes on its next tick — NOT
       // a direct `ledger.answer()` (which would record an answer the resume loop

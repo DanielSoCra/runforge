@@ -101,6 +101,19 @@ export class DecisionIndexManager {
     return this.ledger().protectedStore();
   }
 
+  /**
+   * Reveal a protected field's plaintext for a decision. Mirrors `ledger()`
+   * fail-closed semantics: throws /disabled/ or /unavailable/ when the index is
+   * off or broken. The underlying writer enforces the membership check and audit.
+   */
+  revealProtected(
+    decisionId: string,
+    ref: string,
+    actor: string,
+  ): { field: string; value: string } {
+    return this.ledger().revealProtected(decisionId, ref, actor);
+  }
+
   /** Graceful shutdown: close the underlying writable connection if open. */
   async close(): Promise<void> {
     if (this.#writer) {

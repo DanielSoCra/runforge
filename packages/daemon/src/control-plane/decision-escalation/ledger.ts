@@ -51,6 +51,11 @@ export class DecisionLedger {
     return this.writer.protectedStore;
   }
 
+  /** Reveal a protected field for this decision; delegates to the writer's security-gated reveal. */
+  revealProtected(decisionId: string, ref: string, actor: string): { field: string; value: string } {
+    return this.writer.revealProtected(decisionId, ref, actor);
+  }
+
   /**
    * raise — idempotent ingest of a DecisionRequest. A new id is admitted at
    * `detected`; a re-scan of the same request is `unchanged`; an edited request is
