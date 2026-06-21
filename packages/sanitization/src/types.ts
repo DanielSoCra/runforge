@@ -18,6 +18,13 @@ export interface SanitizationInput {
   readonly content: SanitizableContent;
   /** The owning deployment, for sanitizers that need it. Optional. */
   readonly deploymentRef?: string;
+  /**
+   * A stable, opaque identifier for the subject being sanitized (e.g. the decision id),
+   * for sanitizers that must key withheld material to it. Domain-blind: the pipeline never
+   * interprets it. Carried alongside (not inside) `content` so it never becomes sanitizable
+   * payload. Optional.
+   */
+  readonly subjectRef?: string;
 }
 
 /**
