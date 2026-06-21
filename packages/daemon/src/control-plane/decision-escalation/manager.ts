@@ -20,8 +20,6 @@ import { DecisionLedger } from './ledger.js';
 import { LogNotifier, RecordingSourceSink, AckResumeDispatcher } from './adapters.js';
 import type { IndexWriter, ProtectedStore } from '@auto-claude/decision-index';
 
-export { RevealRefNotFoundError } from '@auto-claude/decision-index';
-
 type DecisionIndexModule = typeof import('@auto-claude/decision-index');
 
 export interface DecisionIndexManagerOptions {

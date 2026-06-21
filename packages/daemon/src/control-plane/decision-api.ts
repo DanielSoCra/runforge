@@ -32,7 +32,6 @@
  * crash the control server.
  */
 import type { RankedListItem, DetailView, ListRankedArgs } from '@auto-claude/decision-index';
-import { RevealRefNotFoundError } from '@auto-claude/decision-index';
 
 /** The narrow read surface a list/detail handler needs (structurally satisfied by `ReadModel`). */
 export interface DecisionReadModel {
@@ -145,11 +144,12 @@ export function revealProtected(
     }
     return { status: 200, body: reveal(decisionId, ref, actor) };
   } catch (e: unknown) {
-    if (e instanceof RevealRefNotFoundError) {
-      return { status: 404, body: { error: 'ref not found for decision' } };
-    }
+    // STRUCTURAL detection by error name (not `instanceof`): this module is always
+    // loaded by the control server, so a value import of RevealRefNotFoundError from
+    // @auto-claude/decision-index would eager-load the native package and defeat the
+    // manager's dynamic-import fail-closed design. Match by name + a "not found" fallback.
     const message = e instanceof Error ? e.message : String(e);
-    if (/not found/i.test(message)) {
+    if ((e instanceof Error && e.name === 'RevealRefNotFoundError') || /not found/i.test(message)) {
       return { status: 404, body: { error: 'ref not found for decision' } };
     }
     return { status: 503, body: { error: 'decision index unavailable' } };
