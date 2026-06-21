@@ -47,27 +47,27 @@ const protectedDetail: DecisionDetailData = {
 
 describe('DecisionDetailView (pure)', () => {
   it('renders the question, context, and consequence-of-no-answer', () => {
-    render(<DecisionDetailView detail={detail} />);
+    render(<DecisionDetailView decisionId="dec-1" detail={detail} />);
     expect(screen.getByText('Merge PR #482 into main?')).toBeTruthy();
     expect(screen.getByText('Touches the auth module.')).toBeTruthy();
     expect(screen.getByText('The run stays parked.')).toBeTruthy();
   });
 
   it('renders the risk class, deployment, and reversibility', () => {
-    render(<DecisionDetailView detail={detail} />);
+    render(<DecisionDetailView decisionId="dec-1" detail={detail} />);
     expect(screen.getByText('P1')).toBeTruthy();
     expect(screen.getByText(/dep-main/)).toBeTruthy();
     expect(screen.getByText(/reversible/)).toBeTruthy();
   });
 
   it('renders the source as a link to source_url', () => {
-    const { container } = render(<DecisionDetailView detail={detail} />);
+    const { container } = render(<DecisionDetailView decisionId="dec-1" detail={detail} />);
     const link = container.querySelector('a[href="https://github.com/org/repo/issues/482"]');
     expect(link).not.toBeNull();
   });
 
   it('renders the options and marks the recommended one', () => {
-    render(<DecisionDetailView detail={detail} />);
+    render(<DecisionDetailView decisionId="dec-1" detail={detail} />);
     expect(screen.getByText('Approve')).toBeTruthy();
     expect(screen.getByText('Reject')).toBeTruthy();
     // the recommended option ('approve') is indicated somehow (text contains "recommend")
@@ -75,7 +75,7 @@ describe('DecisionDetailView (pure)', () => {
   });
 
   it('renders a protected field as its class marker and never the value', () => {
-    const { container } = render(<DecisionDetailView detail={protectedDetail} />);
+    const { container } = render(<DecisionDetailView decisionId="dec-2" detail={protectedDetail} />);
     expect(screen.getByText(/\[protected: secret\]/)).toBeTruthy();
     expect(screen.getByText(/\[protected: phi\]/)).toBeTruthy();
     expect(container.textContent ?? '').not.toContain(PROTECTED_SECRET);
@@ -83,13 +83,13 @@ describe('DecisionDetailView (pure)', () => {
   });
 
   it('never implies a QA/outcome verdict (no banned copy)', () => {
-    const { container } = render(<DecisionDetailView detail={detail} />);
+    const { container } = render(<DecisionDetailView decisionId="dec-1" detail={detail} />);
     expect(container.textContent ?? '').not.toMatch(/\b(QA|safe|passed|ready)\b/i);
   });
 
   it('renders an unsafe (non-http) source_url as plain text, never a clickable link', () => {
     const { container } = render(
-      <DecisionDetailView detail={{ ...detail, source_url: 'javascript:alert(1)' }} />,
+      <DecisionDetailView decisionId="dec-1" detail={{ ...detail, source_url: 'javascript:alert(1)' }} />,
     );
     expect(container.querySelector('a[href^="javascript:"]')).toBeNull();
     // still shown (so the operator sees the suspicious value), but inert
@@ -122,5 +122,43 @@ describe('DecisionDetailPanel (client fetch)', () => {
     render(<DecisionDetailPanel decisionId="dec-1" />);
     fireEvent.click(screen.getByRole('button', { name: /detail/i }));
     await waitFor(() => expect(screen.getByText(/unavailable/i)).toBeTruthy());
+  });
+});
+
+describe('Reveal affordance', () => {
+  it('reveals a protected field value on click', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ field: 'raw_question', value: 'secret question' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<DecisionDetailView decisionId="dec-2" detail={protectedDetail} />);
+
+    const revealButton = screen.getByRole('button', { name: /Reveal protected raw_question/i });
+    expect(revealButton).toBeTruthy();
+    fireEvent.click(revealButton);
+
+    await waitFor(() => expect(screen.getByText('secret question')).toBeTruthy());
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/decisions/dec-2/reveal',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ ref: 'protected://01H' }),
+      }),
+    );
+  });
+
+  it('shows "admin only" when the reveal request returns 403', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: 'Forbidden' }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<DecisionDetailView decisionId="dec-2" detail={protectedDetail} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Reveal protected raw_question/i }));
+    await waitFor(() => expect(screen.getByText('admin only')).toBeTruthy());
   });
 });

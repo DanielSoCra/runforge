@@ -32,6 +32,7 @@
  * crash the control server.
  */
 import type { RankedListItem, DetailView, ListRankedArgs } from '@auto-claude/decision-index';
+import { RevealRefNotFoundError } from '@auto-claude/decision-index';
 
 /** The narrow read surface a list/detail handler needs (structurally satisfied by `ReadModel`). */
 export interface DecisionReadModel {
@@ -102,6 +103,55 @@ export function getDecisionDetail(
     }
     return { status: 200, body: view };
   } catch {
+    return { status: 503, body: { error: 'decision index unavailable' } };
+  }
+}
+
+// ── revealProtected (5b) ─────────────────────────────────────────────────────
+
+/** The reveal request body: which protected ref to decrypt. */
+export interface RevealBody {
+  ref?: string;
+}
+
+/**
+ * POST /decisions/:id/reveal — decrypt a protected field ref that belongs to the
+ * decision and return the original plaintext to an authorized operator.
+ *
+ *   (a) `body.ref` must be a non-empty string → `400` otherwise;
+ *   (b) the reveal function performs the membership check (ref must belong to id);
+ *       `RevealRefNotFoundError` or any "not found" error → `404`;
+ *   (c) index disabled/unavailable → `503`.
+ *
+ * FAIL-SAFE: any unexpected throw → `503`; the handler never rethrows, so a wired
+ * route can never crash the control server. Plaintext is returned ONLY in the 200
+ * body; errors carry no protected content.
+ */
+export function revealProtected(
+  reveal: (id: string, ref: string, actor: string) => { field: string; value: string },
+  decisionId: string,
+  body: RevealBody,
+  actor: string,
+): HandlerResult<{ field: string; value: string } | ErrorBody> {
+  try {
+    // A malformed request body (JSON `null`, a primitive, an array, or a missing
+    // ref) is a 400 — never let it throw and masquerade as a 503 outage.
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      return { status: 400, body: { error: 'reveal body must be an object' } };
+    }
+    const ref = body.ref;
+    if (typeof ref !== 'string' || ref.length === 0) {
+      return { status: 400, body: { error: 'ref is required' } };
+    }
+    return { status: 200, body: reveal(decisionId, ref, actor) };
+  } catch (e: unknown) {
+    if (e instanceof RevealRefNotFoundError) {
+      return { status: 404, body: { error: 'ref not found for decision' } };
+    }
+    const message = e instanceof Error ? e.message : String(e);
+    if (/not found/i.test(message)) {
+      return { status: 404, body: { error: 'ref not found for decision' } };
+    }
     return { status: 503, body: { error: 'decision index unavailable' } };
   }
 }

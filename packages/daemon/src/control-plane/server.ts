@@ -4,7 +4,7 @@ import { getDashboardHtml } from './dashboard.js';
 import { readResults } from './results.js';
 import type { ReleaseProposalResult } from './release.js';
 import type { ListRankedArgs, ListFilters, RankedListItem, DetailView } from '@auto-claude/decision-index';
-import type { HandlerResult, ErrorBody, AnswerBody } from './decision-api.js';
+import type { HandlerResult, ErrorBody, AnswerBody, RevealBody } from './decision-api.js';
 
 export interface ControlHandlers {
   getStatus: () => unknown;
@@ -20,6 +20,11 @@ export interface ControlHandlers {
   submitIdea?: (submittedBy: string, description: string) => Promise<{ id: string }>;
   listPendingDecisions?: (query: ListRankedArgs) => HandlerResult<RankedListItem[] | ErrorBody>;
   getDecisionDetail?: (id: string) => HandlerResult<DetailView | ErrorBody>;
+  revealProtected?: (
+    id: string,
+    body: RevealBody,
+    actor: string,
+  ) => HandlerResult<{ field: string; value: string } | ErrorBody>;
   answerDecision?: (
     id: string,
     body: AnswerBody,
@@ -243,6 +248,64 @@ export function createControlServer(
             console.error('[control-plane] POST /decisions/:id/answer failed:', e);
             json(res, 503, { error: 'decision index unavailable' });
           });
+        });
+      } else {
+        json(res, 501, { error: 'decision index not configured' });
+      }
+    } else if (
+      method === 'POST' &&
+      url.pathname.startsWith('/decisions/') &&
+      url.pathname.endsWith('/reveal')
+    ) {
+      if (handlers.revealProtected) {
+        // Path is `/decisions/<id>/reveal`; decode the id (mirrors detail/answer).
+        const encoded = url.pathname.slice('/decisions/'.length, -'/reveal'.length);
+        let id: string;
+        try {
+          id = decodeURIComponent(encoded);
+        } catch {
+          json(res, 404, { error: 'not found' });
+          return;
+        }
+        if (id.length === 0) {
+          json(res, 404, { error: 'not found' });
+          return;
+        }
+        const MAX_BODY = 10240; // 10KB
+        let rawBody = '';
+        let oversize = false;
+        req.on('data', (chunk: Buffer) => {
+          rawBody += chunk.toString();
+          if (rawBody.length > MAX_BODY) oversize = true;
+        });
+        req.on('error', () => { json(res, 400, { error: 'request error' }); });
+        req.on('end', () => {
+          if (oversize) { json(res, 413, { error: 'body too large' }); return; }
+          let parsed: RevealBody;
+          try {
+            parsed = JSON.parse(rawBody) as RevealBody;
+          } catch {
+            json(res, 400, { error: 'invalid JSON body' });
+            return;
+          }
+          // The daemon itself is not role-aware; the dashboard enforces admin-only.
+          // We still need an actor for the audit log. The dashboard forwards the
+          // operator's identity in the body; fall back to the CSRF header origin.
+          const actorHeader = Array.isArray(req.headers['x-requested-by'])
+            ? req.headers['x-requested-by'][0]
+            : req.headers['x-requested-by'];
+          const actor =
+            typeof parsed === 'object' && parsed !== null && 'actor' in parsed &&
+            typeof (parsed as { actor?: unknown }).actor === 'string'
+              ? (parsed as { actor: string }).actor
+              : (actorHeader ?? 'daemon');
+          try {
+            const result = handlers.revealProtected!(id, parsed, actor);
+            json(res, result.status, result.body);
+          } catch (e: unknown) {
+            console.error('[control-plane] POST /decisions/:id/reveal failed:', e);
+            json(res, 503, { error: 'decision index unavailable' });
+          }
         });
       } else {
         json(res, 501, { error: 'decision index not configured' });

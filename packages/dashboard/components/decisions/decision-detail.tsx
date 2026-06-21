@@ -92,13 +92,86 @@ function safeHttpUrl(url: string): string | null {
   }
 }
 
-function DetailField({ field }: { field: DetailField }): React.JSX.Element {
-  if (field.kind === 'protected') {
-    return (
+function RevealField({
+  decisionId,
+  field,
+}: {
+  decisionId: string;
+  field: Extract<DetailField, { kind: 'protected' }>;
+}): React.JSX.Element {
+  const [value, setValue] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleReveal = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/decisions/${encodeURIComponent(decisionId)}/reveal`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ref: field.ref }),
+        },
+      );
+      if (res.status === 403) {
+        setError('admin only');
+        return;
+      }
+      if (!res.ok) {
+        setError('reveal failed');
+        return;
+      }
+      const data = (await res.json()) as { value?: unknown };
+      if (typeof data.value === 'string') {
+        setValue(data.value);
+      } else {
+        setError('reveal failed');
+      }
+    } catch {
+      setError('reveal failed');
+    } finally {
+      setLoading(false);
+    }
+  }, [decisionId, field.ref]);
+
+  if (value !== null) {
+    return <span>{value}</span>;
+  }
+
+  return (
+    <span className="inline-flex items-center gap-2">
       <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
         [protected: {field.class}]
       </span>
-    );
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="h-auto px-2 py-0 text-xs"
+        onClick={handleReveal}
+        disabled={loading}
+        aria-label={`Reveal protected ${field.field}`}
+      >
+        {loading ? '…' : 'Reveal'}
+      </Button>
+      {error !== null && (
+        <span className="text-xs text-destructive">{error}</span>
+      )}
+    </span>
+  );
+}
+
+function DetailField({
+  decisionId,
+  field,
+}: {
+  decisionId: string;
+  field: DetailField;
+}): React.JSX.Element {
+  if (field.kind === 'protected') {
+    return <RevealField decisionId={decisionId} field={field} />;
   }
   return <span>{field.value}</span>;
 }
@@ -109,8 +182,10 @@ function DetailField({ field }: { field: DetailField }): React.JSX.Element {
  * no state — testable from props alone.
  */
 export function DecisionDetailView({
+  decisionId,
   detail,
 }: {
+  decisionId: string;
   detail: DecisionDetailData;
 }): React.JSX.Element {
   return (
@@ -148,7 +223,7 @@ export function DecisionDetailView({
       <div className="space-y-1">
         <h4 className="text-sm font-medium">Question</h4>
         <p className="text-sm">
-          <DetailField field={detail.question} />
+          <DetailField decisionId={decisionId} field={detail.question} />
         </p>
       </div>
 
@@ -156,7 +231,7 @@ export function DecisionDetailView({
         <div className="space-y-1">
           <h4 className="text-sm font-medium">Context</h4>
           <p className="text-sm">
-            <DetailField field={detail.context} />
+            <DetailField decisionId={decisionId} field={detail.context} />
           </p>
         </div>
       )}
@@ -165,7 +240,7 @@ export function DecisionDetailView({
         <div className="space-y-1">
           <h4 className="text-sm font-medium">If unanswered</h4>
           <p className="text-sm">
-            <DetailField field={detail.consequence_of_no_answer} />
+            <DetailField decisionId={decisionId} field={detail.consequence_of_no_answer} />
           </p>
         </div>
       )}
@@ -175,7 +250,7 @@ export function DecisionDetailView({
         <ul className="space-y-1">
           {detail.options.map((option) => (
             <li key={option.id} className="text-sm">
-              <DetailField field={option.label} />
+              <DetailField decisionId={decisionId} field={option.label} />
               {detail.recommended_option === option.id && (
                 <span className="ml-2 text-xs text-muted-foreground">
                   (recommended)
@@ -249,7 +324,7 @@ export function DecisionDetailPanel({
             </p>
           )}
           {!loading && !unavailable && detail !== null && (
-            <DecisionDetailView detail={detail} />
+            <DecisionDetailView decisionId={decisionId} detail={detail} />
           )}
         </div>
       )}
