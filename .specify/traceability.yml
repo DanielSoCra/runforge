@@ -150,10 +150,12 @@ STACK-AC-SANITIZATION:
     - packages/sanitization/src/pipeline.ts
     - packages/sanitization/src/registry.ts
     - packages/sanitization/src/index.ts
+    - packages/daemon/src/control-plane/sanitization/build-pipeline.ts
   test_paths:
     - packages/sanitization/test/pipeline.test.ts
     - packages/sanitization/test/registry.test.ts
     - packages/sanitization/test/config.test.ts
+    - packages/daemon/src/control-plane/sanitization/build-pipeline.test.ts
   status: draft
 
 STACK-AC-SANITIZER-REDACTION:
@@ -795,8 +797,17 @@ STACK-AC-WINDOW-SCHEDULER:
 STACK-AC-DEPLOYMENT-REGISTRY:
   parent: ARCH-AC-DEPLOYMENT-REGISTRY
   children: []
-  code_paths: []  # DEFERRED to implementation — path-existence validator requires real files
-  test_paths: []  # DEFERRED to implementation — same reason
+  code_paths:
+    - packages/daemon/src/control-plane/deployment-registry/schema.ts
+    - packages/daemon/src/control-plane/deployment-registry/types.ts
+    - packages/daemon/src/control-plane/deployment-registry/registry.ts
+    - packages/daemon/src/control-plane/deployment-registry/index.ts
+  test_paths:
+    - packages/daemon/src/control-plane/deployment-registry/schema.test.ts
+    - packages/daemon/src/control-plane/deployment-registry/registry.test.ts
+    - packages/daemon/src/control-plane/deployment-registry/autonomy.test.ts
+    - packages/daemon/src/control-plane/deployment-registry/regressions.test.ts
+    - packages/daemon/src/control-plane/deployment-registry/gate-set-config.test.ts
   status: draft
 
 STACK-AC-STEERING:

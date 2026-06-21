@@ -13,7 +13,11 @@ export class SanitizationPipeline {
     const withholdings: Withholding[] = [];
 
     for (const sanitizer of this.sanitizers) {
-      const result = await sanitizer.sanitize({ content, deploymentRef: input.deploymentRef });
+      const result = await sanitizer.sanitize({
+        content,
+        deploymentRef: input.deploymentRef,
+        subjectRef: input.subjectRef,
+      });
       content = result.content;
       withholdings.push(...result.withholdings);
     }

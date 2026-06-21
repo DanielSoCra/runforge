@@ -7,6 +7,7 @@ import { StateManager } from './state.js';
 import { createWorkDetector, type FeaturePipelineWorkType } from './work-detection.js';
 import { createPhaseHandlers } from './phases.js';
 import { createDeploymentRegistry } from './deployment-registry/index.js';
+import { buildSanitizationPipelineForDeployment } from './sanitization/build-pipeline.js';
 import { runPipeline } from './pipeline.js';
 import { getPipeline, getStartPhase } from './fsm.js';
 import { selectVariant } from './variants.js';
@@ -144,6 +145,26 @@ export async function processSingleIssue(issueNumber: number, configPath: string
   await stateMgr.saveRunState(run);
 
   console.log(`[process] Running pipeline for #${issueNumber}: ${request.title}`);
+  // The single-issue CLI path does not wire the decision index (no ledger / protected store),
+  // so it cannot supply the store a withholding sanitizer needs. Build the pipeline WITHOUT a
+  // store: an unconfigured deployment gets the identity pipeline; a deployment that activates
+  // withholding fails CLOSED here with a clear, actionable error (run via the daemon) rather
+  // than an opaque throw deep in the factory.
+  let sanitizationPipeline: ReturnType<typeof buildSanitizationPipelineForDeployment>;
+  try {
+    sanitizationPipeline = buildSanitizationPipelineForDeployment(
+      deploymentRegistry,
+      config.deployment?.id,
+    );
+  } catch (e) {
+    return err(
+      new Error(
+        `[process] Single-issue CLI cannot activate the deployment's configured sanitizer ` +
+          `(${e instanceof Error ? e.message : String(e)}). Sanitizer activation requires the ` +
+          `decision index, which this path does not wire — run this deployment via the daemon.`,
+      ),
+    );
+  }
   const handlers = createPhaseHandlers(
     config,
     owner,
@@ -162,6 +183,7 @@ export async function processSingleIssue(issueNumber: number, configPath: string
     undefined,
     undefined,
     deploymentRegistry,
+    sanitizationPipeline,
   );
   const table = getPipeline(variant);
   const result = await runPipeline(run, table, handlers, stateMgr, costTracker, undefined, undefined, phaseLabelMirror);

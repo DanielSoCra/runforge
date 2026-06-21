@@ -39,8 +39,12 @@ import {
   createDeploymentRegistry,
   type DeploymentRegistry,
 } from './deployment-registry/index.js';
+import {
+  buildSanitizationPipelineForDeployment,
+} from './sanitization/build-pipeline.js';
 import { ensureWorkspaceRepo } from './workspace-bootstrap.js';
 import { DecisionIndexManager } from './decision-escalation/manager.js';
+import type { ProtectedStore } from '@auto-claude/sanitizer-redaction';
 import { readDecisionIndexConfig } from './decision-escalation/config.js';
 import { decisionIdFor } from './decision-escalation/build-request.js';
 import { decisionIdFor as mergeDecisionIdFor } from './merge-decision/build-request.js';
@@ -314,6 +318,16 @@ export async function startDaemon(
     return err(e instanceof Error ? e : new Error(String(e)));
   }
 
+  // The protected store is required when a deployment profile activates the
+  // withholding sanitizer. A disabled or broken index yields undefined here;
+  // build-pipeline fails closed if withholding is configured without a store.
+  let protectedStore: ProtectedStore | undefined;
+  try {
+    protectedStore = decisionManager.protectedStore();
+  } catch {
+    protectedStore = undefined;
+  }
+
   // 2c. Deployment registry (optional, flag-gated). A malformed deployment
   // profile is rejected at registration; the registry is left empty so the
   // integrate handler falls back to its flag-OFF unconditional merge.
@@ -328,6 +342,30 @@ export async function startDaemon(
         `[daemon] Deployment registration failed for ${config.deployment.id}: ${registered.offenders.join('; ')}`,
       );
     }
+  }
+
+  // 2d. Input-boundary sanitization pipeline (default = identity). Built once
+  // from the active deployment profile; omitted or empty bindings keep the
+  // decision-raise path byte-identical to today. A profile that activates a
+  // sanitizer whose prerequisite is unavailable (e.g. withholding without a
+  // protected store because the decision index is disabled) throws here; fail
+  // CLOSED via the Result rather than letting an unhandled throw abort boot.
+  let sanitizationPipeline: ReturnType<typeof buildSanitizationPipelineForDeployment>;
+  try {
+    sanitizationPipeline = buildSanitizationPipelineForDeployment(
+      deploymentRegistry,
+      config.deployment?.id,
+      { protectedStore },
+    );
+  } catch (e) {
+    return err(
+      new Error(
+        `[daemon] Failed to build the input-boundary sanitization pipeline ` +
+          `(a deployment activates a sanitizer whose prerequisite is unavailable — ` +
+          `e.g. withholding requires the decision index / protected store): ` +
+          `${e instanceof Error ? e.message : String(e)}`,
+      ),
+    );
   }
 
   // Validate the control host early (hoisted from the control-server step):
@@ -924,7 +962,7 @@ export async function startDaemon(
     const mergeAgent = createMergeAgent(
       {
         queue: mergeQueue,
-        git: async (args: string[], cwd?: string) => ok('' as string),
+        git: async (_args: string[], _cwd?: string) => ok('' as string),
         resolveConflicts: async (_cwd, _cfg, _session) => ({
           resolved: false,
           needsHuman: true,
@@ -1250,6 +1288,7 @@ export async function startDaemon(
             repoManager,
             decisionManager,
             deploymentRegistry,
+            protectedStore,
           )
             .then((outcome) =>
               handleRunOutcome(outcome, request.issueNumber, owner, name),
@@ -1309,6 +1348,7 @@ export async function startDaemon(
               repoManager,
               decisionManager,
               deploymentRegistry,
+              protectedStore,
             )
               .then((outcome) =>
                 handleRunOutcome(outcome, bugRequest.issueNumber, owner, name),
@@ -1369,6 +1409,7 @@ export async function startDaemon(
               repoManager,
               decisionManager,
               deploymentRegistry,
+              protectedStore,
             )
               .then((outcome) =>
                 handleRunOutcome(outcome, fpRequest.issueNumber, owner, name),
@@ -1419,8 +1460,9 @@ export async function startDaemon(
     config.controlPort,
     {
       getStatus: () => {
-        const { remote_control_url: _, ...safeState } =
-          remoteControl.getState() ?? {};
+        const state = remoteControl.getState() ?? {};
+        const { remote_control_url: _discarded, ...safeState } = state;
+        void _discarded;
         return {
           activeRuns,
           activeIssues: [...activeIssues],
@@ -1621,25 +1663,26 @@ export async function startDaemon(
             run.issueNumber,
             null,
           )
-        : createPhaseHandlers(
-            config,
-            runOwner,
-            runRepoName,
-            runtime,
-            coordinator,
-            notifyOctokit,
-            resumedRequest,
-            stateDir,
-            runWriter ?? undefined,
-            run.id,
-            repoRoot,
-            configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins,
-            knowledgeStore,
-            phaseLabelMirror,
-            decisionManager,
-            undefined,
-            deploymentRegistry,
-          );
+          : createPhaseHandlers(
+              config,
+              runOwner,
+              runRepoName,
+              runtime,
+              coordinator,
+              notifyOctokit,
+              resumedRequest,
+              stateDir,
+              runWriter ?? undefined,
+              run.id,
+              repoRoot,
+              configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins,
+              knowledgeStore,
+              phaseLabelMirror,
+              decisionManager,
+              undefined,
+              deploymentRegistry,
+              sanitizationPipeline,
+            );
     const table = getPipeline(run.variant);
 
     const resumeDetector = createWorkDetector(
@@ -2247,25 +2290,26 @@ export async function startDaemon(
               run.issueNumber,
               null,
             )
-          : createPhaseHandlers(
-              config,
-              runOwner,
-              runRepoName,
-              runtime,
-              coordinator,
-              notifyOctokit,
-              resumedRequest,
-              stateDir,
-              runWriter ?? undefined,
-              run.id,
-              repoRoot,
-            configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins,
-            knowledgeStore,
-            phaseLabelMirror,
-            decisionManager,
-            undefined,
-            deploymentRegistry,
-          );
+            : createPhaseHandlers(
+                config,
+                runOwner,
+                runRepoName,
+                runtime,
+                coordinator,
+                notifyOctokit,
+                resumedRequest,
+                stateDir,
+                runWriter ?? undefined,
+                run.id,
+                repoRoot,
+                configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins,
+                knowledgeStore,
+                phaseLabelMirror,
+                decisionManager,
+                undefined,
+                deploymentRegistry,
+                sanitizationPipeline,
+              );
       const table = getPipeline(run.variant);
 
       runPipeline(
@@ -2541,6 +2585,7 @@ async function processWorkRequest(
   repoManager?: RepoManager | null,
   decisionManager?: DecisionIndexManager,
   registry?: DeploymentRegistry,
+  protectedStore?: ProtectedStore,
 ): Promise<string> {
   const today = new Date().toISOString().split('T')[0];
   if (today !== dailyRunCountResetDate) {
@@ -2637,6 +2682,11 @@ async function processWorkRequest(
     repoName,
   );
   const agencyConfig = await readAgencyConfig(null, '');
+  const perRunSanitizationPipeline = buildSanitizationPipelineForDeployment(
+    registry,
+    config.deployment?.id,
+    { protectedStore },
+  );
   const handlers =
     variant === 'website'
       ? createWebsitePhaseHandlers(
@@ -2648,25 +2698,26 @@ async function processWorkRequest(
           request.issueNumber,
           null, // repoId — wired in follow-on
         )
-      : createPhaseHandlers(
-          config,
-          owner,
-          repoName,
-          runtime,
-          coordinator,
-          notifyOctokit,
-          request,
-          stateDir,
-          runWriter ?? undefined,
-          run.id,
-          repoRoot,
-          repoConfig?.activePlugins,
-          knowledgeStore,
-          phaseLabelMirror,
-          decisionManager,
-          undefined,
-          registry,
-        );
+        : createPhaseHandlers(
+            config,
+            owner,
+            repoName,
+            runtime,
+            coordinator,
+            notifyOctokit,
+            request,
+            stateDir,
+            runWriter ?? undefined,
+            run.id,
+            repoRoot,
+            repoConfig?.activePlugins,
+            knowledgeStore,
+            phaseLabelMirror,
+            decisionManager,
+            undefined,
+            registry,
+            perRunSanitizationPipeline,
+          );
   const table = getPipeline(variant);
 
   console.log(

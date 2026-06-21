@@ -152,7 +152,7 @@ export class IndexWriter {
   private readonly ingestDeps: IngestDeps;
   private readonly outbox: Outbox;
   private readonly clock: () => Date;
-  private readonly protectedStore: ProtectedStore;
+  readonly protectedStore: ProtectedStore;
   readonly reader: ReadModel;
   /** the content-free quarantine sink over the SINGLE writable connection, so a
    * GitHub-layer pre-ingest rejection (PHI policy / malformed block) records

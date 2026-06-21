@@ -18,7 +18,7 @@
  */
 import { DecisionLedger } from './ledger.js';
 import { LogNotifier, RecordingSourceSink, AckResumeDispatcher } from './adapters.js';
-import type { IndexWriter } from '@auto-claude/decision-index';
+import type { IndexWriter, ProtectedStore } from '@auto-claude/decision-index';
 
 type DecisionIndexModule = typeof import('@auto-claude/decision-index');
 
@@ -91,6 +91,14 @@ export class DecisionIndexManager {
     if (!this.#enabled) throw new Error('decision index disabled');
     if (this.#broken || !this.#ledger) throw new Error('decision index unavailable');
     return this.#ledger;
+  }
+
+  /**
+   * The protected store owned by the live ledger. Mirrors `ledger()` semantics:
+   * throws /disabled/ when the flag is off and /unavailable/ when enabled-but-broken.
+   */
+  protectedStore(): ProtectedStore {
+    return this.ledger().protectedStore();
   }
 
   /** Graceful shutdown: close the underlying writable connection if open. */

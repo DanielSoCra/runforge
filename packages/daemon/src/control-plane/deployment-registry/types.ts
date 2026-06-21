@@ -15,6 +15,7 @@ import type {
   GateSetDefinitions,
 } from '../lane-engine/types.js';
 import type { PoolConfig } from '../../session-runtime/providers/window-scheduler/types.js';
+import type { SanitizerConfig } from '@auto-claude/sanitization';
 
 // Re-export the sibling shapes so consumers of the registry import them from one
 // place and never re-declare a lane/pool/risk field (the L3 composition rule).
@@ -91,6 +92,11 @@ export interface DeploymentProfile {
    * lane's resolved `gateSet` name here. Absent ⇒ the verdict feature is inert.
    */
   gateSets?: GateSetDefinitions;
+  /**
+   * OPTIONAL sanitizer bindings (STACK-AC-SANITIZATION). Absent or empty ⇒ the
+   * input-boundary sanitization pipeline is the identity (default today).
+   */
+  sanitizers?: SanitizerConfig;
   /** Currently declared lifecycle phase — must be one of laneSet.declaredPhases. */
   lifecycleMode: string;
   complianceReviewers: ComplianceReviewer[];

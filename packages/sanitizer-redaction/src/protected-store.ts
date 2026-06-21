@@ -8,8 +8,14 @@ import {
 } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
-import { ulid } from "ulid";
+import { and, desc, eq } from "drizzle-orm";
+import { monotonicFactory } from "ulid";
+
+// Monotonic ulids: strictly increasing even within the same millisecond, so an ORDER BY
+// ulid DESC reliably yields the newest ref (findRefForField). With plain ulid(), two puts in
+// the same ms could mis-sort, breaking edit convergence (repeated retries of an edited field
+// would keep minting fresh refs). Monotonic ids close that.
+const ulid = monotonicFactory();
 import { type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { protectedRefs } from "./schema.js";
 
@@ -152,6 +158,25 @@ export class ProtectedStore {
   verifyIntegrity(ref: string): true {
     this.readVerified(ref);
     return true;
+  }
+
+  /**
+   * The MOST RECENT protected ref for a (decision_id, field), if one was already stored.
+   * Lets a sanitizer be idempotent across retries: reuse the prior ref instead of minting a
+   * duplicate. Ordered newest-first (by ulid, which is time-monotonic) so that after an edit
+   * minted a fresh ref, the latest is returned — callers compare its plaintext to decide
+   * reuse-vs-mint, which converges. Returns undefined when no row exists. Reads the pointer
+   * table only — no blob I/O, no decryption.
+   */
+  findRefForField(decision_id: string, field: string): string | undefined {
+    const row = this.db
+      .select()
+      .from(protectedRefs)
+      .where(and(eq(protectedRefs.decision_id, decision_id), eq(protectedRefs.field, field)))
+      .orderBy(desc(protectedRefs.ulid))
+      .limit(1)
+      .all()[0];
+    return row ? REF_PREFIX + row.ulid : undefined;
   }
 
   private metaOf(id: string): BoundMeta {
