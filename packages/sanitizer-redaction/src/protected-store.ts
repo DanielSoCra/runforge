@@ -9,7 +9,13 @@ import {
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { and, desc, eq } from "drizzle-orm";
-import { ulid } from "ulid";
+import { monotonicFactory } from "ulid";
+
+// Monotonic ulids: strictly increasing even within the same millisecond, so an ORDER BY
+// ulid DESC reliably yields the newest ref (findRefForField). With plain ulid(), two puts in
+// the same ms could mis-sort, breaking edit convergence (repeated retries of an edited field
+// would keep minting fresh refs). Monotonic ids close that.
+const ulid = monotonicFactory();
 import { type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import { protectedRefs } from "./schema.js";
 

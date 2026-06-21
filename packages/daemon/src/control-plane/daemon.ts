@@ -1348,6 +1348,7 @@ export async function startDaemon(
               repoManager,
               decisionManager,
               deploymentRegistry,
+              protectedStore,
             )
               .then((outcome) =>
                 handleRunOutcome(outcome, bugRequest.issueNumber, owner, name),
@@ -1408,6 +1409,7 @@ export async function startDaemon(
               repoManager,
               decisionManager,
               deploymentRegistry,
+              protectedStore,
             )
               .then((outcome) =>
                 handleRunOutcome(outcome, fpRequest.issueNumber, owner, name),

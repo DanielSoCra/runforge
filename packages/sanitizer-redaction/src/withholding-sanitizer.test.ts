@@ -93,6 +93,14 @@ describe("withholding sanitizer — protected-ref contract", () => {
     expect(puts).toHaveLength(0);
   });
 
+  it("fails closed when a configured field is not a string (e.g. a structured options array)", () => {
+    const { store } = fakeStore();
+    const sanitizer = createWithholdingSanitizer({ fields: ["options"], store });
+    expect(() =>
+      sanitizer.sanitize({ content: { options: [{ id: "a" }] }, subjectRef: "D-1" }),
+    ).toThrow();
+  });
+
   it("fails closed when a field must be withheld but no subjectRef is supplied", () => {
     const { store } = fakeStore();
     const sanitizer = createWithholdingSanitizer({ fields: ["secret"], store });

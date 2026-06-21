@@ -58,6 +58,14 @@ export function createWithholdingSanitizer(options: WithholdingSanitizerOptions)
         }
 
         const value = content[key];
+        // Withholding replaces the value with a protected:// ref STRING, so the field must be a
+        // string (e.g. question / context). Withholding a structured field (e.g. the options
+        // array) would corrupt its shape downstream; fail CLOSED with a clear error instead.
+        if (typeof value !== "string") {
+          throw new Error(
+            `WithholdingSanitizer can only withhold string fields; "${key}" is ${typeof value}`,
+          );
+        }
         const serialized = JSON.stringify(value);
         // Idempotent per (subjectRef, field), but ONLY when the content is unchanged: the
         // raise→publish→notify path is retryable, so reusing the prior ref for an identical
