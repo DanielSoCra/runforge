@@ -49,7 +49,17 @@ async function readDecisionInbox(): Promise<{
 
 export default async function SteeringPage() {
   const [rawBriefing, inbox] = await Promise.all([
-    getLatestBriefing(),
+    // FAIL-SAFE: the briefing is DB-backed; a store hiccup must NOT take down the
+    // decision inbox (the most important thing on the calm pane, per
+    // FUNC-AC-OPERATOR-SURFACE). Degrade the briefing to null on error — exactly as
+    // readDecisionInbox degrades the inbox on a daemon failure — never 500 the pane.
+    getLatestBriefing().catch((err) => {
+      console.error(
+        '[steering] briefing unavailable:',
+        err instanceof Error ? err.message : err,
+      );
+      return null;
+    }),
     readDecisionInbox(),
   ]);
 

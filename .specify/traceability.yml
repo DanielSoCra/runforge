@@ -275,6 +275,8 @@ STACK-AC-OPERATOR-SURFACE-CLIENT:
     - packages/dashboard/components/decisions/decision-detail.tsx
     - packages/dashboard/app/(dashboard)/steering/page.tsx
     - packages/dashboard/app/api/decisions/[id]/route.ts
+    - packages/dashboard/playwright.config.ts
+    - packages/dashboard/e2e/mock-daemon.mjs
   test_paths:
     - packages/dashboard/components/decisions/decision-inbox.test.tsx
     - packages/dashboard/components/decisions/decision-answer.test.tsx
@@ -283,6 +285,7 @@ STACK-AC-OPERATOR-SURFACE-CLIENT:
     - packages/dashboard/app/api/decisions/answer/route.test.ts
     - packages/dashboard/app/api/decisions/[id]/route.test.ts
     - packages/dashboard/app/(dashboard)/steering/page.test.tsx
+    - packages/dashboard/e2e/operator-surface.spec.ts
   status: draft
 
 # Enacts L0 v6's verifier-gated-autonomy boundary (Delta H); the enforcing L1
