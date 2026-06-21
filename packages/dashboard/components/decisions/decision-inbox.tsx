@@ -85,6 +85,7 @@ import {
 } from '@/components/ui/card';
 import { AlertTriangle, Inbox } from 'lucide-react';
 import { DecisionAnswer } from './decision-answer';
+import { DecisionDetailPanel } from './decision-detail';
 
 /**
  * Map the wire `risk_class` (`P0|P1|P2|P3` — decision-protocol `RISK_CLASSES`)
@@ -201,6 +202,7 @@ export function DecisionInbox({ items, unavailable, onAnswered }: DecisionInboxP
                 <div className="text-sm">
                   <QuestionField field={item.question} />
                 </div>
+                <DecisionDetailPanel decisionId={item.decision_id} />
               </div>
               <div className="flex shrink-0 items-start pt-1 sm:pt-0">
                 <DecisionAnswer decision={item} onAnswered={onAnswered} />
