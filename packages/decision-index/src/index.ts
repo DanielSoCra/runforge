@@ -19,6 +19,7 @@ export {
   type WorkflowOpOptions,
   type WorkflowOpResult,
 } from "./index-writer.js";
+export type { ProtectedStore, PutArgs } from "@auto-claude/sanitizer-redaction";
 export {
   WORKFLOW_AUDIT_EVENTS,
   type WorkflowAuditEvent,
@@ -59,6 +60,7 @@ export {
 
 // Error types callers may need to distinguish.
 export { NotAdmittedError } from "./ingest.js";
+export { RevealRefNotFoundError } from "./index-writer.js";
 export {
   AnswerRejectedError,
   AnsweredOnceConflictError,

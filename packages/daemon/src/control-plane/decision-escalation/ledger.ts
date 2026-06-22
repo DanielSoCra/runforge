@@ -16,7 +16,7 @@
  * emits a runtime require of the native package — the only runtime load is the
  * manager's dynamic import inside its enabled branch.
  */
-import type { IndexWriter, DecisionView, ReadModel } from '@auto-claude/decision-index';
+import type { IndexWriter, DecisionView, ReadModel, ProtectedStore } from '@auto-claude/decision-index';
 import type { ResumeMode } from '@auto-claude/decision-protocol';
 
 /** Terminal statuses are excluded from the pending read (mirrors TERMINAL_STATUSES). */
@@ -44,6 +44,16 @@ export class DecisionLedger {
   /** The read-only projection backed by this ledger's writer. */
   get reader(): ReadModel {
     return this.writer.reader;
+  }
+
+  /** The protected store backing this ledger (used for sanitization / reveal). */
+  protectedStore(): ProtectedStore {
+    return this.writer.protectedStore;
+  }
+
+  /** Reveal a protected field for this decision; delegates to the writer's security-gated reveal. */
+  revealProtected(decisionId: string, ref: string, actor: string): { field: string; value: string } {
+    return this.writer.revealProtected(decisionId, ref, actor);
   }
 
   /**

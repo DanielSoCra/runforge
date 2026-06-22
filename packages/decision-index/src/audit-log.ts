@@ -8,7 +8,7 @@ import type { ItemStatus, TransitionEvent } from "@auto-claude/decision-protocol
  * change durable status, only the view-state flags. They DO append a redacted
  * audit row, so the audit `event` type is widened to include them.
  */
-export const WORKFLOW_AUDIT_EVENTS = ["pin", "mute", "defer", "need_more_context"] as const;
+export const WORKFLOW_AUDIT_EVENTS = ["pin", "mute", "defer", "need_more_context", "reveal"] as const;
 export type WorkflowAuditEvent = (typeof WORKFLOW_AUDIT_EVENTS)[number];
 
 export type AuditEvent = TransitionEvent | WorkflowAuditEvent;

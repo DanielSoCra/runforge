@@ -29,6 +29,7 @@ export interface AuditView {
   to: string | null;
   event: string;
   transition_key: string | null;
+  actor: string | null;
   at: string;
 }
 
@@ -165,6 +166,7 @@ export class ReadModel {
         to: a.to_status,
         event: a.event,
         transition_key: a.transition_key,
+        actor: a.actor,
         at: a.at,
       }));
   }

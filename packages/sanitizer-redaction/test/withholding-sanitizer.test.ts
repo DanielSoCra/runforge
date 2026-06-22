@@ -30,33 +30,33 @@ describe("withholding sanitizer", () => {
   it("withholds configured fields into the protected store, leaving other content intact", async () => {
     const s = createWithholdingSanitizer({ fields: ["question"], store: ctx.store });
     expect(s.name).toBe("withholding");
-    const r = await s.sanitize({ content: { decision_id: "d1", question: "secret", context: "keep" } });
+    const r = await s.sanitize({ content: { question: "secret", context: "keep" }, subjectRef: "d1" });
     expect(r.content.context).toBe("keep");
-    // withheld field stays present, replaced by the safe marker (not dropped)
-    expect(r.content.question).toBe("[WITHHELD]");
+    // withheld field's VALUE becomes the protected:// ref (read-model contract), not a marker.
+    expect(r.content.question as string).toMatch(/^protected:\/\//);
     expect(r.withholdings).toHaveLength(1);
     const w = r.withholdings[0]!;
     expect(w.field).toBe("question");
-    expect(w.marker).toBe("[WITHHELD]");
-    expect(w.ref).toMatch(/^protected:\/\//);
+    expect(w.ref).toBe(r.content.question);
     expect(ctx.store.get(w.ref)).toBe(JSON.stringify("secret"));
   });
 
   it("uses a custom marker", async () => {
     const s = createWithholdingSanitizer({ fields: ["question"], marker: "[redacted]", store: ctx.store });
-    const r = await s.sanitize({ content: { decision_id: "d1", question: "x" } });
+    const r = await s.sanitize({ content: { question: "x" }, subjectRef: "d1" });
     expect(r.withholdings[0]!.marker).toBe("[redacted]");
   });
 
   it("emits no withholdings when no configured field is present", async () => {
     const s = createWithholdingSanitizer({ fields: ["ssn"], store: ctx.store });
-    const r = await s.sanitize({ content: { decision_id: "d1", question: "x" } });
+    const r = await s.sanitize({ content: { question: "x" }, subjectRef: "d1" });
     expect(r.withholdings).toEqual([]);
-    expect(r.content).toEqual({ decision_id: "d1", question: "x" });
+    expect(r.content).toEqual({ question: "x" });
   });
 
-  it("throws when content.decision_id is not a string", () => {
+  it("throws when input.subjectRef is missing or empty", () => {
     const s = createWithholdingSanitizer({ fields: ["question"], store: ctx.store });
     expect(() => s.sanitize({ content: { question: "x" } })).toThrow();
+    expect(() => s.sanitize({ content: { question: "x" }, subjectRef: "" })).toThrow();
   });
 });

@@ -16,7 +16,7 @@ import type { ProtectedStore } from "@auto-claude/sanitizer-redaction";
 import type { Quarantine } from "./quarantine.js";
 import { apply, type ApplyCtx, type ApplyResult } from "./state-machine.js";
 import { Outbox, type RunEffectResult, type RunEffectOptions, type PendingEffect } from "./outbox.js";
-import { ReadModel } from "./read-model.js";
+import { ReadModel, type DetailField } from "./read-model.js";
 import { openDb } from "./db.js";
 import { migrate } from "./migrate.js";
 import { ProtectedStore as ProtectedStoreImpl } from "@auto-claude/sanitizer-redaction";
@@ -24,6 +24,14 @@ import { SqliteQuarantine } from "./quarantine.js";
 import type { Notifier } from "./adapters/notifier.js";
 import type { SourceSink } from "./adapters/source-sink.js";
 import type { ResumeDispatcher } from "./adapters/resume-dispatcher.js";
+
+/** Thrown when a reveal request references a protected ref that does not belong to the decision. */
+export class RevealRefNotFoundError extends Error {
+  constructor(decisionId: string, ref: string) {
+    super(`reveal ref not found for decision ${decisionId}: ${ref}`);
+    this.name = "RevealRefNotFoundError";
+  }
+}
 
 export interface IndexWriterDeps {
   db: Db;
@@ -152,7 +160,7 @@ export class IndexWriter {
   private readonly ingestDeps: IngestDeps;
   private readonly outbox: Outbox;
   private readonly clock: () => Date;
-  private readonly protectedStore: ProtectedStore;
+  readonly protectedStore: ProtectedStore;
   readonly reader: ReadModel;
   /** the content-free quarantine sink over the SINGLE writable connection, so a
    * GitHub-layer pre-ingest rejection (PHI policy / malformed block) records
@@ -425,6 +433,54 @@ export class IndexWriter {
   needMoreContext(decisionId: string, opts: WorkflowOpOptions = {}): WorkflowOpResult {
     const now = opts.now ?? this.clock().toISOString();
     return this.applyWorkflow(decisionId, "need_more_context", now, opts.actor, {});
+  }
+
+  /**
+   * Reveal a withheld decision field to an authorized operator.
+   *
+   * SECURITY: the requested `ref` MUST belong to `decisionId` before decrypting.
+   * `reader.detail` enumerates every protected ref on the decision (question,
+   * context, consequence_of_no_answer, and each option label/detail); if the ref
+   * is absent we throw `RevealRefNotFoundError` rather than decrypting arbitrary
+   * protected content (e.g. another decision's secret).
+   *
+   * The original plaintext was JSON-serialized before encryption, so we parse it
+   * back to a string. A `reveal` audit row is appended with the operator identity.
+   */
+  revealProtected(decisionId: string, ref: string, actor: string): { field: string; value: string } {
+    const detail = this.reader.detail(decisionId);
+    if (!detail) {
+      throw new RevealRefNotFoundError(decisionId, ref);
+    }
+
+    const protectedFields: Array<{ field: string; class: string; ref: string }> = [];
+    const collect = (field: DetailField | null) => {
+      if (field && field.kind === "protected" && field.ref) {
+        protectedFields.push({ field: field.field, class: field.class, ref: field.ref });
+      }
+    };
+    collect(detail.question);
+    collect(detail.context);
+    collect(detail.consequence_of_no_answer);
+    for (const option of detail.options) {
+      collect(option.label);
+      collect(option.detail ?? null);
+    }
+
+    const match = protectedFields.find((f) => f.ref === ref);
+    if (!match) {
+      throw new RevealRefNotFoundError(decisionId, ref);
+    }
+
+    const value = JSON.parse(this.protectedStore.get(ref)) as string;
+    appendAudit(this.db, {
+      decision_id: decisionId,
+      event: "reveal",
+      actor,
+      at: this.clock().toISOString(),
+      detail: { field: match.field, class: match.class },
+    });
+    return { field: match.field, value };
   }
 
   /** Run a single outbox effect (reserve -> execute -> commit). */

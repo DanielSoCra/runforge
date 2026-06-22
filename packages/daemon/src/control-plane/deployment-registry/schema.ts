@@ -10,6 +10,7 @@
 // pass against real zod (the gate-author handoff state).
 
 import { z } from 'zod';
+import { SanitizerConfigSchema } from '@auto-claude/sanitization';
 import type {
   DeploymentProfile,
   FleetCapacityConfig,
@@ -122,6 +123,9 @@ export const ProfileEnvelopeSchema = z
     // dangling lane→gate-set reference is checked in parseProfile's cross-field
     // pass below, where both the lane set and the gate-set names are known.
     gateSets: GateSetDefinitionsSchema.optional(),
+    // OPTIONAL sanitizer bindings (STACK-AC-SANITIZATION). Absent or empty ⇒
+    // the input-boundary sanitization pipeline is the identity (default today).
+    sanitizers: SanitizerConfigSchema.optional(),
     lifecycleMode: z.string().min(1),
     complianceReviewers: z.array(ComplianceReviewerSchema),
     honestAutomation: HonestAutomationMapSchema,
@@ -253,6 +257,13 @@ function assembleProfile(
     defaultMinLevel: env.defaultMinLevel,
     laneSet,
     gateSets: env.gateSets,
+    // SanitizerConfigSchema has a default([]), so an omitted field parses to [].
+    // For the deployment profile we want absent/empty to mean "no sanitizers"
+    // (undefined) so downstream consumers can use a simple optional check.
+    sanitizers:
+      env.sanitizers === undefined || env.sanitizers.length === 0
+        ? undefined
+        : env.sanitizers,
     lifecycleMode: env.lifecycleMode,
     complianceReviewers: env.complianceReviewers,
     honestAutomation: env.honestAutomation,

@@ -20,6 +20,8 @@
     "@auto-claude/db": "workspace:*",
     "@auto-claude/decision-index": "workspace:*",
     "@auto-claude/decision-protocol": "workspace:*",
+    "@auto-claude/sanitization": "workspace:*",
+    "@auto-claude/sanitizer-redaction": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@octokit/rest": "^21.0.0",
     "commander": "^13.0.0",
