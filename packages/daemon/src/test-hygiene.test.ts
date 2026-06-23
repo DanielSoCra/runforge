@@ -98,8 +98,8 @@ export function findHygieneViolations(rawSrc: string, label: string): string[] {
 // testTimeout/hookTimeout in packages/daemon/vitest.config.ts; this guard locks
 // that floor in so it cannot silently regress to the default.
 //
-// The check evaluates the *effective resolved config object* rather than
-// string-matching the source: a regex over source would false-pass if
+// The check evaluates the *exported config object* (defineConfig({ test }))
+// rather than string-matching the source: a regex over source would false-pass if
 // `testTimeout`/`hookTimeout` appeared in a dead/unrelated object or a commented
 // line. We assert the actual numeric values that Vitest will use.
 export const MIN_CONTENTION_TIMEOUT_MS = 20_000;

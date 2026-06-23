@@ -12,7 +12,7 @@ export default defineConfig({
     // under 4x concurrent load). The test is not hung — it completes, just
     // slowly under contention — so the principled fix is contention headroom,
     // not masking; a genuine hang still fails at 30s. The test-hygiene guard
-    // (RC-3) evaluates this resolved config and fails if either timeout is
+    // (RC-3) evaluates this exported config and fails if either timeout is
     // removed or drops below 20s, so it cannot silently regress to the default.
     //
     // Scope is deliberately package-wide rather than per-file: the cold-import
