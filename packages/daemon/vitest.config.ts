@@ -12,7 +12,16 @@ export default defineConfig({
     // under 4x concurrent load). The test is not hung — it completes, just
     // slowly under contention — so the principled fix is contention headroom,
     // not masking; a genuine hang still fails at 30s. The test-hygiene guard
-    // (RC-3) locks these in so they cannot silently regress to the default.
+    // (RC-3) evaluates this resolved config and fails if either timeout is
+    // removed or drops below 20s, so it cannot silently regress to the default.
+    //
+    // Scope is deliberately package-wide rather than per-file: the cold-import
+    // cost lands on whichever loadDaemon()-style test runs first (ordering is not
+    // stable), and sibling suites can grow the same vi.resetModules()+import
+    // pattern. Package-wide is robust to both; the cost is a bounded masking of
+    // future 20-30s tests, acceptable on a contended self-hosted gate (a >30s
+    // hang still fails). Keeping it in the config (not a per-file vi.setConfig)
+    // is also what lets the RC-3 guard evaluate the *effective* values.
     testTimeout: 30_000,
     hookTimeout: 30_000,
   },

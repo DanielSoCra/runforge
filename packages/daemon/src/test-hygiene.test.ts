@@ -97,23 +97,28 @@ export function findHygieneViolations(rawSrc: string, label: string): string[] {
 // (passed 100% idle; failed 12/12 under 4x concurrent load). The fix raises
 // testTimeout/hookTimeout in packages/daemon/vitest.config.ts; this guard locks
 // that floor in so it cannot silently regress to the default.
+//
+// The check evaluates the *effective resolved config object* rather than
+// string-matching the source: a regex over source would false-pass if
+// `testTimeout`/`hookTimeout` appeared in a dead/unrelated object or a commented
+// line. We assert the actual numeric values that Vitest will use.
 export const MIN_CONTENTION_TIMEOUT_MS = 20_000;
 
-export function findTimeoutHardeningViolations(configSrc: string, label: string): string[] {
-  const src = stripComments(configSrc);
+type TimeoutConfig = { testTimeout?: number; hookTimeout?: number } | undefined;
+
+export function findTimeoutHardeningViolations(testConfig: TimeoutConfig, label: string): string[] {
   const violations: string[] = [];
   for (const key of ['testTimeout', 'hookTimeout'] as const) {
-    const m = new RegExp(`\\b${key}\\s*:\\s*([\\d_]+)`).exec(src);
-    if (!m) {
+    const value = testConfig?.[key];
+    if (typeof value !== 'number') {
       violations.push(
-        `${label}: missing \`${key}\` — set it >= ${MIN_CONTENTION_TIMEOUT_MS}ms so the loadDaemon() cold dynamic import can't time out under shared-runner contention (RC-3).`,
+        `${label}: missing numeric \`test.${key}\` — set it >= ${MIN_CONTENTION_TIMEOUT_MS}ms so the loadDaemon() cold dynamic import can't time out under shared-runner contention (RC-3).`,
       );
       continue;
     }
-    const value = Number.parseInt(m[1]!.replace(/_/g, ''), 10);
     if (!(value >= MIN_CONTENTION_TIMEOUT_MS)) {
       violations.push(
-        `${label}: \`${key}\` is ${value}ms, below the ${MIN_CONTENTION_TIMEOUT_MS}ms contention floor (RC-3) — the daemon graph's cold dynamic import is starved past it under concurrent CI load.`,
+        `${label}: \`test.${key}\` is ${value}ms, below the ${MIN_CONTENTION_TIMEOUT_MS}ms contention floor (RC-3) — the daemon graph's cold dynamic import is starved past it under concurrent CI load.`,
       );
     }
   }
@@ -152,33 +157,44 @@ describe('test hygiene: no concurrent-load flake anti-patterns in any package te
     expect(findHygieneViolations(clean, 'synthetic-clean')).toEqual([]);
   });
 
-  it('daemon vitest config keeps the RC-3 contention timeout floor', () => {
-    const configPath = join(PACKAGES_DIR, 'daemon', 'vitest.config.ts');
-    const violations = findTimeoutHardeningViolations(
-      readFileSync(configPath, 'utf8'),
-      'daemon/vitest.config.ts',
-    );
+  it('daemon vitest config keeps the RC-3 contention timeout floor', async () => {
+    // Evaluate the REAL exported config (not a source string match): this fails
+    // if the timeouts are removed, dropped below the floor, or moved out of the
+    // effective `test:` block — the only states that actually reintroduce RC-3.
+    // Imported via a variable path: the config lives outside the test rootDir
+    // ('src') and is a .ts file, both of which a static import specifier would
+    // trip tsc on (TS6059 / TS5097). A variable specifier defers resolution to
+    // the runtime (Vitest), which resolves it fine.
+    const configModulePath = '../vitest.config.ts';
+    const mod = (await import(configModulePath)) as { default: unknown };
+    const resolved =
+      typeof mod.default === 'function'
+        ? await (mod.default as (env: { mode: string; command: string }) => unknown)({
+            mode: 'test',
+            command: 'serve',
+          })
+        : mod.default;
+    const testConfig = (resolved as { test?: TimeoutConfig }).test;
+    const violations = findTimeoutHardeningViolations(testConfig, 'daemon/vitest.config.ts');
     expect(violations, `\n${violations.join('\n')}\n`).toEqual([]);
   });
 
   it('RC-3 detector fires on a missing or too-low timeout config (not a no-op)', () => {
-    // Missing both settings -> 2 violations.
-    expect(
-      findTimeoutHardeningViolations('export default { test: { globals: true } };', 'no-timeouts'),
-    ).toHaveLength(2);
+    // No test block at all -> 2 violations.
+    expect(findTimeoutHardeningViolations(undefined, 'no-test-block')).toHaveLength(2);
+    // Test block present but timeouts absent -> 2 violations.
+    expect(findTimeoutHardeningViolations({}, 'no-timeouts')).toHaveLength(2);
     // Present but below the floor (the 5s default that flaked) -> 2 violations.
     expect(
-      findTimeoutHardeningViolations(
-        'test: { testTimeout: 5_000, hookTimeout: 5000 }',
-        'too-low',
-      ),
+      findTimeoutHardeningViolations({ testTimeout: 5_000, hookTimeout: 5_000 }, 'too-low'),
     ).toHaveLength(2);
-    // At/above the floor -> clean.
+    // One ok, one too low -> 1 violation (the floor is per-key).
     expect(
-      findTimeoutHardeningViolations(
-        'test: { testTimeout: 30_000, hookTimeout: 30_000 }',
-        'ok',
-      ),
+      findTimeoutHardeningViolations({ testTimeout: 30_000, hookTimeout: 5_000 }, 'mixed'),
+    ).toHaveLength(1);
+    // Both at/above the floor -> clean.
+    expect(
+      findTimeoutHardeningViolations({ testTimeout: 30_000, hookTimeout: 30_000 }, 'ok'),
     ).toEqual([]);
   });
 });
