@@ -89,6 +89,37 @@ export function findHygieneViolations(rawSrc: string, label: string): string[] {
   return violations;
 }
 
+// RC-3 (CI flake, 2026-06-23): several daemon tests re-import the large
+// daemon.js module graph via loadDaemon() (vi.resetModules() + dynamic import).
+// On the shared self-hosted runner the daemon's own `pnpm test` gate runs
+// concurrently with branch CIs, and that cold esbuild transform/eval is starved
+// well past the 5s default testTimeout, timing out the FIRST loadDaemon() test
+// (passed 100% idle; failed 12/12 under 4x concurrent load). The fix raises
+// testTimeout/hookTimeout in packages/daemon/vitest.config.ts; this guard locks
+// that floor in so it cannot silently regress to the default.
+export const MIN_CONTENTION_TIMEOUT_MS = 20_000;
+
+export function findTimeoutHardeningViolations(configSrc: string, label: string): string[] {
+  const src = stripComments(configSrc);
+  const violations: string[] = [];
+  for (const key of ['testTimeout', 'hookTimeout'] as const) {
+    const m = new RegExp(`\\b${key}\\s*:\\s*([\\d_]+)`).exec(src);
+    if (!m) {
+      violations.push(
+        `${label}: missing \`${key}\` — set it >= ${MIN_CONTENTION_TIMEOUT_MS}ms so the loadDaemon() cold dynamic import can't time out under shared-runner contention (RC-3).`,
+      );
+      continue;
+    }
+    const value = Number.parseInt(m[1]!.replace(/_/g, ''), 10);
+    if (!(value >= MIN_CONTENTION_TIMEOUT_MS)) {
+      violations.push(
+        `${label}: \`${key}\` is ${value}ms, below the ${MIN_CONTENTION_TIMEOUT_MS}ms contention floor (RC-3) — the daemon graph's cold dynamic import is starved past it under concurrent CI load.`,
+      );
+    }
+  }
+  return violations;
+}
+
 describe('test hygiene: no concurrent-load flake anti-patterns in any package tests', () => {
   it('binds no fixed TCP ports and builds no Date.now()-based temp paths', () => {
     const files = listTestFiles(PACKAGES_DIR);
@@ -119,5 +150,35 @@ describe('test hygiene: no concurrent-load flake anti-patterns in any package te
       'const future = new Date(Date.now() + 604800000).toISOString();',
     ].join('\n');
     expect(findHygieneViolations(clean, 'synthetic-clean')).toEqual([]);
+  });
+
+  it('daemon vitest config keeps the RC-3 contention timeout floor', () => {
+    const configPath = join(PACKAGES_DIR, 'daemon', 'vitest.config.ts');
+    const violations = findTimeoutHardeningViolations(
+      readFileSync(configPath, 'utf8'),
+      'daemon/vitest.config.ts',
+    );
+    expect(violations, `\n${violations.join('\n')}\n`).toEqual([]);
+  });
+
+  it('RC-3 detector fires on a missing or too-low timeout config (not a no-op)', () => {
+    // Missing both settings -> 2 violations.
+    expect(
+      findTimeoutHardeningViolations('export default { test: { globals: true } };', 'no-timeouts'),
+    ).toHaveLength(2);
+    // Present but below the floor (the 5s default that flaked) -> 2 violations.
+    expect(
+      findTimeoutHardeningViolations(
+        'test: { testTimeout: 5_000, hookTimeout: 5000 }',
+        'too-low',
+      ),
+    ).toHaveLength(2);
+    // At/above the floor -> clean.
+    expect(
+      findTimeoutHardeningViolations(
+        'test: { testTimeout: 30_000, hookTimeout: 30_000 }',
+        'ok',
+      ),
+    ).toEqual([]);
   });
 });
