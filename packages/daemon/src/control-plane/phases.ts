@@ -19,7 +19,8 @@ import type { Octokit } from '@octokit/rest';
 import { createWorkDetector } from './work-detection.js';
 import { git } from '../lib/git.js';
 import { runCommand } from '../lib/process.js';
-import { join } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
 import {
@@ -91,6 +92,51 @@ export function isRepoGitLocked(): boolean {
 export const acquireDetectLock = acquireRepoGitLock;
 export const releaseDetectLock = releaseRepoGitLock;
 export const isDetectLocked = isRepoGitLocked;
+
+/** Build a synchronous, dependency-free probe for whether a verifier's invocation
+ * ref is reachable/runnable in the repo workspace. Confirms positive runnability
+ * only: a package.json script name, an existing file/directory path, or a known
+ * CI/workflow reference. Anything else returns `false` (fail-closed). */
+function createProbeOracle(repoRoot: string): (ref: { ref: string }) => boolean {
+  let scriptNames: Set<string> | undefined;
+
+  return (invoke) => {
+    const rawRef = invoke.ref.trim();
+    if (rawRef === '') return false;
+
+    // Lazily cache the package.json script names once per integrate attempt.
+    if (scriptNames === undefined) {
+      try {
+        const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
+        scriptNames = new Set(Object.keys(pkg.scripts ?? {}));
+      } catch {
+        scriptNames = new Set();
+      }
+    }
+    if (scriptNames.has(rawRef)) return true;
+
+    // Existing file or directory path (relative to repo root or absolute).
+    try {
+      const target = isAbsolute(rawRef) ? rawRef : join(repoRoot, rawRef);
+      const st = statSync(target);
+      return st.isFile() || st.isDirectory();
+    } catch {
+      // Not a reachable path; continue to CI/workflow checks.
+    }
+
+    // Known CI/workflow reference: either a path under .github/workflows/ or a
+    // bare workflow filename that resolves under that directory.
+    const workflowDir = join(repoRoot, '.github', 'workflows');
+    const workflowCandidates = rawRef.startsWith('.github/workflows/')
+      ? [join(repoRoot, rawRef)]
+      : [join(workflowDir, rawRef), join(workflowDir, `${rawRef}.yml`), join(workflowDir, `${rawRef}.yaml`)];
+    for (const candidate of workflowCandidates) {
+      if (existsSync(candidate)) return true;
+    }
+
+    return false;
+  };
+}
 
 export function createPhaseHandlers(
   config: Config,
@@ -1969,7 +2015,9 @@ export function createPhaseHandlers(
       const assignedLane =
         resolvedSet.lanes.find((l) => l.name === assignment.lane) ??
         resolvedSet.lanes.find((l) => l.name === resolvedSet.mostCautiousLane);
-      const verifierStatus = observeVerifierStatus(assignedLane?.verifier);
+      const verifierStatus = observeVerifierStatus(assignedLane?.verifier, {
+        probeOracle: createProbeOracle(mainRepoRoot),
+      });
 
       // Human-gated autonomy: default-deny unless the registry records widening for
       // this (level) [level-wide grant] OR this (level, lane) [lane-scoped grant].
