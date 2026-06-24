@@ -19,8 +19,8 @@ import type { Octokit } from '@octokit/rest';
 import { createWorkDetector } from './work-detection.js';
 import { git } from '../lib/git.js';
 import { runCommand } from '../lib/process.js';
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { isAbsolute, join, normalize, sep } from 'node:path';
 import { diagnose } from '../diagnosis/diagnostician.js';
 import { routeDiagnosis } from '../diagnosis/router.js';
 import {
@@ -94,17 +94,26 @@ export const releaseDetectLock = releaseRepoGitLock;
 export const isDetectLocked = isRepoGitLocked;
 
 /** Build a synchronous, dependency-free probe for whether a verifier's invocation
- * ref is reachable/runnable in the repo workspace. Confirms positive runnability
- * only: a package.json script name, an existing file/directory path, or a known
- * CI/workflow reference. Anything else returns `false` (fail-closed). */
-function createProbeOracle(repoRoot: string): (ref: { ref: string }) => boolean {
+ * ref is reachable/runnable in the repo workspace. SECURITY BOUNDARY of the
+ * verifier-gating chokepoint, so it confirms runnability ONLY for a narrow,
+ * positively-recognized set and fails closed on everything else:
+ *   - a declared package.json script name, OR
+ *   - a real CI workflow file (`.yml`/`.yaml`) strictly under `.github/workflows/`.
+ * It deliberately does NOT accept an arbitrary existing file/dir (a README is not a
+ * runnable oracle), and rejects absolute refs and any parent-traversal (`..`) so a
+ * ref can never reach outside the repo workspace. */
+export function createProbeOracle(repoRoot: string): (ref: { ref: string }) => boolean {
   let scriptNames: Set<string> | undefined;
+  const workflowDir = normalize(join(repoRoot, '.github', 'workflows')) + sep;
 
   return (invoke) => {
     const rawRef = invoke.ref.trim();
     if (rawRef === '') return false;
+    // Containment: never accept an absolute ref or any parent-traversal segment —
+    // the oracle must live inside this repo workspace.
+    if (isAbsolute(rawRef) || rawRef.split(/[\\/]/).includes('..')) return false;
 
-    // Lazily cache the package.json script names once per integrate attempt.
+    // (1) a declared package.json script name (cached once per integrate attempt).
     if (scriptNames === undefined) {
       try {
         const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'));
@@ -115,23 +124,15 @@ function createProbeOracle(repoRoot: string): (ref: { ref: string }) => boolean 
     }
     if (scriptNames.has(rawRef)) return true;
 
-    // Existing file or directory path (relative to repo root or absolute).
-    try {
-      const target = isAbsolute(rawRef) ? rawRef : join(repoRoot, rawRef);
-      const st = statSync(target);
-      return st.isFile() || st.isDirectory();
-    } catch {
-      // Not a reachable path; continue to CI/workflow checks.
-    }
-
-    // Known CI/workflow reference: either a path under .github/workflows/ or a
-    // bare workflow filename that resolves under that directory.
-    const workflowDir = join(repoRoot, '.github', 'workflows');
-    const workflowCandidates = rawRef.startsWith('.github/workflows/')
-      ? [join(repoRoot, rawRef)]
-      : [join(workflowDir, rawRef), join(workflowDir, `${rawRef}.yml`), join(workflowDir, `${rawRef}.yaml`)];
-    for (const candidate of workflowCandidates) {
-      if (existsSync(candidate)) return true;
+    // (2) a real CI workflow FILE (.yml/.yaml) strictly under .github/workflows/.
+    const candidates = rawRef.startsWith('.github/workflows/')
+      ? [rawRef]
+      : [`.github/workflows/${rawRef}`, `.github/workflows/${rawRef}.yml`, `.github/workflows/${rawRef}.yaml`];
+    for (const rel of candidates) {
+      if (!/\.ya?ml$/.test(rel)) continue;
+      const abs = normalize(join(repoRoot, rel));
+      if (!abs.startsWith(workflowDir)) continue; // belt-and-suspenders containment
+      if (existsSync(abs)) return true;
     }
 
     return false;
