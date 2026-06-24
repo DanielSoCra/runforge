@@ -95,23 +95,26 @@ export function findHygieneViolations(rawSrc: string, label: string): string[] {
   return violations;
 }
 
-// RC-3 cold-import pattern detector. A test that calls vi.resetModules() and then
-// re-imports via a dynamic import() forces a cold esbuild transform/eval of that
-// module graph; under shared-runner contention that cold import is CPU-starved and
-// can blow the 5s default timeout (the daemon's loadDaemon() flake — #770). So ANY
-// package whose tests do this needs the contention-timeout floor below, not just
-// the daemon.
+// RC-3 cold-import pattern detector — package-level signal: does this test source
+// call vi.resetModules()? A test resets the module registry for exactly one reason:
+// to force the NEXT dynamic import() to re-evaluate cold. Under shared-runner
+// contention that cold esbuild transform/eval is CPU-starved and can blow the 5s
+// default timeout (the daemon's loadDaemon() flake — #770). So ANY package whose
+// tests do this needs the contention-timeout floor below, not just the daemon.
 //
-// Deliberately errs toward INCLUSION: it does NOT classify the import specifier
-// (local './x' vs 'node:fs' vs a bare package vs a variable). A needless floor is
-// harmless — a higher timeout only delays the failure of a genuinely-hung test, it
-// never breaks a passing one — whereas a MISSED floor is exactly the RC-3 bug. So
-// over-detection is the safe direction, and the specifier ambiguity stops mattering.
-// (Today only daemon + dashboard match, both real local re-imports.) `importActual(`
-// is not matched: `import` there is followed by `Actual`, not `(`.
-export function usesColdImportPattern(rawSrc: string): boolean {
-  const src = stripComments(rawSrc);
-  return /\bresetModules\s*\(/.test(src) && /\bimport\s*\(/.test(src);
+// We key on resetModules() ALONE (not "resetModules AND import() in the same file")
+// on purpose: the re-import it forces may live in a sibling test or a shared test
+// helper, not the same source — a same-file-only match would let that escape (codex
+// review, 2026-06-24). resetModules() is the unambiguous, co-located signal of the
+// re-import intent, so its mere presence in a package's tests flags the package.
+//
+// Deliberately errs toward INCLUSION: a needless floor is harmless — a higher
+// timeout only delays the failure of a genuinely-hung test, it never breaks a
+// passing one — whereas a MISSED floor is exactly the RC-3 bug. (Today only daemon
+// + dashboard call resetModules().) Comments are stripped first, so a commented-out
+// or prose mention does not count.
+export function mentionsModuleReset(rawSrc: string): boolean {
+  return /\bresetModules\s*\(/.test(stripComments(rawSrc));
 }
 
 // The package a monorepo test file belongs to = the first path segment under
@@ -197,15 +200,17 @@ describe('test hygiene: no concurrent-load flake anti-patterns in any package te
     const files = listTestFiles(PACKAGES_DIR);
     const flagged = new Set<string>();
     for (const f of files) {
-      if (usesColdImportPattern(readFileSync(f, 'utf8'))) flagged.add(packageNameOf(f));
+      if (mentionsModuleReset(readFileSync(f, 'utf8'))) flagged.add(packageNameOf(f));
     }
 
-    // Non-vacuous: the daemon (loadDaemon) and the dashboard (route-handler
-    // re-imports) both use the pattern today. If this set ever empties or loses
-    // either, the detector silently broke — fail loudly instead of passing blind.
-    expect(flagged.size, 'cold-import detector found no packages — it likely broke').toBeGreaterThan(0);
-    expect(flagged.has('daemon'), 'daemon should be flagged (loadDaemon)').toBe(true);
-    expect(flagged.has('dashboard'), 'dashboard should be flagged (route re-imports)').toBe(true);
+    // Soft non-vacuous guard: while ANY package resets modules in its tests this
+    // holds, catching a detector that silently matches nothing on the real tree.
+    // Intentionally NOT asserting specific package names (daemon/dashboard) — that
+    // would fail CI if a package legitimately drops the pattern even though no floor
+    // is then required (codex review, 2026-06-24). The synthetic detector self-test
+    // below is what proves the matcher actually fires. If the whole monorepo ever
+    // stops resetting modules, delete this line.
+    expect(flagged.size, 'module-reset detector found no packages — it likely broke').toBeGreaterThan(0);
 
     const violations: string[] = [];
     for (const pkg of [...flagged].sort()) {
@@ -241,16 +246,18 @@ describe('test hygiene: no concurrent-load flake anti-patterns in any package te
     expect(violations, `\n${violations.join('\n')}\n`).toEqual([]);
   });
 
-  it('RC-3 cold-import detector fires on resetModules()+import() and not otherwise', () => {
-    expect(usesColdImportPattern('vi.resetModules();\nconst { x } = await import("./mod.js");')).toBe(true);
-    // reset but no dynamic import -> not the cold-import flake pattern.
-    expect(usesColdImportPattern('vi.resetModules();\nimport foo from "./mod.js";')).toBe(false);
-    // dynamic import but no module reset -> no cold re-eval.
-    expect(usesColdImportPattern('const { x } = await import("./mod.js");')).toBe(false);
-    // commented-out pattern must not count.
-    expect(usesColdImportPattern('// vi.resetModules(); await import("./m")')).toBe(false);
-    // vi.importActual() is not a dynamic import() call.
-    expect(usesColdImportPattern('vi.resetModules();\nvi.importActual("./m");')).toBe(false);
+  it('RC-3 module-reset detector fires on resetModules() and not otherwise', () => {
+    // The re-import that resetModules() forces may be co-located, in a sibling test,
+    // or in a shared helper — so the detector keys on resetModules() alone.
+    expect(mentionsModuleReset('vi.resetModules();\nconst { x } = await import("./mod.js");')).toBe(true);
+    expect(mentionsModuleReset('vi.resetModules();')).toBe(true); // reset present even with no same-file import
+    expect(mentionsModuleReset('beforeEach(() => { vi.resetModules(); });')).toBe(true);
+    // no module reset -> no cold re-eval, no floor needed.
+    expect(mentionsModuleReset('const { x } = await import("./mod.js");')).toBe(false);
+    expect(mentionsModuleReset('import foo from "./mod.js";')).toBe(false);
+    // commented-out / prose mention must not count (comments are stripped first).
+    expect(mentionsModuleReset('// vi.resetModules();')).toBe(false);
+    expect(mentionsModuleReset('/* call vi.resetModules() here */')).toBe(false);
   });
 
   it('RC-3 detector fires on a missing or too-low timeout config (not a no-op)', () => {
