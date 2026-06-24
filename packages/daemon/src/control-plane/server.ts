@@ -408,12 +408,22 @@ export function createControlServer(
             respond(400, { error: 'lane must be a string' });
             return;
           }
-          const outcome = handlers.widenAutonomy!(id, {
-            riskClass: riskClass as RiskClass,
-            target: target as AutonomyLevel,
-            lane,
-            operator,
-          });
+          let outcome;
+          try {
+            outcome = handlers.widenAutonomy!(id, {
+              riskClass: riskClass as RiskClass,
+              target: target as AutonomyLevel,
+              lane,
+              operator,
+            });
+          } catch (e) {
+            // A widen that throws (e.g. the durable autonomy write failed) must not
+            // escape as a raw 500: persistence-first means in-memory stays unchanged,
+            // so surface a controlled 503 and let the Operator retry.
+            console.error('[control-plane] POST /deployments/:id/widen failed:', e);
+            respond(503, { error: 'autonomy widening could not be persisted' });
+            return;
+          }
           if (!outcome.ok) {
             // An unknown deployment is surfaced as a 404; any other rejected
             // widening (unknown class, unauthorized, unknown lane) is a 409.

@@ -74,6 +74,19 @@ export interface AutonomyStore {
  * A JSON-file AutonomyStore. Writes are atomic (temp file + rename) and the
  * parent directory is created on demand. No external dependencies.
  */
+/** Structural guard for a persisted AutonomyState (entries object + history array,
+ * optional laneEntries object). Used to discard corrupt entries on load. */
+function isAutonomyStateShape(v: unknown): boolean {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const s = v as Record<string, unknown>;
+  const entriesOk = typeof s.entries === 'object' && s.entries !== null && !Array.isArray(s.entries);
+  const historyOk = Array.isArray(s.history);
+  const laneOk =
+    s.laneEntries === undefined ||
+    (typeof s.laneEntries === 'object' && s.laneEntries !== null && !Array.isArray(s.laneEntries));
+  return entriesOk && historyOk && laneOk;
+}
+
 export class JsonFileAutonomyStore implements AutonomyStore {
   constructor(private path: string) {}
 
@@ -88,7 +101,17 @@ export class JsonFileAutonomyStore implements AutonomyStore {
       ) {
         return {};
       }
-      return parsed as Record<string, AutonomyState>;
+      // Validate EACH entry's shape and discard structurally-invalid ones (fail
+      // soft) — a corrupt entry must never become a deferred throw in a later
+      // read/widen. A valid AutonomyState has an `entries` object + a `history`
+      // array (+ optional `laneEntries` object).
+      const out: Record<string, AutonomyState> = {};
+      for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (isAutonomyStateShape(value)) {
+          out[id] = value as AutonomyState;
+        }
+      }
+      return out;
     } catch {
       return {};
     }
@@ -327,6 +350,12 @@ export class DeploymentRegistry {
       return { ok: false, reason: 'missing authorization' };
     }
 
+    // Require a CURRENTLY-REGISTERED deployment — never widen a stale autonomy key
+    // that was loaded from the persistence store for a deployment not registered in
+    // this run (the autonomy Map may hold ids the live profile set no longer has).
+    if (!this.profiles.has(id)) {
+      return { ok: false, reason: `unknown deployment '${id}'` };
+    }
     const state = this.autonomy.get(id);
     if (state === undefined) {
       return { ok: false, reason: `unknown deployment '${id}'` };
@@ -410,8 +439,13 @@ export class DeploymentRegistry {
     // Deep-freeze before storing AND returning (`Readonly` is compile-time only;
     // an un-frozen handle would let a caller bypass the authorization + history path).
     const frozen = deepFreeze(newState);
+    // Persist FIRST, then commit in-memory: if the durable write throws (e.g. disk
+    // full), the in-memory autonomy stays unchanged — never widened-but-unpersisted.
+    if (this.autonomyStore !== undefined) {
+      const nextMap = { ...Object.fromEntries(this.autonomy), [id]: frozen };
+      this.autonomyStore.saveAll(nextMap);
+    }
     this.autonomy.set(id, frozen);
-    this.autonomyStore?.saveAll(Object.fromEntries(this.autonomy));
     return { ok: true, state: frozen };
   }
 
