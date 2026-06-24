@@ -5,6 +5,7 @@ import { readResults } from './results.js';
 import type { ReleaseProposalResult } from './release.js';
 import type { ListRankedArgs, ListFilters, RankedListItem, DetailView } from '@auto-claude/decision-index';
 import type { HandlerResult, ErrorBody, AnswerBody, RevealBody } from './decision-api.js';
+import type { RiskClass, AutonomyLevel, WideningOutcome } from './deployment-registry/types.js';
 
 export interface ControlHandlers {
   getStatus: () => unknown;
@@ -29,6 +30,10 @@ export interface ControlHandlers {
     id: string,
     body: AnswerBody,
   ) => Promise<HandlerResult<{ answered: true; chosen_option: string } | ErrorBody>>;
+  widenAutonomy?: (
+    id: string,
+    grant: { riskClass: RiskClass; target: AutonomyLevel; lane?: string; operator: string },
+  ) => WideningOutcome;
   stateDir?: string;
 }
 
@@ -323,6 +328,106 @@ export function createControlServer(
         });
       } else {
         json(res, 501, { error: 'decision index not configured' });
+      }
+    } else if (
+      method === 'POST' &&
+      url.pathname.startsWith('/deployments/') &&
+      url.pathname.endsWith('/widen')
+    ) {
+      if (handlers.widenAutonomy) {
+        // Path is `/deployments/<id>/widen`; the id is URL-encoded by the client.
+        const encoded = url.pathname.slice('/deployments/'.length, -'/widen'.length);
+        let id: string;
+        try {
+          id = decodeURIComponent(encoded);
+        } catch {
+          json(res, 404, { error: 'not found' });
+          return;
+        }
+        if (id.length === 0) {
+          json(res, 404, { error: 'not found' });
+          return;
+        }
+        const MAX_BODY = 10240; // 10KB
+        let rawBody = '';
+        let bytes = 0;
+        let responded = false;
+        const respond = (status: number, body: unknown): void => {
+          if (responded) return;
+          responded = true;
+          json(res, status, body);
+        };
+        req.on('data', (chunk: Buffer) => {
+          if (responded) return;
+          bytes += chunk.length;
+          // Enforce the cap BEFORE buffering, so an oversized body is never fully
+          // read into memory; stop reading the request once we respond 413.
+          if (bytes > MAX_BODY) {
+            respond(413, { error: 'body too large' });
+            req.destroy();
+            return;
+          }
+          rawBody += chunk.toString();
+        });
+        req.on('error', () => { respond(400, { error: 'request error' }); });
+        req.on('end', () => {
+          if (responded) return;
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(rawBody);
+          } catch {
+            respond(400, { error: 'invalid JSON body' });
+            return;
+          }
+          if (
+            parsed === null ||
+            typeof parsed !== 'object' ||
+            Array.isArray(parsed)
+          ) {
+            respond(400, { error: 'invalid body' });
+            return;
+          }
+          const body = parsed as Record<string, unknown>;
+          const riskClass = body.riskClass;
+          const target = body.target;
+          const lane = body.lane;
+          const operator = body.operator;
+          if (typeof riskClass !== 'string' || riskClass.length === 0) {
+            respond(400, { error: 'riskClass is required' });
+            return;
+          }
+          if (target !== 'human-gated' && target !== 'widened') {
+            respond(400, { error: 'target must be human-gated or widened' });
+            return;
+          }
+          if (typeof operator !== 'string' || operator.length === 0) {
+            respond(400, { error: 'operator is required' });
+            return;
+          }
+          if (lane !== undefined && typeof lane !== 'string') {
+            respond(400, { error: 'lane must be a string' });
+            return;
+          }
+          const outcome = handlers.widenAutonomy!(id, {
+            riskClass: riskClass as RiskClass,
+            target: target as AutonomyLevel,
+            lane,
+            operator,
+          });
+          if (!outcome.ok) {
+            // An unknown deployment is surfaced as a 404; any other rejected
+            // widening (unknown class, unauthorized, unknown lane) is a 409.
+            if (outcome.reason.startsWith('unknown deployment')) {
+              respond(404, { error: outcome.reason });
+            } else {
+              respond(409, { error: outcome.reason });
+            }
+            return;
+          }
+          respond(200, outcome);
+        });
+      } else {
+        json(res, 501, { error: 'deployment registry not configured' });
       }
     } else if (method === 'POST' && url.pathname.startsWith('/retry/')) {
       const issue = Number(url.pathname.split('/')[2]);
