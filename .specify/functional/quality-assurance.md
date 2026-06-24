@@ -3,7 +3,7 @@ id: FUNC-AC-QUALITY
 type: functional
 domain: auto-claude
 status: draft
-version: 3
+version: 4
 layer: 1
 ---
 
@@ -129,19 +129,29 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 
 ### Trust Calibration
 
-**Scenario: Warmup period**
-- Given the system has completed fewer than a configurable number of work requests (the warmup threshold)
-- When a work request passes all review gates
-- Then it still requires explicit Operator approval before promotion — the system earns autonomous promotion rights by demonstrating quality during warmup, not by default
+**Scenario: Quality assurance feeds the earned-trust decision but never grants autonomy**
+- Given a completed work request that has passed all applicable review gates
+- When the system considers whether the work may proceed without the Operator
+- Then quality assurance never by itself grants autonomous promotion; whether the work may proceed is the earned-trust decision — held per deployment, per risk class, and per lane (see FUNC-AC-MERGE-DECISION) and gated by the verifier precondition (see FUNC-AC-VERIFIER-GATE) — and quality assurance only contributes the demonstrated-quality track record those decisions consume; no count of completed work here widens autonomy for any risk class or lane
 
-**Scenario: Warmup graduation**
-- Given the system has completed the warmup threshold of work requests with Operator approval
-- When the next work request passes all review gates
-- Then it proceeds without mandatory Operator approval — the warmup period is complete
+**Scenario: A deployment has earned zero autonomous action at switch-on**
+- Given a deployment that has just been brought online
+- When any completed work passes all review gates
+- Then it is held for the Operator regardless of risk class or lane — a deployment earns zero autonomous action at switch-on, and this is widened only by the earned-trust decision (see FUNC-AC-MERGE-DECISION), never relaxed by a count of completed work
 
-**Scenario: Periodic random sampling**
-- Given the system has graduated from warmup
-- When work requests complete all review gates
+**Scenario: A broken autonomy substrate withholds autonomy across all lanes**
+- Given a signal that the foundation autonomous action depends on is unsound — the wiring of the independent verifiers, the boundary that keeps privileges and work identity correct, the durable record that keeps promotions and rollbacks reversible and auditable, or the configuration shared across lanes
+- When any work would otherwise be eligible to proceed without the Operator
+- Then the system withholds autonomous promotion across every lane and risk class until the foundation is shown sound again, and records the reason — this is a single global signal that can only remove or withhold autonomy, never grant it
+
+**Scenario: A lane is warmup-eligible only if its verifier can demonstrably fail**
+- Given a lane whose work is demonstrating quality toward earned autonomy
+- When the system establishes whether that lane may participate in warmup at all
+- Then the lane is warmup-eligible only if its verifier can be shown to return a failing verdict on bad outcomes (see FUNC-AC-VERIFIER-GATE); until that is proven, the lane is treated as green-only — it may demonstrate quality on the lowest-risk work alone and accrues no track record toward any higher risk class
+
+**Scenario: Periodic random sampling after autonomy is earned**
+- Given a deployment that has earned autonomous promotion for a risk class and lane (see FUNC-AC-MERGE-DECISION)
+- When work of that class completes all review gates
 - Then a configurable percentage of completed work is flagged for Operator review — catching systematic blind spots that all review gates may share
 
 **Scenario: Sampling feedback**
@@ -149,15 +159,15 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 - When corrections are applied
 - Then the corrections feed back into the learning system with elevated priority (see FUNC-AC-LEARNING)
 
-**Scenario: Warmup regression**
-- Given the system has graduated from warmup
+**Scenario: Sampled corrections withdraw earned autonomy**
+- Given a deployment that has earned autonomous promotion for a risk class
 - When a configurable number of consecutive sampled reviews reveal corrections from the Operator
-- Then the system reverts to warmup mode — requiring mandatory Operator approval again until quality is re-demonstrated
+- Then the system withdraws that earned autonomy and reverts the risk class to mandatory Operator approval until quality is re-demonstrated — autonomy withdrawn this way is restored only by re-earning it (see FUNC-AC-MERGE-DECISION)
 
 **Scenario: Minimum sampling floor**
 - Given the Operator configures the sampling percentage
 - When the configured value is below a minimum floor
-- Then the system enforces the minimum floor — post-warmup human oversight cannot be fully disabled
+- Then the system enforces the minimum floor — post-earning human oversight cannot be fully disabled
 
 ### Holdout Scenario Management
 
@@ -206,6 +216,7 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 - Holdout scenarios are never available during implementation or review — isolation is what makes validation trustworthy
 - Holdout failures trigger diagnosis instead of being auto-classified or auto-fixed
 - First implementations become reference standards for consistency (see FUNC-AC-LEARNING)
+- Quality assurance never grants autonomous promotion by itself; autonomy is earned per deployment, per risk class, and per lane behind a usable verifier (see FUNC-AC-MERGE-DECISION and FUNC-AC-VERIFIER-GATE), and the only global trust signal quality assurance holds can withhold autonomy but never grant it
 
 ## Constraints
 
@@ -215,4 +226,7 @@ Autonomous implementers cannot be trusted to self-certify their work. An impleme
 - Escalation is graduated, not binary — repeated identical failures escalate faster than novel failures
 - Complexity classification determines the default review depth, but risk-sensitive work still receives the review gates needed for safe delivery
 - Static analysis thresholds are deterministic and cannot be overridden by implementation work
-- The system does not operate with full autonomy from day one — it must demonstrate quality during a warmup period before earning autonomous promotion rights
+- The system does not operate with full autonomy from day one, and quality assurance never by itself grants it: autonomous promotion is earned per deployment, per risk class, and per lane behind a usable verifier (see FUNC-AC-MERGE-DECISION and FUNC-AC-VERIFIER-GATE) — there is no global count of completed work that, once reached, lets work proceed across risk classes
+- Quality assurance holds exactly one global trust signal and it is subtractive only: a deployment earns zero autonomous action at switch-on, and when the foundation autonomous action depends on (the verifier wiring, the privilege-and-identity boundary, the promotion-and-rollback audit record, the cross-lane configuration) is unsound, the signal withholds autonomy across all lanes and risk classes; this signal can only withhold or withdraw autonomy, never grant it
+- A lane builds a warmup track record toward any risk class above the lowest only if its verifier can be shown to fail on bad outcomes; until proven, it is treated as green-only and accrues no track record toward higher risk classes
+- Human oversight after autonomy is earned cannot be fully disabled: the sampling percentage has an enforced minimum floor, and a sustained run of sampled corrections withdraws earned autonomy until it is re-earned

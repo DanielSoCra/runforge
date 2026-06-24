@@ -59,6 +59,26 @@ A further shared resource has the same shape. The fleet's reasoning capacity is 
 - Then only that deployment's autonomy widens for that risk class
 - And other deployments' autonomy is unchanged
 
+**Scenario: A deployment's first-ever unattended merge is bounded by its first production release**
+- Given a deployment has never yet merged anything without the Operator and the Operator has set a pre-approved earn-in policy for it
+- When that deployment would make its first-ever merge with no contemporaneous Operator decision
+- Then the platform allows it only once the Operator's first production-release approval for that deployment has explicitly recorded that pre-approved unattended merging may begin
+- And until that first release approval records it, the deployment's merges still reach the Operator, even where the earn-in policy would otherwise have let them proceed unattended
+- And no separate first-merge approval beat is created: the only place the Operator authorizes the debut of unattended merging is the production-release approval the deployment already requires
+
+**Scenario: A deployment that never releases to production earns its first unattended merge by mechanism alone**
+- Given a deployment is not on a path that is ever released to production, so no production-release approval will occur for it
+- When it would make its first-ever unattended merge under its pre-approved earn-in policy
+- Then it may proceed only on mechanism evidence held from the deployment's own state — its lane's verifier can return a failing verdict, its promotion rule was pre-approved, the non-configurable safety floors are intact, and the change's risk class is known — with no human beat invented for it
+- And if any of that evidence is absent or the risk class cannot be determined, the merge reaches the Operator instead of proceeding
+
+**Scenario: First-unattended-merge and deployment identity are read from system state, never declared**
+- Given the platform must decide whether a given merge is a deployment's first-ever unattended one
+- When it evaluates that merge
+- Then both which deployment this is and whether this is its first unattended merge are derived from the platform's own recorded state, not from a label a configuration or a lane asserts
+- And renaming, cloning, re-scoping, or re-bundling work cannot make a first-ever unattended merge read as a later one
+- And if it cannot be determined unambiguously whether this is the deployment's debut unattended merge, the merge is treated as the debut and reaches the Operator
+
 ### Bounded isolation and the focus-gated inbox
 
 **Scenario: Deployments are isolated by default**
@@ -188,6 +208,7 @@ A further shared resource has the same shape. The fleet's reasoning capacity is 
 - Adding a project is registering a deployment profile, not changing the platform; the platform's behavior is uniform while everything project-specific lives in the deployment's profile.
 - Each deployment classifies risk, gates compliance, bounds spend, and concentrates the Operator's attention on its irreducibly-human work using only its own profile; differences between deployments are explained by their profiles, not by special-casing.
 - Autonomy widens for one deployment and one risk class at a time, only on the Operator's approval; widening one deployment never widens another.
+- A deployment never makes its first-ever unattended merge unwitnessed: for a deployment that releases to production, that debut is bound to its first production-release approval explicitly recording that unattended merging may begin — adding no new approval beat beyond the two the Operator already reserves; for a deployment that never releases to production, the debut is allowed on mechanism evidence alone (a verifier that can fail, a pre-approved promotion rule, intact safety floors, a known risk class), and on any missing evidence or unknown risk class the merge reaches the Operator instead. Whether a merge is a deployment's debut unattended one is read from recorded state and cannot be evaded by renaming, cloning, or re-bundling.
 - Deployments are isolated by default; the inbox is the only cross-deployment surface, and items from non-focused deployments interrupt only when they meet the Operator's threshold and otherwise accrue without being lost.
 - No shared change reaches the full fleet without first proving healthy on a low-stakes deployment; a shared change that fails on that deployment never promotes, and the Operator is told why.
 - Every deployment stays within its own budget; nearing the limit produces a decision, never a silent overspend or silent stall.
@@ -201,6 +222,9 @@ A further shared resource has the same shape. The fleet's reasoning capacity is 
 - A deployment is governed only by its own profile; no project-specific rule, reviewer, boundary, budget, or rollout setting is part of the platform itself.
 - The honest map of what can and cannot be automated is a per-deployment property, never the platform's; the platform optimizes for concentrating the Operator's attention on each deployment's irreducibly-human work and does not pretend that work away.
 - A deployment is fully human-gated at registration; its autonomy may widen only along a proven, risk-class-by-risk-class ramp, and only with the Operator's approval — given per event, or in advance as a pre-approved earn-in policy bounded to verifier-gated, autonomous-eligible lanes (per FUNC-AC-MERGE-DECISION). Autonomy is earned per deployment, never granted at switch-on, and every widening is recorded and reversible fleet-wide.
+- A deployment's first-ever unattended merge — the crossing from never having merged without the Operator into doing so under a pre-approved earn-in policy — must not happen unwitnessed, and yet must not create a new Operator-reserved approval. For a deployment that is released to production, this debut is bound to the production-release approval the deployment already requires: that first release approval must explicitly record whether pre-approved unattended merging may begin, and until it does, the deployment's merges still reach the Operator regardless of its earn-in policy. There is no separate first-merge approval: the Operator reserves exactly the two approvals already named — authoring the deployment's irreducibly-human spec content, and approving its production releases — and the debut beat is folded into the second, never added as a third.
+- For a deployment that is never released to production, no production-release approval exists to carry the debut; such a deployment may make its first unattended merge on mechanism evidence alone — its lane's verifier can return a failing verdict, its promotion rule was pre-approved, the non-configurable safety floors are intact, and the change's risk class is known — and no human beat is invented in place of the absent release approval.
+- Whether a merge is a deployment's first-ever unattended one, and which deployment it belongs to, must be determined from the platform's own recorded state, never from a label that a configuration or lane asserts; renaming, cloning, re-scoping, or re-bundling work must not turn a debut unattended merge into a later one. Where deployment identity or debut status cannot be determined unambiguously, or the change's risk class is unknown, the merge fails closed to the Operator rather than proceeding unattended.
 - Deployments are isolated by default; one deployment's routine activity must never surface inside another, and the cross-deployment inbox is the only exception.
 - An item from a non-focused deployment must never be silently dropped; it either interrupts because it meets the Operator's threshold or accrues for later, and cross-deployment priority must always be explainable, never a hidden global ranking.
 - The platform adopts capabilities only as identified versions recorded in the registry; it never acts on live, unversioned edits to shared capabilities or instructions.

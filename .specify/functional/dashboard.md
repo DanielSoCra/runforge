@@ -2,8 +2,8 @@
 id: FUNC-AC-DASHBOARD
 type: functional
 domain: auto-claude
-status: draft
-version: 3
+status: approved
+version: 4
 layer: 1
 ---
 
@@ -11,7 +11,9 @@ layer: 1
 
 ## Problem Statement
 
-An autonomous system that processes work across multiple repositories needs a central control surface where operators can configure which repositories to monitor, view active and historical runs, track costs, manage team access, and control the daemon — without editing config files or SSH-ing into a server.
+An autonomous system that processes work across multiple repositories needs a management surface where operators can configure which repositories to monitor, manage credentials and team access, set budgets, track costs, control the daemon, and approve production releases — without editing config files or SSH-ing into a server.
+
+This is the **management plane only**. It is deliberately not where the operator steers the live fleet: the operator's steering experience — the decisions waiting on them, the daily briefing, what needs attention, and the activity of the work — lives in one place, the single operator steering surface, so the operator is never asked to look in two places for the same thing. This surface may *render* state the steering surface has already produced, but it never *re-summarizes* it, never produces its own interpretation of what changed or what needs attention, and never offers a steering action or a queue of pending operator decisions. Without that boundary held as a rule rather than a habit, a management surface naturally regrows attention-grabbing affordances — a "what changed" summary, a "needs attention" list, suggested next actions — and quietly becomes a second, competing place to operate the fleet, splitting the operator's attention and letting the two surfaces disagree about what is true.
 
 ## Actors
 
@@ -85,6 +87,8 @@ An autonomous system that processes work across multiple repositories needs a ce
 - Then each repository's credentials are used only for that repository
 
 ### Run Monitoring
+
+> **Boundary note:** These are render-only management views of run state. This surface displays the runs and links into the operator's steering surface for any action on them; it never ranks them as "needs attention," never derives a summary of what changed, and never offers a steering control here. Deciding what a run needs and acting on it happens in the single operator steering surface, not here.
 
 **Scenario: View active runs**
 - Given work is in progress
@@ -164,74 +168,28 @@ An autonomous system that processes work across multiple repositories needs a ce
 - When they resume it
 - Then the daemon begins accepting new work again
 
-### Briefing Page
+### Steering, briefing, and attention live elsewhere
 
-**Scenario: View current system status at a glance**
-- Given an authenticated user visits the briefing page
-- When the page loads
-- Then they see which agents are actively working, on which issues, in which phase, with elapsed time and cost so far
-- And they see a prioritized list of items needing human attention (reviews pending, blocked issues, failures)
-- And they see the priority-ordered queue of upcoming work
+> **Boundary note:** The briefing, the "what changed since I was away" summary, the prioritized list of what needs human attention, the queue of upcoming work, and the activity feed are **not** part of this management surface. They are owned and produced once, by the single operator steering surface (FUNC-AC-OPERATOR-SURFACE). There is exactly one producer of the briefing and the needs-attention view, so the two surfaces can never disagree about what is true or what needs the operator. This surface may render durable state the steering surface has already produced, but it never re-summarizes that state, never produces its own interpretation of what changed, and never assembles its own needs-attention or pending-decision list.
 
-**Scenario: AI-generated briefing summary**
-- Given a background summarizer runs periodically
-- When the summarizer reads current system signals
-- Then it produces a structured briefing containing what changed since the last briefing, items requiring attention, and a forecast of what happens next
-- And the briefing is stored for the dashboard to display
-
-**Scenario: Briefing reflects recent changes**
-- Given the user checks the briefing page after being away
-- When the page loads
-- Then the AI briefing summarizes what happened since the previous briefing — issues that moved state, code that merged, costs incurred — so the user can catch up in under 30 seconds
-
-**Scenario: Actionable links on every item**
-- Given the briefing page displays issues, PRs, commits, and attention items
-- When the user sees an item they want to act on
-- Then the item links directly to the relevant resource (GitHub Issue, PR, commit diff, spec file, or pipeline log) so the user can take action without searching
-
-**Scenario: Needs-attention prioritization**
-- Given multiple items need human attention
-- When the briefing page displays them
-- Then they are sorted by urgency: blocked issues first, then items waiting for review, then failures
-- And each item explains why it needs attention and how long it has been waiting
-
-**Scenario: Empty state**
-- Given no work is active, queued, or needing attention
-- When the user views the briefing page
-- Then it clearly indicates the system is idle with no pending work
-
-**Scenario: Activity feed**
-- Given the system has been processing work
-- When the user views the briefing page
-- Then a chronological feed shows recent events (state transitions, merges, errors, heartbeats) with timestamps and contextual links
+**Scenario: The management surface never re-summarizes system state**
+- Given the operator's briefing and needs-attention view are produced by the single steering surface
+- When the operator opens this management surface
+- Then it shows only management state — repositories, credentials, team, budgets, costs, daemon status, run records, and pending production releases — and presents no summary of what changed, no list of items needing attention, and no queue of upcoming work
+- And any operator steering decision is therefore discovered in exactly one place — the steering surface — never surfaced a second time here
 
 ### Notifications
 
-> **Ownership note:** This spec owns the notification subsystem. Other specs (FUNC-AC-PIPELINE, FUNC-AC-SAFETY) reference "Operator notification" — the delivery mechanism is defined here.
-
-**Scenario: Pluggable notification channels**
-- Given the system supports multiple notification delivery methods
-- When an event occurs that matches a configured notification rule
-- Then the notification is delivered through the configured channel
-- Note: the notification channel interface is defined in this version but no channels are implemented. The briefing page itself serves as the primary notification surface. Channel implementations (web push, Slack, macOS native, webhook) are deferred to a future iteration.
-
-**Scenario: Configurable notification routing**
-- Given an operator configures notification preferences
-- When they specify which event types route to which channels
-- Then only matching events are delivered to each channel
-- And event types include: attention-required (human action needed), work-completed (issue fully resolved), error (pipeline failure), and digest (periodic briefing summary)
-
-**Scenario: Notifications derived from briefing data**
-- Given the AI briefing summarizer detects items needing attention
-- When notification channels are configured for attention-required events
-- Then notifications are generated from the same analysis pass that produces the briefing — not a separate system
+> **Ownership note:** Delivery of operator notifications is owned by FUNC-AC-OPERATOR-SURFACE together with the analysis that decides what is worth surfacing (the briefing and needs-attention pass). This management surface does not generate notifications and does not run an attention-analysis pass of its own; it is a destination the operator manages, not a second source of what the operator should look at. Other specs (FUNC-AC-PIPELINE, FUNC-AC-SAFETY) that reference "Operator notification" depend on that single producer, not on this surface.
 
 ### Production Releases
+
+> **Boundary note:** Production-release approval is a management-plane gate and is discovered here, on this surface — not duplicated as a steering-inbox item. The release notes shown are the records the platform already produced for the accumulated work; this surface renders and carries the approval, it does not author its own summary of the release.
 
 **Scenario: View pending releases**
 - Given completed work exists in pre-production
 - When an Admin views the releases page
-- Then they see accumulated work items ready for production with aggregated release notes
+- Then they see the accumulated work items ready for production together with the release notes the platform already recorded for that work
 
 **Scenario: Approve production release**
 - Given an Admin reviews a pending release
@@ -260,6 +218,10 @@ An autonomous system that processes work across multiple repositories needs a ce
 
 ## Constraints
 
+- **This is the management plane, not a steering surface.** It owns repositories, credentials, team, budgets, cost, daemon control, and production-release approval. It does not own — and must not grow — the briefing, the needs-attention view, the upcoming-work queue, or any steering control over a run. Those belong to the single operator steering surface, and adding any of them here is a change to this specification, not a styling choice.
+- **Each operator decision is discovered in exactly one surface.** A steering decision is found in the operator's decision inbox; a management or production-release decision is found here. No operator decision is surfaced in both places, so the operator never has to look in two surfaces for the same thing and the two surfaces can never disagree about what awaits the operator.
+- **This surface renders state but never re-summarizes it.** Anything it shows about live work is a read-only projection of records the platform already produced; it never runs its own analysis pass to decide what changed, what needs attention, or what to do next, and it never presents a summary, an attention list, an approval queue, or a suggested action derived that way. There is exactly one producer of the briefing and the needs-attention view, and it is not this surface.
+- **Links lead out to the owning surface, never to a second copy of it.** Where a management view shows a run or a piece of work, acting on it links into the operator's steering surface; this surface never offers an in-place steering action that would make it a second place to operate the fleet.
 - Authentication must use an external identity provider — the system does not manage passwords
 - The dashboard must work without the daemon running (shows last-known state)
 - Removing a repository preserves its run history

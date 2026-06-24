@@ -2,7 +2,7 @@
 id: L0-CONCIERGE-VISION
 type: vision
 domain: concierge
-status: draft
+status: deprecated
 version: 1
 layer: 0
 ---

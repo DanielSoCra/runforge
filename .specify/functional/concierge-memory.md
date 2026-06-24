@@ -9,6 +9,8 @@ layer: 1
 
 # FUNC-CONCIERGE-MEMORY — Two-Tier Memory
 
+> **DISPOSITION — FOLD-IN (ratified 2026-06-24, decision `concierge-vs-platform`).** This spec is being folded into the one operations-OS platform. Its parent vision is re-parented from the separate, now-**deprecated** concierge L0 (`L0-CONCIERGE-VISION`, `.specify/L0-vision.md`) to the platform L0 **L0-AC-VISION**; there is one operations-OS, not a separate single-tenant product. **Live-behavior mapping:** the durable + recent two-tier memory maps onto the platform's memory — and is the likeliest piece to fold in cleanly as platform mechanism (empty/safe-by-default, decoupled from any concierge-specific channel/triage semantics). **This is a disposition marker, not a reconciliation:** no content is deleted, no behavior is yet re-homed or verifier-gated, and the two-vision conflict is surfaced (not hidden) pending the tracked follow-on; only proven platform-native, verifier-gatable pieces will be re-parented/approved. Status stays `draft`.
+
 ## Problem Statement
 
 A conversational assistant that helps the operator across days needs durable memory of decisions, captures, and stable preferences, and fast recall of recent operational context. A single store cannot serve both: durable memory must survive process restarts and remain curated by the operator; recent memory must be cheap to read in-loop without round-tripping the durable store. Two stores → two contracts.
