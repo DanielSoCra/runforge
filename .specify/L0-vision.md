@@ -2,12 +2,14 @@
 id: L0-CONCIERGE-VISION
 type: vision
 domain: concierge
-status: draft
+status: deprecated
+deprecated_by: L0-AC-VISION
+deprecation_date: 2026-06-24
 version: 1
 layer: 0
 ---
 
-> **ℹ Relationship note (2026-06-02).** The platform vision is now the unified, Operator-approved **L0-AC-VISION v5** (`.specify/L0-ac-vision.md`). This concierge vision is **retained as a distinct product vision** under that platform head — the relationship is expressed in prose in L0-AC-VISION, not via a `parent:` field. Note: the concierge *attention/inbox* L1s (FUNC-CONCIERGE-AWARENESS, FUNC-CONCIERGE-BOARD) are now **deprecated** in favor of the unified FUNC-AC-OPERATOR-LEARNING + FUNC-AC-FLEET; the remainder of the concierge tree stands. See `docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`.
+> **⚠ DEPRECATED (2026-06-24, decision `concierge-vs-platform`).** This concierge vision is **deprecated** and folded into the unified, Operator-approved **L0-AC-VISION** (`.specify/L0-ac-vision.md`), which is the single canonical platform vision — there is one operations-OS, not a separate single-tenant concierge product. The document below is retained for **history only**; it is no longer a live or "additive" product vision. Its concierge L1s are marked fold-in (see each spec's disposition note); the per-behavior re-parent/approval (re-homing each live behavior onto a platform-native, verifier-gatable mechanism) is a **tracked follow-on**, not yet performed. See `docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`.
 
 # L0-CONCIERGE-VISION — Concierge
 

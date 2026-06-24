@@ -19,7 +19,7 @@ layer: 1
 
 The platform now runs more than one project at once, and the projects are not alike. One is a regulated platform where almost nothing may ship without a human; another is a product site where nearly everything is safe to automate; a third is a small content website with no regulated paths at all. Today the platform behaves as though there is one project shaped like the first one — its risk rules, its compliance reviewers, its budget, and its honest map of what cannot be automated are baked into the platform itself. Adding a project means forking the platform.
 
-Two failures follow from this. First, there is no single place that says, per project, *which* repositories it owns, *how* its changes are classified by risk, *which* domain reviewers gate it, *what* it can and cannot automate, *how much* it may spend, and *where* its changes are allowed to land first. Without that per-project record, the platform cannot widen autonomy on one project without widening it everywhere, and the Operator cannot see why a given project behaves the way it does.
+Two failures follow from this. First, there is no single place that says, per project, *which* repositories it owns, *how* its changes are classified by risk, *which* domain reviewers gate it, *what* it can and cannot automate, *how much* it may spend, and *by what path* its changes are released to production. Without that per-project record, the platform cannot widen autonomy on one project without widening it everywhere, and the Operator cannot see why a given project behaves the way it does.
 
 Second, the substrate the projects share — the reusable capabilities, instructions, and learned behavior that every project draws on — currently changes for every project at once, instantly. A bad change to a shared capability is exposed to the highest-stakes project at the same moment it reaches the lowest-stakes one, with no chance to catch it on something cheap first, and no way to take it back across the whole fleet once it has done harm.
 
@@ -29,7 +29,7 @@ A further shared resource has the same shape. The fleet's reasoning capacity is 
 
 ## Actors
 
-- **Operator** — registers and shapes deployments, sets each one's risk rules, compliance reviewer set, honest-automation boundary, budget, where its changes may land first, and the path by which its changes are released to production; approves widening a deployment's autonomy; approves each production release; decides cross-fleet rollbacks; sets how much of other deployments' activity is allowed to interrupt the current focus
+- **Operator** — registers and shapes deployments, sets each one's risk rules, compliance reviewer set, honest-automation boundary, budget, and the path by which its changes are released to production (the post-trunk rollout); approves widening a deployment's autonomy; approves each production release; decides cross-fleet rollbacks; sets how much of other deployments' activity is allowed to interrupt the current focus
 - **Control Plane** — reads the registry to apply each deployment's profile, isolates deployments from one another, runs the cross-deployment inbox under the Operator's focus rules, drives a shared change through staged rollout, enforces per-deployment budgets, tracks each capacity pool's usage window and moves work between pools, and executes fleet-wide rollbacks
 
 ## Behavior
@@ -38,7 +38,7 @@ A further shared resource has the same shape. The fleet's reasoning capacity is 
 
 **Scenario: Registering a project as a deployment**
 - Given the Operator wants the platform to run a new project
-- When they register it in the registry with its profile — the repositories it owns, its risk-classification rules, its compliance reviewer set, its automatable/strained/irreducibly-human map, its budget, where its changes may land first, and the path by which its changes are released to production
+- When they register it in the registry with its profile — the repositories it owns, its risk-classification rules, its compliance reviewer set, its automatable/strained/irreducibly-human map, its budget, and the path by which its changes are released to production (the post-trunk rollout)
 - Then the platform runs that project as a deployment using only that profile
 - And no change to the platform itself is required to add the project
 
@@ -58,6 +58,26 @@ A further shared resource has the same shape. The fleet's reasoning capacity is 
 - When its gates are proven over time and the Operator approves widening its autonomy for a given risk class
 - Then only that deployment's autonomy widens for that risk class
 - And other deployments' autonomy is unchanged
+
+**Scenario: A deployment's first-ever unattended merge is bounded by its first production release**
+- Given a deployment has never yet merged anything without the Operator and the Operator has set a pre-approved earn-in policy for it
+- When that deployment would make its first-ever merge with no contemporaneous Operator decision
+- Then the platform allows it only once the Operator's first production-release approval for that deployment has explicitly recorded that pre-approved unattended merging may begin
+- And until that first release approval records it, the deployment's merges still reach the Operator, even where the earn-in policy would otherwise have let them proceed unattended
+- And no separate first-merge approval beat is created: the only place the Operator authorizes the debut of unattended merging is the production-release approval the deployment already requires
+
+**Scenario: A deployment with no production-release path holds its debut unattended merge for the Operator**
+- Given a deployment is not on a path that is ever released to production, so no production-release approval will occur for it
+- When it would make its first-ever unattended merge under its pre-approved earn-in policy
+- Then the platform does not let that debut proceed unattended — there is no production-release approval to witness it, and the debut is never granted on mechanism evidence alone
+- And that first merge reaches the Operator as an explicit per-event decision; only after the Operator has witnessed that debut may the deployment's pre-approved earn-in begin to act unattended of proceeding
+
+**Scenario: First-unattended-merge and deployment identity are read from system state, never declared**
+- Given the platform must decide whether a given merge is a deployment's first-ever unattended one
+- When it evaluates that merge
+- Then both which deployment this is and whether this is its first unattended merge are derived from the platform's own recorded state, not from a label a configuration or a lane asserts
+- And renaming, cloning, re-scoping, or re-bundling work cannot make a first-ever unattended merge read as a later one
+- And if it cannot be determined unambiguously whether this is the deployment's debut unattended merge, the merge is treated as the debut and reaches the Operator
 
 ### Bounded isolation and the focus-gated inbox
 
@@ -188,6 +208,7 @@ A further shared resource has the same shape. The fleet's reasoning capacity is 
 - Adding a project is registering a deployment profile, not changing the platform; the platform's behavior is uniform while everything project-specific lives in the deployment's profile.
 - Each deployment classifies risk, gates compliance, bounds spend, and concentrates the Operator's attention on its irreducibly-human work using only its own profile; differences between deployments are explained by their profiles, not by special-casing.
 - Autonomy widens for one deployment and one risk class at a time, only on the Operator's approval; widening one deployment never widens another.
+- A deployment never makes its first-ever unattended merge unwitnessed: for a deployment that releases to production, that debut is bound to its first production-release approval explicitly recording that unattended merging may begin — adding no new approval beat beyond the two the Operator already reserves; for a deployment that never releases to production, there is no release approval to witness the debut, so the debut is never auto-granted — it reaches the Operator as an explicit per-event decision, and only after that witnessed debut may the deployment's earn-in act unattended. Whether a merge is a deployment's debut unattended one is read from recorded state and cannot be evaded by renaming, cloning, or re-bundling.
 - Deployments are isolated by default; the inbox is the only cross-deployment surface, and items from non-focused deployments interrupt only when they meet the Operator's threshold and otherwise accrue without being lost.
 - No shared change reaches the full fleet without first proving healthy on a low-stakes deployment; a shared change that fails on that deployment never promotes, and the Operator is told why.
 - Every deployment stays within its own budget; nearing the limit produces a decision, never a silent overspend or silent stall.
@@ -199,8 +220,12 @@ A further shared resource has the same shape. The fleet's reasoning capacity is 
 ## Constraints
 
 - A deployment is governed only by its own profile; no project-specific rule, reviewer, boundary, budget, or rollout setting is part of the platform itself.
+- Where a deployment's changes integrate is NOT a per-deployment profile field: every deployment integrates on the single shared trunk, which is a platform floor (per FUNC-AC-CONTROLLED-ARTIFACT-DELIVERY), never a profile choice. The profile owns only the post-trunk release path to production (how a landed change is rolled out and released), not the integration target.
 - The honest map of what can and cannot be automated is a per-deployment property, never the platform's; the platform optimizes for concentrating the Operator's attention on each deployment's irreducibly-human work and does not pretend that work away.
 - A deployment is fully human-gated at registration; its autonomy may widen only along a proven, risk-class-by-risk-class ramp, and only with the Operator's approval — given per event, or in advance as a pre-approved earn-in policy bounded to verifier-gated, autonomous-eligible lanes (per FUNC-AC-MERGE-DECISION). Autonomy is earned per deployment, never granted at switch-on, and every widening is recorded and reversible fleet-wide.
+- A deployment's first-ever unattended merge — the crossing from never having merged without the Operator into doing so under a pre-approved earn-in policy — must not happen unwitnessed, and yet must not create a new Operator-reserved approval. For a deployment that is released to production, this debut is bound to the production-release approval the deployment already requires: that first release approval must explicitly record whether pre-approved unattended merging may begin, and until it does, the deployment's merges still reach the Operator regardless of its earn-in policy. There is no separate first-merge approval: the Operator reserves exactly the two approvals already named — authoring the deployment's irreducibly-human spec content, and approving its production releases — and the debut beat is folded into the second, never added as a third.
+- For a deployment that is never released to production, no production-release approval exists to carry the debut; such a deployment's first-ever unattended merge is therefore never auto-granted — it fails closed to the Operator as an explicit per-event decision, and only after that witnessed debut may its pre-approved earn-in act unattended. The absent release approval is never substituted by mechanism evidence alone; "no gate to witness the debut" resolves to caution, not to proceeding.
+- Whether a merge is a deployment's first-ever unattended one, and which deployment it belongs to, must be determined from the platform's own recorded state, never from a label that a configuration or lane asserts; renaming, cloning, re-scoping, or re-bundling work must not turn a debut unattended merge into a later one. Where deployment identity or debut status cannot be determined unambiguously, or the change's risk class is unknown, the merge fails closed to the Operator rather than proceeding unattended.
 - Deployments are isolated by default; one deployment's routine activity must never surface inside another, and the cross-deployment inbox is the only exception.
 - An item from a non-focused deployment must never be silently dropped; it either interrupts because it meets the Operator's threshold or accrues for later, and cross-deployment priority must always be explainable, never a hidden global ranking.
 - The platform adopts capabilities only as identified versions recorded in the registry; it never acts on live, unversioned edits to shared capabilities or instructions.

@@ -19,6 +19,8 @@ Without a rule about this, a lane with no way to be checked faces only bad optio
 
 What is missing is a single precondition that decides, per lane, whether autonomous execution is even permitted: a lane may act on its own only if it declares a **verifier** — an oracle that can falsify "this work is correct." A lane that declares no verifier is never trusted to execute on its own; it may still help, but only by drafting and surfacing, with the Operator deciding. This is the same principle as "no verification, no merge," lifted from the merge decision to the act of autonomous execution itself, so it holds in every domain the platform steers — not only where the work happens to be code.
 
+A no-oracle lane is therefore assist-and-escalate by default. It is not assist-only forever: such a lane can earn the verifier-gated state by acquiring an engineered, deterministic oracle built for its domain — but only an oracle that can return a real failing verdict on the work's **outcome**, proven able to fail before the lane is ever trusted to act. The danger this guards against is not the obviously-unverifiable lane; it is the lane that dresses a weak check in the appearance of an oracle — a check that confirms the work's shape (its format, a banned-phrase scan, a completed checklist, arithmetic on the figures it was handed, that an approval was recorded) while never touching whether the outcome is right. Admitting such a shell would build autonomy on a verifier that cannot meaningfully fail, and every lane owner is pulled toward defining a check loose enough to let their lane automate — eroding the boundary from inside. The same trap applies to a probabilistic judgment that rates the work and emits a confidence or an opinion rather than a verdict that can mechanically fail: structured confidence around the work is not the same as a check that can falsify it. So the gate's own "must be able to fail" test is applied to the outcome itself, and a lane earns the verifier-gated state only by demonstrating, at qualification, that its oracle truly rejects bad outcomes.
+
 ## Actors
 
 - **Operator** — declares each lane and whether it carries a verifier, grants a lane its autonomy, and is the one to whom a verifier-less lane's work is surfaced for decision
@@ -39,10 +41,25 @@ What is missing is a single precondition that decides, per lane, whether autonom
 - When its work is ready
 - Then the lane never executes autonomously: it may draft work, surface decisions, and act only on the Operator's recorded approval — its output always reaches the Operator before it takes effect, in every domain
 
-**Scenario: A declared verifier must be able to falsify correctness**
+**Scenario: A declared verifier must be able to fail on the work's outcome**
 - Given a lane names something as its verifier
 - When the platform establishes whether the lane is verifier-gated
-- Then only a check that can actually return a failing verdict on incorrect work counts — a check that cannot fail, or that does not bear on whether the work is correct, does not make a lane verifier-gated, and the lane is treated as having no verifier
+- Then only a check that can actually return a failing verdict on the correctness of the work's **outcome** counts — not a check that merely inspects the shape around the work (its format, the presence of required fields, a completed checklist, arithmetic on stated figures, or that an approval was recorded); a check that cannot fail, that bears only on the work's structure rather than whether the outcome is right, or that emits a confidence score, a likelihood, or a graded opinion instead of a verdict that can mechanically fail does not make a lane verifier-gated, and the lane is treated as having no verifier
+
+**Scenario: A probabilistic judgment does not qualify as the verifier**
+- Given a lane names, as its verifier, a judgment that scores or rates the work's quality and emits a confidence, a probability, or an opinion rather than a hard pass-or-fail verdict on the outcome
+- When the platform establishes whether the lane is verifier-gated
+- Then that judgment never qualifies as the verifier on its own, however well-calibrated it appears — a judgment that produces structured confidence around the work is not an oracle that can falsify the work, and the lane is treated as having no verifier
+
+**Scenario: A lane earns the verifier-gated state only by passing a seeded-failure qualification**
+- Given a lane with no inherent oracle proposes to reach the verifier-gated state by way of an engineered, deterministic check built for its domain
+- When the platform qualifies that lane
+- Then the engineered check qualifies only if it (a) names at least one high-severity, judgment-level failure mode of the outcome — not a merely structural defect — and (b) is shown, by a blind evaluation against held-out work seeded with such failures at qualification time, to reject every seeded high-severity failure and to autonomously pass nothing the Operator has marked must-not-execute; a check that lets any seeded high-severity failure through, or that passes any must-not-execute artifact, does not qualify and the lane remains assist-and-escalate
+
+**Scenario: A qualified engineered verifier is re-validated against drift**
+- Given a lane was qualified for the verifier-gated state by an engineered check
+- When time passes and the domain's correct behavior may have shifted — preference, risk tolerance, context, or voice
+- Then the engineered check is re-validated against a fresh seeded-failure evaluation on a recurring cadence, and a check that no longer rejects every seeded high-severity failure drops the lane to assist-and-escalate until it is re-qualified — a once-valid engineered verifier is never trusted indefinitely on the strength of a past qualification
 
 **Scenario: The gate precedes and composes with the other gates**
 - Given a lane is being considered for autonomous execution
@@ -75,8 +92,10 @@ What is missing is a single precondition that decides, per lane, whether autonom
 
 ## Success Criteria
 
-- No lane, in any domain, ever executes autonomously unless it declares a verifier that can falsify the correctness of its work; a lane without one is always assist-and-escalate, drafting and surfacing but never acting on its own
-- A named "verifier" that cannot return a failing verdict on incorrect work never makes a lane verifier-gated
+- No lane, in any domain, ever executes autonomously unless it declares a verifier that can falsify the correctness of its work's outcome; a lane without one is always assist-and-escalate, drafting and surfacing but never acting on its own
+- A named "verifier" that cannot return a failing verdict on an incorrect outcome never makes a lane verifier-gated — a check that bears only on the work's shape (format, required fields, a completed checklist, arithmetic on stated figures, recorded approval) rather than on whether the outcome is right does not qualify
+- A judgment that emits a confidence score, a likelihood, or a graded opinion rather than a hard failing verdict on the outcome never qualifies as the verifier on its own
+- A no-oracle lane reaches the verifier-gated state only by an engineered oracle that passes a blind seeded-failure qualification — rejecting every seeded high-severity, judgment-level failure and autonomously passing nothing marked must-not-execute — and that qualification is re-validated on a cadence so a once-valid oracle that drifts drops the lane back to assist-and-escalate
 - The verifier precondition is established before any other gate and never substitutes for them; a verifier-gated lane still passes scope verification, the merge decision, the compliance lens, and the earned-trust ramp
 - A lane whose verifier becomes unusable reverts to assist-and-escalate, with the reversion recorded — autonomy is never retained on a verifier the lane no longer has
 - No configuration, profile, lane declaration, or learned behavior can grant a verifier-less lane autonomous execution
@@ -85,7 +104,8 @@ What is missing is a single precondition that decides, per lane, whether autonom
 ## Constraints
 
 - **No verifier, no autonomous action** is inviolable and applies across every domain and lane-type the platform steers — software delivery is one case, not the rule; the gate reads identically for operations, knowledge-work, client-delivery, and business-development lanes
-- A **verifier is an oracle that can falsify correctness**: a deterministic check, an automated test or end-to-end run, a deployable-and-checkable result, or an independent check that bears on whether the work is right; something that cannot fail, or that does not bear on correctness, is not a verifier
+- A **verifier is an oracle that can return a real failing verdict on the work's outcome**: a deterministic check, an automated test or end-to-end run, a deployable-and-checkable result, or an engineered check that bears on whether the outcome is right. A check is **not** a verifier if it cannot fail; if it bears only on the shape around the work (its format, the presence of required fields, a completed checklist, arithmetic on figures it was handed, that an approval was recorded) rather than on whether the outcome is correct; or if it emits a confidence score, a likelihood, or a graded opinion instead of a hard pass-or-fail verdict — structured confidence around the work is not the ability to falsify it. A probabilistic or model-based judgment of quality, on its own, never qualifies as the verifier
+- A no-oracle lane is **assist-and-escalate by default** and earns the verifier-gated state only through an **engineered oracle that passes a seeded-failure qualification**: the oracle must name at least one high-severity, judgment-level failure mode of the outcome and be shown, by a blind evaluation against work seeded with such failures at qualification time, to reject every seeded high-severity failure and to autonomously pass nothing the Operator has marked must-not-execute. This qualification is **re-validated on a recurring cadence** to counter drift in the domain's correct behavior; an oracle that stops rejecting seeded high-severity failures drops its lane to assist-and-escalate until re-qualified. No general earn-path program is built ahead of a concrete lane that needs to qualify — the qualification is established per lane, when a lane is actually a candidate
 - The gate is **a precondition that composes, never a substitute**: it sits ahead of and alongside the scope verification, the merge decision (FUNC-AC-MERGE-DECISION), the compliance lens (FUNC-AC-COMPLIANCE-GATE), and the earned-trust ramp (FUNC-AC-FLEET); it can only withhold autonomy, never grant a change passage past another gate
 - The gate is **non-configurable**, a sibling of the scope tripwire: no deployment profile, config pack, lane declaration, or learned behavior can disable, weaken, or bypass it
 - The gate is **fail-safe**: any doubt about whether a lane has a usable, falsifying verifier resolves to assist-and-escalate, never to autonomous execution; a lost or degraded verifier drops the lane to assist-only with the reason recorded

@@ -117,15 +117,27 @@ Six interaction protocols govern PO and Tech Lead collaboration: Proposal Enrich
 
 ### Merge Coordination
 
-**Scenario: Automatic merge succeeds**
-- Given a worker has completed its task
+Coordination owns only the post-gate integration mechanics — sequencing, dependency ordering, conflict handling, integration validation, and recovery. It does not decide whether completed work may join the shared codebase. That proceed-or-hold-or-escalate verdict belongs to the earned-trust merge decision (FUNC-AC-MERGE-DECISION) together with the verifier precondition (FUNC-AC-VERIFIER-GATE) and the compliance lens (FUNC-AC-COMPLIANCE-GATE); coordination consumes that verdict and never re-derives it. A completed work item is eligible for these mechanics only after that decision returns a proceed verdict for the **final diff** it will actually integrate — the diff as it stands after any conflict resolution. The absence of conflicts never authorizes integration on its own.
+
+**Scenario: Eligible work is integrated**
+- Given completed work has a recorded proceed verdict from the merge decision for its current diff and no conflicts with the shared codebase
 - When the system processes its output for integration
-- Then it integrates the changes into the shared codebase if no conflicts exist
+- Then it integrates the changes into the shared codebase
+
+**Scenario: Completed work without a proceed verdict is never integrated**
+- Given completed work has no conflicts with the shared codebase but has not received a proceed verdict from the merge decision
+- When the system considers it for integration
+- Then it does not integrate the work — building cleanly and having no conflicts does not by itself authorize joining the shared codebase
 
 **Scenario: Small conflict is resolved automatically**
 - Given completed work has conflicts with the current codebase that are small in scope
 - When the system detects the conflict
 - Then it attempts automatic resolution using the conflicting files and specification context
+
+**Scenario: A resolved conflict is re-verified before integration**
+- Given a conflict has been resolved automatically and the resulting diff differs from the diff the merge decision last judged
+- When the system prepares the resolved work for integration
+- Then it does not reuse the earlier proceed verdict — the merge decision is re-consulted on the final post-resolution diff, and integration proceeds only if that final diff earns a proceed verdict
 
 **Scenario: Large conflict requires human review**
 - Given completed work has conflicts that are large in scope or cannot be resolved automatically
@@ -197,7 +209,8 @@ Six interaction protocols govern PO and Tech Lead collaboration: Proposal Enrich
 
 ## Constraints
 
-- The operator must approve all proposals before they enter the pipeline — no autonomous feature creation
+- The operator is the sole source of new feature direction — the system never invents features on its own; whether a given proposal needs the operator's explicit approval before it enters the pipeline, or may proceed on earned autonomy, is decided by the earned-trust merge decision, not by this spec
+- Whether completed work may join the shared codebase is decided by the earned-trust merge decision together with the verifier precondition and the compliance lens, evaluated against the final diff to be integrated; coordination only sequences and integrates work that has already earned a proceed verdict, and never lets the absence of conflicts substitute for that verdict
 - Only the integration service merges to the shared codebase — workers never integrate directly
 - The database is the source of truth for work claims and integration state
 - A single system process coordinates all workers — no distributed execution

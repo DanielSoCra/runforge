@@ -14,6 +14,8 @@ layer: 1
 
 # FUNC-CONCIERGE-AWARENESS — Activity Awareness
 
+> **DISPOSITION — FOLD-IN (ratified 2026-06-24, decision `concierge-vs-platform`).** Consistent with the existing deprecation above: this spec folds into the one operations-OS platform under platform L0 **L0-AC-VISION** (the separate concierge L0 `L0-CONCIERGE-VISION`, `.specify/L0-vision.md`, is deprecated). **Live-behavior mapping:** read-on-demand activity awareness feeds the platform's **operator surface** (**FUNC-AC-OPERATOR-SURFACE**) + **decision inbox** (**FUNC-AC-DECISION-ESCALATION** / **FUNC-AC-FLEET**), with what-surfaces relevance owned by **FUNC-AC-OPERATOR-LEARNING**. **This is a disposition marker, not a reconciliation:** no content is deleted; the two-vision conflict is surfaced pending the tracked follow-on. Status stays `deprecated`.
+
 ## Problem Statement
 
 The operator performs work outside the assistant, sometimes in parallel with the assistant's own activity. The assistant must be able to answer "what is happening on this machine right now?" without nagging the operator about the operator's own work, and without inventing context.

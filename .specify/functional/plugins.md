@@ -2,14 +2,16 @@
 id: FUNC-AC-PLUGINS
 type: functional
 domain: auto-claude
-status: draft
-version: 3
+status: approved
+version: 4
 layer: 1
 ---
 
 # FUNC-AC-PLUGINS — Plugin, Role Registry & Config Pack Management
 
 > **Spec history (v3, 2026-06-11):** v3 extends the plugin capability for the v-next masterplan (decisions D6, D10, D11): the platform's built-in working-role definitions are lifted out of platform code into a declarative role registry; a complete pipeline configuration (lanes + roles + personas + check sets + steering policy) becomes a versioned, swappable **config pack** carried by this same plugin system; assignment and routing values inside the active configuration become changeable at runtime without redeploying; and the pipeline's phase-transition tables are committed to remaining pure, configuration-loadable data. A visual workflow editor is an explicit exclusion this cycle (see Constraints). All concrete values — which roles exist, which lanes, which thresholds — live in packs; one non-normative example pack is maintained alongside the specifications.
+>
+> **Spec history (v4, 2026-06-24, L0/L1 hardening ratification):** The Operator ratifies three hardening decisions and this sets `status: approved`. **(1) Non-configurable minimum-classification floor (classification-floor):** enumerated risky change kinds — authentication or security, data migrations, sensitive-data handling, and regulated paths — carry a minimum risk classification a config pack can only **raise**, never lower; the floor is implemented by extending the existing escalate-only markings and always-escalate set (not a parallel rule), the kind list is an L0-owned append-only invariant, and detection is **semantic** (by what the change actually is or touches), never path-pattern-only. **(2) The non-weakening floor is enumerated as a closed list (plugins-draft-approval):** the "never weaken safety" floor is extended to name the verifier-gate boundary and the always-escalate set explicitly, expressed as a closed, mechanism-derived enumeration with an amendment rule, not an open-ended catch-all. **(3) Two-tier runtime values (runtime-floor-values):** runtime-changeable values are split — a small **closed allowlist** of soft values (display, model/lane *preference* among pre-approved verifier-equivalent options, debounce within safe ranges, notification cadence) may be hot-swapped, while everything else, including which verifier or lane actually runs, sampling strategy, promotion/earn-in timing, retry/fix cadence, and every named scalar floor, is frozen per pack version and changeable only by a recorded pack-version change. The hardening through-line: a safety claim is a non-configurable, fail-closed mechanism; configuration may only ratchet more cautious, never relabel risk down or cross a floor.
 
 ## Problem Statement
 
@@ -153,12 +155,42 @@ The same rigidity sits one level deeper. The definitions of the platform's own w
 - When the platform starts
 - Then a preconfigured default pack is present so the pipeline can run out of the box, and every value in it is ordinary pack data the admin can edit or replace — none of it lives in the platform
 
+**Scenario: A pack may raise a risky change kind's classification but never lower it**
+- Given a change whose nature falls in an enumerated risky kind — authentication or security, a data migration, sensitive-data handling, or a regulated path
+- When a config pack's classification rules are applied to it
+- Then the pack may classify it as more cautious than its minimum, but a pack that would classify it below its minimum has no effect on the floor — the platform still treats it at no less than the minimum, so a risky change always reaches a human by construction regardless of how a pack labels it
+
+**Scenario: A risky change kind is recognized by what it is, not only by where it sits**
+- Given a change in an enumerated risky kind that a pack has not marked as risky — for instance authentication or migration logic composed across an ordinary-looking set of files
+- When the platform classifies the change
+- Then it recognizes the kind from what the change actually is or touches, not from file location alone, and applies the minimum classification — a change cannot escape the floor by avoiding a flagged path
+
+**Scenario: The enumerated risky kinds are an append-only platform invariant**
+- Given the set of risky change kinds that carry a minimum classification
+- When the platform or a deployment evolves
+- Then no pack, profile, or runtime change can remove a kind from the set or shrink the floor; the set is owned at the platform's highest level and may only be added to, never narrowed
+
 ### Runtime Configuration Changes
 
-**Scenario: Routing and assignment values change without redeploying**
-- Given the active configuration contains routing, threshold, and assignment values — which capability level serves a role, what a lane prefers, where a boundary sits
+**Scenario: Soft routing and preference values change without redeploying**
+- Given a value belongs to the closed soft tier — display and presentation, a lane's or role's *preference* among pre-approved capability options that are equivalent in safety, debounce or pacing within safe ranges, or notification cadence
 - When an admin changes such a value
 - Then the change takes effect for future work without redeploying or restarting the platform, and runs already in progress complete under the values they started with
+
+**Scenario: A floor value cannot be changed live**
+- Given a value belongs to the frozen tier — any sampling minimum, fix-cycle cap, risk threshold, earn-in bar, or any other value an approved safety specification declares a floor; and likewise any value that governs *which* verifier or lane actually runs, the sampling strategy or mode, promotion or earn-in timing, or retry and fix-cycle cadence
+- When an admin attempts to change such a value at runtime
+- Then the platform refuses the live change: a frozen value moves only by adopting a different, recorded config-pack version, never by a runtime tweak
+
+**Scenario: The soft tier is a closed allowlist, deny-by-default**
+- Given a value whose tier is not on the platform's known soft allowlist — including any value owned by a pack or any unrecognized value
+- When an admin attempts to change it at runtime
+- Then it is treated as frozen by construction and cannot be hot-swapped; only values explicitly on the soft allowlist are runtime-changeable, everything else is frozen per pack version
+
+**Scenario: A runtime change that would cross a floor is rejected**
+- Given a soft-tier change whose effect would move a deployment's safety posture below a floor — for example switching to a faster but not-verifier-equivalent option, or pacing a check below its minimum
+- When the change is submitted
+- Then the platform rejects it rather than applying it: no runtime change may relabel risk downward or carry any value across a floor, and the rejection is recorded
 
 **Scenario: Every runtime change is recorded and reversible**
 - Given a runtime configuration change has been made
@@ -194,7 +226,9 @@ The same rigidity sits one level deeper. The definitions of the platform's own w
 - Plugin activation and deactivation take effect for the next session without requiring a system restart
 - No working role's definition lives in the platform: every role is declared in the registry, and adding or reshaping a role is a recorded act of declaration, not an engineering change
 - A deployment's complete pipeline behavior is expressible, swappable, and reversible as one versioned config pack; no swap ever leaves a deployment running a mixture of two packs
-- Routing, threshold, and assignment values inside the active configuration are changeable while the platform runs, take effect for future work only, and every change is recorded and reversible
+- Only values on the closed soft allowlist are changeable while the platform runs; they take effect for future work only and every change is recorded and reversible. Floor values and the interaction levers that govern which verifier or lane runs, sampling strategy, and promotion timing are frozen per pack version, and any runtime change that would cross a floor or relabel risk downward is rejected
+- An enumerated risky change kind — authentication or security, a data migration, sensitive-data handling, or a regulated path — always reaches a human by construction: a pack may only raise its classification, never lower it; the kind is recognized by what the change is or touches, not by path alone; and the set of risky kinds can only be added to, never narrowed
+- The non-weakening floor names a closed, mechanism-derived set of safety boundaries — scope verification, the compliance gate, budget, containment, the verifier-gate boundary, and the always-escalate set — extended only by spec amendment when a new floor is ratified, never by an open-ended reference
 - A fresh installation runs on the default pack with no authored configuration, and nothing in the default pack is privileged over an admin-authored pack
 
 ## Constraints
@@ -203,7 +237,9 @@ The same rigidity sits one level deeper. The definitions of the platform's own w
 - Suggestions are generated automatically on repository setup and on demand; they never activate without an explicit Admin action
 - Deactivating a plugin, editing a declaration, changing a runtime value, or swapping a pack never affects runs already in progress — in-flight work always completes under the configuration it started with
 - Built-in plugin capabilities are defined by the system; role declarations and config packs are data the Admin may author, edit, version, and swap — within the boundaries below
-- **Configuration can shape behavior but never weaken safety**: no role declaration, pack, or runtime change can disable or weaken the merge decision's scope verification, the compliance gate, budget enforcement, or containment; packs configure within those floors, never past them
+- **Configuration can shape behavior but never weaken safety**: no role declaration, pack, or runtime change can disable or weaken any non-configurable safety floor owned by an approved safety specification — including but not limited to the scope verification, the compliance gate, budget enforcement, containment, the verifier-gate boundary (no autonomous action without a falsifying verifier), and the always-escalate set; packs configure within those floors, never past them. This enumeration is closed and mechanism-derived rather than open-ended: it is extended only by spec amendment whenever a new non-configurable floor is ratified — a pack may add behavior, never subtract a floor
+- **Risky change kinds carry a non-configurable minimum classification**: changes whose nature is authentication or security, a data migration, sensitive-data handling, or a regulated path carry a minimum risk classification a pack may only **raise**, never lower — extending the escalate-only markings already defined for the merge decision rather than introducing a separate rule, so these changes reach a human by construction however a pack labels them. The kind is recognized **semantically**, by what the change actually is or touches, not by file path alone; and the set of risky kinds is a platform-level, **append-only invariant** — a pack, profile, or runtime change may never remove a kind or shrink the floor
+- **Runtime-changeable values are a closed soft allowlist; floor values are frozen per pack version**: only values explicitly on the platform's soft allowlist — display and presentation, a lane's or role's preference among pre-approved capability options equivalent in safety, debounce or pacing within safe ranges, and notification cadence — may be hot-swapped at runtime. Everything else is frozen by construction and deny-by-default, including every pack-owned or unrecognized value and every value an approved safety specification names a floor — sampling minimums, fix-cycle caps, risk thresholds, and earn-in bars — and the interaction levers that change effective safety posture: which verifier or lane actually runs, the sampling strategy or mode, promotion or earn-in timing, and retry or fix-cycle cadence. A frozen value moves only by adopting a different, recorded config-pack version, never by a live tweak, and any runtime change that would carry a value across a floor or relabel risk downward is rejected and the rejection recorded
 - **Policy lives in packs, mechanisms live in the platform**: every routing, threshold, and assignment value is pack or registry data; the platform defines only how such data is read, applied, versioned, and audited. A single, clearly-marked non-normative example pack is maintained alongside the specifications as illustration; it is data, not specification
 - Config packs are **versioned and immutable per version**: a deployment binds to an identified pack version, never to a live-edited pack; changing anything produces a new version, and rollback restores an identified prior version
 - The pipeline's phase-transition definitions remain pure, configuration-loadable data; a graphical or interactive workflow-composition surface is **excluded from this capability this cycle** — the data seam exists, the surface does not

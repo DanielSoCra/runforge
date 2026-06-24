@@ -14,6 +14,8 @@ layer: 1
 
 # FUNC-CONCIERGE-BOARD — Triage Surface
 
+> **DISPOSITION — FOLD-IN (ratified 2026-06-24, decision `concierge-vs-platform`).** Consistent with the existing deprecation above: this spec folds into the one operations-OS platform under platform L0 **L0-AC-VISION** (the separate concierge L0 `L0-CONCIERGE-VISION`, `.specify/L0-vision.md`, is deprecated). **Live-behavior mapping:** the at-a-glance triage / "needs you" surface maps onto the platform's **operator surface** (**FUNC-AC-OPERATOR-SURFACE**) + **decision inbox** (**FUNC-AC-DECISION-ESCALATION** / **FUNC-AC-FLEET**), with relevance/ranking owned by **FUNC-AC-OPERATOR-LEARNING**. **This is a disposition marker, not a reconciliation:** no content is deleted; the two-vision conflict is surfaced pending the tracked follow-on. Status stays `deprecated`.
+
 ## Problem Statement
 
 The conversation channel is good for back-and-forth. It is bad for "what needs me right now?" and "what is the assistant currently doing?". The operator needs an at-a-glance surface, available on the move, that shows two things: items that need an operator decision, and items currently in flight. The surface offers one-tap actions for common decisions; it does not replicate the conversational channel.

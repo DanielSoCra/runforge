@@ -39,8 +39,13 @@ Autonomous sessions produce useful artifacts, but reliability breaks down when t
 
 **Scenario: Target branch safety**
 - Given the Control Plane opens or updates a review proposal
-- When the target branch differs from the configured staging branch
+- When the target branch differs from the single configured trunk
 - Then delivery is rejected before the proposal becomes operator-visible
+
+**Scenario: Trunk target is not a per-deployment choice**
+- Given a deployment configures its delivery policy
+- When that policy attempts to set the integration target to any branch other than the single trunk
+- Then the configuration is rejected, because the trunk is a fixed safety floor rather than a tunable per-deployment setting
 
 **Scenario: Durable phase artifact record**
 - Given a delivery proposal is created, updated, merged, rejected, or superseded
@@ -50,7 +55,7 @@ Autonomous sessions produce useful artifacts, but reliability breaks down when t
 **Scenario: Gate resume from delivered artifact**
 - Given a gated phase is approved after its proposal is merged
 - When the Control Plane resumes the run
-- Then subsequent phases start from the merged artifact on the staging branch, not from stale pre-merge workspace state
+- Then subsequent phases start from the merged artifact on the trunk, not from stale pre-merge workspace state
 
 **Scenario: Delivery failure routing**
 - Given packaging or proposal creation fails for an infrastructure reason
@@ -61,7 +66,7 @@ Autonomous sessions produce useful artifacts, but reliability breaks down when t
 
 - Design and generation sessions cannot directly create delivery proposals
 - Review proposals are unique for each work request and phase
-- Review proposals always target the configured staging branch
+- Review proposals always target the single configured trunk, which no deployment policy may redirect to another branch
 - Run state contains enough phase artifact metadata to resume after approval or restart
 - Gate transitions reconcile against the recorded artifact before continuing
 
@@ -72,3 +77,5 @@ Autonomous sessions produce useful artifacts, but reliability breaks down when t
 - Delivery records must be idempotent across daemon restarts and phase retries
 - Existing operator approvals must be preserved during retries
 - Delivery ownership must not bypass quality, safety, or release approval gates
+- There is a single integration trunk for all delivery. The trunk is a fixed safety floor: no deployment, profile, or runtime change may redirect the integration target to a separate standing integration branch. A delivery whose target is anything other than the trunk is rejected before it becomes operator-visible
+- Promoting integrated work toward production is a release event taken from the trunk, not a merge into a second standing branch. Any staging-versus-production separation a regulated deployment needs is expressed as stricter checks that run after work reaches the trunk — additional verification, environment approvals, controlled rollout, and the operator's production-release approval — never as a different delivery target

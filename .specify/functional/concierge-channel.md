@@ -9,6 +9,8 @@ layer: 1
 
 # FUNC-CONCIERGE-CHANNEL — Operator Conversation Channel
 
+> **DISPOSITION — FOLD-IN (ratified 2026-06-24, decision `concierge-vs-platform`).** This spec is being folded into the one operations-OS platform. Its parent vision is re-parented from the separate, now-**deprecated** concierge L0 (`L0-CONCIERGE-VISION`, `.specify/L0-vision.md`) to the platform L0 **L0-AC-VISION**; there is one operations-OS, not a separate single-tenant product. **Live-behavior mapping:** the always-available operator conversation channel maps onto the platform's **interactive-session / deep-work conversational session escape hatch** (the live-collaborator mode in **L0-AC-VISION**, surfaced via **FUNC-AC-OPERATOR-SURFACE**), and its push/confirmation traffic onto the platform's decision **notifications** (**FUNC-AC-DECISION-ESCALATION**) — not a separate concierge channel stack. **This is a disposition marker, not a reconciliation:** no content is deleted, no behavior is yet re-homed or verifier-gated, and the two-vision conflict is surfaced (not hidden) pending the tracked follow-on. Status stays `draft`.
+
 ## Problem Statement
 
 The assistant needs an always-available conversational surface that delivers reliable mobile push to the operator, supports parallel topics within a single bidirectional channel, and accepts both natural-language input and one-tap structured replies (for confirmations and quick triage decisions). The channel is the assistant's primary input/output.
