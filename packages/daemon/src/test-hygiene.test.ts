@@ -39,7 +39,13 @@ function listTestFiles(dir: string): string[] {
     if (entry.isDirectory()) {
       if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name === 'build') continue;
       out.push(...listTestFiles(full));
-    } else if (entry.name.endsWith('.test.ts') && entry.name !== SELF) {
+    } else if (
+      (entry.name.endsWith('.test.ts') || entry.name.endsWith('.test.tsx')) &&
+      entry.name !== SELF
+    ) {
+      // .test.tsx is matched too: vitest collects it, so the repo-wide guard must
+      // see it as well (the dashboard ships 29 .test.tsx files). A narrower scan
+      // would let an anti-pattern in a .tsx test escape every check here.
       out.push(full);
     }
   }
@@ -87,6 +93,31 @@ export function findHygieneViolations(rawSrc: string, label: string): string[] {
     );
   }
   return violations;
+}
+
+// RC-3 cold-import pattern detector. A test that calls vi.resetModules() and then
+// re-imports via a dynamic import() forces a cold esbuild transform/eval of that
+// module graph; under shared-runner contention that cold import is CPU-starved and
+// can blow the 5s default timeout (the daemon's loadDaemon() flake — #770). So ANY
+// package whose tests do this needs the contention-timeout floor below, not just
+// the daemon.
+//
+// Deliberately errs toward INCLUSION: it does NOT classify the import specifier
+// (local './x' vs 'node:fs' vs a bare package vs a variable). A needless floor is
+// harmless — a higher timeout only delays the failure of a genuinely-hung test, it
+// never breaks a passing one — whereas a MISSED floor is exactly the RC-3 bug. So
+// over-detection is the safe direction, and the specifier ambiguity stops mattering.
+// (Today only daemon + dashboard match, both real local re-imports.) `importActual(`
+// is not matched: `import` there is followed by `Actual`, not `(`.
+export function usesColdImportPattern(rawSrc: string): boolean {
+  const src = stripComments(rawSrc);
+  return /\bresetModules\s*\(/.test(src) && /\bimport\s*\(/.test(src);
+}
+
+// The package a monorepo test file belongs to = the first path segment under
+// packages/. Each package keeps its vitest.config.ts at its own root.
+function packageNameOf(absTestFile: string): string {
+  return relative(PACKAGES_DIR, absTestFile).split(/[\\/]/)[0] ?? '';
 }
 
 // RC-3 (CI flake, 2026-06-23): several daemon tests re-import the large
@@ -157,26 +188,69 @@ describe('test hygiene: no concurrent-load flake anti-patterns in any package te
     expect(findHygieneViolations(clean, 'synthetic-clean')).toEqual([]);
   });
 
-  it('daemon vitest config keeps the RC-3 contention timeout floor', async () => {
-    // Evaluate the REAL exported config (not a source string match): this fails
-    // if the timeouts are removed, dropped below the floor, or moved out of the
-    // effective `test:` block — the only states that actually reintroduce RC-3.
-    // Imported via a variable path: the config lives outside the test rootDir
-    // ('src') and is a .ts file, both of which a static import specifier would
-    // trip tsc on (TS6059 / TS5097). A variable specifier defers resolution to
-    // the runtime (Vitest), which resolves it fine.
-    const configModulePath = '../vitest.config.ts';
-    const mod = (await import(configModulePath)) as { default: unknown };
-    const resolved =
-      typeof mod.default === 'function'
-        ? await (mod.default as (env: { mode: string; command: string }) => unknown)({
-            mode: 'test',
-            command: 'serve',
-          })
-        : mod.default;
-    const testConfig = (resolved as { test?: TimeoutConfig }).test;
-    const violations = findTimeoutHardeningViolations(testConfig, 'daemon/vitest.config.ts');
+  it('every package whose tests use the RC-3 cold-import pattern keeps the contention timeout floor', async () => {
+    // Generalized from a daemon-only check: the shared self-hosted runner runs
+    // every package's tests concurrently, so the cold-import starvation flakes any
+    // package that uses the pattern, not just the daemon. Detect the flagged
+    // packages from their test sources, then assert each one's REAL config (not a
+    // source string-match) holds the floor.
+    const files = listTestFiles(PACKAGES_DIR);
+    const flagged = new Set<string>();
+    for (const f of files) {
+      if (usesColdImportPattern(readFileSync(f, 'utf8'))) flagged.add(packageNameOf(f));
+    }
+
+    // Non-vacuous: the daemon (loadDaemon) and the dashboard (route-handler
+    // re-imports) both use the pattern today. If this set ever empties or loses
+    // either, the detector silently broke — fail loudly instead of passing blind.
+    expect(flagged.size, 'cold-import detector found no packages — it likely broke').toBeGreaterThan(0);
+    expect(flagged.has('daemon'), 'daemon should be flagged (loadDaemon)').toBe(true);
+    expect(flagged.has('dashboard'), 'dashboard should be flagged (route re-imports)').toBe(true);
+
+    const violations: string[] = [];
+    for (const pkg of [...flagged].sort()) {
+      // Variable specifier (not a static literal): the configs live outside this
+      // test's rootDir ('src') and are .ts, both of which a static import would
+      // trip tsc on (TS6059 / TS5097). A computed path defers resolution to Vitest.
+      const configPath = join(PACKAGES_DIR, pkg, 'vitest.config.ts');
+      let testConfig: TimeoutConfig;
+      try {
+        const mod = (await import(configPath)) as { default: unknown };
+        const resolved =
+          typeof mod.default === 'function'
+            ? await (mod.default as (env: { mode: string; command: string }) => unknown)({
+                mode: 'test',
+                command: 'serve',
+              })
+            : mod.default;
+        testConfig = (resolved as { test?: TimeoutConfig }).test;
+      } catch (err) {
+        // Fail-closed: a config we cannot evaluate cannot be PROVEN to hold the
+        // floor, and a flagged package without an enforceable floor is the exact
+        // RC-3 risk. No weak textual fallback — that would false-pass on a
+        // commented / dead-object / spread-overridden / below-floor timeout.
+        violations.push(
+          `${pkg}/vitest.config.ts: could not be evaluated to verify the RC-3 contention floor (${
+            (err as Error).message.split('\n')[0]
+          }) — its tests use vi.resetModules()+import(), so it MUST set test.testTimeout/hookTimeout >= ${MIN_CONTENTION_TIMEOUT_MS}ms in a statically-evaluable config.`,
+        );
+        continue;
+      }
+      violations.push(...findTimeoutHardeningViolations(testConfig, `${pkg}/vitest.config.ts`));
+    }
     expect(violations, `\n${violations.join('\n')}\n`).toEqual([]);
+  });
+
+  it('RC-3 cold-import detector fires on resetModules()+import() and not otherwise', () => {
+    expect(usesColdImportPattern('vi.resetModules();\nconst { x } = await import("./mod.js");')).toBe(true);
+    // reset but no dynamic import -> not the cold-import flake pattern.
+    expect(usesColdImportPattern('vi.resetModules();\nimport foo from "./mod.js";')).toBe(false);
+    // dynamic import but no module reset -> no cold re-eval.
+    expect(usesColdImportPattern('const { x } = await import("./mod.js");')).toBe(false);
+    // commented-out pattern must not count.
+    expect(usesColdImportPattern('// vi.resetModules(); await import("./m")')).toBe(false);
+    // vi.importActual() is not a dynamic import() call.
+    expect(usesColdImportPattern('vi.resetModules();\nvi.importActual("./m");')).toBe(false);
   });
 
   it('RC-3 detector fires on a missing or too-low timeout config (not a no-op)', () => {
