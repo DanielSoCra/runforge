@@ -11,4 +11,10 @@ export {
   deepFreeze,
   zodOffenders,
 } from './schema.js';
-export { DeploymentRegistry, createDeploymentRegistry } from './registry.js';
+export {
+  DeploymentRegistry,
+  createDeploymentRegistry,
+  JsonFileAutonomyStore,
+  type AutonomyStore,
+  type DeploymentRegistryOptions,
+} from './registry.js';

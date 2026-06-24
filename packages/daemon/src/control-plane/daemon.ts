@@ -37,8 +37,10 @@ import {
 import { createPhaseHandlers } from './phases.js';
 import {
   createDeploymentRegistry,
+  JsonFileAutonomyStore,
   type DeploymentRegistry,
 } from './deployment-registry/index.js';
+import type { RiskClass, AutonomyLevel } from './deployment-registry/types.js';
 import {
   buildSanitizationPipelineForDeployment,
 } from './sanitization/build-pipeline.js';
@@ -332,7 +334,10 @@ export async function startDaemon(
   // 2c. Deployment registry (optional, flag-gated). A malformed deployment
   // profile is rejected at registration; the registry is left empty so the
   // integrate handler falls back to its flag-OFF unconditional merge.
-  const deploymentRegistry = createDeploymentRegistry();
+  // Autonomy state is durable: an explicit Operator grant survives restart.
+  const deploymentRegistry = createDeploymentRegistry({
+    autonomyStore: new JsonFileAutonomyStore(join(stateDir, 'autonomy.json')),
+  });
   if (config.deployment !== undefined) {
     const registered = deploymentRegistry.register(
       config.deployment.id,
@@ -1593,6 +1598,19 @@ export async function startDaemon(
           id,
           body,
         ),
+      // WIDEN (slice 2): explicit Operator grant to widen autonomy for a lane
+      // and/or risk class. Persists via the registry's AutonomyStore.
+      widenAutonomy: (id, { riskClass, target, lane, operator }) => {
+        const authorization = { kind: 'operator-grant', operator } as const;
+        return deploymentRegistry.recordWidening(
+          id,
+          riskClass as RiskClass,
+          target as AutonomyLevel,
+          authorization,
+          Date.now(),
+          lane,
+        );
+      },
     },
     daemonHost,
   );

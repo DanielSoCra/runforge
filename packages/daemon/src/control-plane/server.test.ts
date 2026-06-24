@@ -4,6 +4,8 @@ import { ok, err } from '../lib/result.js';
 import type { Server } from 'http';
 import type { AddressInfo } from 'net';
 import * as results from './results.js';
+import { DeploymentRegistry } from './deployment-registry/registry.js';
+import type { RiskClass, AutonomyLevel } from './deployment-registry/types.js';
 
 let serverRef: Server | undefined;
 
@@ -465,5 +467,165 @@ describe('ControlServer', () => {
     } finally {
       await closeServer(s2);
     }
+  });
+
+  describe('POST /deployments/:id/widen', () => {
+    function makeProfile() {
+      return {
+        repositories: [{ owner: 'acme', name: 'auto-claude' }],
+        riskPathMap: [{ paths: ['infra/**'], minLevel: 'orange' }],
+        defaultMinLevel: 'green',
+        laneSet: {
+          declaredPhases: ['velocity'],
+          mostCautiousLane: 'standard',
+          lanes: [
+            {
+              name: 'fast',
+              qualify: { complexity: ['simple'] },
+              allowedPaths: ['**'],
+              roleRouting: { implement: 'cheap-implementer' },
+              gateSet: 'gate1',
+              mergePolicy: 'auto',
+            },
+            {
+              name: 'standard',
+              qualify: { complexity: ['standard', 'complex'] },
+              allowedPaths: ['**'],
+              roleRouting: { implement: 'cheap-implementer' },
+              gateSet: 'gate1',
+              mergePolicy: 'auto',
+            },
+          ],
+        },
+        lifecycleMode: 'velocity',
+        complianceReviewers: [],
+        honestAutomation: { automatable: [], strained: [], irreduciblyHuman: [] },
+        budget: 5000,
+        landing: { landsOn: 'main', productionReleasePath: 'tag-and-deploy' },
+        capabilityBindings: [],
+      };
+    }
+
+    function widenHandler(reg: DeploymentRegistry) {
+      return (
+        id: string,
+        grant: {
+          riskClass: RiskClass;
+          target: AutonomyLevel;
+          lane?: string;
+          operator: string;
+        },
+      ) =>
+        reg.recordWidening(
+          id,
+          grant.riskClass,
+          grant.target,
+          { kind: 'operator-grant', operator: grant.operator },
+          Date.now(),
+          grant.lane,
+        );
+    }
+
+    function levelFor(
+      reg: DeploymentRegistry,
+      id: string,
+      rc: RiskClass,
+      lane?: string,
+    ): string | undefined {
+      return reg.readAutonomyState(id, rc, lane).find((e) => e.riskClass === rc)?.level;
+    }
+
+    it('returns 400 when the body is missing required fields', async () => {
+      const reg = new DeploymentRegistry();
+      const { port } = await startServer({
+        widenAutonomy: widenHandler(reg),
+      });
+      const res = await fetch(
+        `http://127.0.0.1:${port}/deployments/dep-a/widen`,
+        {
+          method: 'POST',
+          headers: {
+            'X-Requested-By': 'test',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ target: 'widened', operator: 'daniel' }),
+        },
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 400 when the body is not an object', async () => {
+      const reg = new DeploymentRegistry();
+      const { port } = await startServer({
+        widenAutonomy: widenHandler(reg),
+      });
+      const res = await fetch(
+        `http://127.0.0.1:${port}/deployments/dep-a/widen`,
+        {
+          method: 'POST',
+          headers: {
+            'X-Requested-By': 'test',
+            'Content-Type': 'application/json',
+          },
+          body: '"not-an-object"',
+        },
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 404 for an unknown deployment', async () => {
+      const reg = new DeploymentRegistry();
+      const { port } = await startServer({
+        widenAutonomy: widenHandler(reg),
+      });
+      const res = await fetch(
+        `http://127.0.0.1:${port}/deployments/dep-a/widen`,
+        {
+          method: 'POST',
+          headers: {
+            'X-Requested-By': 'test',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            riskClass: 'green',
+            target: 'widened',
+            operator: 'daniel',
+          }),
+        },
+      );
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 200 and records the widening for a valid request', async () => {
+      const reg = new DeploymentRegistry();
+      reg.register('dep-a', makeProfile() as never);
+      const { server, port } = await startServer({
+        widenAutonomy: widenHandler(reg),
+      });
+      try {
+        const res = await fetch(
+          `http://127.0.0.1:${port}/deployments/dep-a/widen`,
+          {
+            method: 'POST',
+            headers: {
+              'X-Requested-By': 'test',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              riskClass: 'green',
+              target: 'widened',
+              lane: 'fast',
+              operator: 'daniel',
+            }),
+          },
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { ok: boolean };
+        expect(body.ok).toBe(true);
+        expect(levelFor(reg, 'dep-a', 'green', 'fast')).toBe('widened');
+      } finally {
+        await closeServer(server);
+      }
+    });
   });
 });

@@ -12,6 +12,8 @@
 // question (lookups → tagged not-found; widening → { ok:false; reason }).
 // Exceptions are reserved for programmer error.
 
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type {
   RegistrationOutcome,
   LookupResult,
@@ -58,16 +60,100 @@ function emptyAutonomyState(): AutonomyState {
   return { entries: {}, history: [] };
 }
 
+/**
+ * Persistence backend for per-deployment autonomy state. Implementations are
+ * fail-soft on read (an unreadable/absent/invalid store returns `{}`) and
+ * atomic on write so a crash mid-save never leaves a corrupt file.
+ */
+export interface AutonomyStore {
+  loadAll(): Record<string, AutonomyState>;
+  saveAll(map: Record<string, AutonomyState>): void;
+}
+
+/**
+ * A JSON-file AutonomyStore. Writes are atomic (temp file + rename) and the
+ * parent directory is created on demand. No external dependencies.
+ */
+/** Structural guard for a persisted AutonomyState (entries object + history array,
+ * optional laneEntries object). Used to discard corrupt entries on load. */
+function isAutonomyStateShape(v: unknown): boolean {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const s = v as Record<string, unknown>;
+  const entriesOk = typeof s.entries === 'object' && s.entries !== null && !Array.isArray(s.entries);
+  const historyOk = Array.isArray(s.history);
+  const laneOk =
+    s.laneEntries === undefined ||
+    (typeof s.laneEntries === 'object' && s.laneEntries !== null && !Array.isArray(s.laneEntries));
+  return entriesOk && historyOk && laneOk;
+}
+
+export class JsonFileAutonomyStore implements AutonomyStore {
+  constructor(private path: string) {}
+
+  loadAll(): Record<string, AutonomyState> {
+    try {
+      const raw = readFileSync(this.path, 'utf8');
+      const parsed = JSON.parse(raw) as unknown;
+      if (
+        typeof parsed !== 'object' ||
+        parsed === null ||
+        Array.isArray(parsed)
+      ) {
+        return {};
+      }
+      // Validate EACH entry's shape and discard structurally-invalid ones (fail
+      // soft) — a corrupt entry must never become a deferred throw in a later
+      // read/widen. A valid AutonomyState has an `entries` object + a `history`
+      // array (+ optional `laneEntries` object).
+      const out: Record<string, AutonomyState> = {};
+      for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (isAutonomyStateShape(value)) {
+          out[id] = value as AutonomyState;
+        }
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
+  saveAll(map: Record<string, AutonomyState>): void {
+    const tmp = `${this.path}.tmp`;
+    mkdirSync(dirname(this.path), { recursive: true });
+    writeFileSync(tmp, JSON.stringify(map, null, 2), 'utf8');
+    renameSync(tmp, this.path);
+  }
+}
+
+/** Constructor options: either the legacy fleet-capacity seed or an options bag. */
+export type DeploymentRegistryOptions =
+  | Readonly<FleetCapacityConfig>
+  | {
+      autonomyStore?: AutonomyStore;
+      fleetCapacity?: Readonly<FleetCapacityConfig>;
+    };
+
 export class DeploymentRegistry {
   private profiles = new Map<string, Readonly<DeploymentProfile>>();
   private fleetCapacity: Readonly<FleetCapacityConfig> | undefined;
-  private autonomy = new Map<string, AutonomyState>();
+  private autonomyStore: AutonomyStore | undefined;
+  private autonomy: Map<string, AutonomyState>;
 
   /**
-   * @param fleetCapacity optional initial fleet capacity (else set via setFleetCapacity).
-   *        Capacity pools are a fleet-level record, set ONCE — not copied per profile.
+   * @param options either the legacy fleet-capacity seed (backward compatible
+   *        with registry.test.ts / regressions.test.ts) or an options bag with
+   *        an optional AutonomyStore and optional fleet capacity. Capacity pools
+   *        are fleet-level, set ONCE — not copied per profile.
    */
-  constructor(fleetCapacity?: Readonly<FleetCapacityConfig>) {
+  constructor(options?: DeploymentRegistryOptions) {
+    let fleetCapacity: Readonly<FleetCapacityConfig> | undefined;
+    if (options !== undefined && 'pools' in options) {
+      fleetCapacity = options;
+    } else if (options !== undefined) {
+      fleetCapacity = options.fleetCapacity;
+      this.autonomyStore = options.autonomyStore;
+    }
+
     if (fleetCapacity !== undefined) {
       // Validate through the SAME parser as setFleetCapacity — the one-provider-
       // one-pool invariant is not encoded in the type, so a type-valid-but-
@@ -82,6 +168,12 @@ export class DeploymentRegistry {
       }
       this.fleetCapacity = outcome.fleet;
     }
+
+    // Load any persisted autonomy state. A missing/broken store returns `{}`,
+    // so the registry is always bootable even if the autonomy file is corrupt.
+    this.autonomy = new Map(
+      Object.entries(this.autonomyStore?.loadAll() ?? {}),
+    );
   }
 
   /**
@@ -258,6 +350,12 @@ export class DeploymentRegistry {
       return { ok: false, reason: 'missing authorization' };
     }
 
+    // Require a CURRENTLY-REGISTERED deployment — never widen a stale autonomy key
+    // that was loaded from the persistence store for a deployment not registered in
+    // this run (the autonomy Map may hold ids the live profile set no longer has).
+    if (!this.profiles.has(id)) {
+      return { ok: false, reason: `unknown deployment '${id}'` };
+    }
     const state = this.autonomy.get(id);
     if (state === undefined) {
       return { ok: false, reason: `unknown deployment '${id}'` };
@@ -341,6 +439,12 @@ export class DeploymentRegistry {
     // Deep-freeze before storing AND returning (`Readonly` is compile-time only;
     // an un-frozen handle would let a caller bypass the authorization + history path).
     const frozen = deepFreeze(newState);
+    // Persist FIRST, then commit in-memory: if the durable write throws (e.g. disk
+    // full), the in-memory autonomy stays unchanged — never widened-but-unpersisted.
+    if (this.autonomyStore !== undefined) {
+      const nextMap = { ...Object.fromEntries(this.autonomy), [id]: frozen };
+      this.autonomyStore.saveAll(nextMap);
+    }
     this.autonomy.set(id, frozen);
     return { ok: true, state: frozen };
   }
@@ -387,10 +491,14 @@ export class DeploymentRegistry {
 
 /**
  * Factory mirror of the lane-engine/window-scheduler convention. The fleet
- * capacity may be supplied here or set later via setFleetCapacity.
+ * capacity and/or an AutonomyStore may be supplied here or set later via
+ * setFleetCapacity.
  */
 export function createDeploymentRegistry(
-  fleetCapacity?: Readonly<FleetCapacityConfig>,
+  options?: {
+    fleetCapacity?: Readonly<FleetCapacityConfig>;
+    autonomyStore?: AutonomyStore;
+  },
 ): DeploymentRegistry {
-  return new DeploymentRegistry(fleetCapacity);
+  return new DeploymentRegistry(options);
 }
