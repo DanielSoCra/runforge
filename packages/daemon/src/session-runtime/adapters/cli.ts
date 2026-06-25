@@ -37,6 +37,7 @@ export class CliAdapter implements ProviderAdapter {
     provider?: ProviderDefinition,
     skipPermissions?: boolean,
     continuationId?: string,
+    mcpConfigJson?: string,
   ): string[] {
     const args = [
       '-p', prompt,
@@ -72,7 +73,43 @@ export class CliAdapter implements ProviderAdapter {
     if (skipPermissions === true && !isRoot()) {
       args.push('--dangerously-skip-permissions');
     }
+    // SEC/correctness: isolate the worker's MCP surface from the operator's
+    // personal configuration. Without --strict-mcp-config the worker inherits
+    // user-scope (~/.claude.json) MCP servers — the operator's personal tools —
+    // which is both a scope violation for an autonomous worker and a hard
+    // failure when any such server ships a non-conformant tool input_schema
+    // (the API rejects the whole request: "tools.N.custom.input_schema.type").
+    // Under strict mode the worker sees ONLY the daemon-injected plugin MCP
+    // servers (empty for deployments without capability bindings).
+    args.push('--strict-mcp-config', '--mcp-config', mcpConfigJson ?? '{"mcpServers":{}}');
+    // Exclude the operator's USER-scope settings (personal hooks — e.g. a
+    // SessionStart vault-read, statusline, personal permissions) from the
+    // autonomous worker. Such hooks burn the worker's turn budget on denied,
+    // out-of-scope tool calls and can starve a low-turn structured call
+    // (decomposition runs at maxTurns=1) of any turn to emit its output.
+    // 'project,local' still loads the daemon's OWN containment/timeout hooks,
+    // which are written to the workspace .claude/settings.local.json (local
+    // scope). Keychain/OAuth auth is unaffected — auth is not a settings source.
+    args.push('--setting-sources', 'project,local');
     return args;
+  }
+
+  /**
+   * Serialize the daemon-injected plugin MCP servers into a --mcp-config JSON
+   * string. Empty (no plugins) yields {"mcpServers":{}}, which combined with
+   * --strict-mcp-config gives the worker a clean, operator-MCP-free surface.
+   */
+  buildMcpConfigJson(mcpConfigs?: McpConfig[]): string {
+    const mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
+    for (const mcp of mcpConfigs ?? []) {
+      const entry: { command: string; args: string[]; env?: Record<string, string> } = {
+        command: mcp.command,
+        args: mcp.args,
+      };
+      if (mcp.env && Object.keys(mcp.env).length > 0) entry.env = mcp.env;
+      mcpServers[mcp.name] = entry;
+    }
+    return JSON.stringify({ mcpServers });
   }
 
   buildEnv(extra?: Record<string, string>, provider?: ProviderDefinition): Record<string, string> {
@@ -318,6 +355,8 @@ export class CliAdapter implements ProviderAdapter {
       options?.jsonSchema,
       options?.provider,
       options?.skipPermissions,
+      undefined,
+      this.buildMcpConfigJson(options?.mcpConfigs),
     );
     const sessionStartTime = Date.now();
     const extraEnv: Record<string, string> = {
@@ -518,6 +557,7 @@ export class CliAdapter implements ProviderAdapter {
       options?.provider,
       options?.skipPermissions,
       continuationId,
+      this.buildMcpConfigJson(options?.mcpConfigs),
     );
     const sessionStartTime = Date.now();
     const extraEnv: Record<string, string> = {

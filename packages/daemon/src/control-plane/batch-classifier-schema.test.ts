@@ -18,21 +18,23 @@ describe('batch classifier schema (#470)', () => {
     expect(parsed.success).toBe(true);
   });
 
-  it('validates batch output as an array of classifier items', () => {
-    const parsed = BatchClassificationResponseSchema.safeParse([
-      {
-        issueNumber: 1,
-        complexity: 'simple',
-        reasoning: 'Small fix',
-        estimatedUnits: 1,
-        estimatedArtifacts: 1,
-      },
-    ]);
+  it('validates batch output as an object with a classifications array', () => {
+    const parsed = BatchClassificationResponseSchema.safeParse({
+      classifications: [
+        {
+          issueNumber: 1,
+          complexity: 'simple',
+          reasoning: 'Small fix',
+          estimatedUnits: 1,
+          estimatedArtifacts: 1,
+        },
+      ],
+    });
 
     expect(parsed.success).toBe(true);
   });
 
-  it('exports a draft-07 JSON schema array for the CLI adapter', () => {
+  it('exports a draft-07 OBJECT JSON schema for the CLI adapter (a tool input_schema.type must be object, never array)', () => {
     const schema = JSON.parse(batchClassificationJsonSchema) as Record<
       string,
       unknown
@@ -40,8 +42,9 @@ describe('batch classifier schema (#470)', () => {
 
     expect(schema).toMatchObject({
       $schema: 'http://json-schema.org/draft-07/schema#',
-      type: 'array',
+      type: 'object',
     });
+    expect(JSON.stringify(schema)).toContain('classifications');
     expect(JSON.stringify(schema)).toContain('issueNumber');
   });
 });

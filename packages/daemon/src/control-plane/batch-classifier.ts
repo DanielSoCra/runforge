@@ -54,10 +54,17 @@ const BATCH_CLASSIFIER_AGENT: AgentDefinition = {
   name: 'batch-classifier',
   description: 'Classifies multiple work requests in one session',
   systemPrompt:
-    'You classify multiple work requests and return JSON matching the provided schema.',
-  allowedTools: ['Read', 'Glob', 'Grep'],
+    'You classify multiple work requests and return ONLY the JSON object ' +
+    'matching the provided schema. Do not call any tools, do not read files — ' +
+    'classify from the work-request text and scope alone and respond ' +
+    'immediately with the JSON as your final message.',
+  // No file tools: the classifier judges from the prompt text, never the repo.
+  // Combined with a small turn buffer this stops the model burning its only
+  // turn on an exploratory tool call (which produced intermittent
+  // error_max_turns → empty verdict → lane-fallback-most-cautious → escalate).
+  allowedTools: [],
   modelOverride: 'claude-haiku-4-5-20251001',
-  maxTurns: 1,
+  maxTurns: 4,
   timeoutMs: 10_800_000,
   budgetCap: 0.5,
 };
@@ -68,7 +75,7 @@ You assess work request complexity to determine the appropriate pipeline variant
 
 ## Output
 
-Return a JSON array. Each item must contain:
+Return a JSON object of the form { "classifications": [ ... ] }. Each item in that array must contain:
 - issueNumber
 - complexity: "simple", "standard", or "complex"
 - reasoning
@@ -251,7 +258,8 @@ function parseBatchItems(
       ? String((structuredData as Record<string, unknown>)['result'])
       : output;
   const jsonMatch =
-    text.match(/```json\s*([\s\S]*?)```/s) ?? text.match(/(\[[\s\S]*\])/s);
+    text.match(/```json\s*([\s\S]*?)```/s) ??
+    text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/s);
   if (!jsonMatch?.[1]) return [];
   try {
     return parseUnknownBatch(JSON.parse(jsonMatch[1]));
@@ -261,9 +269,18 @@ function parseBatchItems(
 }
 
 function parseUnknownBatch(value: unknown): BatchClassificationItem[] {
-  if (!Array.isArray(value)) return [];
+  // Accept either the object-wrapped shape { classifications: [...] } (the
+  // structured-output schema) or a bare array (text-fallback / legacy).
+  const arr = Array.isArray(value)
+    ? value
+    : value !== null &&
+        typeof value === 'object' &&
+        Array.isArray((value as Record<string, unknown>).classifications)
+      ? ((value as Record<string, unknown>).classifications as unknown[])
+      : null;
+  if (arr === null) return [];
   const parsed: BatchClassificationItem[] = [];
-  for (const item of value) {
+  for (const item of arr) {
     const result = BatchClassificationItemSchema.safeParse(item);
     if (result.success) parsed.push(result.data);
   }

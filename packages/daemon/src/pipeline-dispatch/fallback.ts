@@ -86,7 +86,14 @@ function spawnClaude(prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(
       'claude',
-      ['--dangerously-skip-permissions', '-p', '--max-budget-usd', '10', prompt],
+      [
+        '--dangerously-skip-permissions',
+        // Isolate from the operator's personal config (see CliAdapter.buildArgs):
+        // no user-scope hooks/settings, no inherited MCP servers.
+        '--setting-sources', 'project,local',
+        '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
+        '-p', '--max-budget-usd', '10', prompt,
+      ],
       { timeout: 900_000, maxBuffer: 10 * 1024 * 1024 },
       (error, stdout, stderr) => {
         if (error) {
