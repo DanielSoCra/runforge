@@ -16,6 +16,7 @@ import type {
 } from '../lane-engine/types.js';
 import type { PoolConfig } from '../../session-runtime/providers/window-scheduler/types.js';
 import type { SanitizerConfig } from '@auto-claude/sanitization';
+import type { ComplianceReviewVerdict } from '../../compliance/schemas.js';
 
 // Re-export the sibling shapes so consumers of the registry import them from one
 // place and never re-declare a lane/pool/risk field (the L3 composition rule).
@@ -100,6 +101,15 @@ export interface DeploymentProfile {
   /** Currently declared lifecycle phase — must be one of laneSet.declaredPhases. */
   lifecycleMode: string;
   complianceReviewers: ComplianceReviewer[];
+  /**
+   * OPTIONAL recorded compliance review verdicts (FUNC-AC-COMPLIANCE-GATE):
+   * one entry per reviewer that has reviewed this deployment's regulated paths,
+   * keyed downstream by `reviewerRoleId`. Absent ⇒ the merge-decision compliance
+   * lens falls back to path-condition matching (force escalation on any match);
+   * present ⇒ the full evaluator runs and a recorded `pass` from every required
+   * reviewer can earn a `proceed` that clears the force.
+   */
+  complianceVerdicts?: ComplianceReviewVerdict[];
   honestAutomation: HonestAutomationMap;
   budget: number;
   landing: LandingTarget;
@@ -213,6 +223,10 @@ export type CapacityPoolInputsResult =
 /** Which declared datum readDeclaredData serves. */
 export type DeclaredDatum =
   | 'complianceReviewers'
+  // The OPTIONAL recorded compliance VERDICTS (FUNC-AC-COMPLIANCE-GATE). Read the
+  // same way as complianceReviewers — value is ComplianceReviewVerdict[] | undefined
+  // (undefined ⇒ the merge-decision lens falls back to path-condition matching).
+  | 'complianceVerdicts'
   | 'honestAutomation'
   | 'budget'
   | 'landing'

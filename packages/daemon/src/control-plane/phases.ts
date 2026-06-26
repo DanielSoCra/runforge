@@ -2086,13 +2086,33 @@ export function createPhaseHandlers(
       // Compliance lens: force the change to the Operator when a touched path is
       // governed by one of the deployment's compliance reviewers (condition read as
       // a path glob). Composes with and OVERRIDES autonomy (FUNC-AC-MERGE-DECISION).
-      // Full reviewer dispatch/verdict is FUNC-AC-COMPLIANCE-GATE's concern; this is
-      // the merge-decision lens composition. (deploymentId/registry are defined here
-      // — the not-found / not-owned / flag-OFF cases returned earlier.)
+      //
+      // FAIL-CLOSED (security, #779): a regulated change — the deployment declares
+      // complianceReviewers AND a touched path matches a reviewer condition — must
+      // NOT be auto-merged on the strength of the STATIC, deployment-scoped
+      // `complianceVerdicts` recorded on the frozen profile. Those verdicts are a
+      // property of the DEPLOYMENT, not of THIS change: a single historic `pass`
+      // would otherwise clear EVERY future change touching governed paths, with no
+      // review of the actual diff — defeating the gate (FUNC-AC-COMPLIANCE-GATE:
+      // "never auto-promote a regulated-sensitive change to autonomous merge").
+      // There is today no change-scoped / run-scoped verdict datum (RunState carries
+      // none), so we deliberately do NOT source verdicts here: the lens falls back
+      // to path-condition matching and any governed touched path forces escalation
+      // to the Operator. Change-scoped reviewer-dispatch that produces durable
+      // PER-CHANGE verdicts — the only source that could legitimately clear the
+      // force — is the documented REMAINDER of FUNC-AC-COMPLIANCE-GATE; until it
+      // lands, regulated changes fail closed (escalate). When that lands, thread the
+      // per-change verdict as the third arg of evaluateComplianceForced.
+      // (deploymentId/registry are defined here — the not-found / not-owned /
+      // flag-OFF cases returned earlier.)
       let complianceForced = false;
       if (registry !== undefined && deploymentId !== undefined) {
         const declared = registry.readDeclaredData(deploymentId, 'complianceReviewers');
         if (declared.kind === 'found' && Array.isArray(declared.value)) {
+          // No verdicts argument on purpose: the static profile `complianceVerdicts`
+          // are deployment-scoped and must never clear a change-scoped gate. Absent a
+          // change-scoped verdict, evaluateComplianceForced fails closed via
+          // path-condition matching (any governed touched path → escalate).
           complianceForced = evaluateComplianceForced(
             declared.value as ComplianceReviewer[],
             touchedPaths,

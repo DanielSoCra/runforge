@@ -455,6 +455,94 @@ describe('merge-decision live wiring — integrate handler', () => {
     expect(decision.raise).toHaveBeenCalled();
   });
 
+  it('(g2) a STATIC deployment-profile PASS verdict does NOT auto-merge a regulated change — it ESCALATES (fail-closed, #779)', async () => {
+    const reg = new DeploymentRegistry();
+    // Same governed docs/** path as (g). The deployment ALSO declares a recorded
+    // compliance verdict on its FROZEN profile: clinical-lead PASSED. That verdict
+    // is DEPLOYMENT-scoped, not CHANGE-scoped — a single historic pass must NOT
+    // clear the gate for THIS (or any future) change touching governed paths.
+    // SECURITY (#779): the integrate handler deliberately does NOT source static
+    // profile verdicts, so the lens fails closed via path matching and the change
+    // ESCALATES even though a static `pass` is on record and autonomy is widened.
+    const out = reg.register(DEPLOYMENT_ID, {
+      ...makeProfile(),
+      complianceReviewers: [{ reviewer: 'clinical-lead', condition: 'docs/**' }],
+      complianceVerdicts: [
+        {
+          reviewerRoleId: 'clinical-lead',
+          verdict: 'pass',
+          reason: 'reviewed',
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    });
+    expect(out.ok).toBe(true);
+    reg.recordWidening(
+      DEPLOYMENT_ID,
+      'green',
+      'widened',
+      { kind: 'operator-grant', operator: 'daniel' },
+      1,
+    );
+    const decision = makeDecisionDouble();
+    const { handlers } = createHandlers({
+      config: { deployment: { id: DEPLOYMENT_ID, profile: {} } },
+      registry: reg,
+      decisionManager: decision.manager,
+      decisionPublisher: decision.publisher,
+    });
+    const run = makeRun();
+
+    await handlers.integrate!(run);
+
+    // Static profile pass must NOT clear the change-scoped gate.
+    expect(mockIntegrate).not.toHaveBeenCalled();
+    expect(run.pausedAtPhase).toBe('integrate');
+    expect(decision.raise).toHaveBeenCalled();
+  });
+
+  it('(g3) a regulated change escalates even when a static BLOCK verdict is on record (still fail-closed, never merges)', async () => {
+    // NOTE (#779): post-fix, escalation here is driven by the fail-closed
+    // path-condition match (static profile verdicts are not sourced), so a static
+    // BLOCK can never be mistaken for a "merge anyway" signal either. The change
+    // still must NOT merge — this guards that the block case stays escalating.
+    const reg = new DeploymentRegistry();
+    const out = reg.register(DEPLOYMENT_ID, {
+      ...makeProfile(),
+      complianceReviewers: [{ reviewer: 'clinical-lead', condition: 'docs/**' }],
+      complianceVerdicts: [
+        {
+          reviewerRoleId: 'clinical-lead',
+          verdict: 'block',
+          reason: 'non-compliant',
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    });
+    expect(out.ok).toBe(true);
+    reg.recordWidening(
+      DEPLOYMENT_ID,
+      'green',
+      'widened',
+      { kind: 'operator-grant', operator: 'daniel' },
+      1,
+    );
+    const decision = makeDecisionDouble();
+    const { handlers } = createHandlers({
+      config: { deployment: { id: DEPLOYMENT_ID, profile: {} } },
+      registry: reg,
+      decisionManager: decision.manager,
+      decisionPublisher: decision.publisher,
+    });
+    const run = makeRun();
+
+    await handlers.integrate!(run);
+
+    expect(mockIntegrate).not.toHaveBeenCalled(); // block overrides autonomy
+    expect(run.pausedAtPhase).toBe('integrate');
+    expect(decision.raise).toHaveBeenCalled();
+  });
+
   // --- operator-approved resume override (follow-up #9) ---------------------
   // After the resume branch sets run.mergeDecisionApprovedEpoch on an operator
   // APPROVE, a run re-entering integrate must MERGE (execute the held merge) via

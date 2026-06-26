@@ -11,6 +11,7 @@
 
 import { z } from 'zod';
 import { SanitizerConfigSchema } from '@auto-claude/sanitization';
+import { ComplianceReviewVerdictSchema } from '../../compliance/schemas.js';
 import type {
   DeploymentProfile,
   FleetCapacityConfig,
@@ -128,6 +129,11 @@ export const ProfileEnvelopeSchema = z
     sanitizers: SanitizerConfigSchema.optional(),
     lifecycleMode: z.string().min(1),
     complianceReviewers: z.array(ComplianceReviewerSchema),
+    // OPTIONAL recorded compliance review verdicts (FUNC-AC-COMPLIANCE-GATE).
+    // Absent ⇒ the merge-decision compliance lens falls back to path-condition
+    // matching. Reuses the compliance module's canonical verdict schema so the
+    // evaluator and the profile agree on shape.
+    complianceVerdicts: z.array(ComplianceReviewVerdictSchema).optional(),
     honestAutomation: HonestAutomationMapSchema,
     budget: z.number(),
     landing: LandingTargetSchema,
@@ -266,6 +272,7 @@ function assembleProfile(
         : env.sanitizers,
     lifecycleMode: env.lifecycleMode,
     complianceReviewers: env.complianceReviewers,
+    complianceVerdicts: env.complianceVerdicts,
     honestAutomation: env.honestAutomation,
     budget: env.budget,
     landing: env.landing,

@@ -227,6 +227,7 @@ STACK-AC-OPERATOR-LEARNING-TS:
   status: draft
 
 FUNC-AC-COMPLIANCE-GATE:
+  children: [ARCH-AC-COMPLIANCE-GATE]
   status: approved
 
 FUNC-AC-FLEET:
@@ -350,6 +351,11 @@ ARCH-AC-BATCH-CLASSIFIER:
 ARCH-AC-CONTROL-PLANE:
   parent: FUNC-AC-PIPELINE
   children: [STACK-AC-CONTROL-PLANE]
+  status: draft
+
+ARCH-AC-COMPLIANCE-GATE:
+  parent: FUNC-AC-COMPLIANCE-GATE
+  children: [STACK-AC-COMPLIANCE-GATE-TS]
   status: draft
 
 ARCH-AC-DAG-EXECUTOR:
@@ -561,6 +567,17 @@ STACK-AC-CONTROL-PLANE:
     - packages/daemon/src/control-plane/**/*.test.ts
     - packages/daemon/src/control-plane/remote-control.test.ts
     - packages/daemon/src/control-plane/classifier.test.ts
+  status: draft
+
+STACK-AC-COMPLIANCE-GATE-TS:
+  parent: ARCH-AC-COMPLIANCE-GATE
+  children: []
+  code_paths:
+    - packages/daemon/src/compliance/schemas.ts
+    - packages/daemon/src/compliance/evaluator.ts
+  test_paths:
+    - packages/daemon/src/compliance/schemas.test.ts
+    - packages/daemon/src/compliance/evaluator.test.ts
   status: draft
 
 STACK-AC-IMPLEMENTATION:
