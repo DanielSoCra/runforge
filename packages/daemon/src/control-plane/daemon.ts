@@ -118,6 +118,8 @@ import { GotchaStore } from '../knowledge/gotcha-store.js';
 import { KnowledgeStore } from '../knowledge/knowledge-store.js';
 import { DEFAULT_POLICIES } from '../knowledge/policy-registry.js';
 import { validatePromptContracts } from '../knowledge/prompt-contracts.js';
+import { OperatorLearningService } from '../operator-learning/index.js';
+import { startKnowledgeMaintenance } from '../knowledge/maintenance.js';
 import { join } from 'path';
 import { createReviewScheduler } from '../coordination/review-scheduler.js';
 import { createPOAgent } from '../coordination/po-agent.js';
@@ -664,6 +666,11 @@ export async function startDaemon(
     DEFAULT_POLICIES,
     gotchasPath,
   );
+  const operatorLearning = new OperatorLearningService({
+    logPath: join(stateDir, 'operator-learning.jsonl'),
+    proposalDir: join(stateDir, 'operator-learning-proposals'),
+  });
+  await operatorLearning.init();
   // Resolve the worktree base. Native: cwd is already the target checkout
   // (unchanged). Container / fresh host: cwd is not a git repo → clone
   // config.repo into config.workspaceRoot. Without this the detect phase's
@@ -702,6 +709,19 @@ export async function startDaemon(
       .triggerSync()
       .catch((e) => console.warn('[knowledge-sync] startup cycle error:', e));
   }
+
+  // 3b-2. Start institutional-learning maintenance (detect systemic proposals,
+  // surface promotion candidates). Opt-in via config; default off.
+  const knowledgeMaintenance = startKnowledgeMaintenance(knowledgeStore, stateDir, {
+    enabled: config.knowledgeMaintenance?.enabled === true,
+    intervalMs:
+      config.knowledgeMaintenance?.intervalMinutes !== undefined &&
+      config.knowledgeMaintenance.intervalMinutes > 0
+        ? config.knowledgeMaintenance.intervalMinutes * 60_000
+        : 60 * 60_000,
+    systemicProposalThreshold: config.knowledgeMaintenance?.systemicProposalThreshold ?? 3,
+    promotionCooldownDays: config.knowledgeMaintenance?.promotionCooldownDays ?? 30,
+  });
 
   // 3c. Start Remote Control — opt-in. It's an interactive claude.ai feature
   // (needs a trusted workspace + interactive login, no permission-bypass flag)
@@ -2116,6 +2136,18 @@ export async function startDaemon(
         }
       }
 
+      // Behavioral learning: record the operator's l2-gate decision (fire-and-forget).
+      operatorLearning.observeDecisionAnswer({
+        decisionClass: 'l2_gate',
+        context: `${runOwner}/${runRepoName}`,
+        sourceDecisionId: decisionId,
+        chosenOption: choice,
+      }).catch((e) =>
+        console.warn(
+          `[daemon] resumeParkedRuns: operator-learning observation failed for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+        ),
+      );
+
       // For a rejected resume (FLAG ON ONLY), capture the rejection feedback and
       // route the run BACK to l2-design directly (fix for the pre-existing
       // dropped-feedback bug: we strip l2-rejected here, so the l2-gate handler
@@ -2369,6 +2401,20 @@ export async function startDaemon(
         return;
       }
 
+      // Behavioral learning: record the operator's integrate decision (fire-and-forget).
+      operatorLearning
+        .observeDecisionAnswer({
+          decisionClass: 'merge_decision',
+          context: `${runOwner}/${runRepoName}`,
+          sourceDecisionId: decisionId,
+          chosenOption: answer.choice,
+        })
+        .catch((e) =>
+          console.warn(
+            `[daemon] resumeParkedRuns: operator-learning observation failed for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+          ),
+        );
+
       if (answer.choice === 'approve') {
         run.mergeDecisionApprovedEpoch = mergeEpoch;
         run.phase = 'integrate';
@@ -2537,6 +2583,7 @@ export async function startDaemon(
     );
     // Stop schedulers so no new background work starts
     if (knowledgeSyncPoller) clearInterval(knowledgeSyncPoller);
+    knowledgeMaintenance.stop();
     stopReviewScheduler();
     stopPOAgent?.();
     stopTechLeadScheduler?.();
@@ -2554,6 +2601,7 @@ export async function startDaemon(
     shuttingDown = true;
     console.log('Shutting down...');
     if (knowledgeSyncPoller) clearInterval(knowledgeSyncPoller);
+    knowledgeMaintenance.stop();
     stopHeartbeat();
     if (stopCoordinator) stopCoordinator();
     stopReviewScheduler();

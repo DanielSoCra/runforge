@@ -432,6 +432,14 @@ export const ConfigSchema = z.object({
       syncIntervalMinutes: z.number().int().positive().default(60),
     })
     .optional(),
+  knowledgeMaintenance: z
+    .object({
+      enabled: z.boolean().default(false),
+      intervalMinutes: z.number().int().positive().default(60),
+      systemicProposalThreshold: z.number().int().positive().default(3),
+      promotionCooldownDays: z.number().int().positive().default(30),
+    })
+    .optional(),
   coordination: z
     .object({
       useCoordinator: z.boolean().default(false),

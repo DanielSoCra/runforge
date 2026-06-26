@@ -204,7 +204,27 @@ STACK-AC-DECISION-ESCALATION-EMITTER:
 # re-approved by the Operator 2026-06-14 alongside the L0 v6 delta enactment.
 
 FUNC-AC-OPERATOR-LEARNING:
+  children: [ARCH-AC-OPERATOR-LEARNING]
   status: approved
+
+ARCH-AC-OPERATOR-LEARNING:
+  parent: FUNC-AC-OPERATOR-LEARNING
+  children: [STACK-AC-OPERATOR-LEARNING-TS]
+  status: draft
+
+STACK-AC-OPERATOR-LEARNING-TS:
+  parent: ARCH-AC-OPERATOR-LEARNING
+  children: []
+  code_paths:
+    - packages/daemon/src/operator-learning/
+    - packages/daemon/src/operator-learning/types.ts
+    - packages/daemon/src/operator-learning/observation-log.ts
+    - packages/daemon/src/operator-learning/preference-engine.ts
+    - packages/daemon/src/operator-learning/ranking.ts
+    - packages/daemon/src/operator-learning/audit.ts
+  test_paths:
+    - packages/daemon/src/operator-learning/**/*.test.ts
+  status: draft
 
 FUNC-AC-COMPLIANCE-GATE:
   status: approved
@@ -887,9 +907,11 @@ STACK-AC-KNOWLEDGE:
     - packages/daemon/src/knowledge/pattern-extractor.ts
     - packages/daemon/src/knowledge/proposal-store.ts
     - packages/daemon/src/knowledge/prompt-contracts.ts
+    - packages/daemon/src/knowledge/maintenance.ts
   test_paths:
     - packages/daemon/src/knowledge/**/*.test.ts
     - packages/daemon/src/knowledge/prompt-contracts.test.ts
+    - packages/daemon/src/knowledge/maintenance.test.ts
   status: draft
 
 STACK-AC-KNOWLEDGE-SYNC:
@@ -1091,8 +1113,11 @@ STACK-AC-GOVERNANCE-DAEMON:
 STACK-AC-ENRICHED-COMMITS-KNOWLEDGE:
   parent: ARCH-AC-ENRICHED-COMMITS
   children: []
-  code_paths: []  # planned: parse-commits.ts, completion.ts — add when implemented
-  test_paths: []  # planned: parse-commits.test.ts, completion.test.ts — add when implemented
+  code_paths:
+    - packages/daemon/src/knowledge/enriched-commits.ts
+    - prompts/worker.md
+  test_paths:
+    - packages/daemon/src/knowledge/enriched-commits.test.ts
   status: draft
 
 STACK-AC-SUPABASE-SYNC:

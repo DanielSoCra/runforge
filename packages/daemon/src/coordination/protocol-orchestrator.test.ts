@@ -33,7 +33,7 @@ function makeDeps(overrides: Partial<ProtocolOrchestratorDeps> = {}): ProtocolOr
     poStatusSync: vi.fn().mockResolvedValue(undefined),
     tlStatusSync: vi.fn().mockResolvedValue(undefined),
     poRetrospective: vi.fn().mockResolvedValue({ lessons: [] }),
-    tlRetrospective: vi.fn().mockResolvedValue({ lessons: [] }),
+    tlRetrospective: vi.fn().mockResolvedValue({ pitfalls: [], observations: [] }),
     ...overrides,
   };
 }
@@ -246,7 +246,7 @@ describe('ProtocolOrchestrator', () => {
     it('calls both PO and TL retrospective and returns combined output', async () => {
       const deps = makeDeps({
         poRetrospective: vi.fn().mockResolvedValue({ lessons: ['improve estimation'] }),
-        tlRetrospective: vi.fn().mockResolvedValue({ lessons: ['add retry logic'] }),
+        tlRetrospective: vi.fn().mockResolvedValue({ pitfalls: [], observations: ['add retry logic'] }),
       });
       const orchestrator = createProtocolOrchestrator(deps, makeConfig());
 
@@ -257,8 +257,34 @@ describe('ProtocolOrchestrator', () => {
       expect(result.ok).toBe(true);
       if (result.ok) {
         expect(result.value.poLessons).toEqual({ lessons: ['improve estimation'] });
-        expect(result.value.tlLessons).toEqual({ lessons: ['add retry logic'] });
+        expect(result.value.tlLessons).toEqual({ pitfalls: [], observations: ['add retry logic'] });
       }
+    });
+
+    it('submits TL retrospective pitfalls to knowledge when submitRetrospectivePitfalls is provided', async () => {
+      const tlOutput = {
+        pitfalls: [
+          {
+            artifactPatterns: ['src/foo.ts'],
+            description: 'race condition',
+            severity: 8,
+            rootCauseTag: 'race-condition',
+          },
+        ],
+        observations: [],
+      };
+      const submit = vi.fn().mockResolvedValue(1);
+      const deps = makeDeps({
+        poRetrospective: vi.fn().mockResolvedValue({ lessons: [] }),
+        tlRetrospective: vi.fn().mockResolvedValue(tlOutput),
+        submitRetrospectivePitfalls: submit,
+      });
+      const orchestrator = createProtocolOrchestrator(deps, makeConfig());
+
+      const result = await orchestrator.retrospective();
+
+      expect(result.ok).toBe(true);
+      expect(submit).toHaveBeenCalledWith(tlOutput);
     });
 
     it('returns timeout error if retrospective exceeds timeout', async () => {

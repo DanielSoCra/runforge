@@ -1,5 +1,6 @@
 // src/coordination/protocol-orchestrator.ts — Protocol triggering/sequencing for PO/TL protocols
 import { ok, err, type Result } from '../lib/result.js';
+import type { TechLeadRetrospectiveOutput } from './tech-lead/schemas.js';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -43,7 +44,8 @@ export interface ProtocolOrchestratorDeps {
   poStatusSync: () => Promise<void>;
   tlStatusSync: () => Promise<void>;
   poRetrospective: () => Promise<unknown>;
-  tlRetrospective: () => Promise<unknown>;
+  tlRetrospective: () => Promise<TechLeadRetrospectiveOutput>;
+  submitRetrospectivePitfalls?: (output: TechLeadRetrospectiveOutput) => Promise<number>;
 }
 
 export interface ProtocolOrchestrator {
@@ -127,6 +129,14 @@ export function createProtocolOrchestrator(
         config.protocolTimeoutMs,
         'Retrospective protocol',
       );
+      if (deps.submitRetrospectivePitfalls && tlLessons != null) {
+        await deps.submitRetrospectivePitfalls(tlLessons).catch((e) =>
+          console.warn(
+            '[protocol-orchestrator] failed to submit retrospective pitfalls:',
+            e instanceof Error ? e.message : String(e),
+          ),
+        );
+      }
       return ok({ poLessons, tlLessons });
     } catch (e) {
       return err(e instanceof Error ? e : new Error(String(e)));
