@@ -167,6 +167,13 @@ export function createPhaseHandlers(
   // OPTIONAL input-boundary sanitization pipeline. Default = identity, keeping
   // the raise path byte-identical when no deployment configures sanitizers.
   sanitizationPipeline?: SanitizationPipeline,
+  // OPTIONAL detect-settled signal (gap #6 — detect dispatch serialization). Fired
+  // in the `detect` handler's `finally` AFTER the repo git lock is released
+  // (release-before-signal). The daemon threads a per-run idempotent gate-release
+  // here so the repo's detect gate frees the moment detect settles — preserving
+  // post-detect concurrency and letting the next FIFO-queued detect proceed
+  // without false contention. Omitted for website / non-detect entrants.
+  onDetectSettled?: () => void,
 ): PhaseHandlerMap {
   const repo = repoName;
   // Lazily constructed only when the decision index is enabled — a disabled
@@ -524,15 +531,16 @@ export function createPhaseHandlers(
   return {
     detect: async (run: RunState): Promise<PhaseEvent> => {
       if (!acquireRepoGitLock()) {
-        console.error(`[detect] Lock held by another run — aborting`);
-        run.lastFailure = createFailureRecord({
-          kind: 'workspace-repair-needed',
-          phase: 'detect',
-          message: 'Repository git lock is held by another run',
-          severity: 'warning',
-          retryable: true,
-          repairAction: 'recreate-workspace',
-        });
+        // GATE BYPASS (gap #6): the daemon's dispatch gate serializes detect so two
+        // detects can no longer legally overlap in-process. A contended lock HERE
+        // means the gate was bypassed — a loud structured fault, NOT routine
+        // workspace repair. Do NOT route as `workspace-repair-needed` /
+        // `recreate-workspace` (that destructive path is reserved for genuine
+        // reconcileWorkspace failures); surface the invariant violation instead.
+        console.error(
+          `[detect] CONTENDED despite dispatch serialization — possible concurrent shared-worktree mutation`,
+          { feature: featureBranch },
+        );
         return 'failure';
       }
       try {
@@ -550,6 +558,17 @@ export function createPhaseHandlers(
             `[detect] ensureRepoFresh(${baseRef}) failed (continuing with local base): ${refreshed.error.message}`,
           );
         }
+        // Post-gate assertion (gap #6): the repo git lock MUST be held across the
+        // checkout-mutating reconcileWorkspace call. If it is not, the dispatch
+        // serialization invariant was violated — surface it loudly so a hidden
+        // concurrent shared-worktree mutation cannot be silently masked.
+        if (!isRepoGitLocked()) {
+          console.error(
+            `[detect] reconcileWorkspace invoked WITHOUT the repo git lock held — serialization invariant violated`,
+            { feature: featureBranch },
+          );
+        }
+        console.log(`[detect] reconcileWorkspace start for ${featureBranch}`);
         const reconciled = await reconcileWorkspace({
           repoRoot: mainRepoRoot,
           workspaceDir,
@@ -557,6 +576,9 @@ export function createPhaseHandlers(
           stagingBranch: config.branches.staging,
           sourceRef: config.runtimeSource.expectedRef,
         });
+        console.log(
+          `[detect] reconcileWorkspace done for ${featureBranch} (ok=${reconciled.ok})`,
+        );
         if (!reconciled.ok) {
           console.error(
             `[detect] Workspace reconcile failed:`,
@@ -576,7 +598,14 @@ export function createPhaseHandlers(
         run.workspacePath = reconciled.value.path; // Persist for daemon restart recovery
         return 'success';
       } finally {
+        // Release-before-signal (gap #6 — load-bearing order): free the repo git
+        // lock FIRST, THEN signal the daemon's detect gate. If onDetectSettled
+        // launched the next FIFO-queued crash-resume detect before the lock was
+        // released, that detect would hit acquireRepoGitLock() while the old lock
+        // is still held → false contention. Early release preserves post-detect
+        // concurrency.
         releaseRepoGitLock();
+        onDetectSettled?.();
       }
     },
 

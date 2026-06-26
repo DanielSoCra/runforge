@@ -43,6 +43,7 @@ const {
   mockClassifyBatch,
   mockBuildRuntimeSourcePolicy,
   mockValidateRuntimeSource,
+  mockGetStartPhase,
 } = vi.hoisted(() => ({
   mockStateMgr: {
     initialize: vi.fn().mockResolvedValue(undefined),
@@ -154,6 +155,7 @@ const {
   mockClassifyBatch: vi.fn(),
   mockBuildRuntimeSourcePolicy: vi.fn(),
   mockValidateRuntimeSource: vi.fn(),
+  mockGetStartPhase: vi.fn(),
 }));
 
 // --- Module mocks (use classes for constructors to work with `new`) ---
@@ -267,7 +269,7 @@ vi.mock('./pipeline.js', () => ({
 }));
 vi.mock('./fsm.js', () => ({
   getPipeline: () => ({}),
-  getStartPhase: () => 'detect',
+  getStartPhase: (...args: unknown[]) => mockGetStartPhase(...args),
 }));
 vi.mock('./variants.js', () => ({
   selectVariant: (...args: unknown[]) => mockSelectVariant(...args),
@@ -542,6 +544,7 @@ describe('daemon', () => {
     mockDetector.claimFeaturePipelineWork.mockResolvedValue(ok(undefined));
     mockDetector.markStuck.mockResolvedValue(ok(undefined));
     mockSelectVariant.mockReturnValue('feature');
+    mockGetStartPhase.mockReturnValue('detect'); // default: all variants start at 'detect'
     mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
     mockServerStart.mockResolvedValue(ok(undefined));
     mockDegradedStart.mockResolvedValue(ok(undefined));
@@ -700,6 +703,7 @@ describe('daemon', () => {
       mockRunHistory.markInProgressRunsStuck,
       mockDbSqlEnd,
       mockSelectVariant,
+      mockGetStartPhase,
       mockCreateReviewScheduler,
       mockCreatePOAgent,
       mockCreateTechLeadScheduler,
@@ -1751,12 +1755,21 @@ describe('daemon', () => {
       await vi.advanceTimersByTimeAsync(0);
 
       expect(mockDetector.claimWork).toHaveBeenCalledWith(1);
-      expect(mockDetector.claimWork).toHaveBeenCalledWith(2);
+      // gap #6: same-repo detect is serialized at the claim GATE (checked before
+      // claimWork, so a gated issue is never stranded as in-progress). Issues
+      // 1/2/3 share the daemon's single repo, so only #1 is claimed this tick; #2
+      // and #3 are gated and re-detected next poll once #1's detect settles and
+      // releases the repo gate. Because classification runs on CLAIMED work
+      // (preClassifyReadyWork, after the gate), only #1 is classified + started.
+      // Same-repo detects can never truly run concurrently (the git-worktree lock
+      // enforces this) — gap #6 serializes cleanly instead of contending.
+      // NOTE: this serializes same-repo batch classification to 1/tick; a future
+      // optimization could classify pre-gate to restore batching via gap#5's cache.
+      expect(mockDetector.claimWork).not.toHaveBeenCalledWith(2);
       expect(mockDetector.claimWork).not.toHaveBeenCalledWith(3);
       expect(mockClassifyBatch).toHaveBeenCalledTimes(1);
       expect(mockClassifyBatch.mock.calls[0]?.[1]).toEqual([
         expect.objectContaining({ issueNumber: 1 }),
-        expect.objectContaining({ issueNumber: 2 }),
       ]);
       const startedRequests = phaseHandlerCalls.map(
         (call) => call[6] as WorkRequest,
@@ -1766,13 +1779,6 @@ describe('daemon', () => {
           issueNumber: 1,
           preClassification: expect.objectContaining({
             complexity: 'simple',
-            allocatedCost: 0.05,
-          }),
-        }),
-        expect.objectContaining({
-          issueNumber: 2,
-          preClassification: expect.objectContaining({
-            complexity: 'complex',
             allocatedCost: 0.05,
           }),
         }),
@@ -4570,6 +4576,296 @@ describe('daemon', () => {
       // Must be the raw LLM output, not the stringified CLI wrapper
       expect(result).toBe(proposalsJson);
       expect(result).not.toContain('cost_usd');
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // gap #6 — detect-phase dispatch serialization acceptance gate (#779)
+  // All tests named with "[detect]" so `-t "detect"` filter selects them.
+  // RED until: detectInFlight Set, onDetectSettled param, gate-before-claim,
+  //   per-run idempotent release, and FIFO defer for crash-resumption are wired.
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('detect gate serialization (#779 gap6)', () => {
+    /** Make a minimal incomplete-run fixture for crash-resumption tests. */
+    function makeIncompleteRun(
+      issueNumber: number,
+      phase: string,
+      owner = 'test-owner',
+      repo = 'test-repo',
+    ) {
+      return {
+        id: `run-${issueNumber}`,
+        issueNumber,
+        title: `Run #${issueNumber}`,
+        phase,
+        variant: 'feature',
+        phaseCompletions: {},
+        checkpoints: [] as unknown[],
+        cost: 0,
+        perRunBudget: 10,
+        fixAttempts: [] as unknown[],
+        errorHashes: {},
+        repoOwner: owner,
+        repoName: repo,
+        startedAt: '2026-03-21T00:00:00Z',
+        updatedAt: '2026-03-21T01:00:00Z',
+      };
+    }
+
+    it('[detect] (a) second detect-run for same repo NOT claimed on same tick — gate is checked BEFORE claimWork (no stranded claim)', async () => {
+      // With maxConcurrentRuns=2, the concurrency limit does not mask the detect gate.
+      // Both requests are for the same repo → only the first should be claimed;
+      // the second must be skipped (not claimed) so it retries on the next tick.
+      // Without the gate the current code claims both → claimWork called twice → RED.
+      const config = makeConfig({ maxConcurrentRuns: 2 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      const requests = [
+        makeWorkRequest({ issueNumber: 1001 }),
+        makeWorkRequest({ issueNumber: 1002 }),
+      ];
+      mockDetector.detectReadyWork.mockResolvedValue(ok(requests));
+      // Block so activeRuns stays at 1 (won't mask the gate via concurrency limit)
+      mockRunPipeline.mockImplementation(() => new Promise(() => {}));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(30000); // first poll tick
+      await vi.advanceTimersByTimeAsync(0); // flush microtasks
+
+      // RED: without the gate, claimWork is called for both requests
+      expect(mockDetector.claimWork).toHaveBeenCalledTimes(1);
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(1001);
+      expect(mockDetector.claimWork).not.toHaveBeenCalledWith(1002);
+    });
+
+    it('[detect] (b) gate clears on onDetectSettled signal — deferred run claimed on next tick only after settle', async () => {
+      // Behavioral test: reqA claimed tick 1 (gate set), reqB NOT claimed tick 1 (gate holds),
+      // onDetectSettled fires → gate cleared → reqB claimed tick 2 while reqA pipeline still running.
+      // RED: (1) no gate → reqB claimed tick 1; (2) onDetectSettled not wired → arg[18] undefined.
+      const config = makeConfig({ maxConcurrentRuns: 2 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      const reqA = makeWorkRequest({ issueNumber: 1003 });
+      const reqB = makeWorkRequest({ issueNumber: 1004 });
+      mockDetector.detectReadyWork
+        .mockResolvedValueOnce(ok([reqA, reqB])) // tick 1: both available
+        .mockResolvedValueOnce(ok([reqB]))        // tick 2: reqB still available
+        .mockResolvedValue(ok([]));
+
+      let resolveRunA!: (v: { outcome: string }) => void;
+      mockRunPipeline
+        .mockImplementationOnce(() => new Promise((r) => { resolveRunA = r; })) // runA blocks
+        .mockResolvedValue({ outcome: 'complete' }); // runB resolves when claimed
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(30000); // tick 1
+      await vi.advanceTimersByTimeAsync(0);     // flush processWorkRequest setup
+
+      // RED: without the gate, reqB is claimed on tick 1 too
+      expect(mockDetector.claimWork).not.toHaveBeenCalledWith(1004);
+
+      // phaseHandlerCalls[0][18] is onDetectSettled; RED if not wired
+      const onDetectSettled = phaseHandlerCalls[0]?.[18] as (() => void) | undefined;
+      expect(typeof onDetectSettled).toBe('function'); // RED: undefined
+
+      // When wired: calling onDetectSettled should unblock reqB on next tick
+      if (typeof onDetectSettled === 'function') {
+        onDetectSettled(); // detect settled → gate cleared
+        await vi.advanceTimersByTimeAsync(30000); // tick 2
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mockDetector.claimWork).toHaveBeenCalledWith(1004); // reqB now claimable
+        // runA pipeline still unresolved — early release confirmed by B being claimable
+        expect(resolveRunA).toBeDefined(); // runA is still blocking
+      }
+    });
+
+    it('[detect] (c) leak guard — run rejecting before detect still frees the gate via .finally backstop', async () => {
+      // The pre-detect window (saveRunState → insertRun → token → readAgencyConfig →
+      // createPhaseHandlers) can throw before detect ever runs. Without a .finally
+      // backstop, detectInFlight leaks and the repo is permanently blocked.
+      // Test: saveRunState rejects for reqA (pre-detect) → gate must clear → reqB
+      // is NOT claimed on tick 1 (gate blocks it) → claimable on tick 2 after clear.
+      // RED: without the gate, reqB is claimed on tick 1 too.
+      const config = makeConfig({ maxConcurrentRuns: 2 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      const reqA = makeWorkRequest({ issueNumber: 1004 });
+      const reqB = makeWorkRequest({ issueNumber: 1005 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([reqA, reqB]));
+      // saveRunState throws for reqA → processWorkRequest rejects before detect
+      mockStateMgr.saveRunState.mockRejectedValueOnce(new Error('disk full'));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(30000); // tick 1
+      await vi.advanceTimersByTimeAsync(0); // flush rejection + .finally
+
+      // RED: without the gate, reqB is claimed on the same tick as reqA
+      expect(mockDetector.claimWork).not.toHaveBeenCalledWith(1005);
+    });
+
+    it('[detect] (d) website variant (start phase "init") does NOT set the detect gate — detect run for same repo gets onDetectSettled', async () => {
+      // Website runs start at 'init', not 'detect'. The gate must only apply to runs
+      // whose entry phase is 'detect'. If website is incorrectly gated it leaks forever.
+      // Use issue-based mock (not one-shot) so selectVariant call at the claim gate
+      // doesn't consume the stub before processWorkRequest sees it.
+      const config = makeConfig({ maxConcurrentRuns: 3 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      // Issue-based variant selection: 1006=website, 1007=feature
+      mockSelectVariant.mockImplementation((req: WorkRequest) =>
+        req.issueNumber === 1006 ? 'website' : 'feature',
+      );
+      mockGetStartPhase.mockImplementation((variant: string) =>
+        variant === 'website' ? 'init' : 'detect',
+      );
+
+      const requests = [
+        makeWorkRequest({ issueNumber: 1006 }),
+        makeWorkRequest({ issueNumber: 1007 }),
+      ];
+      mockDetector.detectReadyWork.mockResolvedValue(ok(requests));
+      mockRunPipeline.mockImplementation(() => new Promise(() => {}));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Both requests claimed: website doesn't set gate so detect isn't blocked by it
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(1006);
+      expect(mockDetector.claimWork).toHaveBeenCalledWith(1007);
+
+      // detect run (1007): createPhaseHandlers call must have onDetectSettled (arg[18])
+      // RED: arg[18] not wired yet
+      const detectCall = phaseHandlerCalls.find(
+        (call) => (call[6] as WorkRequest)?.issueNumber === 1007,
+      );
+      expect(typeof detectCall?.[18]).toBe('function'); // RED: undefined
+    });
+
+    it('[detect] (e) cross-run idempotent release — run-1 late .finally does NOT clear run-2 gate entry', async () => {
+      // Per-run release closure is idempotent. Once run-1's detect settles
+      // (onDetectSettled fires → gate deleted), the run-2 entry is a separate add.
+      // A run-1 backstop .finally (fires after detect settled) must be a no-op,
+      // not delete run-2's key.
+      // RED: onDetectSettled not wired → phaseHandlerCalls[0][18] is undefined.
+      const config = makeConfig({ maxConcurrentRuns: 2 });
+      mockLoadConfig.mockResolvedValue(ok(config));
+
+      const request = makeWorkRequest({ issueNumber: 1008 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+      mockRunPipeline.mockImplementation(() => new Promise(() => {}));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // onDetectSettled must be a per-run function reference
+      const onDetectSettledRun1 = phaseHandlerCalls[0]?.[18] as (() => void) | undefined;
+      // RED: arg[18] not wired — undefined
+      expect(typeof onDetectSettledRun1).toBe('function');
+    });
+
+    it('[detect] (f) crash-resume at detect phase is gated; post-detect crash-resume is NOT gated; reenterPipeline is NOT gated', async () => {
+      // Crash-resumption path (findIncompleteRuns) must gate run.phase==='detect'.
+      // A run resuming at 'implement' (already past detect) must NOT be gated.
+      // Both pipelines should start: runB (implement) is NOT blocked even when runA (detect)
+      // occupies the gate, because implement runs skip the detect gate entirely.
+      // RED: createPhaseHandlers for crash-resumed detect run does not receive onDetectSettled.
+      const runA = makeIncompleteRun(1009, 'detect');    // must be gated
+      const runB = makeIncompleteRun(1010, 'implement'); // must NOT be gated (past detect)
+      mockStateMgr.findIncompleteRuns.mockResolvedValue([runA, runB]);
+      mockRunPipeline.mockImplementation(() => new Promise(() => {})); // both block
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(0); // flush crash-resumption startup
+
+      // runB (implement-phase) must start IMMEDIATELY — not blocked by runA's detect gate
+      // Both runA and runB have runPipeline called (implement-phase doesn't wait on detect)
+      expect(mockRunPipeline).toHaveBeenCalledTimes(2);
+
+      // createPhaseHandlers for the detect run (run #1009) must have onDetectSettled wired
+      const detectResumeCall = phaseHandlerCalls.find(
+        (call) => (call[6] as { issueNumber: number })?.issueNumber === 1009,
+      );
+      // RED: crash-resume path doesn't pass onDetectSettled to createPhaseHandlers yet
+      expect(typeof detectResumeCall?.[18]).toBe('function');
+
+      // The implement-phase run (#1010) must NOT have onDetectSettled (it's post-detect)
+      const implementResumeCall = phaseHandlerCalls.find(
+        (call) => (call[6] as { issueNumber: number })?.issueNumber === 1010,
+      );
+      expect(implementResumeCall?.[18]).toBeUndefined();
+    });
+
+    it('[detect] (g) crash-resumed detect frees the gate EARLY via onDetectSettled — not only at whole-run finally', async () => {
+      // Early release: the detect gate must clear when detect settles (detect.finally),
+      // not when the whole multi-phase run completes. This keeps post-detect concurrency.
+      // Requires onDetectSettled to be wired into the crash-resume createPhaseHandlers call.
+      // RED: crash-resume path doesn't pass onDetectSettled (arg[18] is undefined).
+      const run = makeIncompleteRun(1011, 'detect');
+      mockStateMgr.findIncompleteRuns.mockResolvedValue([run]);
+      mockRunPipeline.mockImplementation(() => new Promise(() => {})); // whole run never completes
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(0);
+
+      const crashResumeCall = phaseHandlerCalls[0];
+      // RED: arg[18] (onDetectSettled) not wired in crash-resume path
+      expect(typeof crashResumeCall?.[18]).toBe('function');
+    });
+
+    it('[detect] (h) queue-defer invariant — two startup detect runs for same repo: second deferred, launched EXACTLY ONCE after first settles', async () => {
+      // Crash-resumption is a one-shot startup pass — skip-and-drop is forbidden.
+      // Two incomplete detect runs for the same repo → first runs immediately,
+      // second is QUEUED/DEFERRED until the first detect settles (onDetectSettled fires),
+      // then launched exactly once (not zero times, not twice — idempotent).
+      // RED: current code (no defer) calls runPipeline for BOTH runs immediately → count=2.
+      const run1 = makeIncompleteRun(1012, 'detect', 'test-owner', 'test-repo');
+      const run2 = makeIncompleteRun(1013, 'detect', 'test-owner', 'test-repo'); // same repo
+      mockStateMgr.findIncompleteRuns.mockResolvedValue([run1, run2]);
+
+      let resolveRun1!: (v: { outcome: string }) => void;
+      mockRunPipeline
+        .mockImplementationOnce(
+          () => new Promise((r) => { resolveRun1 = r; }),
+        )
+        .mockImplementation(() => Promise.resolve({ outcome: 'complete' }));
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(0); // flush startup
+
+      // RED: without FIFO defer, runPipeline is called for both runs immediately (count=2)
+      expect(mockRunPipeline).toHaveBeenCalledTimes(1);
+
+      // onDetectSettled for run1 must be wired — RED if undefined
+      const onDetectSettledRun1 = phaseHandlerCalls[0]?.[18] as (() => void) | undefined;
+      expect(typeof onDetectSettledRun1).toBe('function'); // RED: not wired
+
+      if (typeof onDetectSettledRun1 === 'function') {
+        // Settle run-1's detect → gate cleared → run-2 launched
+        onDetectSettledRun1();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mockRunPipeline).toHaveBeenCalledTimes(2); // run-2 launched exactly once
+
+        // Idempotency: calling onDetectSettled AGAIN (late .finally backstop simulation)
+        // must NOT launch run-2 a second time
+        onDetectSettledRun1();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mockRunPipeline).toHaveBeenCalledTimes(2); // still exactly 2 — no double-launch
+
+        // Resolving run-1's whole pipeline also must not re-launch run-2
+        resolveRun1({ outcome: 'complete' });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mockRunPipeline).toHaveBeenCalledTimes(2); // still 2
+      }
     });
   });
 });

@@ -303,6 +303,8 @@ function createHandlers(
   phaseLabelMirror?: PhaseLabelMirror,
   decisionManager?: import('./decision-escalation/manager.js').DecisionIndexManager,
   decisionPublisher?: import('./decision-escalation/github-block-notifier.js').GitHubBlockPublisher,
+  // gap #6 RED gate: onDetectSettled does not yet exist in createPhaseHandlers signature
+  onDetectSettled?: () => void,
 ) {
   const config = makeConfig(configOverrides);
   const mockCoordinator = { implement: vi.fn() } as any;
@@ -324,6 +326,9 @@ function createHandlers(
       phaseLabelMirror,
       decisionManager,
       decisionPublisher,
+      undefined, // registry
+      undefined, // sanitizationPipeline
+      onDetectSettled,
     ),
     coordinator: mockCoordinator,
     config,
@@ -3532,6 +3537,116 @@ describe('createPhaseHandlers', () => {
       expect(typeof handlers['l3-generate']).toBe('function');
       expect(typeof handlers['l3-compliance']).toBe('function');
       expect(typeof handlers.decompose).toBe('function');
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // gap #6 — detect-phase serialization acceptance gate (#779)
+  // RED until: createPhaseHandlers accepts onDetectSettled param (phases.ts),
+  //   detect calls releaseRepoGitLock() BEFORE onDetectSettled(), and the
+  //   contention branch emits a loud "dispatch serialization" error instead of
+  //   silently routing to recreate-workspace.
+  // ────────────────────────────────────────────────────────────────────────────
+  describe('detect serialization (#779 gap6)', () => {
+    beforeEach(() => {
+      releaseDetectLock();
+      vi.clearAllMocks();
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockExistsSync.mockReturnValue(false);
+      // Default: git succeeds (workspace dir not present → worktree add)
+      mockGit.mockResolvedValue({ ok: true, value: '' });
+    });
+
+    afterEach(() => {
+      releaseDetectLock();
+    });
+
+    it('detect invokes onDetectSettled in finally on success and observes lock already released', async () => {
+      // Load-bearing order: releaseRepoGitLock() MUST fire BEFORE onDetectSettled().
+      // If signal fires while lock is held the next FIFO-queued detect hits false
+      // contention on acquireRepoGitLock() before it can legally proceed.
+      const lockDuringReconcile: boolean[] = [];
+      const lockStates: boolean[] = [];
+      const onDetectSettled = vi.fn(() => {
+        lockStates.push(isDetectLocked());
+      });
+      // Record lock state DURING the git mutation (must be held while checkout is in progress)
+      mockGit.mockImplementationOnce(async () => {
+        lockDuringReconcile.push(isDetectLocked()); // must be true — lock held during worktree add
+        return { ok: true, value: '' };
+      });
+      const { handlers } = createHandlers(
+        {},
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        onDetectSettled,
+      );
+      const result = await handlers.detect!(makeRun());
+      expect(result).toBe('success');
+      // Lock must be held DURING the mutating git operation (not released early before callback)
+      expect(lockDuringReconcile[0]).toBe(true);
+      // RED: onDetectSettled param not yet in createPhaseHandlers — callback never invoked
+      expect(onDetectSettled).toHaveBeenCalledTimes(1);
+      // RED: lock must be released BEFORE callback fires (release-before-signal order)
+      expect(lockStates[0]).toBe(false);
+    });
+
+    it('detect invokes onDetectSettled in finally on failure and observes lock already released', async () => {
+      // onDetectSettled must fire in the `finally` block on BOTH success and failure paths.
+      const lockStates: boolean[] = [];
+      const onDetectSettled = vi.fn(() => {
+        lockStates.push(isDetectLocked());
+      });
+      // All git worktree attempts fail → reconcileWorkspace returns failure
+      mockGit.mockResolvedValue({ ok: false, error: new Error('worktree fail') });
+      const { handlers } = createHandlers(
+        {},
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        onDetectSettled,
+      );
+      const result = await handlers.detect!(makeRun());
+      expect(result).toBe('failure');
+      // RED: callback not invoked — param not wired in createPhaseHandlers yet
+      expect(onDetectSettled).toHaveBeenCalledTimes(1);
+      // RED: lock must be released BEFORE callback fires
+      expect(lockStates[0]).toBe(false);
+    });
+
+    it('contended acquireRepoGitLock emits loud dispatch-serialization error, NOT silent workspace-repair routing', async () => {
+      // With the dispatch gate in place, two detects should NEVER legally overlap
+      // in-process. If acquireRepoGitLock() is contended, it means the gate was
+      // bypassed — this is a loud fault, not a routine recreate-workspace repair.
+      acquireDetectLock(); // simulate another run already holds the detect lock
+      const capturedErrors: string[] = [];
+      vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+        capturedErrors.push(args.map(String).join(' '));
+      });
+
+      const { handlers } = createHandlers();
+      const run = makeRun();
+      const result = await handlers.detect!(run);
+
+      expect(result).toBe('failure');
+      // RED: current code emits '[detect] Lock held by another run — aborting',
+      // not the required loud "dispatch serialization" error
+      expect(
+        capturedErrors.some((m) => m.includes('dispatch serialization')),
+      ).toBe(true);
+      // RED: contention must NOT route to recreate-workspace; that path is reserved
+      // for genuine reconcileWorkspace failures, not in-process lock contention.
+      // Also assert kind is not workspace-repair-needed (a buggy impl could omit
+      // repairAction but still set the kind, falsely passing the repairAction check).
+      expect(run.lastFailure?.repairAction).not.toBe('recreate-workspace');
+      expect(run.lastFailure?.kind).not.toBe('workspace-repair-needed');
     });
   });
 });

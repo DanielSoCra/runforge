@@ -1043,6 +1043,15 @@ export async function startDaemon(
   let consecutiveStuckCount = 0;
   const activeIssues = new Set<number>(); // Persists across poll cycles — prevents duplicate runs
 
+  // gap #6 — detect dispatch serialization. Daemon-scoped, repo-keyed registry of
+  // repos with a detect phase currently in flight (entry phase === 'detect').
+  // A run is gated BEFORE it is claimed/committed (so an already-claimed in-progress
+  // run is never stranded) and released the moment detect SETTLES (release-before-
+  // signal in phases.ts) — preserving post-detect concurrency. Covers ALL in-process
+  // detect entrants: fresh-work claim loops AND crash-resumption (FIFO-deferred,
+  // never skip-and-dropped). website/non-detect/parked-resume entrants bypass it.
+  const detectInFlight = new Set<string>();
+
   const stuckBackoff = new Map<
     string,
     { count: number; lastStuckAt: number }
@@ -1195,6 +1204,11 @@ export async function startDaemon(
         if (!sourceReady.ok) return;
         costTracker.maybeResetDaily();
         const claimedIssues = new Set<number>();
+        // gap #6: repo key for the detect dispatch gate (one repo per poll callback).
+        const detectRepoKey = `${owner}/${name}`;
+        // Per-tick carrier of each committed run's idempotent detect-gate release,
+        // created at the claim/commit point and threaded into the dispatch site.
+        const detectGateReleases = new Map<number, () => void>();
         // DECISION-OWNED skip set (flag-ON only): the cockpit's requeue label is
         // `ready` — the SAME label new-work detection polls. Without this guard the
         // new-work poll would spawn a DUPLICATE run for a parked decision issue
@@ -1254,12 +1268,29 @@ export async function startDaemon(
             );
             continue;
           }
+          // gap #6: detect dispatch gate, checked BEFORE claimWork so we never
+          // strand an already-claimed in-progress issue. A run whose ENTRY phase is
+          // detect is skipped this tick (retried next tick) while another detect is
+          // in flight for the same repo.
+          const entersAtDetect =
+            getStartPhase(selectVariant(request)) === 'detect';
+          if (entersAtDetect && detectInFlight.has(detectRepoKey)) continue;
           const claimResult = await detector.claimWork(request.issueNumber);
           if (!claimResult.ok) continue;
           claimedIssues.add(request.issueNumber);
           activeIssues.add(request.issueNumber);
           activeRuns++;
           repoManager!.notifyRunStart(repoId);
+          // Commit point: mark the repo's detect gate held and build the per-run
+          // idempotent release (carried to the dispatch site below).
+          if (entersAtDetect) detectInFlight.add(detectRepoKey);
+          let gateReleased = false;
+          const releaseDetectGateOnce = (): void => {
+            if (gateReleased) return;
+            gateReleased = true;
+            if (entersAtDetect) detectInFlight.delete(detectRepoKey);
+          };
+          detectGateReleases.set(request.issueNumber, releaseDetectGateOnce);
           readyToProcess.push(request);
         }
         const preClassifiedReady = await preClassifyReadyWork(
@@ -1268,6 +1299,9 @@ export async function startDaemon(
           batchClassifierConfig,
         );
         for (const request of preClassifiedReady) {
+          const releaseDetectGateOnce = detectGateReleases.get(
+            request.issueNumber,
+          );
           processWorkRequest(
             config,
             repoId,
@@ -1289,6 +1323,7 @@ export async function startDaemon(
             decisionManager,
             deploymentRegistry,
             protectedStore,
+            releaseDetectGateOnce,
           )
             .then((outcome) =>
               handleRunOutcome(outcome, request.issueNumber, owner, name),
@@ -1300,6 +1335,11 @@ export async function startDaemon(
               activeRuns--;
               activeIssues.delete(request.issueNumber);
               repoManager!.notifyRunEnd(repoId);
+              // gap #6 setup-throw backstop: a throw in processWorkRequest's
+              // pre-detect setup rejects the promise before detect's EARLY release
+              // fires, so free the gate here too. Idempotent — a no-op once detect
+              // already released.
+              releaseDetectGateOnce?.();
             });
         }
 
@@ -1320,47 +1360,66 @@ export async function startDaemon(
           !isDecisionOwned(bugResult.value)
         ) {
           const bugRequest = bugResult.value;
-          const bugClaimResult = await detector.claimBugFixWork(
-            bugRequest.issueNumber,
-          );
-          if (bugClaimResult.ok) {
-            claimedIssues.add(bugRequest.issueNumber);
-            activeIssues.add(bugRequest.issueNumber);
-            activeRuns++;
-            repoManager!.notifyRunStart(repoId);
-            processWorkRequest(
-              config,
-              repoId,
-              owner,
-              name,
-              bugRequest,
-              runtime,
-              coordinator,
-              costTracker,
-              stateMgr,
-              detector,
-              stateDir,
-              runWriter ?? undefined,
-              configReader ?? undefined,
-              runHistory ?? undefined,
-              repoRoot,
-              knowledgeStore,
-              repoManager,
-              decisionManager,
-              deploymentRegistry,
-              protectedStore,
-            )
-              .then((outcome) =>
-                handleRunOutcome(outcome, bugRequest.issueNumber, owner, name),
+          // gap #6: detect dispatch gate (checked before claim — no stranded claim).
+          const bugEntersAtDetect =
+            getStartPhase(selectVariant(bugRequest)) === 'detect';
+          if (!(bugEntersAtDetect && detectInFlight.has(detectRepoKey))) {
+            const bugClaimResult = await detector.claimBugFixWork(
+              bugRequest.issueNumber,
+            );
+            if (bugClaimResult.ok) {
+              claimedIssues.add(bugRequest.issueNumber);
+              activeIssues.add(bugRequest.issueNumber);
+              activeRuns++;
+              repoManager!.notifyRunStart(repoId);
+              if (bugEntersAtDetect) detectInFlight.add(detectRepoKey);
+              let bugGateReleased = false;
+              const releaseBugDetectGateOnce = (): void => {
+                if (bugGateReleased) return;
+                bugGateReleased = true;
+                if (bugEntersAtDetect) detectInFlight.delete(detectRepoKey);
+              };
+              processWorkRequest(
+                config,
+                repoId,
+                owner,
+                name,
+                bugRequest,
+                runtime,
+                coordinator,
+                costTracker,
+                stateMgr,
+                detector,
+                stateDir,
+                runWriter ?? undefined,
+                configReader ?? undefined,
+                runHistory ?? undefined,
+                repoRoot,
+                knowledgeStore,
+                repoManager,
+                decisionManager,
+                deploymentRegistry,
+                protectedStore,
+                releaseBugDetectGateOnce,
               )
-              .catch((e) =>
-                console.error(`Run failed for #${bugRequest.issueNumber}:`, e),
-              )
-              .finally(() => {
-                activeRuns--;
-                activeIssues.delete(bugRequest.issueNumber);
-                repoManager!.notifyRunEnd(repoId);
-              });
+                .then((outcome) =>
+                  handleRunOutcome(
+                    outcome,
+                    bugRequest.issueNumber,
+                    owner,
+                    name,
+                  ),
+                )
+                .catch((e) =>
+                  console.error(`Run failed for #${bugRequest.issueNumber}:`, e),
+                )
+                .finally(() => {
+                  activeRuns--;
+                  activeIssues.delete(bugRequest.issueNumber);
+                  repoManager!.notifyRunEnd(repoId);
+                  releaseBugDetectGateOnce();
+                });
+            }
           }
         }
 
@@ -1381,47 +1440,61 @@ export async function startDaemon(
           !isDecisionOwned(fpResult.value)
         ) {
           const fpRequest = fpResult.value;
-          const fpClaimResult = await detector.claimFeaturePipelineWork(
-            fpRequest.issueNumber,
-            fpRequest.workType as FeaturePipelineWorkType,
-          );
-          if (fpClaimResult.ok) {
-            activeIssues.add(fpRequest.issueNumber);
-            activeRuns++;
-            repoManager!.notifyRunStart(repoId);
-            processWorkRequest(
-              config,
-              repoId,
-              owner,
-              name,
-              fpRequest,
-              runtime,
-              coordinator,
-              costTracker,
-              stateMgr,
-              detector,
-              stateDir,
-              runWriter ?? undefined,
-              configReader ?? undefined,
-              runHistory ?? undefined,
-              repoRoot,
-              knowledgeStore,
-              repoManager,
-              decisionManager,
-              deploymentRegistry,
-              protectedStore,
-            )
-              .then((outcome) =>
-                handleRunOutcome(outcome, fpRequest.issueNumber, owner, name),
+          // gap #6: detect dispatch gate (checked before claim — no stranded claim).
+          const fpEntersAtDetect =
+            getStartPhase(selectVariant(fpRequest)) === 'detect';
+          if (!(fpEntersAtDetect && detectInFlight.has(detectRepoKey))) {
+            const fpClaimResult = await detector.claimFeaturePipelineWork(
+              fpRequest.issueNumber,
+              fpRequest.workType as FeaturePipelineWorkType,
+            );
+            if (fpClaimResult.ok) {
+              activeIssues.add(fpRequest.issueNumber);
+              activeRuns++;
+              repoManager!.notifyRunStart(repoId);
+              if (fpEntersAtDetect) detectInFlight.add(detectRepoKey);
+              let fpGateReleased = false;
+              const releaseFpDetectGateOnce = (): void => {
+                if (fpGateReleased) return;
+                fpGateReleased = true;
+                if (fpEntersAtDetect) detectInFlight.delete(detectRepoKey);
+              };
+              processWorkRequest(
+                config,
+                repoId,
+                owner,
+                name,
+                fpRequest,
+                runtime,
+                coordinator,
+                costTracker,
+                stateMgr,
+                detector,
+                stateDir,
+                runWriter ?? undefined,
+                configReader ?? undefined,
+                runHistory ?? undefined,
+                repoRoot,
+                knowledgeStore,
+                repoManager,
+                decisionManager,
+                deploymentRegistry,
+                protectedStore,
+                releaseFpDetectGateOnce,
               )
-              .catch((e) =>
-                console.error(`Run failed for #${fpRequest.issueNumber}:`, e),
-              )
-              .finally(() => {
-                activeRuns--;
-                activeIssues.delete(fpRequest.issueNumber);
-                repoManager!.notifyRunEnd(repoId);
-              });
+                .then((outcome) =>
+                  handleRunOutcome(outcome, fpRequest.issueNumber, owner, name),
+                )
+                .catch((e) =>
+                  console.error(`Run failed for #${fpRequest.issueNumber}:`, e),
+                )
+                .finally(() => {
+                  activeRuns--;
+                  activeIssues.delete(fpRequest.issueNumber);
+                  repoManager!.notifyRunEnd(repoId);
+                  releaseFpDetectGateOnce();
+                });
+            }
           }
         }
 
@@ -1631,6 +1704,192 @@ export async function startDaemon(
   const incompleteRuns = shouldPauseForRuntimeSource(runtimeSourceStatus)
     ? []
     : await stateMgr.findIncompleteRuns();
+  // gap #6 — crash-resumption is a ONE-SHOT startup pass (no retry tick). A
+  // detect-phase resume blocked by another in-flight same-repo detect must NOT be
+  // skip-and-dropped; it is DEFERRED (per-repo FIFO) and launched EXACTLY ONCE when
+  // the holder's detect settles (chained off releaseDetectGateOnce).
+  const deferredDetectResumes = new Map<string, Array<() => void>>();
+
+  const launchResumeRun = async (
+    run: RunState,
+    runOwner: string,
+    runRepoName: string,
+  ): Promise<void> => {
+    const detectRepoKey = `${runOwner}/${runRepoName}`;
+    const entersAtDetect = run.phase === 'detect';
+    // Gate BEFORE committing the resume. If a detect is already in flight for this
+    // repo, defer this launch (one-shot pass — never drop it).
+    if (entersAtDetect && detectInFlight.has(detectRepoKey)) {
+      const queue = deferredDetectResumes.get(detectRepoKey) ?? [];
+      queue.push(() => {
+        void launchResumeRun(run, runOwner, runRepoName);
+      });
+      deferredDetectResumes.set(detectRepoKey, queue);
+      console.log(
+        `[daemon] Deferred crash-resume detect run #${run.issueNumber} — detect already in flight for ${detectRepoKey}`,
+      );
+      return;
+    }
+    if (entersAtDetect) detectInFlight.add(detectRepoKey);
+    // Per-run idempotent release: frees the repo's detect gate and fires the next
+    // FIFO-deferred same-repo resume (if any). Idempotent so the detect-settled
+    // EARLY release and the runPipeline `.finally` / setup-throw backstop are safe
+    // to call in any order without double-launching or clobbering a later run.
+    let gateReleased = false;
+    const releaseDetectGateOnce = (): void => {
+      if (gateReleased) return;
+      gateReleased = true;
+      if (!entersAtDetect) return;
+      detectInFlight.delete(detectRepoKey);
+      const queue = deferredDetectResumes.get(detectRepoKey);
+      const next = queue?.shift();
+      if (next) next();
+    };
+    // Only detect entrants thread the EARLY release into createPhaseHandlers.
+    const onDetectSettled = entersAtDetect ? releaseDetectGateOnce : undefined;
+
+    run.deploymentId = config.deployment?.id;
+    activeIssues.add(run.issueNumber);
+    activeRuns++;
+
+    // Look up repoId for DB-mode repo tracking
+    const resumeRepoId = repoManager?.getRepoId(runOwner, runRepoName) ?? '';
+    if (repoManager && resumeRepoId) {
+      repoManager.notifyRunStart(resumeRepoId);
+    }
+
+    try {
+      const resumeToken =
+        repoManager && resumeRepoId
+          ? await repoManager.resolveTokenForRepo(resumeRepoId)
+          : process.env.GITHUB_TOKEN;
+      const notifyOctokit = new Octokit({ auth: resumeToken });
+      const phaseLabelMirror = createPhaseLabelMirror(
+        notifyOctokit,
+        runOwner,
+        runRepoName,
+      );
+      const agencyConfig = await readAgencyConfig(null, '');
+      const resumedRequest: WorkRequest = {
+        issueNumber: run.issueNumber,
+        title: run.title,
+        body: run.body ?? '',
+        labels: run.labels ?? [],
+        specRefs: run.specRefs ?? [],
+      };
+      const handlers =
+        run.variant === 'website'
+          ? createWebsitePhaseHandlers(
+              agencyConfig,
+              null,
+              notifyOctokit,
+              runOwner,
+              runRepoName,
+              run.issueNumber,
+              null,
+            )
+            : createPhaseHandlers(
+                config,
+                runOwner,
+                runRepoName,
+                runtime,
+                coordinator,
+                notifyOctokit,
+                resumedRequest,
+                stateDir,
+                runWriter ?? undefined,
+                run.id,
+                repoRoot,
+                configReader?.getRepoConfig(runOwner, runRepoName)
+                  ?.activePlugins,
+                knowledgeStore,
+                phaseLabelMirror,
+                decisionManager,
+                undefined,
+                deploymentRegistry,
+                sanitizationPipeline,
+                // gap #6: EARLY release when the resumed detect settles (omitted for
+                // website / post-detect resumes).
+                onDetectSettled,
+              );
+      const table = getPipeline(run.variant);
+
+      const resumeDetector = createWorkDetector(
+        new Octokit({ auth: resumeToken }),
+        runOwner,
+        runRepoName,
+      );
+      runPipeline(
+        run,
+        table,
+        handlers,
+        stateMgr,
+        costTracker,
+        undefined,
+        runWriter ?? undefined,
+        phaseLabelMirror,
+      )
+        .then(async (result) => {
+          console.log(
+            `[daemon] Resumed run #${run.issueNumber} finished: ${result.outcome}`,
+          );
+
+          void runWriter?.upsertRun(run.id, {
+            outcome: toDbOutcome(result.outcome),
+            completed_at: new Date().toISOString(),
+            total_cost: run.cost,
+          });
+
+          handleRunOutcome(
+            result.outcome,
+            run.issueNumber,
+            runOwner,
+            runRepoName,
+          );
+
+          if (result.outcome === 'stuck') {
+            await resumeDetector.markStuck(
+              run.issueNumber,
+              result.error ?? 'Unknown error',
+            );
+            await notify(config.webhooks, {
+              event: 'stuck',
+              issueNumber: run.issueNumber,
+              phase: run.phase,
+              message: `Issue #${run.issueNumber} stuck: ${result.error ?? 'unknown'}`,
+            });
+          }
+        })
+        .catch((e) =>
+          console.error(`Resumed run failed for #${run.issueNumber}:`, e),
+        )
+        .finally(() => {
+          activeRuns--;
+          activeIssues.delete(run.issueNumber);
+          if (repoManager && resumeRepoId) {
+            repoManager.notifyRunEnd(resumeRepoId);
+          }
+          // gap #6 run-level backstop (covers a detect that never settles, e.g. a
+          // throw inside the FSM). Idempotent with the EARLY release above.
+          releaseDetectGateOnce();
+        });
+    } catch (setupErr) {
+      // gap #6 setup-throw backstop: the inline setup above runs BEFORE any
+      // runPipeline `.finally` exists, so a throw here must free the gate directly
+      // (a plain outer `finally` would release synchronously BEFORE detect runs).
+      releaseDetectGateOnce();
+      activeRuns--;
+      activeIssues.delete(run.issueNumber);
+      if (repoManager !== null && resumeRepoId !== '') {
+        repoManager.notifyRunEnd(resumeRepoId);
+      }
+      console.error(
+        `[daemon] Crash-resume setup failed for #${run.issueNumber}:`,
+        setupErr,
+      );
+    }
+  };
+
   for (const run of incompleteRuns) {
     const runOwner = run.repoOwner ?? config.repo?.owner;
     const runRepoName = run.repoName ?? config.repo?.name;
@@ -1648,123 +1907,7 @@ export async function startDaemon(
     console.log(
       `[daemon] Resuming incomplete run #${run.issueNumber} from phase '${run.phase}'`,
     );
-    run.deploymentId = config.deployment?.id;
-    activeIssues.add(run.issueNumber);
-    activeRuns++;
-
-    // Look up repoId for DB-mode repo tracking
-    const resumeRepoId = repoManager?.getRepoId(runOwner, runRepoName) ?? '';
-    if (repoManager && resumeRepoId) {
-      repoManager.notifyRunStart(resumeRepoId);
-    }
-
-    const resumeToken =
-      repoManager && resumeRepoId
-        ? await repoManager.resolveTokenForRepo(resumeRepoId)
-        : process.env.GITHUB_TOKEN;
-    const notifyOctokit = new Octokit({ auth: resumeToken });
-    const phaseLabelMirror = createPhaseLabelMirror(
-      notifyOctokit,
-      runOwner,
-      runRepoName,
-    );
-    const agencyConfig = await readAgencyConfig(null, '');
-    const resumedRequest: WorkRequest = {
-      issueNumber: run.issueNumber,
-      title: run.title,
-      body: run.body ?? '',
-      labels: run.labels ?? [],
-      specRefs: run.specRefs ?? [],
-    };
-    const handlers =
-      run.variant === 'website'
-        ? createWebsitePhaseHandlers(
-            agencyConfig,
-            null,
-            notifyOctokit,
-            runOwner,
-            runRepoName,
-            run.issueNumber,
-            null,
-          )
-          : createPhaseHandlers(
-              config,
-              runOwner,
-              runRepoName,
-              runtime,
-              coordinator,
-              notifyOctokit,
-              resumedRequest,
-              stateDir,
-              runWriter ?? undefined,
-              run.id,
-              repoRoot,
-              configReader?.getRepoConfig(runOwner, runRepoName)?.activePlugins,
-              knowledgeStore,
-              phaseLabelMirror,
-              decisionManager,
-              undefined,
-              deploymentRegistry,
-              sanitizationPipeline,
-            );
-    const table = getPipeline(run.variant);
-
-    const resumeDetector = createWorkDetector(
-      new Octokit({ auth: resumeToken }),
-      runOwner,
-      runRepoName,
-    );
-    runPipeline(
-      run,
-      table,
-      handlers,
-      stateMgr,
-      costTracker,
-      undefined,
-      runWriter ?? undefined,
-      phaseLabelMirror,
-    )
-      .then(async (result) => {
-        console.log(
-          `[daemon] Resumed run #${run.issueNumber} finished: ${result.outcome}`,
-        );
-
-        void runWriter?.upsertRun(run.id, {
-          outcome: toDbOutcome(result.outcome),
-          completed_at: new Date().toISOString(),
-          total_cost: run.cost,
-        });
-
-        handleRunOutcome(
-          result.outcome,
-          run.issueNumber,
-          runOwner,
-          runRepoName,
-        );
-
-        if (result.outcome === 'stuck') {
-          await resumeDetector.markStuck(
-            run.issueNumber,
-            result.error ?? 'Unknown error',
-          );
-          await notify(config.webhooks, {
-            event: 'stuck',
-            issueNumber: run.issueNumber,
-            phase: run.phase,
-            message: `Issue #${run.issueNumber} stuck: ${result.error ?? 'unknown'}`,
-          });
-        }
-      })
-      .catch((e) =>
-        console.error(`Resumed run failed for #${run.issueNumber}:`, e),
-      )
-      .finally(() => {
-        activeRuns--;
-        activeIssues.delete(run.issueNumber);
-        if (repoManager && resumeRepoId) {
-          repoManager.notifyRunEnd(resumeRepoId);
-        }
-      });
+    await launchResumeRun(run, runOwner, runRepoName);
   }
 
   // 6c. Heartbeat — write a timestamp file for operator monitoring (health.sh compatibility)
@@ -2610,6 +2753,12 @@ async function processWorkRequest(
   decisionManager?: DecisionIndexManager,
   registry?: DeploymentRegistry,
   protectedStore?: ProtectedStore,
+  // gap #6: per-run idempotent detect-gate release. Threaded into createPhaseHandlers
+  // as onDetectSettled (non-website branch only) for EARLY release when detect
+  // settles. The caller ALSO attaches it to this promise's `.finally` as a
+  // setup-throw backstop (a throw in the pre-detect setup below rejects the
+  // returned promise, so the caller's `.finally` still frees the gate).
+  onDetectSettled?: () => void,
 ): Promise<string> {
   const today = new Date().toISOString().split('T')[0];
   if (today !== dailyRunCountResetDate) {
@@ -2741,6 +2890,9 @@ async function processWorkRequest(
             undefined,
             registry,
             perRunSanitizationPipeline,
+            // gap #6: EARLY detect-gate release. Website branch omits it (starts at
+            // 'init', never gated).
+            onDetectSettled,
           );
   const table = getPipeline(variant);
 
