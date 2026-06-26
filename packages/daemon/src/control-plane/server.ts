@@ -19,6 +19,7 @@ export interface ControlHandlers {
   scanIssues?: () => Promise<{ scanned: number }>;
   release?: () => Promise<ReleaseProposalResult>;
   submitIdea?: (submittedBy: string, description: string) => Promise<{ id: string }>;
+  startInteractivePoSession?: () => Promise<HandlerResult<unknown>>;
   listPendingDecisions?: (query: ListRankedArgs) => HandlerResult<RankedListItem[] | ErrorBody>;
   getDecisionDetail?: (id: string) => HandlerResult<DetailView | ErrorBody>;
   revealProtected?: (
@@ -167,6 +168,17 @@ export function createControlServer(
         });
       } else {
         json(res, 501, { error: 'PO agent not configured' });
+      }
+    } else if (method === 'POST' && url.pathname === '/po/interactive-session') {
+      if (handlers.startInteractivePoSession) {
+        handlers.startInteractivePoSession().then((result) => {
+          json(res, result.status, result.body);
+        }).catch((e: unknown) => {
+          console.error('[control-plane] POST /po/interactive-session failed:', e);
+          json(res, 500, { error: 'session failed' });
+        });
+      } else {
+        json(res, 501, { error: 'interactive PO sessions not configured' });
       }
     } else if (method === 'GET' && url.pathname === '/decisions/pending') {
       if (handlers.listPendingDecisions) {

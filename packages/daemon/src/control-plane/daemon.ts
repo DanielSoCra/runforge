@@ -144,8 +144,15 @@ import { tmpdir } from 'os';
 import type { Proposal, IdeaSubmission } from '../coordination/types.js';
 import {
   buildProductOwnerSessionVariables,
+  buildProductOwnerSignalSnapshot,
   PRODUCT_OWNER_SNAPSHOT_CONFIG,
 } from './po-snapshot.js';
+import { SharedPOStateStore } from '../coordination/product-owner/shared-po-state.js';
+import {
+  hasActiveInteractiveSession,
+  closeOrphanedSessions,
+  startInteractivePOSession,
+} from '../coordination/product-owner/interactive-session-context.js';
 
 let dailyRunCount = 0;
 let dailyRunCountResetDate = new Date().toISOString().split('T')[0];
@@ -798,6 +805,14 @@ export async function startDaemon(
   await mkdir(poStateDir, { recursive: true });
   const proposalsPath = join(poStateDir, 'proposals.json');
   const ideasPath = join(poStateDir, 'ideas.json');
+  const poInteractiveSessionsDir = join(poStateDir, 'sessions');
+  await mkdir(poInteractiveSessionsDir, { recursive: true });
+  const poSharedStatePath = join(poStateDir, 'shared-po-state.json');
+  const poStateStore = new SharedPOStateStore(
+    poSharedStatePath,
+    config.coordination.poMaxWriteRetries,
+  );
+  await closeOrphanedSessions(poInteractiveSessionsDir);
   const poSnapshotGithub = config.repo
     ? {
         owner: config.repo.owner,
@@ -850,6 +865,8 @@ export async function startDaemon(
           console.error('[po-agent] session failed:', result.error.message);
         }
       },
+      shouldDeferCycle: async () =>
+        hasActiveInteractiveSession(poInteractiveSessionsDir),
     },
     {
       intervalMs: config.coordination.poInterval,
@@ -1061,6 +1078,14 @@ export async function startDaemon(
   let activeRuns = 0;
   let shuttingDown = false;
   let consecutiveStuckCount = 0;
+  // Synchronous in-process guard for the single-session interactive PO launch.
+  // The fs marker (the session record) is written only AFTER async context
+  // assembly, so two concurrent launches can both pass hasActiveInteractiveSession()
+  // before either marker exists. This flag is set/checked synchronously (no await
+  // in between) so the second concurrent launch is rejected; it is cleared in a
+  // finally so a failed launch never wedges the gate. The fs check still covers
+  // cross-process / post-restart cases.
+  let interactiveSessionLaunching = false;
   const activeIssues = new Set<number>(); // Persists across poll cycles — prevents duplicate runs
 
   // gap #6 — detect dispatch serialization. Daemon-scoped, repo-keyed registry of
@@ -1608,6 +1633,74 @@ export async function startDaemon(
       submitIdea: async (submittedBy, description) => {
         const idea = await poAgent.submitIdea(submittedBy, description);
         return { id: idea.id };
+      },
+      // Operator-launched interactive PO session (STACK-AC-PRODUCT-OWNER-INTERACTIVE).
+      // The spec's intended entrypoint is a `start_po_session` MCP tool on the
+      // coordination terminal server, but that server is not yet wired into the
+      // daemon, so the live control-plane HTTP server is the reachable surface
+      // today. A single session at a time: refuse (409) if one is already active.
+      // The shared PO snapshot is memoized so activeProposals + backlog are read
+      // from one consistent assembly rather than two GitHub round-trips.
+      startInteractivePoSession: async () => {
+        // Synchronous in-process guard FIRST — set before any await so two
+        // concurrent requests cannot both pass the fs check below before either
+        // writes its (post-assembly) session marker.
+        if (interactiveSessionLaunching) {
+          return {
+            status: 409,
+            body: { error: 'an interactive PO session is already active' },
+          };
+        }
+        interactiveSessionLaunching = true;
+        try {
+          // Cross-process / post-restart guard: an active marker from a prior
+          // process. The in-process flag above covers same-process concurrency.
+          if (await hasActiveInteractiveSession(poInteractiveSessionsDir)) {
+            return {
+              status: 409,
+              body: { error: 'an interactive PO session is already active' },
+            };
+          }
+          let snapshotPromise:
+            | ReturnType<typeof buildProductOwnerSignalSnapshot>
+            | undefined;
+          const getSnapshot = () => {
+            snapshotPromise ??= buildProductOwnerSignalSnapshot(
+              {
+                repoRoot,
+                stateDir,
+                loadProposals: loadPOProposals,
+                loadIdeas: loadPOIdeas,
+                github: poSnapshotGithub,
+              },
+              poSnapshotConfig,
+            );
+            return snapshotPromise;
+          };
+          const result = await startInteractivePOSession({
+            stateStore: poStateStore,
+            sessionsDir: poInteractiveSessionsDir,
+            promptsDir: promptsDirPath,
+            runtime,
+            loadActiveProposals: async () =>
+              (await getSnapshot()).activeProposals,
+            loadBacklogSummary: async () => (await getSnapshot()).backlog,
+          });
+          if (!result.ok) {
+            return { status: 500, body: { error: result.error.message } };
+          }
+          return {
+            status: 200,
+            body: {
+              sessionId: result.value.id,
+              endReason: result.value.endReason,
+              needsDiscussionResolved: result.value.needsDiscussionResolved,
+              summary: result.value.summary,
+            },
+          };
+        } finally {
+          interactiveSessionLaunching = false;
+        }
       },
       // READ API (slice 7a). `.ledger()` throws when the index is disabled/broken;
       // it is called lazily inside the closure so the route's try/catch maps it to

@@ -1278,11 +1278,18 @@ STACK-AC-PRODUCT-OWNER-FINDING-APPROVAL:
 STACK-AC-PRODUCT-OWNER-INTERACTIVE:
   parent: ARCH-AC-PRODUCT-OWNER
   children: []
-  # Code/test paths are forward-declared by the L3 spec (#409) but the
-  # implementation (issue #408) hasn't landed yet. Empty until the
-  # implementation PR re-adds the real paths.
-  code_paths: []
-  test_paths: []
+  code_paths:
+    - packages/daemon/src/coordination/product-owner/interactive-schemas.ts
+    - packages/daemon/src/coordination/product-owner/shared-po-state.ts
+    - packages/daemon/src/coordination/product-owner/interactive-session-context.ts
+    - packages/daemon/src/coordination/po-agent.ts
+    - packages/daemon/src/control-plane/daemon.ts
+    - prompts/product-owner-interactive.md
+  test_paths:
+    - packages/daemon/src/coordination/product-owner/interactive-schemas.test.ts
+    - packages/daemon/src/coordination/product-owner/shared-po-state.test.ts
+    - packages/daemon/src/coordination/product-owner/interactive-session-context.test.ts
+    - packages/daemon/src/coordination/po-agent.test.ts
   status: draft
 
 STACK-AC-PHASE-LABELS:

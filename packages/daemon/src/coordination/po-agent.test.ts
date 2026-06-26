@@ -62,6 +62,35 @@ describe('POAgent', () => {
     vi.useRealTimers();
   });
 
+  it('defers cycle when shouldDeferCycle returns true', async () => {
+    const deps = makeDeps({
+      shouldDeferCycle: vi.fn().mockResolvedValue(true),
+    });
+    const config = makeConfig({ intervalMs: 1000 });
+    const agent = createPOAgent(deps, config);
+    const stop = agent.start();
+
+    await vi.advanceTimersByTimeAsync(1100);
+
+    expect(deps.shouldDeferCycle).toHaveBeenCalled();
+    expect(deps.spawnPOSession).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('runs cycle normally when shouldDeferCycle returns false', async () => {
+    const deps = makeDeps({
+      shouldDeferCycle: vi.fn().mockResolvedValue(false),
+    });
+    const config = makeConfig({ intervalMs: 1000 });
+    const agent = createPOAgent(deps, config);
+    const stop = agent.start();
+
+    await vi.advanceTimersByTimeAsync(1100);
+
+    expect(deps.spawnPOSession).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
   it('runs PO session on scheduled interval', async () => {
     const deps = makeDeps();
     const config = makeConfig({ intervalMs: 1000 });

@@ -13,6 +13,7 @@ export interface POAgentDeps {
   loadIdeas: () => Promise<IdeaSubmission[]>;
   saveIdeas: (ideas: IdeaSubmission[]) => Promise<void>;
   spawnPOSession: () => Promise<void>;
+  shouldDeferCycle?: () => Promise<boolean>;
 }
 
 export interface POAgent {
@@ -47,6 +48,13 @@ export function createPOAgent(deps: POAgentDeps, config: POAgentConfig): POAgent
     if (running) return;
     running = true;
     try {
+      if (deps.shouldDeferCycle !== undefined) {
+        const defer = await deps.shouldDeferCycle();
+        if (defer) {
+          console.log('[po-agent] autonomous cycle deferred: active interactive session');
+          return;
+        }
+      }
       await sweepExpiredProposals();
       await deps.spawnPOSession();
     } finally {

@@ -44,6 +44,9 @@ const {
   mockBuildRuntimeSourcePolicy,
   mockValidateRuntimeSource,
   mockGetStartPhase,
+  mockHasActiveInteractiveSession,
+  mockStartInteractivePOSession,
+  mockCloseOrphanedSessions,
 } = vi.hoisted(() => ({
   mockStateMgr: {
     initialize: vi.fn().mockResolvedValue(undefined),
@@ -156,6 +159,17 @@ const {
   mockBuildRuntimeSourcePolicy: vi.fn(),
   mockValidateRuntimeSource: vi.fn(),
   mockGetStartPhase: vi.fn(),
+  mockHasActiveInteractiveSession: vi.fn().mockResolvedValue(false),
+  mockStartInteractivePOSession: vi.fn().mockResolvedValue({
+    ok: true,
+    value: {
+      id: 'po-session-1',
+      endReason: 'explicit_close',
+      needsDiscussionResolved: 0,
+      summary: '',
+    },
+  }),
+  mockCloseOrphanedSessions: vi.fn().mockResolvedValue(0),
 }));
 
 // --- Module mocks (use classes for constructors to work with `new`) ---
@@ -353,6 +367,14 @@ vi.mock('../coordination/review-scheduler.js', () => ({
 vi.mock('../coordination/po-agent.js', () => ({
   createPOAgent: (...args: unknown[]) => mockCreatePOAgent(...args),
 }));
+vi.mock('../coordination/product-owner/interactive-session-context.js', () => ({
+  hasActiveInteractiveSession: (...args: unknown[]) =>
+    mockHasActiveInteractiveSession(...args),
+  startInteractivePOSession: (...args: unknown[]) =>
+    mockStartInteractivePOSession(...args),
+  closeOrphanedSessions: (...args: unknown[]) =>
+    mockCloseOrphanedSessions(...args),
+}));
 vi.mock('../coordination/tech-lead-scheduler.js', () => ({
   createTechLeadScheduler: (...args: unknown[]) =>
     mockCreateTechLeadScheduler(...args),
@@ -458,6 +480,9 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
     poInterval: 3600000,
     poIdeaDebounce: 300000,
     poFindingDailyCap: 5,
+    poInteractiveTimeout: 1800,
+    poSharedStateRetentionDays: 7,
+    poMaxWriteRetries: 3,
     plannerTimeout: 60000,
     maxAttemptsPerIssue: 3,
     diskSpaceThreshold: 2_000_000_000,
@@ -588,6 +613,17 @@ describe('daemon', () => {
     mockRunHistory.countStuckRunsForIssue.mockResolvedValue(0);
     mockRunHistory.markInProgressRunsStuck.mockResolvedValue(0);
     mockDbSqlEnd.mockResolvedValue(undefined);
+    mockHasActiveInteractiveSession.mockResolvedValue(false);
+    mockCloseOrphanedSessions.mockResolvedValue(0);
+    mockStartInteractivePOSession.mockResolvedValue({
+      ok: true,
+      value: {
+        id: 'po-session-1',
+        endReason: 'explicit_close',
+        needsDiscussionResolved: 0,
+        summary: '',
+      },
+    });
     mockClassifyBatch.mockImplementation(
       async (_runtime: unknown, requests: Array<{ issueNumber: number }>) => ({
         results: requests.map((request) => ({
@@ -712,6 +748,9 @@ describe('daemon', () => {
       mockValidatePromptContracts,
       mockBuildRuntimeSourcePolicy,
       mockValidateRuntimeSource,
+      mockHasActiveInteractiveSession,
+      mockStartInteractivePOSession,
+      mockCloseOrphanedSessions,
     ]) {
       mock.mockClear();
     }
@@ -1340,6 +1379,70 @@ describe('daemon', () => {
         healthy: false,
         failureKind: 'dirty-runtime-source',
       });
+    });
+  });
+
+  describe('interactive PO session launch guard (atomic in-process)', () => {
+    it('rejects a second concurrent launch with 409 while the first is mid-assembly (before its fs marker)', async () => {
+      // No active fs marker yet — proves the 409 comes from the synchronous
+      // in-process guard, not the fs check (which is written only post-assembly).
+      mockHasActiveInteractiveSession.mockResolvedValue(false);
+
+      // Park the first launch mid-assembly: startInteractivePOSession stays pending
+      // (its session-record marker is never written) while the second request races.
+      let resolveLaunch!: (value: unknown) => void;
+      mockStartInteractivePOSession.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveLaunch = resolve;
+          }),
+      );
+
+      const { startDaemon } = await loadDaemon();
+      const { createControlServer } = await import('./server.js');
+      const result = await startDaemon('config.json');
+      expect(result.ok).toBe(true);
+
+      const handlers = vi.mocked(createControlServer).mock.lastCall![1] as {
+        startInteractivePoSession: () => Promise<{
+          status: number;
+          body: unknown;
+        }>;
+      };
+
+      // First launch: runs synchronously up to its first await (the in-process flag
+      // is already set true), then parks inside the pending startInteractivePOSession.
+      const first = handlers.startInteractivePoSession();
+      // Let the first call progress past the synchronous guard + fs check.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Second concurrent launch must be rejected by the in-process guard.
+      const second = await handlers.startInteractivePoSession();
+      expect(second.status).toBe(409);
+
+      // The second request short-circuited BEFORE the fs check and before any
+      // second launch was started.
+      expect(mockStartInteractivePOSession).toHaveBeenCalledTimes(1);
+      expect(mockHasActiveInteractiveSession).toHaveBeenCalledTimes(1);
+
+      // Resolve the first launch; it completes 200 and the finally clears the guard.
+      resolveLaunch({
+        ok: true,
+        value: {
+          id: 'po-session-1',
+          endReason: 'explicit_close',
+          needsDiscussionResolved: 0,
+          summary: '',
+        },
+      });
+      const firstResult = await first;
+      expect(firstResult.status).toBe(200);
+
+      // Guard cleared — a fresh, non-concurrent launch proceeds normally.
+      const third = await handlers.startInteractivePoSession();
+      expect(third.status).toBe(200);
+      expect(mockStartInteractivePOSession).toHaveBeenCalledTimes(2);
     });
   });
 

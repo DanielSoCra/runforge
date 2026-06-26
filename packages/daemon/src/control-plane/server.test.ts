@@ -241,6 +241,55 @@ describe('ControlServer', () => {
     expect(res.status).toBe(501);
   });
 
+  it('POST /po/interactive-session invokes the launch handler and returns its result', async () => {
+    const startInteractivePoSession = vi.fn().mockResolvedValue({
+      status: 200,
+      body: { sessionId: 'sess-1', endReason: 'explicit_close', summary: 'done' },
+    });
+    const { server, port } = await startServer({ startInteractivePoSession });
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/po/interactive-session`, {
+        method: 'POST',
+        headers: { 'X-Requested-By': 'test' },
+      });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        sessionId: 'sess-1',
+        endReason: 'explicit_close',
+        summary: 'done',
+      });
+      expect(startInteractivePoSession).toHaveBeenCalledOnce();
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it('POST /po/interactive-session propagates a 409 when a session is already active', async () => {
+    const startInteractivePoSession = vi.fn().mockResolvedValue({
+      status: 409,
+      body: { error: 'an interactive PO session is already active' },
+    });
+    const { server, port } = await startServer({ startInteractivePoSession });
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/po/interactive-session`, {
+        method: 'POST',
+        headers: { 'X-Requested-By': 'test' },
+      });
+      expect(res.status).toBe(409);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it('POST /po/interactive-session returns 501 when handler not wired', async () => {
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/po/interactive-session`, {
+      method: 'POST',
+      headers: { 'X-Requested-By': 'test' },
+    });
+    expect(res.status).toBe(501);
+  });
+
   it('re-listen on the same port succeeds immediately after a clean close', async () => {
     // This test makes no HTTP request — it only proves a port can be re-bound
     // right after a clean server.close(), with no lingering instance-lock or
