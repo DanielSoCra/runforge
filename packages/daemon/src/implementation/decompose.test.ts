@@ -73,6 +73,31 @@ function createMockRuntime(
 }
 
 describe('decompose', () => {
+  it('unwraps the real-CLI structured_output wrapper before parsing units (#779 gap1 C1)', async () => {
+    // In schema mode the CLI adapter sets structuredData to the FULL wrapper
+    // { ..., structured_output: { units } } (cli.ts). decompose must unwrap via
+    // extractStructuredOutput, like every other structured-output consumer — the
+    // real CLI never emits a top-level { units }. Buggy code reads obj.units at the
+    // top level → undefined → err → retry → coordinator hard-fail.
+    const runtime = createMockRuntime(
+      makeSessionResult({ structured_output: { units: validUnits } }),
+    );
+    const result = await decompose(
+      mockWorkRequest,
+      'feature/7',
+      runtime,
+      'spec content',
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.units).toHaveLength(2);
+      expect(result.value.units[0]?.id).toBe('unit-auth-backend');
+    }
+    // Correct unwrap parses on the first attempt — no retry.
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(1);
+  });
+
   it('parses valid structured output into a TaskGraph', async () => {
     const runtime = createMockRuntime(makeSessionResult({ units: validUnits }));
     const result = await decompose(
@@ -178,6 +203,8 @@ describe('decompose', () => {
     const runtime = createMockRuntime(makeSessionResult({ units: validUnits }));
     await decompose(mockWorkRequest, 'feature/7', runtime, 'my-spec');
 
+    // gap #1: 4th arg must now be { jsonSchema: <string> } — NOT undefined —
+    // so the coordinator is constrained to emit the units task-graph schema.
     expect(runtime.spawnSession).toHaveBeenCalledWith(
       'coordinator',
       expect.objectContaining({
@@ -188,10 +215,25 @@ describe('decompose', () => {
         }),
       }),
       7,
-      undefined,
+      { jsonSchema: expect.any(String) },
       undefined,
       undefined,
     );
+  });
+
+  it('passes jsonSchema to BOTH the first spawn and the retry spawn (gap #1)', async () => {
+    // First call fails to parse → retry triggers
+    const runtime = createMockRuntime(
+      makeSessionResult({ wrong: 'data' }),   // first: parse fails
+      makeSessionResult({ units: validUnits }), // retry: succeeds
+    );
+    await decompose(mockWorkRequest, 'feature/7', runtime, 'spec');
+
+    expect(runtime.spawnSession).toHaveBeenCalledTimes(2);
+    for (const call of runtime.spawnSession.mock.calls) {
+      // 4th positional arg (index 3) must carry jsonSchema
+      expect(call[3]).toEqual({ jsonSchema: expect.any(String) });
+    }
   });
 
   it('wraps GitHub issue content in an escaped untrusted-data boundary (#341)', async () => {

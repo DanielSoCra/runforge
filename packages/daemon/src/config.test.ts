@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { loadConfig, ConfigSchema } from './config.js';
+import { loadConfig, ConfigSchema, validateRequiredBootEnv } from './config.js';
 import { mkdtemp, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -575,5 +575,53 @@ describe('loadConfig', () => {
     await writeFile(path, JSON.stringify({ adapter: 'invalid' }));
     const result = await loadConfig(path);
     expect(result.ok).toBe(false);
+  });
+});
+
+// --- gap #7 tests: validateRequiredBootEnv consolidated boot-env check ---
+describe('validateRequiredBootEnv', () => {
+  const REQUIRED = {
+    GITHUB_TOKEN: 'ghp_test',
+    AUTO_CLAUDE_DATABASE_URL: 'postgres://localhost/test',
+    ENCRYPTION_KEY: Buffer.alloc(32).toString('base64url'),
+  };
+
+  it('returns ok:true when all three required vars are present', () => {
+    const result = validateRequiredBootEnv(REQUIRED);
+    expect(result.ok).toBe(true);
+  });
+
+  it('returns ok:false listing BOTH missing vars (exact ordered array) when two are absent', () => {
+    const env = { GITHUB_TOKEN: 'ghp_test' }; // missing DB URL and KEY
+    const result = validateRequiredBootEnv(env);
+    expect(result.ok).toBe(false);
+    if (result.ok === false) {
+      // Order must be stable: GITHUB_TOKEN, AUTO_CLAUDE_DATABASE_URL, ENCRYPTION_KEY
+      expect(result.missing).toEqual(['AUTO_CLAUDE_DATABASE_URL', 'ENCRYPTION_KEY']);
+    }
+  });
+
+  it('treats whitespace-only required env values as missing', () => {
+    const env = {
+      GITHUB_TOKEN: 'ghp_test',
+      AUTO_CLAUDE_DATABASE_URL: '   ', // whitespace only — should be treated as absent
+      ENCRYPTION_KEY: Buffer.alloc(32).toString('base64url'),
+    };
+    const result = validateRequiredBootEnv(env);
+    expect(result.ok).toBe(false);
+    if (result.ok === false) {
+      expect(result.missing).toContain('AUTO_CLAUDE_DATABASE_URL');
+      expect(result.missing).not.toContain('GITHUB_TOKEN');
+      expect(result.missing).not.toContain('ENCRYPTION_KEY');
+    }
+  });
+
+  it('ignores optional vars (DAEMON_DATA_BACKEND, etc.) — only the three required matter', () => {
+    const env = {
+      ...REQUIRED,
+      // optional vars absent — should still be ok
+    };
+    const result = validateRequiredBootEnv(env);
+    expect(result.ok).toBe(true);
   });
 });

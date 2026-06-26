@@ -26,6 +26,8 @@ All services share a common runtime, persistence strategy, error handling patter
 
 **Runtime: tsx (no build step).** Run directly via `tsx src/main.ts`. Chosen over tsc+node (slow build cycle), ts-node (slower startup), and Bun (less mature worker_threads support). tsx uses esbuild under the hood — instant startup, zero config.
 
+**Boot env loading: dotenv with no-override semantics.** `.env` is loaded at boot inside the `start` and `process` command actions (not at module top, so importing `main.ts` in tests does not mutate env). dotenv's default behavior preserves already-set `process.env` values, so deployment environment wins over `.env`. Required boot variables (`GITHUB_TOKEN`, `AUTO_CLAUDE_DATABASE_URL`, `ENCRYPTION_KEY`) are validated once, up front, by `validateRequiredBootEnv`, reporting all missing vars in a single error. `DAEMON_DATA_BACKEND` is NOT required — it defaults to `postgres` when undefined or empty.
+
 **Testing: Vitest.** TypeScript-native, fast watch mode. Vitest uses its own esbuild transform pipeline — it does NOT run through tsx. Path aliases and loader hooks configured for tsx must also be configured in `vitest.config.ts`. Chosen over Jest (slower, needs transform config) and node:test (no TypeScript support without build).
 
 **Persistence: JSON files with atomic writes.** Write to a temp file in the same directory, then `rename()` (atomic on POSIX). No database dependency. Chosen over SQLite (overkill for config/state), LevelDB (unnecessary complexity). JSONL (one object per line) for append-only stores (gotchas, results ledger).

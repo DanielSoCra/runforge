@@ -585,3 +585,14 @@ export async function loadConfig(path: string): Promise<Result<Config>> {
     return err(e instanceof Error ? e : new Error(String(e)));
   }
 }
+
+const REQUIRED_BOOT_ENV = ['GITHUB_TOKEN', 'AUTO_CLAUDE_DATABASE_URL', 'ENCRYPTION_KEY'] as const;
+export function validateRequiredBootEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): { ok: true } | { ok: false; missing: string[] } {
+  const missing = REQUIRED_BOOT_ENV.filter((k) => {
+    const value = env[k];
+    return value === undefined || value.trim() === '';
+  });
+  return missing.length === 0 ? { ok: true } : { ok: false, missing };
+}

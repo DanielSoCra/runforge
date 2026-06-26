@@ -4,8 +4,10 @@ import type { WorkRequest, TaskGraph } from '../types.js';
 import type { RunWriter } from '../data/run-writer.js';
 import { validateTaskGraph } from './task-graph.js';
 import { createSingleUnitGraph } from './task-graph.js';
+import { taskGraphJsonSchema } from './task-graph-schema.js';
 import { ok, err, type Result } from '../lib/result.js';
 import { formatUserIssueContent } from '../lib/prompt-boundary.js';
+import { extractStructuredOutput } from '../lib/structured-output.js';
 
 export async function decompose(
   request: WorkRequest,
@@ -34,7 +36,7 @@ export async function decompose(
       activePlugins,
     },
     request.issueNumber,
-    undefined,
+    { jsonSchema: taskGraphJsonSchema },
     runWriter,
     runId,
   );
@@ -43,7 +45,7 @@ export async function decompose(
 
   // Parse structured output as TaskGraph
   const graph = parseTaskGraph(
-    result.value.structuredData,
+    extractStructuredOutput(result.value.structuredData),
     request.issueNumber,
     featureBranch,
   );
@@ -60,13 +62,13 @@ export async function decompose(
         activePlugins,
       },
       request.issueNumber,
-      undefined,
+      { jsonSchema: taskGraphJsonSchema },
       runWriter,
       runId,
     );
     if (!retry.ok) return retry;
     return parseTaskGraph(
-      retry.value.structuredData,
+      extractStructuredOutput(retry.value.structuredData),
       request.issueNumber,
       featureBranch,
     );

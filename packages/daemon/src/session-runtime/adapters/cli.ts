@@ -146,12 +146,10 @@ export class CliAdapter implements ProviderAdapter {
         : typeof json['output'] === 'string'
           ? json['output']
           : JSON.stringify(json);
-      const rawCost = typeof json['cost_usd'] === 'number'
-        ? json['cost_usd']
-        : typeof json['cost'] === 'number'
-          ? json['cost']
-          : 0;
-      const cost = Number.isFinite(rawCost) && rawCost > 0 ? rawCost : 0;
+      let cost = 0;
+      for (const c of [json['total_cost_usd'], json['cost_usd'], json['cost']]) {
+        if (typeof c === 'number' && Number.isFinite(c) && c > 0) { cost = c; break; }
+      }
       const continuationId = typeof json['session_id'] === 'string' ? json['session_id'] : undefined;
       return ok({
         output,

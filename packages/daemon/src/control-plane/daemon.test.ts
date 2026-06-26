@@ -340,7 +340,8 @@ vi.mock('@octokit/rest', () => {
     },
   };
 });
-vi.mock('../config.js', () => ({
+vi.mock('../config.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../config.js')>()),
   loadConfig: (...args: unknown[]) => mockLoadConfig(...args),
 }));
 vi.mock('../coordination/review-scheduler.js', () => ({
@@ -519,8 +520,10 @@ describe('daemon', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    // Ensure GITHUB_TOKEN is set for all tests (validated at daemon startup)
+    // Ensure all required boot env vars are set for happy-path tests (gap #7)
     process.env.GITHUB_TOKEN = 'ghp_test_token';
+    process.env.AUTO_CLAUDE_DATABASE_URL = 'postgres://test';
+    process.env.ENCRYPTION_KEY = Buffer.alloc(32).toString('base64url');
     // Capture signal handlers.
     vi.spyOn(process, 'on').mockImplementation(((
       event: string,
@@ -940,6 +943,54 @@ describe('daemon', () => {
       expect(mockServerStart).not.toHaveBeenCalled();
 
       vi.doUnmock('../session-runtime/adapters/index.js');
+    });
+
+    // --- gap #7 tests: consolidated env validation at startDaemon ---
+    it('startDaemon validates all required boot env vars and reports all missing at once', async () => {
+      const originalDb = process.env.AUTO_CLAUDE_DATABASE_URL;
+      const originalKey = process.env.ENCRYPTION_KEY;
+      delete process.env.AUTO_CLAUDE_DATABASE_URL;
+      delete process.env.ENCRYPTION_KEY;
+      try {
+        const { startDaemon } = await loadDaemon();
+        const result = await startDaemon('config.json');
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error.message).toContain('AUTO_CLAUDE_DATABASE_URL');
+          expect(result.error.message).toContain('ENCRYPTION_KEY');
+        }
+        // Env validation runs before config load (step 0)
+        expect(mockLoadConfig).not.toHaveBeenCalled();
+        expect(mockServerStart).not.toHaveBeenCalled();
+      } finally {
+        process.env.AUTO_CLAUDE_DATABASE_URL = originalDb;
+        process.env.ENCRYPTION_KEY = originalKey;
+      }
+    });
+
+    it('startDaemon reports all three required vars when all are missing', async () => {
+      const origToken = process.env.GITHUB_TOKEN;
+      const origDb = process.env.AUTO_CLAUDE_DATABASE_URL;
+      const origKey = process.env.ENCRYPTION_KEY;
+      delete process.env.GITHUB_TOKEN;
+      delete process.env.AUTO_CLAUDE_DATABASE_URL;
+      delete process.env.ENCRYPTION_KEY;
+      try {
+        const { startDaemon } = await loadDaemon();
+        const result = await startDaemon('config.json');
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error.message).toContain('GITHUB_TOKEN');
+          expect(result.error.message).toContain('AUTO_CLAUDE_DATABASE_URL');
+          expect(result.error.message).toContain('ENCRYPTION_KEY');
+        }
+        expect(mockLoadConfig).not.toHaveBeenCalled();
+        expect(mockServerStart).not.toHaveBeenCalled();
+      } finally {
+        process.env.GITHUB_TOKEN = origToken;
+        process.env.AUTO_CLAUDE_DATABASE_URL = origDb;
+        process.env.ENCRYPTION_KEY = origKey;
+      }
     });
   });
 
@@ -1827,6 +1878,167 @@ describe('daemon', () => {
       await vi.advanceTimersByTimeAsync(30000);
 
       expect(mockCostTracker.maybeResetDaily).toHaveBeenCalled();
+    });
+  });
+
+  // --- gap #5 tests: preClassifyReadyWork caches only real classifications ---
+  describe('preClassifyReadyWork', () => {
+    it('preClassif: sets preClassification with full cached fields when classified:true and complexity is present', async () => {
+      const request = makeWorkRequest({ issueNumber: 10 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+      mockClassifyBatch.mockResolvedValueOnce({
+        results: [
+          {
+            issueNumber: 10,
+            classified: true,
+            event: 'success:simple',
+            complexity: 'standard',
+            changeKind: 'feature',
+            scope: 'backend',
+            allocatedCost: 0.05,
+          },
+        ],
+        totalCost: 0.05,
+        batchSequenceId: 'batch-gate-1',
+        status: 'complete',
+      });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const workRequests = phaseHandlerCalls.map((call) => call[6] as { preClassification?: unknown });
+      expect(phaseHandlerCalls.length).toBeGreaterThan(0);
+      expect(workRequests[0]).toEqual(
+        expect.objectContaining({
+          preClassification: {
+            event: 'success:simple',
+            complexity: 'standard',
+            changeKind: 'feature',
+            scope: 'backend',
+            allocatedCost: 0.05,
+            batchSequenceId: 'batch-gate-1',
+          },
+        }),
+      );
+    });
+
+    it('preClassif: does NOT cache preClassification when classified:false (rate-limited)', async () => {
+      const request = makeWorkRequest({ issueNumber: 11 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+      mockClassifyBatch.mockResolvedValueOnce({
+        results: [
+          {
+            issueNumber: 11,
+            classified: false,
+            event: 'rate-limited',
+            allocatedCost: 0,
+          },
+        ],
+        totalCost: 0,
+        batchSequenceId: 'batch-gate-2',
+        status: 'complete',
+      });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const workRequests = phaseHandlerCalls.map((call) => call[6] as WorkRequest);
+      expect(phaseHandlerCalls.length).toBeGreaterThan(0);
+      expect((workRequests[0] as WorkRequest).issueNumber).toBe(11);
+      expect(workRequests[0]).not.toHaveProperty('preClassification');
+    });
+
+    it('preClassif: does NOT cache preClassification when classified:false even if complexity is present', async () => {
+      // classified:false is authoritative — complexity alone does not make it a real classification
+      const request = makeWorkRequest({ issueNumber: 14 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+      mockClassifyBatch.mockResolvedValueOnce({
+        results: [
+          {
+            issueNumber: 14,
+            classified: false,
+            event: 'rate-limited',
+            complexity: 'standard', // has complexity but classified:false → should NOT cache
+            allocatedCost: 0,
+          },
+        ],
+        totalCost: 0,
+        batchSequenceId: 'batch-gate-5',
+        status: 'complete',
+      });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const workRequests = phaseHandlerCalls.map((call) => call[6] as WorkRequest);
+      expect(phaseHandlerCalls.length).toBeGreaterThan(0);
+      expect((workRequests[0] as WorkRequest).issueNumber).toBe(14);
+      expect(workRequests[0]).not.toHaveProperty('preClassification');
+    });
+
+    it('preClassif: does NOT cache preClassification when classified:false event:success:simple (orderResults empty fallback)', async () => {
+      const request = makeWorkRequest({ issueNumber: 12 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+      mockClassifyBatch.mockResolvedValueOnce({
+        results: [
+          {
+            issueNumber: 12,
+            classified: false,
+            event: 'success:simple',
+            allocatedCost: 0,
+          },
+        ],
+        totalCost: 0,
+        batchSequenceId: 'batch-gate-3',
+        status: 'complete',
+      });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const workRequests = phaseHandlerCalls.map((call) => call[6] as WorkRequest);
+      expect(phaseHandlerCalls.length).toBeGreaterThan(0);
+      expect((workRequests[0] as WorkRequest).issueNumber).toBe(12);
+      expect(workRequests[0]).not.toHaveProperty('preClassification');
+    });
+
+    it('preClassif: does NOT cache preClassification when classified:true but complexity:undefined (classifier session-failed fallback)', async () => {
+      // This is the codex-critical case: classified:true alone is NOT the unambiguous signal.
+      // When the classifier session fails and falls back to success:simple, complexity is undefined.
+      const request = makeWorkRequest({ issueNumber: 13 });
+      mockDetector.detectReadyWork.mockResolvedValue(ok([request]));
+      mockClassifyBatch.mockResolvedValueOnce({
+        results: [
+          {
+            issueNumber: 13,
+            classified: true,
+            event: 'success:simple',
+            complexity: undefined,
+            allocatedCost: 0,
+          },
+        ],
+        totalCost: 0,
+        batchSequenceId: 'batch-gate-4',
+        status: 'complete',
+      });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const workRequests = phaseHandlerCalls.map((call) => call[6] as WorkRequest);
+      expect(phaseHandlerCalls.length).toBeGreaterThan(0);
+      expect((workRequests[0] as WorkRequest).issueNumber).toBe(13);
+      expect(workRequests[0]).not.toHaveProperty('preClassification');
     });
   });
 

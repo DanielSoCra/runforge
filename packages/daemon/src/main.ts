@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 
 import { Command } from 'commander';
+import { config as loadDotenv } from 'dotenv';
 import { startDaemon } from './control-plane/daemon.js';
 import { processSingleIssue } from './control-plane/process-single.js';
 
@@ -15,6 +16,7 @@ program
   .description('Start the daemon')
   .option('-c, --config <path>', 'Config file path', 'auto-claude.config.json')
   .action(async (options: { config: string }) => {
+    loadDotenv();
     const result = await startDaemon(options.config);
     if (!result.ok) {
       console.error(formatStartupError(result.error));
@@ -27,6 +29,7 @@ program
   .description('Process a single issue by number (one-shot)')
   .option('-c, --config <path>', 'Config file path', 'auto-claude.config.json')
   .action(async (issue: string, options: { config: string }) => {
+    loadDotenv();
     const issueNumber = Number(issue);
     if (isNaN(issueNumber)) {
       console.error(`Invalid issue number: ${issue}`);

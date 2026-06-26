@@ -177,6 +177,51 @@ describe('CliAdapter', () => {
     expect(parsed.ok).toBe(true);
     if (parsed.ok) expect(parsed.value.cost).toBe(0);
   });
+
+  // --- gap #3 tests: total_cost_usd (Claude CLI canonical field) ---
+  it('parseOutput reads total_cost_usd (Claude CLI canonical field)', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(JSON.stringify({ result: 'ok', total_cost_usd: 0.12 }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value.cost).toBe(0.12);
+      expect(parsed.value.costEstimated).toBe(false);
+    }
+  });
+
+  it('parseOutput prefers total_cost_usd over cost_usd/cost', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(
+      JSON.stringify({ result: 'ok', total_cost_usd: 0.2, cost_usd: 0.05, cost: 0.01 }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0.2);
+  });
+
+  it('parseOutput falls through a non-positive total_cost_usd to cost_usd', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(
+      JSON.stringify({ result: 'ok', total_cost_usd: 0, cost_usd: 0.07 }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0.07);
+  });
+
+  it('parseOutput falls through a negative total_cost_usd to cost_usd', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(
+      JSON.stringify({ result: 'ok', total_cost_usd: -1, cost_usd: 0.07 }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0.07);
+  });
+
+  it('parseOutput falls through to legacy cost field when total_cost_usd and cost_usd absent', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(JSON.stringify({ result: 'ok', cost: 0.09 }));
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.cost).toBe(0.09);
+  });
 });
 
 describe('CliAdapter.extractHandoff (#11)', () => {

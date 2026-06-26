@@ -1,7 +1,7 @@
 // src/control-plane/daemon.ts
 import { isIP } from 'node:net';
 import { Octokit } from '@octokit/rest';
-import { loadConfig, type Config } from '../config.js';
+import { loadConfig, validateRequiredBootEnv, type Config } from '../config.js';
 import { SessionRuntime } from '../session-runtime/runtime.js';
 import { CostTracker } from '../session-runtime/cost.js';
 import { createProviderAdapter } from '../session-runtime/adapters/index.js';
@@ -188,16 +188,10 @@ export async function startDaemon(
   configPath: string,
   opts?: StartDaemonOptions,
 ): Promise<Result<void>> {
-  // 0. Validate GITHUB_TOKEN — required for Octokit (labeling, commenting, notifications)
-  if (
-    process.env.GITHUB_TOKEN === undefined ||
-    process.env.GITHUB_TOKEN === ''
-  ) {
-    return err(
-      new Error(
-        'GITHUB_TOKEN environment variable is not set. The daemon requires a GitHub token to interact with issues and pull requests.',
-      ),
-    );
+  // 0. Validate required boot environment variables up front.
+  const envCheck = validateRequiredBootEnv();
+  if (!envCheck.ok) {
+    return err(new Error('Missing required environment variables: ' + envCheck.missing.join(', ')));
   }
 
   // 1. Load config
@@ -2553,7 +2547,7 @@ async function releaseClaim(
   }
 }
 
-async function preClassifyReadyWork(
+export async function preClassifyReadyWork(
   runtime: SessionRuntime,
   requests: WorkRequest[],
   batchClassifierConfig: BatchClassifierConfig,
@@ -2573,7 +2567,7 @@ async function preClassifyReadyWork(
     );
     return requests.map((request) => {
       const item = byIssue.get(request.issueNumber);
-      if (!item) return request;
+      if (!item || item.classified !== true || item.complexity === undefined) return request;
       return {
         ...request,
         preClassification: {
