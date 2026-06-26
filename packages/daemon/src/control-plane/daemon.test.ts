@@ -498,6 +498,7 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
     techLeadProposalExpiryMs: 604800000,
     techLeadLookbackWindowMs: 172800000,
     techLeadMaxEntriesPerSection: 50,
+    triageDailyCap: 5,
     maxConsecutiveTickErrors: 5,
   },
   diagnosis: { confidenceThreshold: 0.7 },

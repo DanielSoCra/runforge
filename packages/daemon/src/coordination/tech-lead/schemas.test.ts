@@ -158,7 +158,18 @@ describe('TechLeadOutputSchema', () => {
     if (result.success) {
       expect(result.data.proposals).toEqual([]);
       expect(result.data.protocolTriggers).toEqual([]);
+      expect(result.data.triageDecisions).toEqual([]);
     }
+  });
+
+  it('accepts valid triage decisions', () => {
+    const result = TechLeadOutputSchema.safeParse({
+      triageDecisions: [
+        { issueNumber: 1, verdict: 'approve', reason: 'Clear finding' },
+        { issueNumber: 2, verdict: 'promote', reason: 'High impact', newSeverity: 'P1' },
+      ],
+    });
+    expect(result.success).toBe(true);
   });
 
   it('accepts valid protocol triggers', () => {

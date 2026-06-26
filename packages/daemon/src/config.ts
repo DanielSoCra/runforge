@@ -475,6 +475,7 @@ export const ConfigSchema = z.object({
         .min(60000)
         .default(48 * 60 * 60 * 1000),
       techLeadMaxEntriesPerSection: z.number().int().min(1).default(50),
+      triageDailyCap: z.number().int().min(0).default(5),
       maxConsecutiveTickErrors: z.number().int().min(1).default(5),
     })
     .default({
@@ -503,6 +504,7 @@ export const ConfigSchema = z.object({
       techLeadProposalExpiryMs: 7 * 24 * 60 * 60 * 1000,
       techLeadLookbackWindowMs: 48 * 60 * 60 * 1000,
       techLeadMaxEntriesPerSection: 50,
+      triageDailyCap: 5,
       maxConsecutiveTickErrors: 5,
     }),
   // OPTIONAL deployment profile — the config source for the lane-engine /

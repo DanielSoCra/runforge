@@ -1208,7 +1208,19 @@ STACK-AC-PIPELINE-DISPATCH:
 STACK-AC-TECH-LEAD-TRIAGE:
   parent: ARCH-AC-TECH-LEAD
   children: []
-  # code_paths and test_paths pending implementation in issue #393
+  code_paths:
+    - packages/daemon/src/coordination/tech-lead/finding-triage.ts
+    - packages/daemon/src/coordination/tech-lead/triage.ts
+    - packages/daemon/src/coordination/tech-lead/triage-store.ts
+    - packages/daemon/src/coordination/tech-lead/schemas.ts
+    - packages/daemon/src/coordination/tech-lead-scheduler.ts
+    - packages/daemon/src/control-plane/daemon.ts
+  test_paths:
+    - packages/daemon/src/coordination/tech-lead/finding-triage.test.ts
+    - packages/daemon/src/coordination/tech-lead/triage.test.ts
+    - packages/daemon/src/coordination/tech-lead/triage-store.test.ts
+    - packages/daemon/src/coordination/tech-lead/schemas.test.ts
+    - packages/daemon/src/coordination/tech-lead-scheduler.test.ts
   status: draft
 
 STACK-AC-TECH-LEAD:
@@ -1224,7 +1236,6 @@ STACK-AC-TECH-LEAD:
     - packages/daemon/src/coordination/tech-lead/metrics.ts
     - packages/daemon/src/coordination/tech-lead/session-output-parser.ts
     - packages/daemon/src/coordination/tech-lead/retrospective.ts
-    # triage.ts and triage-store.ts pending implementation in issue #393
     - packages/daemon/src/coordination/tech-lead-scheduler.ts
     - prompts/tech-lead.md
     - prompts/tech-lead-enrichment.md

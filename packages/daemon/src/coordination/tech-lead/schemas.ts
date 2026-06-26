@@ -149,6 +149,32 @@ export const DependencyRiskEntrySchema = z.object({
 });
 export type DependencyRiskEntry = z.infer<typeof DependencyRiskEntrySchema>;
 
+// --- Triage ---
+
+export const TriageDecisionSchema = z.object({
+  issueNumber: z.number().int().positive(),
+  verdict: z.enum(['approve', 'reject', 'promote', 'defer']),
+  reason: z.string().min(1),
+  newSeverity: z.string().optional(),
+});
+export type TriageDecision = z.infer<typeof TriageDecisionSchema>;
+
+export const UntriagedIssueSchema = z.object({
+  issueNumber: z.number().int().positive(),
+  title: z.string(),
+  body: z.string().nullable().default(null),
+  labels: z.array(z.string()).default([]),
+  severity: z.string().optional(),
+});
+export type UntriagedIssue = z.infer<typeof UntriagedIssueSchema>;
+
+/** Outcome of applying a batch of triage decisions (see finding-triage.ts). */
+export interface TriageApplyResult {
+  applied: number;
+  skipped: number;
+  capReached: boolean;
+}
+
 // --- SignalDigest ---
 
 export const SignalDigestSchema = z.object({
@@ -163,6 +189,8 @@ export const SignalDigestSchema = z.object({
   activeProposals: z.array(TechnicalProposalSchema).default([]),
   priorRejections: z.array(TechnicalProposalSchema).default([]),
   missingSources: z.array(z.string()).default([]),
+  untriagedIssues: z.array(UntriagedIssueSchema).default([]),
+  triageRemainingCap: z.number().int().nonnegative().default(0),
   assembledAt: z.string().datetime(),
 });
 export type SignalDigest = z.infer<typeof SignalDigestSchema>;
@@ -205,6 +233,7 @@ export const TechLeadOutputSchema = z.object({
     'backlog_grooming',
     'retrospective',
   ])).default([]),
+  triageDecisions: z.array(TriageDecisionSchema).default([]),
 });
 export type TechLeadOutput = z.infer<typeof TechLeadOutputSchema>;
 

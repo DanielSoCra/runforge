@@ -138,6 +138,9 @@ import { createKnowledgeSyncService } from '../knowledge-sync/sync-service.js';
 import { TechProposalStore } from '../coordination/tech-lead/proposal-store.js';
 import { assembleSignalDigest } from '../coordination/tech-lead/signal-digest.js';
 import { isTerminalStatus } from '../coordination/tech-lead/proposal-lifecycle.js';
+import { fetchUntriagedIssues } from '../coordination/tech-lead/triage.js';
+import { applyTriageDecisions } from '../coordination/tech-lead/finding-triage.js';
+import { TriageStore } from '../coordination/tech-lead/triage-store.js';
 import { readJsonSafe, writeJsonSafe } from '../lib/json-store.js';
 import { mkdir, mkdtemp, rm, stat } from 'fs/promises';
 import { tmpdir } from 'os';
@@ -884,6 +887,7 @@ export async function startDaemon(
   const techLeadEnrichmentsDir = join(techLeadStateDir, 'enrichments');
   await mkdir(techLeadProposalsDir, { recursive: true });
   await mkdir(techLeadEnrichmentsDir, { recursive: true });
+  await mkdir(join(techLeadStateDir, 'triage'), { recursive: true });
 
   const techProposalStore = new TechProposalStore(
     techLeadProposalsDir,
@@ -891,9 +895,13 @@ export async function startDaemon(
   );
   await techProposalStore.init();
 
+  const triageStore = new TriageStore(
+    join(techLeadStateDir, 'triage', 'triage-state.json'),
+  );
+
   const techLeadScheduler = createTechLeadScheduler(
     {
-      assembleDigest: async (trigger, cfg) => {
+      assembleDigest: async (trigger, cfg, triageContext) => {
         return assembleSignalDigest(
           trigger,
           {
@@ -918,6 +926,8 @@ export async function startDaemon(
             ],
             workspacePath: repoRoot,
             traceabilityPath: join(repoRoot, '.specify', 'traceability.yml'),
+            untriagedIssues: triageContext.untriagedIssues,
+            triageRemainingCap: triageContext.remainingCap,
           },
         );
       },
@@ -976,6 +986,40 @@ export async function startDaemon(
           `[tech-lead-scheduler] protocol trigger: ${trigger} (routing not yet wired)`,
         );
       },
+      fetchUntriagedIssues: async (cap) => {
+        if (!config.repo) return [];
+        return fetchUntriagedIssues(
+          {
+            octokit: new Octokit({ auth: process.env.GITHUB_TOKEN }),
+            owner: config.repo.owner,
+            repo: config.repo.name,
+          },
+          cap,
+        );
+      },
+      getTriageRemainingCap: async () =>
+        triageStore.remaining(config.coordination.triageDailyCap),
+      applyTriageDecisions: async (decisions, remainingCap) => {
+        if (!config.repo) {
+          return { applied: 0, skipped: decisions.length, capReached: false };
+        }
+        return applyTriageDecisions(
+          decisions,
+          {
+            octokit: new Octokit({ auth: process.env.GITHUB_TOKEN }),
+            owner: config.repo.owner,
+            repo: config.repo.name,
+            onCapConsumed: () => {
+              triageStore.increment(1).catch((e) => {
+                console.warn(
+                  `[tech-lead-scheduler] failed to update triage cap: ${e instanceof Error ? e.message : String(e)}`,
+                );
+              });
+            },
+          },
+          remainingCap,
+        );
+      },
     },
     {
       intervalMs: config.coordination.techLeadInterval,
@@ -983,6 +1027,7 @@ export async function startDaemon(
       proposalExpiryMs: config.coordination.techLeadProposalExpiryMs,
       lookbackWindowMs: config.coordination.techLeadLookbackWindowMs,
       maxEntriesPerSection: config.coordination.techLeadMaxEntriesPerSection,
+      triageDailyCap: config.coordination.triageDailyCap,
     },
   );
   let stopTechLeadScheduler: (() => void) | null = null;

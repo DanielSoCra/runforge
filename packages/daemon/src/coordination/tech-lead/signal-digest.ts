@@ -10,6 +10,7 @@ import type {
   DeferredWorkEntry,
   DriftIndicatorEntry,
   DependencyRiskEntry,
+  UntriagedIssue,
 } from './schemas.js';
 
 // --- Dependency injection types ---
@@ -34,6 +35,8 @@ export interface DigestConfig {
   deferredWorkExclude: string[];
   workspacePath: string;
   traceabilityPath: string;
+  untriagedIssues?: UntriagedIssue[];
+  triageRemainingCap?: number;
 }
 
 const DEFAULT_DEFERRED_EXCLUDE = ['node_modules', 'dist', '.git', 'coverage', '.next'];
@@ -98,6 +101,8 @@ export async function assembleSignalDigest(
     activeProposals,
     priorRejections,
     missingSources,
+    untriagedIssues: config.untriagedIssues ?? [],
+    triageRemainingCap: config.triageRemainingCap ?? 0,
     assembledAt: new Date().toISOString(),
   };
 }

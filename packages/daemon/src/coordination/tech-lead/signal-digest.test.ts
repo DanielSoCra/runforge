@@ -139,6 +139,65 @@ describe('assembleSignalDigest', () => {
 
     expect(digest.reviewFindings).toHaveLength(10);
   });
+
+  it('includes triage context when provided', async () => {
+    const deps = makeDeps();
+    const config = makeConfig(tmpDir, {
+      untriagedIssues: [
+        { issueNumber: 1, title: 'A', body: null, labels: [], severity: 'P2' },
+        { issueNumber: 2, title: 'B', body: null, labels: [], severity: 'P3' },
+      ],
+      triageRemainingCap: 3,
+    });
+
+    const digest = await assembleSignalDigest('scheduled', deps, config);
+
+    expect(digest.untriagedIssues).toHaveLength(2);
+    expect(digest.triageRemainingCap).toBe(3);
+  });
+
+  it('renders untriaged issues into the serialized digest the agent receives', async () => {
+    const deps = makeDeps();
+    const config = makeConfig(tmpDir, {
+      untriagedIssues: [
+        { issueNumber: 42, title: 'Flaky retry loop', body: 'details', labels: ['review-finding'], severity: 'P2' },
+      ],
+      triageRemainingCap: 4,
+    });
+
+    const digest = await assembleSignalDigest('scheduled', deps, config);
+
+    // The scheduler injects JSON.stringify(digest) as the prompt's signal_digest
+    // variable, so the agent only "sees" the triage context if it survives
+    // serialization.
+    const rendered = JSON.stringify(digest);
+    expect(rendered).toContain('"untriagedIssues"');
+    expect(rendered).toContain('Flaky retry loop');
+    expect(rendered).toContain('42');
+    expect(rendered).toContain('"triageRemainingCap":4');
+  });
+});
+
+describe('tech-lead prompt contract', () => {
+  const promptPath = `${import.meta.dirname}/../../../../../prompts/tech-lead.md`;
+
+  it('documents the triageDecisions output contract', async () => {
+    const fs = await import('node:fs');
+    const content = fs.readFileSync(promptPath, 'utf-8');
+
+    expect(content).toContain('triageDecisions');
+    // Output contract uses the exact TriageDecision field names.
+    expect(content).toContain('issueNumber');
+    expect(content).toContain('verdict');
+    expect(content).toContain('newSeverity');
+    // Presents the untriaged inbox + cap to the agent.
+    expect(content).toContain('untriagedIssues');
+    expect(content).toContain('triageRemainingCap');
+    // All four verdicts are described.
+    for (const verdict of ['approve', 'reject', 'promote', 'defer']) {
+      expect(content).toContain(verdict);
+    }
+  });
 });
 
 describe('runDependencyAudit', () => {

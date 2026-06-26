@@ -13,17 +13,21 @@ function makeConfig(overrides: Partial<TechLeadSchedulerConfig> = {}): TechLeadS
     proposalExpiryMs: 7 * 24 * 60 * 60 * 1000,
     lookbackWindowMs: 48 * 60 * 60 * 1000,
     maxEntriesPerSection: 50,
+    triageDailyCap: 5,
     ...overrides,
   };
 }
 
 function makeDeps(overrides: Partial<TechLeadSchedulerDeps> = {}): TechLeadSchedulerDeps {
   return {
-    assembleDigest: vi.fn().mockResolvedValue({ id: 'digest-1', trigger: 'scheduled', proposals: [], protocolTriggers: [], reviewFindings: [], runOutcomes: [], driftIndicators: [], deferredWork: [], testHealth: [], dependencyRisks: [], activeProposals: [], priorRejections: [], missingSources: [], assembledAt: new Date().toISOString() }),
-    spawnTechLeadSession: vi.fn().mockResolvedValue('{"proposals":[],"protocolTriggers":[]}'),
+    assembleDigest: vi.fn().mockResolvedValue({ id: 'digest-1', trigger: 'scheduled', proposals: [], protocolTriggers: [], reviewFindings: [], runOutcomes: [], driftIndicators: [], deferredWork: [], testHealth: [], dependencyRisks: [], activeProposals: [], priorRejections: [], missingSources: [], untriagedIssues: [], triageRemainingCap: 0, assembledAt: new Date().toISOString() }),
+    spawnTechLeadSession: vi.fn().mockResolvedValue('{"proposals":[],"protocolTriggers":[],"triageDecisions":[]}'),
     storeProposals: vi.fn().mockResolvedValue(0),
     sweepExpiredProposals: vi.fn().mockResolvedValue(0),
     routeToProtocol: vi.fn().mockResolvedValue(undefined),
+    fetchUntriagedIssues: vi.fn().mockResolvedValue([]),
+    getTriageRemainingCap: vi.fn().mockResolvedValue(5),
+    applyTriageDecisions: vi.fn().mockResolvedValue({ applied: 0, skipped: 0, capReached: false }),
     ...overrides,
   };
 }
@@ -118,7 +122,7 @@ describe('TechLeadScheduler', () => {
 
     // Only one event-triggered cycle should fire (debounced)
     expect(deps.assembleDigest).toHaveBeenCalledTimes(1);
-    expect(deps.assembleDigest).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({}));
+    expect(deps.assembleDigest).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({}), expect.objectContaining({}));
     stop();
   });
 
@@ -261,5 +265,76 @@ describe('TechLeadScheduler', () => {
     const callArgs = (deps.assembleDigest as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(callArgs[0]).toBe('scheduled');
     stop();
+  });
+
+  it('fetches untriaged issues bounded by remaining cap and passes them to assembleDigest', async () => {
+    const deps = makeDeps({
+      getTriageRemainingCap: vi.fn().mockResolvedValue(3),
+      fetchUntriagedIssues: vi.fn().mockResolvedValue([
+        { issueNumber: 1, title: 'A', labels: [], severity: 'P2' },
+        { issueNumber: 2, title: 'B', labels: [], severity: 'P3' },
+      ]),
+    });
+    const config = makeConfig({ intervalMs: 1000 });
+    const scheduler = createTechLeadScheduler(deps, config);
+    const stop = scheduler.start();
+
+    await vi.advanceTimersByTimeAsync(1100);
+
+    expect(deps.getTriageRemainingCap).toHaveBeenCalled();
+    expect(deps.fetchUntriagedIssues).toHaveBeenCalledWith(3);
+    const callArgs = (deps.assembleDigest as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(callArgs[2]).toEqual({
+      untriagedIssues: [
+        { issueNumber: 1, title: 'A', labels: [], severity: 'P2' },
+        { issueNumber: 2, title: 'B', labels: [], severity: 'P3' },
+      ],
+      remainingCap: 3,
+    });
+    stop();
+  });
+
+  it('applies triage decisions from session output', async () => {
+    const deps = makeDeps({
+      getTriageRemainingCap: vi.fn().mockResolvedValue(2),
+      spawnTechLeadSession: vi.fn().mockResolvedValue(JSON.stringify({
+        proposals: [],
+        protocolTriggers: [],
+        triageDecisions: [
+          { issueNumber: 1, verdict: 'approve', reason: 'Clear finding' },
+          { issueNumber: 2, verdict: 'defer', reason: 'Needs more info' },
+        ],
+      })),
+    });
+    const config = makeConfig({ intervalMs: 1000 });
+    const scheduler = createTechLeadScheduler(deps, config);
+    const stop = scheduler.start();
+
+    await vi.advanceTimersByTimeAsync(1100);
+
+    expect(deps.applyTriageDecisions).toHaveBeenCalledWith(
+      [
+        { issueNumber: 1, verdict: 'approve', reason: 'Clear finding' },
+        { issueNumber: 2, verdict: 'defer', reason: 'Needs more info' },
+      ],
+      2,
+    );
+    stop();
+  });
+
+  it('does not apply triage decisions when session output is malformed', async () => {
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const deps = makeDeps({
+      spawnTechLeadSession: vi.fn().mockResolvedValue('not valid json'),
+    });
+    const config = makeConfig({ intervalMs: 1000 });
+    const scheduler = createTechLeadScheduler(deps, config);
+    const stop = scheduler.start();
+
+    await vi.advanceTimersByTimeAsync(1100);
+
+    expect(deps.applyTriageDecisions).not.toHaveBeenCalled();
+    stop();
+    consoleSpy.mockRestore();
   });
 });

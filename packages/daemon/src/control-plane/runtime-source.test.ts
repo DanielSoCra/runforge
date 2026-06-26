@@ -119,9 +119,10 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
       techLeadEventDebounce: 300000,
       techLeadProposalExpiryMs: 604800000,
       techLeadLookbackWindowMs: 172800000,
-      techLeadMaxEntriesPerSection: 50,
-      maxConsecutiveTickErrors: 5,
-    },
+    techLeadMaxEntriesPerSection: 50,
+    triageDailyCap: 5,
+    maxConsecutiveTickErrors: 5,
+  },
     ...overrides,
   };
 }
