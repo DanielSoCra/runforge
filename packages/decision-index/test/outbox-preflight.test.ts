@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
-import { makeTempDb, type TempDb } from "./helpers/temp-db.js";
+import { makePgliteDb, type PgliteTestDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { makeOutbox, answerItem } from "./helpers/effect-driver.js";
 import { decisions, outbox as outboxTable } from "../src/schema.js";
@@ -17,12 +17,16 @@ import { IllegalTransitionError } from "../src/transition-table.js";
  * BEFORE any adapter call.
  */
 describe("outbox preflight: illegal effects throw with ZERO adapter calls", () => {
-  let t: TempDb;
-  beforeEach(() => (t = makeTempDb()));
-  afterEach(() => t?.cleanup());
+  let t: PgliteTestDb;
+  beforeEach(async () => {
+    t = await makePgliteDb();
+  });
+  afterEach(async () => {
+    await t?.cleanup();
+  });
 
   it("resume on a non-source_written item throws and NEVER calls resumeDispatcher", async () => {
-    const id = seedDecision(t.db); // status: detected
+    const id = await seedDecision(t.db); // status: detected
     const f = makeOutbox(t);
 
     await expect(f.outbox.runEffect(id, "resume")).rejects.toThrow(IllegalTransitionError);
@@ -30,24 +34,24 @@ describe("outbox preflight: illegal effects throw with ZERO adapter calls", () =
     // the adapter must not have been touched at all
     expect(f.resumeDispatcher.calls).toHaveLength(0);
     // no reserved outbox row should leak either
-    expect(t.db.select().from(outboxTable).all()).toHaveLength(0);
+    expect(await t.db.select().from(outboxTable)).toHaveLength(0);
     // status unchanged
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("detected");
   });
 
   it("write_response before answering throws and NEVER calls sourceSink", async () => {
-    const id = seedDecision(t.db); // status: detected (no answer yet)
+    const id = await seedDecision(t.db); // status: detected (no answer yet)
     const f = makeOutbox(t);
 
     await expect(f.outbox.runEffect(id, "write_response")).rejects.toThrow(IllegalTransitionError);
 
     expect(f.sourceSink.calls).toHaveLength(0);
-    expect(t.db.select().from(outboxTable).all()).toHaveLength(0);
+    expect(await t.db.select().from(outboxTable)).toHaveLength(0);
   });
 
   it("notify on an already-viewed item throws and NEVER calls notifier", async () => {
-    const id = seedDecision(t.db);
+    const id = await seedDecision(t.db);
     const f = makeOutbox(t);
     // advance past detected so notify is no longer the expected effect
     await answerItem(t, f.outbox, id); // -> answered_pending_source_write
@@ -59,7 +63,7 @@ describe("outbox preflight: illegal effects throw with ZERO adapter calls", () =
   });
 
   it("requeue on a non-source_written item throws and NEVER calls resumeDispatcher", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" });
+    const id = await seedDecision(t.db, { resume_mode: "requeue" });
     const f = makeOutbox(t);
 
     await expect(f.outbox.runEffect(id, "requeue")).rejects.toThrow(IllegalTransitionError);

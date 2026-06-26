@@ -94,11 +94,11 @@ function fakeReadModel(opts: {
   lastArgs?: { value: ListRankedArgs | undefined };
 }): DecisionReadModel {
   return {
-    listRanked(args?: ListRankedArgs): RankedListItem[] {
+    async listRanked(args?: ListRankedArgs): Promise<RankedListItem[]> {
       if (opts.lastArgs) opts.lastArgs.value = args;
       return opts.ranked ?? [];
     },
-    detail(decisionId: string): DetailView | undefined {
+    async detail(decisionId: string): Promise<DetailView | undefined> {
       return opts.details?.[decisionId];
     },
   };
@@ -107,10 +107,10 @@ function fakeReadModel(opts: {
 /** A read model fake that THROWS on every call (index disabled/broken). */
 function throwingReadModel(): DecisionReadModel {
   return {
-    listRanked(): RankedListItem[] {
+    async listRanked(): Promise<RankedListItem[]> {
       throw new Error('decision index unavailable');
     },
-    detail(): DetailView | undefined {
+    async detail(): Promise<DetailView | undefined> {
       throw new Error('decision index unavailable');
     },
   };
@@ -119,22 +119,22 @@ function throwingReadModel(): DecisionReadModel {
 // ── listPendingDecisions ─────────────────────────────────────────────────────
 
 describe('listPendingDecisions', () => {
-  it('returns 200 with the ranked rows (ranking order preserved)', () => {
+  it('returns 200 with the ranked rows (ranking order preserved)', async () => {
     const ranked = [rankedItem('d-2', 90), rankedItem('d-1', 10)];
-    const res = listPendingDecisions(fakeReadModel({ ranked }), {});
+    const res = await listPendingDecisions(fakeReadModel({ ranked }), {});
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect((res.body as RankedListItem[]).map((r) => r.decision_id)).toEqual(['d-2', 'd-1']);
   });
 
-  it('returns 200 with an empty array when nothing is pending (the calm success state)', () => {
-    const res = listPendingDecisions(fakeReadModel({ ranked: [] }), {});
+  it('returns 200 with an empty array when nothing is pending (the calm success state)', async () => {
+    const res = await listPendingDecisions(fakeReadModel({ ranked: [] }), {});
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
   });
 
-  it('never leaks protected content — list protected fields carry class only, no resolvable ref', () => {
-    const res = listPendingDecisions(fakeReadModel({ ranked: [rankedItem('d-1', 50)] }), {});
+  it('never leaks protected content — list protected fields carry class only, no resolvable ref', async () => {
+    const res = await listPendingDecisions(fakeReadModel({ ranked: [rankedItem('d-1', 50)] }), {});
     const rows = res.body as RankedListItem[];
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
@@ -144,33 +144,35 @@ describe('listPendingDecisions', () => {
     expect(JSON.stringify(res.body)).not.toContain('protected://');
   });
 
-  it('passes caller filters/focus through, defaulting status to the awaiting-operator set', () => {
+  it('passes caller filters/focus through, defaulting status to the awaiting-operator set', async () => {
     const lastArgs: { value: ListRankedArgs | undefined } = { value: undefined };
     const query: ListRankedArgs = { filters: { risk_class: ['P1'] } };
-    listPendingDecisions(fakeReadModel({ ranked: [], lastArgs }), query);
+    await listPendingDecisions(fakeReadModel({ ranked: [], lastArgs }), query);
     // caller's risk_class survives; status is defaulted to notified/viewed.
     expect(lastArgs.value?.filters?.risk_class).toEqual(['P1']);
     expect(lastArgs.value?.filters?.status).toEqual(['notified', 'viewed']);
   });
 
-  it('defaults the inbox to awaiting-operator statuses (excludes terminal/answered)', () => {
+  it('defaults the inbox to awaiting-operator statuses (excludes terminal/answered)', async () => {
     const lastArgs: { value: ListRankedArgs | undefined } = { value: undefined };
-    listPendingDecisions(fakeReadModel({ ranked: [], lastArgs }), {});
+    await listPendingDecisions(fakeReadModel({ ranked: [], lastArgs }), {});
     expect(lastArgs.value?.filters?.status).toEqual(['notified', 'viewed']);
   });
 
-  it('respects an EXPLICIT status filter (does not widen it)', () => {
+  it('respects an EXPLICIT status filter (does not widen it)', async () => {
     const lastArgs: { value: ListRankedArgs | undefined } = { value: undefined };
     const query: ListRankedArgs = { filters: { status: ['resumed'] } };
-    listPendingDecisions(fakeReadModel({ ranked: [], lastArgs }), query);
+    await listPendingDecisions(fakeReadModel({ ranked: [], lastArgs }), query);
     expect(lastArgs.value?.filters?.status).toEqual(['resumed']);
   });
 
-  it('fail-safe: a throwing read model maps to 503, never rethrows', () => {
+  it('fail-safe: a throwing read model maps to 503, never rethrows', async () => {
     let res: { status: number; body: unknown } | undefined;
-    expect(() => {
-      res = listPendingDecisions(throwingReadModel(), {});
-    }).not.toThrow();
+    await expect(
+      (async () => {
+        res = await listPendingDecisions(throwingReadModel(), {});
+      })(),
+    ).resolves.toBeUndefined();
     expect(res?.status).toBe(503);
   });
 });
@@ -178,24 +180,26 @@ describe('listPendingDecisions', () => {
 // ── getDecisionDetail ────────────────────────────────────────────────────────
 
 describe('getDecisionDetail', () => {
-  it('returns 200 with the revealed DetailView for a known decision', () => {
-    const res = getDecisionDetail(fakeReadModel({ details: { 'd-1': detailView('d-1') } }), 'd-1');
+  it('returns 200 with the revealed DetailView for a known decision', async () => {
+    const res = await getDecisionDetail(fakeReadModel({ details: { 'd-1': detailView('d-1') } }), 'd-1');
     expect(res.status).toBe(200);
     expect((res.body as DetailView).decision_id).toBe('d-1');
     // detail MAY carry the resolvable ref (server-side reveal happens inside the control plane).
     expect((res.body as DetailView).question.kind).toBe('protected');
   });
 
-  it('returns 404 for an unknown decision', () => {
-    const res = getDecisionDetail(fakeReadModel({ details: {} }), 'nope');
+  it('returns 404 for an unknown decision', async () => {
+    const res = await getDecisionDetail(fakeReadModel({ details: {} }), 'nope');
     expect(res.status).toBe(404);
   });
 
-  it('fail-safe: a throwing read model maps to 503, never rethrows', () => {
+  it('fail-safe: a throwing read model maps to 503, never rethrows', async () => {
     let res: { status: number; body: unknown } | undefined;
-    expect(() => {
-      res = getDecisionDetail(throwingReadModel(), 'd-1');
-    }).not.toThrow();
+    await expect(
+      (async () => {
+        res = await getDecisionDetail(throwingReadModel(), 'd-1');
+      })(),
+    ).resolves.toBeUndefined();
     expect(res?.status).toBe(503);
   });
 });

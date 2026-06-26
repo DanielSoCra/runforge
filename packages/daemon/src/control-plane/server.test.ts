@@ -91,7 +91,7 @@ describe('ControlServer', () => {
   it('GET /decisions/:id decodes a URL-encoded decision id before lookup (codex)', async () => {
     let receivedId: string | undefined;
     const { port } = await startServer({
-      getDecisionDetail: (id: string) => {
+      getDecisionDetail: async (id: string) => {
         receivedId = id;
         return { status: 404, body: { error: 'unknown decision' } };
       },

@@ -131,12 +131,13 @@ const PROTECTED_PREFIX = "protected://";
 export class ReadModel {
   constructor(private readonly db: Db) {}
 
-  get(decisionId: string): DecisionView | undefined {
-    const r = this.db
-      .select()
-      .from(decisions)
-      .where(eq(decisions.decision_id, decisionId))
-      .all()[0];
+  async get(decisionId: string): Promise<DecisionView | undefined> {
+    const r = (
+      await this.db
+        .select()
+        .from(decisions)
+        .where(eq(decisions.decision_id, decisionId))
+    )[0];
     if (!r) return undefined;
     return {
       decision_id: r.decision_id,
@@ -155,11 +156,8 @@ export class ReadModel {
     };
   }
 
-  audit(decisionId: string): AuditView[] {
-    return this.db
-      .select()
-      .from(auditLog)
-      .all()
+  async audit(decisionId: string): Promise<AuditView[]> {
+    return (await this.db.select().from(auditLog))
       .filter((a) => a.decision_id === decisionId)
       .map((a) => ({
         from: a.from_status,
@@ -171,22 +169,19 @@ export class ReadModel {
       }));
   }
 
-  hasResponse(decisionId: string): boolean {
+  async hasResponse(decisionId: string): Promise<boolean> {
     return (
-      this.db
-        .select()
-        .from(decisionResponses)
-        .where(eq(decisionResponses.decision_id, decisionId))
-        .all().length > 0
+      (
+        await this.db
+          .select()
+          .from(decisionResponses)
+          .where(eq(decisionResponses.decision_id, decisionId))
+      ).length > 0
     );
   }
 
-  list(): DecisionView[] {
-    return this.db
-      .select()
-      .from(decisions)
-      .all()
-      .map((r) => ({
+  async list(): Promise<DecisionView[]> {
+    return (await this.db.select().from(decisions)).map((r) => ({
         decision_id: r.decision_id,
         status: r.status as ItemStatus,
         stale: r.stale,
@@ -206,13 +201,12 @@ export class ReadModel {
   // ── slice-4 dashboard surface (ADDITIONS; the methods above stay unchanged) ──
 
   /** Map a ulid -> its protected_refs class for a single decision. */
-  private protectedClasses(decisionId: string): Map<string, ProtectedClass> {
+  private async protectedClasses(decisionId: string): Promise<Map<string, ProtectedClass>> {
     const m = new Map<string, ProtectedClass>();
-    for (const ref of this.db
+    for (const ref of await this.db
       .select()
       .from(protectedRefs)
-      .where(eq(protectedRefs.decision_id, decisionId))
-      .all()) {
+      .where(eq(protectedRefs.decision_id, decisionId))) {
       m.set(ref.ulid, ref.class as ProtectedClass);
     }
     return m;
@@ -246,9 +240,9 @@ export class ReadModel {
    * with `why_ranked`. Protected fields carry {field, class} ONLY (no resolvable
    * ref). Suppressed (muted/deferred) items are dropped unless `includeSuppressed`.
    */
-  listRanked(args: ListRankedArgs = {}): RankedListItem[] {
+  async listRanked(args: ListRankedArgs = {}): Promise<RankedListItem[]> {
     const focus: FocusContext = args.focus ?? { now: new Date() };
-    const rows = this.db.select().from(decisions).all();
+    const rows = await this.db.select().from(decisions);
 
     const items: RankedListItem[] = [];
     for (const r of rows) {
@@ -272,7 +266,7 @@ export class ReadModel {
       );
       if (priority.suppressed && !args.includeSuppressed) continue;
 
-      const classes = this.protectedClasses(r.decision_id);
+      const classes = await this.protectedClasses(r.decision_id);
       const options = (JSON.parse(r.options_json) as { id: string; label: string; detail?: string }[]).map(
         (o, idx): ListOption => ({
           id: o.id,
@@ -322,10 +316,12 @@ export class ReadModel {
    * tokens — the `ref` appears ONLY here, consumed by the server-only resolver in
    * the authenticated detail render. No plaintext.
    */
-  detail(decisionId: string): DetailView | undefined {
-    const r = this.db.select().from(decisions).where(eq(decisions.decision_id, decisionId)).all()[0];
+  async detail(decisionId: string): Promise<DetailView | undefined> {
+    const r = (
+      await this.db.select().from(decisions).where(eq(decisions.decision_id, decisionId))
+    )[0];
     if (!r) return undefined;
-    const classes = this.protectedClasses(decisionId);
+    const classes = await this.protectedClasses(decisionId);
     const options = (JSON.parse(r.options_json) as { id: string; label: string; detail?: string }[]).map(
       (o, idx): DetailOption => ({
         id: o.id,

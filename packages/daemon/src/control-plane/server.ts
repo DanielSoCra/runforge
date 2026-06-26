@@ -20,13 +20,15 @@ export interface ControlHandlers {
   release?: () => Promise<ReleaseProposalResult>;
   submitIdea?: (submittedBy: string, description: string) => Promise<{ id: string }>;
   startInteractivePoSession?: () => Promise<HandlerResult<unknown>>;
-  listPendingDecisions?: (query: ListRankedArgs) => HandlerResult<RankedListItem[] | ErrorBody>;
-  getDecisionDetail?: (id: string) => HandlerResult<DetailView | ErrorBody>;
+  listPendingDecisions?: (
+    query: ListRankedArgs,
+  ) => Promise<HandlerResult<RankedListItem[] | ErrorBody>>;
+  getDecisionDetail?: (id: string) => Promise<HandlerResult<DetailView | ErrorBody>>;
   revealProtected?: (
     id: string,
     body: RevealBody,
     actor: string,
-  ) => HandlerResult<{ field: string; value: string } | ErrorBody>;
+  ) => Promise<HandlerResult<{ field: string; value: string } | ErrorBody>>;
   answerDecision?: (
     id: string,
     body: AnswerBody,
@@ -43,7 +45,7 @@ export function createControlServer(
   handlers: ControlHandlers,
   host: string = '127.0.0.1',
 ): { server: Server; start: () => Promise<Result<void>> } {
-  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', `http://localhost:${port}`);
     const method = req.method ?? 'GET';
 
@@ -184,7 +186,7 @@ export function createControlServer(
       if (handlers.listPendingDecisions) {
         try {
           const query = parseListRankedArgs(url.searchParams);
-          const result = handlers.listPendingDecisions(query);
+          const result = await handlers.listPendingDecisions(query);
           json(res, result.status, result.body);
         } catch (e: unknown) {
           console.error('[control-plane] GET /decisions/pending failed:', e);
@@ -211,7 +213,7 @@ export function createControlServer(
           return;
         }
         try {
-          const result = handlers.getDecisionDetail(id);
+          const result = await handlers.getDecisionDetail(id);
           json(res, result.status, result.body);
         } catch (e: unknown) {
           console.error('[control-plane] GET /decisions/:id failed:', e);
@@ -310,7 +312,7 @@ export function createControlServer(
           rawBody += chunk.toString();
         });
         req.on('error', () => { respond(400, { error: 'request error' }); });
-        req.on('end', () => {
+        req.on('end', async () => {
           if (responded) return;
           let parsed: RevealBody;
           try {
@@ -331,7 +333,7 @@ export function createControlServer(
               ? (parsed as { actor: string }).actor
               : (actorHeader ?? 'daemon');
           try {
-            const result = handlers.revealProtected!(id, parsed, actor);
+            const result = await handlers.revealProtected!(id, parsed, actor);
             respond(result.status, result.body);
           } catch (e: unknown) {
             console.error('[control-plane] POST /decisions/:id/reveal failed:', e);

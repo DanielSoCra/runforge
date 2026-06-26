@@ -29,6 +29,23 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Real Postgres for the decision-index integration suite. The runner is
+      # self-hosted (macOS), where GitHub `services:` containers are Linux-only,
+      # so start Postgres via `docker run` on a random host port (avoids clashing
+      # with any local Postgres) and export the connection URL.
+      - name: Start Postgres
+        run: |
+          docker rm -f "ci-pg-${{ github.run_id }}" 2>/dev/null || true
+          docker run -d --name "ci-pg-${{ github.run_id }}" \
+            -e POSTGRES_DB=auto_claude_ci -e POSTGRES_USER=auto_claude -e POSTGRES_PASSWORD=auto_claude \
+            -p 127.0.0.1::5432 postgres:18-alpine
+          for i in $(seq 1 30); do
+            if docker exec "ci-pg-${{ github.run_id }}" pg_isready -U auto_claude -d auto_claude_ci >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          PORT="$(docker port "ci-pg-${{ github.run_id }}" 5432/tcp | head -1 | sed 's/.*://')"
+          echo "PG_URL=postgres://auto_claude:auto_claude@127.0.0.1:${PORT}/auto_claude_ci" >> "$GITHUB_ENV"
+
       - name: Lint
         run: pnpm lint
 
@@ -37,8 +54,17 @@ jobs:
 
       - name: Test
         run: pnpm test
+        env:
+          # Makes the decision-index real-Postgres integration suite REQUIRED
+          # (not skipped). Points at the docker Postgres started above.
+          AUTO_CLAUDE_TEST_DATABASE_URL: ${{ env.PG_URL }}
+          AUTO_CLAUDE_DATABASE_URL: ${{ env.PG_URL }}
 
       - name: Build
         run: pnpm build
         env:
           NEXT_PUBLIC_SITE_URL: http://placeholder.invalid
+
+      - name: Stop Postgres
+        if: always()
+        run: docker rm -f "ci-pg-${{ github.run_id }}" 2>/dev/null || true

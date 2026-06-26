@@ -52,7 +52,7 @@ export {
 // it is intentionally NOT exported from the package surface. Redaction/sanitization
 // plugins live in separate packages selected per deployment.
 export {
-  SqliteQuarantine,
+  PgQuarantine,
   FakeQuarantine,
   type Quarantine,
   type QuarantineRecord,

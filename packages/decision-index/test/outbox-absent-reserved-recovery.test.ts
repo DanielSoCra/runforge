@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
-import { makeTempDb, type TempDb } from "./helpers/temp-db.js";
+import { makePgliteDb, type PgliteTestDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { makeOutbox, FIXED_NOW } from "./helpers/effect-driver.js";
 import { decisions, outbox as outboxTable, appliedTransitions } from "../src/schema.js";
@@ -14,19 +14,23 @@ import { decisions, outbox as outboxTable, appliedTransitions } from "../src/sch
  * `notified` status and would otherwise leave the row stuck in `reserved`.
  */
 describe("absent reserved effect recovery (crash before execute)", () => {
-  let t: TempDb;
-  beforeEach(() => (t = makeTempDb()));
-  afterEach(() => t?.cleanup());
+  let t: PgliteTestDb;
+  beforeEach(async () => {
+    t = await makePgliteDb();
+  });
+  afterEach(async () => {
+    await t?.cleanup();
+  });
 
   it("reserved re_notify row + crash before execute (absent) -> reconcile executes + commits, no stuck reserved, idempotent", async () => {
-    const id = seedDecision(t.db, { status: "notified" });
+    const id = await seedDecision(t.db, { status: "notified" });
     const f = makeOutbox(t);
 
-    const reNotifyId = f.outbox.effectIdFor(id, "notify", { reNotifyCycle: "cycle-9" });
+    const reNotifyId = await f.outbox.effectIdFor(id, "notify", { reNotifyCycle: "cycle-9" });
     expect(reNotifyId).toContain("cycle-9");
 
     // crash state: re_notify reserved, but the Notifier NEVER sent (probe -> absent).
-    t.db
+    await t.db
       .insert(outboxTable)
       .values({
         id: reNotifyId,
@@ -37,8 +41,7 @@ describe("absent reserved effect recovery (crash before execute)", () => {
         state: "reserved",
         attempts: 0,
         created_at: FIXED_NOW,
-      })
-      .run();
+      });
     // NOTE: notifier.applied is empty -> probe(reNotifyId) === "absent"
 
     expect(await f.notifier.probe(reNotifyId)).toBe("absent");
@@ -55,50 +58,42 @@ describe("absent reserved effect recovery (crash before execute)", () => {
     expect(mine.kind).toBe("notify");
 
     // row committed, no stuck reserved row
-    const obRow = t.db.select().from(outboxTable).where(eq(outboxTable.id, reNotifyId)).all()[0]!;
+    const obRow = (await t.db.select().from(outboxTable).where(eq(outboxTable.id, reNotifyId)))[0]!;
     expect(obRow.state).toBe("committed");
 
-    const stuck = t.db
-      .select()
-      .from(outboxTable)
-      .all()
-      .filter((o) => o.decision_id === id && o.state === "reserved");
+    const stuck = (await t.db.select().from(outboxTable)).filter(
+      (o) => o.decision_id === id && o.state === "reserved",
+    );
     expect(stuck).toHaveLength(0);
 
     // the re_notify:<cycle> transition was recorded (correct semantic key)
-    const keys = t.db
-      .select()
-      .from(appliedTransitions)
-      .all()
+    const keys = (await t.db.select().from(appliedTransitions))
       .filter((k) => k.decision_id === id)
       .map((k) => k.transition_key);
     expect(keys).toContain("re_notify:cycle-9");
 
     // item stays in notified after a re_notify
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("notified");
 
     // second reconcile is a no-op: no re-send, no duplicate applied row
     const callsBeforeSecond = f.notifier.calls.length;
     await f.outbox.reconcile();
     expect(f.notifier.calls.length).toBe(callsBeforeSecond);
-    const keysAfter = t.db
-      .select()
-      .from(appliedTransitions)
-      .all()
+    const keysAfter = (await t.db.select().from(appliedTransitions))
       .filter((k) => k.decision_id === id)
       .map((k) => k.transition_key);
     expect(keysAfter.filter((k) => k === "re_notify:cycle-9")).toHaveLength(1);
   });
 
   it("reserved initial notify row + crash before execute (absent) -> reconcile executes + commits", async () => {
-    const id = seedDecision(t.db, { status: "detected" });
+    const id = await seedDecision(t.db, { status: "detected" });
     const f = makeOutbox(t);
 
-    const notifyId = f.outbox.effectIdFor(id, "notify");
+    const notifyId = await f.outbox.effectIdFor(id, "notify");
 
     // crash state: initial notify reserved, never sent (probe -> absent).
-    t.db
+    await t.db
       .insert(outboxTable)
       .values({
         id: notifyId,
@@ -109,8 +104,7 @@ describe("absent reserved effect recovery (crash before execute)", () => {
         state: "reserved",
         attempts: 0,
         created_at: FIXED_NOW,
-      })
-      .run();
+      });
 
     expect(await f.notifier.probe(notifyId)).toBe("absent");
     const callsBefore = f.notifier.calls.length;
@@ -118,25 +112,20 @@ describe("absent reserved effect recovery (crash before execute)", () => {
     await f.outbox.reconcile();
 
     expect(f.notifier.calls.length).toBe(callsBefore + 1);
-    const obRow = t.db.select().from(outboxTable).where(eq(outboxTable.id, notifyId)).all()[0]!;
+    const obRow = (await t.db.select().from(outboxTable).where(eq(outboxTable.id, notifyId)))[0]!;
     expect(obRow.state).toBe("committed");
 
-    const stuck = t.db
-      .select()
-      .from(outboxTable)
-      .all()
-      .filter((o) => o.decision_id === id && o.state === "reserved");
+    const stuck = (await t.db.select().from(outboxTable)).filter(
+      (o) => o.decision_id === id && o.state === "reserved",
+    );
     expect(stuck).toHaveLength(0);
 
-    const keys = t.db
-      .select()
-      .from(appliedTransitions)
-      .all()
+    const keys = (await t.db.select().from(appliedTransitions))
       .filter((k) => k.decision_id === id)
       .map((k) => k.transition_key);
     expect(keys).toContain("notify:slack");
 
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("notified");
   });
 });

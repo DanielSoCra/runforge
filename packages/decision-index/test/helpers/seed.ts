@@ -13,7 +13,7 @@ export interface SeedOverrides {
 }
 
 /** Insert a minimal `detected` decision row for state-machine tests. */
-export function seedDecision(db: Db, o: SeedOverrides = {}): string {
+export async function seedDecision(db: Db, o: SeedOverrides = {}): Promise<string> {
   const id = o.decision_id ?? `d-${Math.random().toString(36).slice(2, 10)}`;
   const now = "2026-05-27T00:00:00.000Z";
   const row: DecisionRow = {
@@ -51,6 +51,6 @@ export function seedDecision(db: Db, o: SeedOverrides = {}): string {
     created_at: now,
     updated_at: now,
   };
-  db.insert(decisions).values(row).run();
+  await db.insert(decisions).values(row);
   return id;
 }

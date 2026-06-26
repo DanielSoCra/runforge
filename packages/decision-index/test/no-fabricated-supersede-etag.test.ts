@@ -1,17 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
-import { makeTempDb, type TempDb } from "./helpers/temp-db.js";
+import { makePgliteDb, type PgliteTestDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { makeOutbox, answerItem } from "./helpers/effect-driver.js";
 import { IndexWriter } from "../src/index-writer.js";
 import { PROTOCOL_VERSION } from "@auto-claude/decision-protocol";
 import { ProtectedStore } from "@auto-claude/sanitizer-redaction";
-import { SqliteQuarantine } from "../src/quarantine.js";
+import { PgQuarantine } from "../src/quarantine.js";
 import { FakeNotifier } from "../src/adapters/fakes/fake-notifier.js";
 import { FakeSourceSink } from "../src/adapters/fakes/fake-source-sink.js";
 import { FakeResumeDispatcher } from "../src/adapters/fakes/fake-resume-dispatcher.js";
 import { decisions } from "../src/schema.js";
 import { TEST_PROTECTED_KEY } from "./helpers/temp-db.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 /**
@@ -25,12 +27,19 @@ import { join } from "node:path";
  * requires a CONCRETE incoming source_etag to supersede.
  */
 describe("IMPORTANT 3 — no fabricated supersede etag (fail-closed instead)", () => {
-  let t: TempDb;
-  beforeEach(() => (t = makeTempDb()));
-  afterEach(() => t?.cleanup());
+  let t: PgliteTestDb;
+  let protectedDir: string | undefined;
+  beforeEach(async () => {
+    t = await makePgliteDb();
+    protectedDir = undefined;
+  });
+  afterEach(async () => {
+    await t?.cleanup();
+    if (protectedDir) rmSync(protectedDir, { recursive: true, force: true });
+  });
 
   it("runResume: source_changed WITHOUT a concrete currentSourceEtag -> deferred (unknown), NOT a fabricated supersede", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" });
+    const id = await seedDecision(t.db, { resume_mode: "requeue" });
     const f = makeOutbox(t);
     await answerItem(t, f.outbox, id);
     await f.outbox.runEffect(id, "write_response"); // -> source_written
@@ -41,7 +50,7 @@ describe("IMPORTANT 3 — no fabricated supersede etag (fail-closed instead)", (
 
     const r = await f.outbox.runEffect(id, "requeue");
     expect(r.outcome).toBe("deferred"); // fail-closed, NOT superseded
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("source_written"); // unchanged, not superseded
     // and no fabricated superseded_by was recorded.
     expect(row.superseded_by).toBeNull();
@@ -50,7 +59,7 @@ describe("IMPORTANT 3 — no fabricated supersede etag (fail-closed instead)", (
   });
 
   it("runResume: source_changed WITH a concrete etag supersedes using that EXACT etag", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" });
+    const id = await seedDecision(t.db, { resume_mode: "requeue" });
     const f = makeOutbox(t);
     await answerItem(t, f.outbox, id);
     await f.outbox.runEffect(id, "write_response");
@@ -58,14 +67,14 @@ describe("IMPORTANT 3 — no fabricated supersede etag (fail-closed instead)", (
     f.sourceSink.currentEtagResults = [{ status: "source_changed", currentSourceEtag: "concrete-new-etag" }];
     const r = await f.outbox.runEffect(id, "requeue");
     expect(r.outcome).toBe("superseded");
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.superseded_by).toBe("concrete-new-etag"); // the REAL etag, never fabricated
   });
 
   function makeWriter() {
-    const protectedDir = join(t.dir, "protected");
+    protectedDir = mkdtempSync(join(tmpdir(), "pm-prot-nfs-"));
     const protectedStore = new ProtectedStore({ key: TEST_PROTECTED_KEY, dir: protectedDir, db: t.db });
-    const quarantine = new SqliteQuarantine(t.db);
+    const quarantine = new PgQuarantine(t.db);
     return new IndexWriter({
       db: t.db,
       protectedStore,
@@ -103,30 +112,30 @@ describe("IMPORTANT 3 — no fabricated supersede etag (fail-closed instead)", (
     return r;
   }
 
-  it("observeRequest: a different-content edit with NO concrete incoming source_etag does NOT fabricate a supersede", () => {
+  it("observeRequest: a different-content edit with NO concrete incoming source_etag does NOT fabricate a supersede", async () => {
     const w = makeWriter();
     const id = "01HOBS00000000000000000001";
     // admit with a concrete etag.
-    w.observeRequest(rawRequest(id, "etag-original"));
-    expect(w.reader.get(id)!.status).toBe("detected");
+    await w.observeRequest(rawRequest(id, "etag-original"));
+    expect((await w.reader.get(id))!.status).toBe("detected");
 
     // a re-observation WITHOUT a source_etag (cannot prove a real change) must NOT
     // fabricate `"source-edited"` and supersede. Fail-closed: no supersede.
-    const out = w.observeRequest(rawRequest(id, undefined, "EDITED"));
+    const out = await w.observeRequest(rawRequest(id, undefined, "EDITED"));
     expect(out.outcome).not.toBe("superseded");
-    const view = w.reader.get(id)!;
+    const view = (await w.reader.get(id))!;
     expect(view.status).toBe("detected"); // still non-terminal, not superseded
     expect(view.superseded_by).toBeNull();
   });
 
-  it("observeRequest: a different CONCRETE source_etag supersedes with that exact etag", () => {
+  it("observeRequest: a different CONCRETE source_etag supersedes with that exact etag", async () => {
     const w = makeWriter();
     const id = "01HOBS00000000000000000002";
-    w.observeRequest(rawRequest(id, "etag-original"));
+    await w.observeRequest(rawRequest(id, "etag-original"));
 
-    const out = w.observeRequest(rawRequest(id, "etag-new-concrete", "EDITED"));
+    const out = await w.observeRequest(rawRequest(id, "etag-new-concrete", "EDITED"));
     expect(out.outcome).toBe("superseded");
-    const view = w.reader.get(id)!;
+    const view = (await w.reader.get(id))!;
     expect(view.status).toBe("superseded");
     expect(view.superseded_by).toBe("etag-new-concrete"); // the real etag
   });

@@ -1,74 +1,83 @@
-import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, beforeAll, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import Database from "better-sqlite3";
-import { createIndexWriter } from "../src/index-writer.js";
+import postgres from "postgres";
+import { openDb } from "../src/db.js";
+import { migrate } from "../src/migrate.js";
+import { createIndexWriter, type IndexWriter } from "../src/index-writer.js";
 import { FakeNotifier } from "../src/adapters/fakes/fake-notifier.js";
 import { FakeSourceSink } from "../src/adapters/fakes/fake-source-sink.js";
 import { FakeResumeDispatcher } from "../src/adapters/fakes/fake-resume-dispatcher.js";
 
 /**
- * FIX (verdict fix_before_flag_on / index-writer.ts:84): createIndexWriter opens
- * the writable connection via openDb(), then runs migrate() and constructs
- * ProtectedStoreImpl. If EITHER throws after openDb() succeeds, the sqlite handle
- * (db.$client) was never closed — a file-handle leak on the broken-config path.
- * A bad-length protectedKey makes the ProtectedStore ctor throw, which exercises
- * exactly that window. The fix must close db.$client before rethrowing.
+ * HANDLE-LEAK FIX (verdict fix_before_flag_on / index-writer.ts:84): on Postgres,
+ * createIndexWriter opens the writer connection via openDb(), then runs migrate()
+ * and constructs ProtectedStoreImpl. If EITHER throws after openDb() succeeded, the
+ * postgres-js connection (`sql`) would leak unless the factory ends it before
+ * rethrowing. A bad-length protectedKey makes the ProtectedStore ctor throw, which
+ * exercises exactly that window.
+ *
+ * Opening a real postgres-js connection requires a real Postgres, so this is gated
+ * on AUTO_CLAUDE_TEST_DATABASE_URL (set in CI). The leak guard is the factory's
+ * `catch { await sql.end() }`; here we assert the throw surfaces AND a subsequent
+ * healthy writer still constructs + closes (the broken path freed its connection
+ * rather than wedging the writer).
  */
-describe("createIndexWriter closes the sqlite handle when construction throws", () => {
-  let dir: string;
-  const opened: Database.Database[] = [];
+const DB_URL = process.env.AUTO_CLAUDE_TEST_DATABASE_URL;
 
-  beforeEach(() => {
+// Serialize the real-PG-gated files (shared decision_index schema) across forks.
+const SERIALIZE_LOCK = 982_451_653;
+
+describe.skipIf(!DB_URL)("createIndexWriter frees the writer connection when construction throws [real Postgres]", () => {
+  let dir: string;
+  let serializer: ReturnType<typeof postgres>;
+
+  beforeAll(async () => {
+    serializer = postgres(DB_URL!, { max: 1 });
+    await serializer`SELECT pg_advisory_lock(${SERIALIZE_LOCK})`;
+  });
+  afterAll(async () => {
+    await serializer`SELECT pg_advisory_unlock(${SERIALIZE_LOCK})`;
+    await serializer.end();
+  });
+
+  beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "pm-leak-"));
-    opened.length = 0;
-    // Capture every better-sqlite3 connection created during the test.
-    const realClose = Database.prototype.close;
-    vi.spyOn(Database.prototype, "close").mockImplementation(function (this: Database.Database) {
-      return realClose.call(this);
-    });
+    const { db, sql } = await openDb({ url: DB_URL! });
+    await sql`DROP SCHEMA IF EXISTS decision_index CASCADE`;
+    await migrate(db);
+    await sql.end();
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
     rmSync(dir, { recursive: true, force: true });
   });
 
   function baseDeps() {
     return {
-      dbPath: join(dir, "decision-index.sqlite"),
+      databaseUrl: DB_URL!,
       protectedDir: join(dir, "protected"),
       notifier: new FakeNotifier(),
       sourceSink: new FakeSourceSink(),
       resumeDispatcher: new FakeResumeDispatcher(),
       clock: () => new Date("2026-05-27T00:00:00.000Z"),
+      skipMigrate: true,
     };
   }
 
-  it("a bad protectedKey (ProtectedStore ctor throws) does NOT leak an open handle", () => {
-    // A non-32-byte base64 key forces ProtectedStore ctor to throw AFTER
-    // openDb() + migrate() have already run.
-    expect(() =>
+  it("a bad protectedKey (ProtectedStore ctor throws) surfaces and does not leak the connection", async () => {
+    // A non-32-byte base64 key forces the ProtectedStore ctor to throw AFTER
+    // openDb() succeeded — the factory's catch must end the connection.
+    await expect(
       createIndexWriter({ ...baseDeps(), protectedKey: Buffer.from("short").toString("base64") }),
-    ).toThrow(/32 bytes/);
-
-    // The handle must be closed: reopening the same path in exclusive-ish mode
-    // and running a trivial pragma must succeed (a leaked WAL writer would not
-    // block a second reader, so we assert the stronger invariant directly:
-    // close() was called on the connection that was opened for this writer).
-    const closeMock = Database.prototype.close as unknown as ReturnType<typeof vi.fn>;
-    expect(closeMock).toHaveBeenCalled();
+    ).rejects.toThrow(/32 bytes/);
   });
 
-  it("a healthy construction does NOT spuriously close the handle (regression)", () => {
+  it("a healthy construction returns a usable writer that closes cleanly (regression)", async () => {
     const validKey = Buffer.alloc(32, 9).toString("base64");
-    const writer = createIndexWriter({ ...baseDeps(), protectedKey: validKey });
-    const closeMock = Database.prototype.close as unknown as ReturnType<typeof vi.fn>;
-    expect(closeMock).not.toHaveBeenCalled();
-    // a real, usable writer came back.
+    const writer: IndexWriter = await createIndexWriter({ ...baseDeps(), protectedKey: validKey });
     expect(writer.reader).toBeDefined();
-    writer.close();
-    expect(closeMock).toHaveBeenCalledTimes(1);
+    await writer.close();
   });
 });

@@ -280,8 +280,8 @@ export function validateAnswer(
   };
 }
 
-function loadState(db: Db, decisionId: string): DecisionStateRow {
-  const rows = db
+async function loadState(db: Db, decisionId: string): Promise<DecisionStateRow> {
+  const rows = await db
     .select({
       decision_id: decisions.decision_id,
       status: decisions.status,
@@ -292,8 +292,7 @@ function loadState(db: Db, decisionId: string): DecisionStateRow {
       trace_id: decisions.trace_id,
     })
     .from(decisions)
-    .where(eq(decisions.decision_id, decisionId))
-    .all();
+    .where(eq(decisions.decision_id, decisionId));
   const r = rows[0];
   if (!r) throw new UnknownDecisionError(decisionId);
   return {
@@ -314,9 +313,14 @@ function loadState(db: Db, decisionId: string): DecisionStateRow {
  *  4. write status + applied_transitions + audit row.
  * External side-effects are NEVER run here (see outbox).
  */
-export function apply(db: Db, decisionId: string, event: TransitionEvent, ctx: ApplyCtx): ApplyResult {
-  return withTx(db, (tx) => {
-    const state = loadState(tx, decisionId);
+export async function apply(
+  db: Db,
+  decisionId: string,
+  event: TransitionEvent,
+  ctx: ApplyCtx,
+): Promise<ApplyResult> {
+  return withTx(db, async (tx) => {
+    const state = await loadState(tx, decisionId);
     const key = transitionKey(event, ctx.semanticKey);
 
     // (1) idempotent replay guard.
@@ -339,12 +343,12 @@ export function apply(db: Db, decisionId: string, event: TransitionEvent, ctx: A
     // applied_transitions, so a present answer key always implies a present
     // decision_responses row — (2a)'s existing-row gate cannot double-advance.
     // For EVERY OTHER event the immediate transition-key replay no-op is kept.
-    const already = tx
-      .select()
-      .from(appliedTransitions)
-      .where(eq(appliedTransitions.transition_key, key))
-      .all()
-      .filter((r) => r.decision_id === decisionId);
+    const already = (
+      await tx
+        .select()
+        .from(appliedTransitions)
+        .where(eq(appliedTransitions.transition_key, key))
+    ).filter((r) => r.decision_id === decisionId);
     if (already.length > 0 && event !== "answer_submitted") {
       return { applied: false, status: state.status, effects: [] };
     }
@@ -358,11 +362,10 @@ export function apply(db: Db, decisionId: string, event: TransitionEvent, ctx: A
     if (event === "answer_submitted") {
       const a = ctx.answer;
       if (!a) throw new AnswerRejectedError("answer_submitted requires ctx.answer");
-      const existing = tx
+      const existing = await tx
         .select()
         .from(decisionResponses)
-        .where(eq(decisionResponses.decision_id, decisionId))
-        .all();
+        .where(eq(decisionResponses.decision_id, decisionId));
       if (existing.length > 0) {
         const prev = existing[0]!;
         const sensitive =
@@ -398,7 +401,7 @@ export function apply(db: Db, decisionId: string, event: TransitionEvent, ctx: A
       if (!answer) throw new AnswerRejectedError("answer_submitted requires ctx.answer");
 
       // audit: answering sub-step (no durable status)
-      appendAudit(tx, {
+      await appendAudit(tx, {
         decision_id: decisionId,
         from: state.status,
         to: state.status,
@@ -416,7 +419,7 @@ export function apply(db: Db, decisionId: string, event: TransitionEvent, ctx: A
       } catch (e) {
         if (e instanceof AnswerRejectedError) {
           // reject: stay viewed, no response row, no status change, no applied_transitions.
-          appendAudit(tx, {
+          await appendAudit(tx, {
             decision_id: decisionId,
             from: state.status,
             to: state.status,
@@ -437,11 +440,10 @@ export function apply(db: Db, decisionId: string, event: TransitionEvent, ctx: A
       }
 
       // guarded answered-once insert (PK decision_id)
-      const existing = tx
+      const existing = await tx
         .select()
         .from(decisionResponses)
-        .where(eq(decisionResponses.decision_id, decisionId))
-        .all();
+        .where(eq(decisionResponses.decision_id, decisionId));
       if (existing.length > 0) {
         const prev = existing[0]!;
         if (
@@ -454,23 +456,21 @@ export function apply(db: Db, decisionId: string, event: TransitionEvent, ctx: A
         // any second distinct answer => conflict
         throw new AnsweredOnceConflictError(decisionId);
       }
-      tx.insert(decisionResponses)
-        .values({
-          decision_id: decisionId,
-          response_idempotency_key: answer.response_idempotency_key,
-          response_hash: responseHash,
-          chosen_option: answer.chosen_option ?? null,
-          answer_ref: answer.answer_ref ?? null,
-          // C1: store the postable payload ONLY for a non-sensitive answer; a
-          // phi/secret answer leaves this NULL (sink posts an ack, never plaintext).
-          response_payload_json: postableResponsePayload(answer),
-          answerer: answer.answerer,
-          answered_at: answer.answered_at,
-        })
-        .run();
+      await tx.insert(decisionResponses).values({
+        decision_id: decisionId,
+        response_idempotency_key: answer.response_idempotency_key,
+        response_hash: responseHash,
+        chosen_option: answer.chosen_option ?? null,
+        answer_ref: answer.answer_ref ?? null,
+        // C1: store the postable payload ONLY for a non-sensitive answer; a
+        // phi/secret answer leaves this NULL (sink posts an ack, never plaintext).
+        response_payload_json: postableResponsePayload(answer),
+        answerer: answer.answerer,
+        answered_at: answer.answered_at,
+      });
 
       // audit: validated sub-step (no durable status)
-      appendAudit(tx, {
+      await appendAudit(tx, {
         decision_id: decisionId,
         from: state.status,
         to: state.status,
@@ -494,11 +494,11 @@ export function apply(db: Db, decisionId: string, event: TransitionEvent, ctx: A
     if (event === "notify" || event === "re_notify") {
       updates.last_notified_at = ctx.now;
     }
-    tx.update(decisions).set(updates).where(eq(decisions.decision_id, decisionId)).run();
+    await tx.update(decisions).set(updates).where(eq(decisions.decision_id, decisionId));
 
-    tx.insert(appliedTransitions)
-      .values({ decision_id: decisionId, transition_key: key, applied_at: ctx.now })
-      .run();
+    await tx
+      .insert(appliedTransitions)
+      .values({ decision_id: decisionId, transition_key: key, applied_at: ctx.now });
 
     // UNIFIED FIX (b) — cancel-on-terminal at the REAL chokepoint. The moment a
     // decision ADVANCES to a terminal status (resumed / superseded / failed),
@@ -514,13 +514,13 @@ export function apply(db: Db, decisionId: string, event: TransitionEvent, ctx: A
     // across restart); committed rows record a real effect and are left untouched.
     // Idempotent + redundant-safe with the Outbox-path cancellation.
     if (TERMINAL_STATUSES.has(result.next)) {
-      tx.update(outbox)
+      await tx
+        .update(outbox)
         .set({ superseded: true })
-        .where(and(eq(outbox.decision_id, decisionId), ne(outbox.state, "committed")))
-        .run();
+        .where(and(eq(outbox.decision_id, decisionId), ne(outbox.state, "committed")));
     }
 
-    appendAudit(tx, {
+    await appendAudit(tx, {
       decision_id: decisionId,
       from: state.status,
       to: result.next,

@@ -16,21 +16,21 @@ import { revealProtected } from './decision-api.js';
 
 function fakeReveal(
   result: { field: string; value: string },
-): (id: string, ref: string, actor: string) => { field: string; value: string } {
-  return (_id, _ref, _actor) => result;
+): (id: string, ref: string, actor: string) => Promise<{ field: string; value: string }> {
+  return async (_id, _ref, _actor) => result;
 }
 
 function throwingReveal(
   error: Error,
-): (id: string, ref: string, actor: string) => { field: string; value: string } {
-  return () => {
+): (id: string, ref: string, actor: string) => Promise<{ field: string; value: string }> {
+  return async () => {
     throw error;
   };
 }
 
 describe('revealProtected', () => {
-  it('returns 200 with field + value for a valid ref', () => {
-    const res = revealProtected(
+  it('returns 200 with field + value for a valid ref', async () => {
+    const res = await revealProtected(
       fakeReveal({ field: 'context', value: 'TOP-SECRET' }),
       'd-1',
       { ref: 'protected://01H' },
@@ -40,14 +40,14 @@ describe('revealProtected', () => {
     expect(res.body).toEqual({ field: 'context', value: 'TOP-SECRET' });
   });
 
-  it('returns 400 when ref is missing', () => {
-    const res = revealProtected(fakeReveal({ field: '', value: '' }), 'd-1', {}, 'admin@example.com');
+  it('returns 400 when ref is missing', async () => {
+    const res = await revealProtected(fakeReveal({ field: '', value: '' }), 'd-1', {}, 'admin@example.com');
     expect(res.status).toBe(400);
     expect((res.body as { error: string }).error).toMatch(/ref/);
   });
 
-  it('returns 400 when ref is empty string', () => {
-    const res = revealProtected(
+  it('returns 400 when ref is empty string', async () => {
+    const res = await revealProtected(
       fakeReveal({ field: '', value: '' }),
       'd-1',
       { ref: '' },
@@ -56,8 +56,8 @@ describe('revealProtected', () => {
     expect(res.status).toBe(400);
   });
 
-  it('returns 400 for a malformed body (JSON null)', () => {
-    const res = revealProtected(
+  it('returns 400 for a malformed body (JSON null)', async () => {
+    const res = await revealProtected(
       fakeReveal({ field: '', value: '' }),
       'd-1',
       null as unknown as { ref?: string },
@@ -66,8 +66,8 @@ describe('revealProtected', () => {
     expect(res.status).toBe(400);
   });
 
-  it('returns 404 when the reveal function throws RevealRefNotFoundError', () => {
-    const res = revealProtected(
+  it('returns 404 when the reveal function throws RevealRefNotFoundError', async () => {
+    const res = await revealProtected(
       throwingReveal(new RevealRefNotFoundError('d-1', 'protected://nope')),
       'd-1',
       { ref: 'protected://nope' },
@@ -77,8 +77,8 @@ describe('revealProtected', () => {
     expect((res.body as { error: string }).error).toMatch(/ref not found/);
   });
 
-  it('returns 404 for any "not found" error message', () => {
-    const res = revealProtected(
+  it('returns 404 for any "not found" error message', async () => {
+    const res = await revealProtected(
       throwingReveal(new Error('decision not found')),
       'd-1',
       { ref: 'protected://nope' },
@@ -87,16 +87,18 @@ describe('revealProtected', () => {
     expect(res.status).toBe(404);
   });
 
-  it('fail-safe: an unexpected throw maps to 503, never rethrows', () => {
+  it('fail-safe: an unexpected throw maps to 503, never rethrows', async () => {
     let res: { status: number } | undefined;
-    expect(() => {
-      res = revealProtected(
-        throwingReveal(new Error('store corrupt')),
-        'd-1',
-        { ref: 'protected://01H' },
-        'admin@example.com',
-      );
-    }).not.toThrow();
+    await expect(
+      (async () => {
+        res = await revealProtected(
+          throwingReveal(new Error('store corrupt')),
+          'd-1',
+          { ref: 'protected://01H' },
+          'admin@example.com',
+        );
+      })(),
+    ).resolves.toBeUndefined();
     expect(res?.status).toBe(503);
   });
 });

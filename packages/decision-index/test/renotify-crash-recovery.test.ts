@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
-import { makeTempDb, type TempDb } from "./helpers/temp-db.js";
+import { makePgliteDb, type PgliteTestDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { makeOutbox, FIXED_NOW } from "./helpers/effect-driver.js";
 import { decisions, outbox as outboxTable, appliedTransitions } from "../src/schema.js";
@@ -14,21 +14,25 @@ import { decisions, outbox as outboxTable, appliedTransitions } from "../src/sch
  * path AND expectedEffect() did not expect notify from `notified`/`viewed`.
  */
 describe("re_notify crash recovery (Finding I6)", () => {
-  let t: TempDb;
-  beforeEach(() => (t = makeTempDb()));
-  afterEach(() => t?.cleanup());
+  let t: PgliteTestDb;
+  beforeEach(async () => {
+    t = await makePgliteDb();
+  });
+  afterEach(async () => {
+    await t?.cleanup();
+  });
 
   it("reserved re_notify row + sent-before-commit -> reconcile resolves it (committed, no stuck reserved row)", async () => {
-    const id = seedDecision(t.db, { status: "notified" });
+    const id = await seedDecision(t.db, { status: "notified" });
     const f = makeOutbox(t);
 
     // the re_notify cycle's deterministic id (kind=notify, idKey=channel:cycle)
-    const reNotifyId = f.outbox.effectIdFor(id, "notify", { reNotifyCycle: "cycle-7" });
+    const reNotifyId = await f.outbox.effectIdFor(id, "notify", { reNotifyCycle: "cycle-7" });
     expect(reNotifyId).toContain("cycle-7"); // id encodes the cycle
 
     // crash state: re_notify reserved, notify ALREADY sent at the channel, but
     // commit never ran (row still `reserved`, no applied_transition).
-    t.db
+    await t.db
       .insert(outboxTable)
       .values({
         id: reNotifyId,
@@ -39,8 +43,7 @@ describe("re_notify crash recovery (Finding I6)", () => {
         state: "reserved",
         attempts: 0,
         created_at: FIXED_NOW,
-      })
-      .run();
+      });
     f.notifier.applied.add(reNotifyId); // already sent at the channel
 
     const callsBefore = f.notifier.calls.length; // 0 — nothing re-sent yet
@@ -54,25 +57,23 @@ describe("re_notify crash recovery (Finding I6)", () => {
     expect(mine.action).toBe("advanced");
 
     // re_notify keeps the item in `notified`; the row is now committed (no stuck reserve)
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("notified");
-    const obRow = t.db.select().from(outboxTable).where(eq(outboxTable.id, reNotifyId)).all()[0]!;
+    const obRow = (await t.db.select().from(outboxTable).where(eq(outboxTable.id, reNotifyId)))[0]!;
     expect(obRow.state).toBe("committed");
 
     // the re_notify:<cycle> transition was applied (correct semantic key, not notify:<channel>)
-    const keys = t.db
+    const keys = (await t.db
       .select()
-      .from(appliedTransitions)
-      .all()
+      .from(appliedTransitions))
       .filter((k) => k.decision_id === id)
       .map((k) => k.transition_key);
     expect(keys).toContain("re_notify:cycle-7");
 
     // no stuck reserved rows remain
-    const stuck = t.db
+    const stuck = (await t.db
       .select()
-      .from(outboxTable)
-      .all()
+      .from(outboxTable))
       .filter((o) => o.decision_id === id && o.state === "reserved");
     expect(stuck).toHaveLength(0);
   });
@@ -84,14 +85,14 @@ describe("re_notify crash recovery (Finding I6)", () => {
     // WRONG transition key and allowing a duplicate re-notify. The cycle must be
     // recovered from a dedicated semantic_key column, never by string-splitting.
     const CYCLE = "2026-05-27T23:30:00Z";
-    const id = seedDecision(t.db, { status: "notified" });
+    const id = await seedDecision(t.db, { status: "notified" });
     const f = makeOutbox(t);
 
-    const reNotifyId = f.outbox.effectIdFor(id, "notify", { reNotifyCycle: CYCLE });
+    const reNotifyId = await f.outbox.effectIdFor(id, "notify", { reNotifyCycle: CYCLE });
     expect(reNotifyId).toContain(CYCLE); // id encodes the full cycle
 
     // crash state: re_notify reserved, notify ALREADY sent, commit never ran.
-    t.db
+    await t.db
       .insert(outboxTable)
       .values({
         id: reNotifyId,
@@ -102,8 +103,7 @@ describe("re_notify crash recovery (Finding I6)", () => {
         state: "reserved",
         attempts: 0,
         created_at: FIXED_NOW,
-      })
-      .run();
+      });
     f.notifier.applied.add(reNotifyId);
 
     const callsBefore = f.notifier.calls.length;
@@ -111,10 +111,9 @@ describe("re_notify crash recovery (Finding I6)", () => {
     expect(f.notifier.calls.length).toBe(callsBefore); // not re-sent
 
     // the committed applied-transition key is EXACTLY re_notify:<full-cycle>
-    const keys = t.db
+    const keys = (await t.db
       .select()
-      .from(appliedTransitions)
-      .all()
+      .from(appliedTransitions))
       .filter((k) => k.decision_id === id)
       .map((k) => k.transition_key);
     expect(keys).toContain(`re_notify:${CYCLE}`);
@@ -125,10 +124,9 @@ describe("re_notify crash recovery (Finding I6)", () => {
     const callsBeforeSecond = f.notifier.calls.length;
     await f.outbox.reconcile();
     expect(f.notifier.calls.length).toBe(callsBeforeSecond);
-    const keysAfter = t.db
+    const keysAfter = (await t.db
       .select()
-      .from(appliedTransitions)
-      .all()
+      .from(appliedTransitions))
       .filter((k) => k.decision_id === id)
       .map((k) => k.transition_key);
     expect(keysAfter.filter((k) => k === `re_notify:${CYCLE}`)).toHaveLength(1);

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
-import { makeTempDb, type TempDb } from "./helpers/temp-db.js";
+import { makePgliteDb, type PgliteTestDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { makeOutbox, answerItem } from "./helpers/effect-driver.js";
 import { Outbox } from "../src/outbox.js";
@@ -12,7 +12,7 @@ import { outbox as outboxTable, decisions } from "../src/schema.js";
 const FIXED_NOW = "2026-05-27T02:00:00.000Z";
 
 /** Build an Outbox bound to an explicit generation id (for crash-recovery sims). */
-function makeOutboxWithGeneration(t: TempDb, generation: string) {
+function makeOutboxWithGeneration(t: PgliteTestDb, generation: string) {
   const notifier = new FakeNotifier();
   const sourceSink = new FakeSourceSink();
   const resumeDispatcher = new FakeResumeDispatcher();
@@ -44,14 +44,18 @@ function makeOutboxWithGeneration(t: TempDb, generation: string) {
  * writes, so its executing rows are genuinely in-flight.
  */
 describe("CRITICAL 1 — owner/process-generation token gates reconcile reclaim of executing rows", () => {
-  let t: TempDb;
-  beforeEach(() => (t = makeTempDb()));
-  afterEach(() => t?.cleanup());
+  let t: PgliteTestDb;
+  beforeEach(async () => {
+    t = await makePgliteDb();
+  });
+  afterEach(async () => {
+    await t?.cleanup();
+  });
 
   /** Manually create an `executing` row claimed_by `gen` with an OLD (lease-
    *  expired) claim timestamp, modelling an effect mid-flight past the lease. */
-  function forceExecuting(id: string, effId: string, gen: string) {
-    t.db
+  async function forceExecuting(id: string, effId: string, gen: string) {
+    await t.db
       .insert(outboxTable)
       .values({
         id: effId,
@@ -67,20 +71,19 @@ describe("CRITICAL 1 — owner/process-generation token gates reconcile reclaim 
         claimed_at: "2026-05-27T00:00:00.000Z",
         claimed_by: gen,
         created_at: "2026-05-27T00:00:00.000Z",
-      })
-      .run();
+      });
   }
 
   it("an `executing` row owned by the CURRENT generation — even PAST the lease — is NOT reclaimed/re-dispatched", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" });
+    const id = await seedDecision(t.db, { resume_mode: "requeue" });
     const gen = "gen-current";
     const f = makeOutboxWithGeneration(t, gen);
     await answerItem(t, f.outbox, id); // answered_pending_source_write; write_response next
 
-    const effId = f.outbox.effectIdFor(id, "write_response");
+    const effId = await f.outbox.effectIdFor(id, "write_response");
     // a LIVE slow effect of the CURRENT process: executing, lease-expired, marker
     // not yet visible at the sink (absent).
-    forceExecuting(id, effId, gen);
+    await forceExecuting(id, effId, gen);
     expect(f.sourceSink.applied.has(effId)).toBe(false);
 
     const before = f.sourceSink.calls.length;
@@ -91,22 +94,22 @@ describe("CRITICAL 1 — owner/process-generation token gates reconcile reclaim 
     expect(f.sourceSink.calls.length).toBe(before);
     const mine = results.find((x) => x.decision_id === id);
     expect(mine).toBeUndefined();
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("answered_pending_source_write");
     // the executing row is untouched (still owned by the current generation).
-    const ob = t.db.select().from(outboxTable).where(eq(outboxTable.id, effId)).all()[0]!;
+    const ob = (await t.db.select().from(outboxTable).where(eq(outboxTable.id, effId)))[0]!;
     expect(ob.state).toBe("executing");
     expect(ob.claimed_by).toBe(gen);
   });
 
   it("an `executing` row owned by a DIFFERENT (prior, dead) generation IS reclaimed (crash recovery)", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" });
+    const id = await seedDecision(t.db, { resume_mode: "requeue" });
     // current process is a NEW generation; the executing row is from a prior one.
     const f = makeOutboxWithGeneration(t, "gen-current");
     await answerItem(t, f.outbox, id);
 
-    const effId = f.outbox.effectIdFor(id, "write_response");
-    forceExecuting(id, effId, "gen-prior-dead");
+    const effId = await f.outbox.effectIdFor(id, "write_response");
+    await forceExecuting(id, effId, "gen-prior-dead");
     // marker absent at the sink -> crash before the adapter landed -> re-execute.
 
     const before = f.sourceSink.calls.length;
@@ -115,17 +118,17 @@ describe("CRITICAL 1 — owner/process-generation token gates reconcile reclaim 
     const mine = results.find((x) => x.decision_id === id)!;
     expect(mine.action).toBe("re-executed");
     expect(f.sourceSink.calls.length).toBeGreaterThan(before);
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("source_written");
   });
 
   it("a prior-generation `executing` row whose marker is APPLIED advances without re-dispatch", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" });
+    const id = await seedDecision(t.db, { resume_mode: "requeue" });
     const f = makeOutboxWithGeneration(t, "gen-current");
     await answerItem(t, f.outbox, id);
 
-    const effId = f.outbox.effectIdFor(id, "write_response");
-    forceExecuting(id, effId, "gen-prior-dead");
+    const effId = await f.outbox.effectIdFor(id, "write_response");
+    await forceExecuting(id, effId, "gen-prior-dead");
     f.sourceSink.applied.add(effId); // the prior process DID land the write before dying
 
     const before = f.sourceSink.calls.length;
@@ -133,7 +136,7 @@ describe("CRITICAL 1 — owner/process-generation token gates reconcile reclaim 
     const mine = results.find((x) => x.decision_id === id)!;
     expect(mine.action).toBe("advanced");
     expect(f.sourceSink.calls.length).toBe(before); // applied marker -> no re-dispatch
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("source_written");
   });
 });

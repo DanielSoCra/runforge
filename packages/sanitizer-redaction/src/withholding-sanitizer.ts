@@ -18,10 +18,18 @@ export interface WithholdingSanitizerOptions {
 const DEFAULT_MARKER = "[WITHHELD]";
 const DEFAULT_CLASS = "withheld";
 
-/** A sanitizer whose {@link Sanitizer.sanitize} is synchronous. */
-export interface SynchronousSanitizer extends Sanitizer {
-  sanitize(input: SanitizationInput): SanitizationResult;
+/**
+ * A sanitizer whose {@link Sanitizer.sanitize} is asynchronous. The withholding
+ * sanitizer awaits the (now async, Postgres-backed) ProtectedStore, so its
+ * `sanitize` returns a Promise. The sanitization pipeline already `await`s every
+ * sanitizer result, so this is contract-compatible.
+ */
+export interface AsynchronousSanitizer extends Sanitizer {
+  sanitize(input: SanitizationInput): Promise<SanitizationResult>;
 }
+
+/** @deprecated kept as an alias for back-compat; the sanitizer is now async. */
+export type SynchronousSanitizer = AsynchronousSanitizer;
 
 const factoryOptionsSchema = z.object({
   fields: z.array(z.string()).min(1),
@@ -29,14 +37,14 @@ const factoryOptionsSchema = z.object({
   class: z.string().optional(),
 });
 
-export function createWithholdingSanitizer(options: WithholdingSanitizerOptions): SynchronousSanitizer {
+export function createWithholdingSanitizer(options: WithholdingSanitizerOptions): AsynchronousSanitizer {
   const marker = options.marker ?? DEFAULT_MARKER;
   const cls = options.class ?? DEFAULT_CLASS;
   const fields = new Set(options.fields);
 
   return {
     name: "withholding",
-    sanitize(input: SanitizationInput): SanitizationResult {
+    async sanitize(input: SanitizationInput): Promise<SanitizationResult> {
       const content = input.content;
       const transformed: SanitizableContent = {};
       const withholdings: Withholding[] = [];
@@ -74,23 +82,23 @@ export function createWithholdingSanitizer(options: WithholdingSanitizerOptions)
         // value must NOT be reused — that would hide the edit and reveal stale plaintext — so
         // we mint a fresh ref reflecting the new value. A missing/corrupt prior blob also
         // falls through to a fresh mint.
-        const existingRef = options.store.findRefForField(subjectRef, key);
+        const existingRef = await options.store.findRefForField(subjectRef, key);
         let reuseRef: string | undefined;
         if (existingRef !== undefined) {
           try {
-            if (options.store.get(existingRef) === serialized) reuseRef = existingRef;
+            if ((await options.store.get(existingRef)) === serialized) reuseRef = existingRef;
           } catch {
             /* prior blob unreadable — mint a fresh ref below */
           }
         }
         const ref =
           reuseRef ??
-          options.store.put({
+          (await options.store.put({
             decision_id: subjectRef,
             field: key,
             class: cls,
             plaintext: serialized,
-          });
+          }));
 
         // The STORED value is the protected:// ref, NOT the marker: the decision read-model
         // detects a protected field by `value.startsWith("protected://")` and resolves the
@@ -105,7 +113,7 @@ export function createWithholdingSanitizer(options: WithholdingSanitizerOptions)
   };
 }
 
-export function createWithholdingFactory(store: ProtectedStore): (options: unknown) => SynchronousSanitizer {
+export function createWithholdingFactory(store: ProtectedStore): (options: unknown) => AsynchronousSanitizer {
   return (options: unknown) => {
     const parsed = factoryOptionsSchema.parse(options);
     return createWithholdingSanitizer({

@@ -35,8 +35,8 @@ import type { RankedListItem, DetailView, ListRankedArgs } from '@auto-claude/de
 
 /** The narrow read surface a list/detail handler needs (structurally satisfied by `ReadModel`). */
 export interface DecisionReadModel {
-  listRanked(args?: ListRankedArgs): RankedListItem[];
-  detail(decisionId: string): DetailView | undefined;
+  listRanked(args?: ListRankedArgs): Promise<RankedListItem[]>;
+  detail(decisionId: string): Promise<DetailView | undefined>;
 }
 
 /** Uniform handler envelope: an HTTP status plus the JSON body the route writes. */
@@ -65,10 +65,10 @@ export const PENDING_DECISION_STATUSES: readonly string[] = ['notified', 'viewed
  * fields class-only, never a resolvable ref). A throwing read model → `503`
  * (index unavailable), never a crash.
  */
-export function listPendingDecisions(
+export async function listPendingDecisions(
   readModel: DecisionReadModel,
   query: ListRankedArgs,
-): HandlerResult<RankedListItem[] | ErrorBody> {
+): Promise<HandlerResult<RankedListItem[] | ErrorBody>> {
   try {
     // Default the inbox to awaiting-Operator statuses so terminal/answered rows
     // (resumed/superseded/failed/answered_*) never appear in the default pending
@@ -80,7 +80,7 @@ export function listPendingDecisions(
         status: query.filters?.status ?? [...PENDING_DECISION_STATUSES],
       },
     };
-    return { status: 200, body: readModel.listRanked(effective) };
+    return { status: 200, body: await readModel.listRanked(effective) };
   } catch {
     return { status: 503, body: { error: 'decision index unavailable' } };
   }
@@ -91,12 +91,12 @@ export function listPendingDecisions(
  * resolvable ref for the trusted server-side resolver. Unknown id → `404`; a
  * throwing read model → `503`.
  */
-export function getDecisionDetail(
+export async function getDecisionDetail(
   readModel: DecisionReadModel,
   id: string,
-): HandlerResult<DetailView | ErrorBody> {
+): Promise<HandlerResult<DetailView | ErrorBody>> {
   try {
-    const view = readModel.detail(id);
+    const view = await readModel.detail(id);
     if (view === undefined) {
       return { status: 404, body: { error: 'unknown decision' } };
     }
@@ -126,12 +126,12 @@ export interface RevealBody {
  * route can never crash the control server. Plaintext is returned ONLY in the 200
  * body; errors carry no protected content.
  */
-export function revealProtected(
-  reveal: (id: string, ref: string, actor: string) => { field: string; value: string },
+export async function revealProtected(
+  reveal: (id: string, ref: string, actor: string) => Promise<{ field: string; value: string }>,
   decisionId: string,
   body: RevealBody,
   actor: string,
-): HandlerResult<{ field: string; value: string } | ErrorBody> {
+): Promise<HandlerResult<{ field: string; value: string } | ErrorBody>> {
   try {
     // A malformed request body (JSON `null`, a primitive, an array, or a missing
     // ref) is a 400 — never let it throw and masquerade as a 503 outage.
@@ -142,7 +142,7 @@ export function revealProtected(
     if (typeof ref !== 'string' || ref.length === 0) {
       return { status: 400, body: { error: 'ref is required' } };
     }
-    return { status: 200, body: reveal(decisionId, ref, actor) };
+    return { status: 200, body: await reveal(decisionId, ref, actor) };
   } catch (e: unknown) {
     // STRUCTURAL detection by error name (not `instanceof`): this module is always
     // loaded by the control server, so a value import of RevealRefNotFoundError from
@@ -219,7 +219,7 @@ export async function answerDecision(
     if (typeof body !== 'object' || body === null || Array.isArray(body)) {
       return { status: 400, body: { error: 'answer body must be an object' } };
     }
-    const detail = deps.readModel.detail(decisionId);
+    const detail = await deps.readModel.detail(decisionId);
     if (detail === undefined) {
       return { status: 404, body: { error: 'unknown decision' } };
     }

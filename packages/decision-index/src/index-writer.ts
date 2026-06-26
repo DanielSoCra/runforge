@@ -7,7 +7,7 @@ import {
   type EffectKind,
 } from "@auto-claude/decision-protocol";
 import { eq } from "drizzle-orm";
-import type { Db } from "./db.js";
+import type { Db, Sql } from "./db.js";
 import { withTx } from "./db.js";
 import { decisions, workerSessions } from "./schema.js";
 import { appendAudit, type WorkflowAuditEvent } from "./audit-log.js";
@@ -20,7 +20,7 @@ import { ReadModel, type DetailField } from "./read-model.js";
 import { openDb } from "./db.js";
 import { migrate } from "./migrate.js";
 import { ProtectedStore as ProtectedStoreImpl } from "@auto-claude/sanitizer-redaction";
-import { SqliteQuarantine } from "./quarantine.js";
+import { PgQuarantine } from "./quarantine.js";
 import type { Notifier } from "./adapters/notifier.js";
 import type { SourceSink } from "./adapters/source-sink.js";
 import type { ResumeDispatcher } from "./adapters/resume-dispatcher.js";
@@ -35,6 +35,8 @@ export class RevealRefNotFoundError extends Error {
 
 export interface IndexWriterDeps {
   db: Db;
+  /** raw writer client to `end()` on close (production); omitted in PGlite tests. */
+  sql?: Sql;
   protectedStore: ProtectedStore;
   quarantine: Quarantine;
   notifier: Notifier;
@@ -61,8 +63,8 @@ export interface IndexWriterDeps {
  * use `openReadOnlyDb()`.
  */
 export interface CreateIndexWriterOptions {
-  /** path to the SQLite file; the factory opens it writable + runs migrate(). */
-  dbPath: string;
+  /** Postgres URL; the factory opens the writer connection + runs migrate(). */
+  databaseUrl: string;
   /** base64 AES-256 key for the protected store. */
   protectedKey: string;
   /** directory for the protected blob store. */
@@ -89,19 +91,28 @@ export interface CreateIndexWriterOptions {
  * package public surface exposes only this + `openReadOnlyDb()`; raw `openDb` is
  * internal, so the single-writer invariant is enforced by the SURFACE.
  */
-export function createIndexWriter(opts: CreateIndexWriterOptions): IndexWriter {
-  const db = openDb({ path: opts.dbPath });
+export async function createIndexWriter(opts: CreateIndexWriterOptions): Promise<IndexWriter> {
+  const { db, sql } = await openDb({ url: opts.databaseUrl });
   // HANDLE-LEAK FIX (verdict fix_before_flag_on / index-writer.ts:84): openDb()
-  // has already acquired the sqlite handle. If migrate() or the ProtectedStore
-  // ctor (e.g. a bad-length protectedKey) throws, the handle would leak — the
-  // caller catches higher up but never sees `db`. Close db.$client before
-  // rethrowing so a broken-config boot path frees the connection.
+  // has already acquired the writer connection. If migrate() or the ProtectedStore
+  // ctor (e.g. a bad-length protectedKey) throws, the connection would leak — the
+  // caller catches higher up but never sees `db`. End `sql` before rethrowing so a
+  // broken-config boot path frees the connection.
   try {
-    if (!opts.skipMigrate) migrate(db);
-    const protectedStore = new ProtectedStoreImpl({ key: opts.protectedKey, dir: opts.protectedDir, db });
-    const quarantine = new SqliteQuarantine(db);
+    if (!opts.skipMigrate) await migrate(db);
+    const protectedStore = new ProtectedStoreImpl({
+      key: opts.protectedKey,
+      dir: opts.protectedDir,
+      db,
+      // Inject the guarded writer primitive so the protected_refs pointer insert
+      // acquires the writer mutex + per-tx advisory lock (and re-uses an open
+      // writer tx when nested). Bound to THIS writer's db (spec §3.5a/§3.10).
+      runWrite: (fn) => withTx(db, fn),
+    });
+    const quarantine = new PgQuarantine(db);
     return new IndexWriter({
       db,
+      sql,
       protectedStore,
       quarantine,
       notifier: opts.notifier,
@@ -115,11 +126,7 @@ export function createIndexWriter(opts: CreateIndexWriterOptions): IndexWriter {
       generation: opts.generation ?? randomUUID(),
     });
   } catch (err) {
-    try {
-      db.$client.close();
-    } catch {
-      /* already closed / nothing to free */
-    }
+    await sql.end({ timeout: 5 }).catch(() => {});
     throw err;
   }
 }
@@ -157,6 +164,7 @@ export interface WorkflowOpResult {
  */
 export class IndexWriter {
   private readonly db: Db;
+  private readonly sql: Sql | undefined;
   private readonly ingestDeps: IngestDeps;
   private readonly outbox: Outbox;
   private readonly clock: () => Date;
@@ -169,6 +177,7 @@ export class IndexWriter {
 
   constructor(deps: IndexWriterDeps) {
     this.db = deps.db;
+    this.sql = deps.sql;
     this.clock = deps.clock;
     this.protectedStore = deps.protectedStore;
     this.quarantine = deps.quarantine;
@@ -191,9 +200,11 @@ export class IndexWriter {
   }
 
   /** Fail-closed admit: ingest (classify+redact) then insert the `detected` row. */
-  admit(rawRequest: unknown): { decision_id: string } {
-    const { decisionRow }: { decisionRow: DecisionRow } = ingest(rawRequest, this.ingestDeps);
-    this.db.insert(decisions).values(decisionRow).run();
+  async admit(rawRequest: unknown): Promise<{ decision_id: string }> {
+    const { decisionRow }: { decisionRow: DecisionRow } = await ingest(rawRequest, this.ingestDeps);
+    await withTx(this.db, async (tx) => {
+      await tx.insert(decisions).values(decisionRow);
+    });
     return { decision_id: decisionRow.decision_id };
   }
 
@@ -211,10 +222,10 @@ export class IndexWriter {
    * The locator/etag are read from the RAW (operational, never-redacted) request
    * so no protected lookup is needed.
    */
-  observeRequest(
+  async observeRequest(
     rawRequest: unknown,
     sourceObservedAt?: string,
-  ): { decision_id: string; outcome: "admitted" | "unchanged" | "superseded" } {
+  ): Promise<{ decision_id: string; outcome: "admitted" | "unchanged" | "superseded" }> {
     const now = sourceObservedAt ?? this.clock().toISOString();
     // Operational fields (decision_id, source_etag, source_url) are never
     // redacted, so a light schema parse is enough to read them for dedup. A parse
@@ -222,31 +233,33 @@ export class IndexWriter {
     const parsed = DecisionRequestSchema.safeParse(rawRequest);
     if (!parsed.success) {
       // Delegate to admit so the same fail-closed quarantine path runs.
-      return { decision_id: this.admit(rawRequest).decision_id, outcome: "admitted" };
+      return { decision_id: (await this.admit(rawRequest)).decision_id, outcome: "admitted" };
     }
     const incoming = parsed.data;
-    const existing = this.db
-      .select({
-        decision_id: decisions.decision_id,
-        status: decisions.status,
-        source_etag: decisions.source_etag,
-      })
-      .from(decisions)
-      .where(eq(decisions.decision_id, incoming.decision_id))
-      .all()[0];
+    const existing = (
+      await this.db
+        .select({
+          decision_id: decisions.decision_id,
+          status: decisions.status,
+          source_etag: decisions.source_etag,
+        })
+        .from(decisions)
+        .where(eq(decisions.decision_id, incoming.decision_id))
+    )[0];
 
     if (!existing) {
-      return { decision_id: this.admit(rawRequest).decision_id, outcome: "admitted" };
+      return { decision_id: (await this.admit(rawRequest)).decision_id, outcome: "admitted" };
     }
 
     const incomingEtag = incoming.source_etag ?? null;
     if (existing.source_etag === incomingEtag) {
       // same id + same etag -> a re-poll of the unchanged request. Bump last_seen_at.
-      this.db
-        .update(decisions)
-        .set({ last_seen_at: now })
-        .where(eq(decisions.decision_id, incoming.decision_id))
-        .run();
+      await withTx(this.db, async (tx) => {
+        await tx
+          .update(decisions)
+          .set({ last_seen_at: now })
+          .where(eq(decisions.decision_id, incoming.decision_id));
+      });
       return { decision_id: incoming.decision_id, outcome: "unchanged" };
     }
 
@@ -257,11 +270,12 @@ export class IndexWriter {
     // fabricated supersede. (The poller always supplies the canonical block etag,
     // so a missing etag here is a degenerate/non-GitHub path.)
     if (incomingEtag === null) {
-      this.db
-        .update(decisions)
-        .set({ last_seen_at: now })
-        .where(eq(decisions.decision_id, incoming.decision_id))
-        .run();
+      await withTx(this.db, async (tx) => {
+        await tx
+          .update(decisions)
+          .set({ last_seen_at: now })
+          .where(eq(decisions.decision_id, incoming.decision_id));
+      });
       return { decision_id: incoming.decision_id, outcome: "unchanged" };
     }
 
@@ -271,7 +285,7 @@ export class IndexWriter {
     if (TERMINAL_STATUSES.has(existing.status as ItemStatus)) {
       return { decision_id: incoming.decision_id, outcome: "unchanged" };
     }
-    apply(this.db, incoming.decision_id, "source_superseded", {
+    await apply(this.db, incoming.decision_id, "source_superseded", {
       semanticKey: incomingEtag,
       now,
       actor: "observe",
@@ -281,26 +295,27 @@ export class IndexWriter {
   }
 
   /** Record durable §7 worker metadata so mid_run->requeue is implementable. */
-  setWorkerSession(decisionId: string, meta: WorkerSessionMeta): void {
-    this.db
-      .insert(workerSessions)
-      .values({
-        decision_id: decisionId,
-        worker_session_id: meta.worker_session_id ?? null,
-        wake_command: meta.wake_command ?? null,
-        requeue_command: meta.requeue_command ?? null,
-        work_request_ref: meta.work_request_ref ?? null,
-        transcript_path: meta.transcript_path ?? null,
-      })
-      .onConflictDoUpdate({
-        target: workerSessions.decision_id,
-        set: {
+  async setWorkerSession(decisionId: string, meta: WorkerSessionMeta): Promise<void> {
+    await withTx(this.db, async (tx) => {
+      await tx
+        .insert(workerSessions)
+        .values({
+          decision_id: decisionId,
+          worker_session_id: meta.worker_session_id ?? null,
           wake_command: meta.wake_command ?? null,
           requeue_command: meta.requeue_command ?? null,
           work_request_ref: meta.work_request_ref ?? null,
-        },
-      })
-      .run();
+          transcript_path: meta.transcript_path ?? null,
+        })
+        .onConflictDoUpdate({
+          target: workerSessions.decision_id,
+          set: {
+            wake_command: meta.wake_command ?? null,
+            requeue_command: meta.requeue_command ?? null,
+            work_request_ref: meta.work_request_ref ?? null,
+          },
+        });
+    });
   }
 
   /**
@@ -312,11 +327,11 @@ export class IndexWriter {
    * phi/secret) carrying a raw `answer_value` is redacted to a protected
    * `answer_ref` here BEFORE apply — the plaintext value never reaches SQLite.
    */
-  applyEvent(
+  async applyEvent(
     decisionId: string,
     event: TransitionEvent,
     ctx: Omit<ApplyCtx, "now"> & { now?: string },
-  ): ApplyResult {
+  ): Promise<ApplyResult> {
     // Lifecycle fix (live e2e): the §6.2 path is
     //   notified --opened--> viewed --answer_submitted--> ...
     // The real answer path (CLI -> intent socket -> driver) reaches a freshly
@@ -333,9 +348,9 @@ export class IndexWriter {
     // `opened` semantic key is deterministic (the answerer), consistent with the
     // `opened:<viewer>` transition_key scheme.
     if (event === "answer_submitted" && ctx.answer) {
-      const current = this.reader.get(decisionId);
+      const current = await this.reader.get(decisionId);
       if (current?.status === "notified") {
-        apply(this.db, decisionId, "opened", {
+        await apply(this.db, decisionId, "opened", {
           semanticKey: ctx.answer.answerer,
           actor: ctx.actor,
           trace_id: ctx.trace_id,
@@ -343,7 +358,7 @@ export class IndexWriter {
         });
       }
     }
-    let answer = ctx.answer;
+    const answer = ctx.answer;
     return apply(this.db, decisionId, event, {
       ...ctx,
       answer,
@@ -364,20 +379,21 @@ export class IndexWriter {
    * or an unknown id, it is a no-op/reject (no mutation, no audit). The view-state
    * of a settled or in-progress item is meaningless, so it is never touched.
    */
-  private applyWorkflow(
+  private async applyWorkflow(
     decisionId: string,
     op: WorkflowAuditEvent,
     now: string,
     actor: string | undefined,
     set: Partial<{ pinned: boolean; muted: boolean; deferred_until: string }>,
     detail?: Record<string, unknown>,
-  ): WorkflowOpResult {
-    return withTx(this.db, (tx) => {
-      const r = tx
-        .select({ status: decisions.status })
-        .from(decisions)
-        .where(eq(decisions.decision_id, decisionId))
-        .all()[0];
+  ): Promise<WorkflowOpResult> {
+    return withTx(this.db, async (tx) => {
+      const r = (
+        await tx
+          .select({ status: decisions.status })
+          .from(decisions)
+          .where(eq(decisions.decision_id, decisionId))
+      )[0];
       if (!r) return { applied: false, status: "unknown", reason: "unknown_decision" };
       const status = r.status as ItemStatus;
       // Only an item awaiting a human (notified/viewed) carries a meaningful
@@ -386,12 +402,12 @@ export class IndexWriter {
         return { applied: false, status, reason: "not_view_state" };
       }
       if (Object.keys(set).length > 0) {
-        tx.update(decisions)
+        await tx
+          .update(decisions)
           .set({ ...set, updated_at: now })
-          .where(eq(decisions.decision_id, decisionId))
-          .run();
+          .where(eq(decisions.decision_id, decisionId));
       }
-      appendAudit(tx, {
+      await appendAudit(tx, {
         decision_id: decisionId,
         from: status,
         to: status,
@@ -407,19 +423,19 @@ export class IndexWriter {
   }
 
   /** Pin an item to the top of the active inbox (guarded view-state op). */
-  pin(decisionId: string, opts: WorkflowOpOptions = {}): WorkflowOpResult {
+  pin(decisionId: string, opts: WorkflowOpOptions = {}): Promise<WorkflowOpResult> {
     const now = opts.now ?? this.clock().toISOString();
     return this.applyWorkflow(decisionId, "pin", now, opts.actor, { pinned: true });
   }
 
   /** Mute an item (suppress from the active ranking) — guarded view-state op. */
-  mute(decisionId: string, opts: WorkflowOpOptions = {}): WorkflowOpResult {
+  mute(decisionId: string, opts: WorkflowOpOptions = {}): Promise<WorkflowOpResult> {
     const now = opts.now ?? this.clock().toISOString();
     return this.applyWorkflow(decisionId, "mute", now, opts.actor, { muted: true });
   }
 
   /** Defer an item until a timestamp (suppress until then) — guarded view-state op. */
-  defer(decisionId: string, until: string, opts: WorkflowOpOptions = {}): WorkflowOpResult {
+  defer(decisionId: string, until: string, opts: WorkflowOpOptions = {}): Promise<WorkflowOpResult> {
     const now = opts.now ?? this.clock().toISOString();
     return this.applyWorkflow(decisionId, "defer", now, opts.actor, { deferred_until: until }, {
       until,
@@ -430,7 +446,7 @@ export class IndexWriter {
    * Record a "need more context" note. No column changes (the actual context-fetch
    * is deferred to a later slice) — only the redacted audit row + the guard.
    */
-  needMoreContext(decisionId: string, opts: WorkflowOpOptions = {}): WorkflowOpResult {
+  needMoreContext(decisionId: string, opts: WorkflowOpOptions = {}): Promise<WorkflowOpResult> {
     const now = opts.now ?? this.clock().toISOString();
     return this.applyWorkflow(decisionId, "need_more_context", now, opts.actor, {});
   }
@@ -447,8 +463,8 @@ export class IndexWriter {
    * The original plaintext was JSON-serialized before encryption, so we parse it
    * back to a string. A `reveal` audit row is appended with the operator identity.
    */
-  revealProtected(decisionId: string, ref: string, actor: string): { field: string; value: string } {
-    const detail = this.reader.detail(decisionId);
+  async revealProtected(decisionId: string, ref: string, actor: string): Promise<{ field: string; value: string }> {
+    const detail = await this.reader.detail(decisionId);
     if (!detail) {
       throw new RevealRefNotFoundError(decisionId, ref);
     }
@@ -472,13 +488,17 @@ export class IndexWriter {
       throw new RevealRefNotFoundError(decisionId, ref);
     }
 
-    const value = JSON.parse(this.protectedStore.get(ref)) as string;
-    appendAudit(this.db, {
-      decision_id: decisionId,
-      event: "reveal",
-      actor,
-      at: this.clock().toISOString(),
-      detail: { field: match.field, class: match.class },
+    const value = JSON.parse(await this.protectedStore.get(ref)) as string;
+    // §3.5a: this audit append runs OUTSIDE any open writer tx, so wrap it in the
+    // guarded primitive (acquire the mutex + per-tx advisory lock).
+    await withTx(this.db, async (tx) => {
+      await appendAudit(tx, {
+        decision_id: decisionId,
+        event: "reveal",
+        actor,
+        at: this.clock().toISOString(),
+        detail: { field: match.field, class: match.class },
+      });
     });
     return { field: match.field, value };
   }
@@ -502,16 +522,16 @@ export class IndexWriter {
    * without a restart — and a reserved `requeue` left by the mid_run fallback is
    * retried AS requeue (not a state-derived `resume`).
    */
-  pendingEffectDecisions(): PendingEffect[] {
+  pendingEffectDecisions(): Promise<PendingEffect[]> {
     return this.outbox.pendingEffectDecisions();
   }
 
-  /** Close the underlying writable connection (graceful shutdown). */
-  close(): void {
-    try {
-      this.db.$client.close();
-    } catch {
-      /* already closed */
+  /** Close the underlying writer connection (graceful shutdown). */
+  async close(): Promise<void> {
+    // The per-tx advisory xact-lock auto-releases at tx end and the boot
+    // fast-fail is non-holding, so there is no session lock to release.
+    if (this.sql) {
+      await this.sql.end({ timeout: 5 }).catch(() => {});
     }
   }
 }

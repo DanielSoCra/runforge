@@ -2,9 +2,9 @@ import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeTempDb, type TempDb, TEST_PROTECTED_KEY } from "./helpers/temp-db.js";
+import { makePgliteDb, type PgliteTestDb, TEST_PROTECTED_KEY } from "./helpers/temp-db.js";
 import { ProtectedStore } from "@auto-claude/sanitizer-redaction";
-import { SqliteQuarantine } from "../src/quarantine.js";
+import { PgQuarantine } from "../src/quarantine.js";
 import { ingest, NotAdmittedError } from "../src/ingest.js";
 import { decisions, quarantineEvents } from "../src/schema.js";
 import { PROTOCOL_VERSION } from "@auto-claude/decision-protocol";
@@ -50,43 +50,43 @@ function rawRequest(overrides: Partial<Record<string, unknown>> = {}): any {
 describe("protocol_version equality guard at ingest", () => {
   let protectedDir: string;
   let store: ProtectedStore;
-  let t: TempDb;
-  let quarantine: SqliteQuarantine;
+  let t: PgliteTestDb;
+  let quarantine: PgQuarantine;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     protectedDir = mkdtempSync(join(tmpdir(), "pm-prot-pv-"));
-    t = makeTempDb();
+    t = await makePgliteDb();
     store = new ProtectedStore({ key: TEST_PROTECTED_KEY, dir: protectedDir, db: t.db });
-    quarantine = new SqliteQuarantine(t.db);
+    quarantine = new PgQuarantine(t.db);
   });
-  afterEach(() => {
-    t?.cleanup();
+  afterEach(async () => {
+    await t?.cleanup();
     rmSync(protectedDir, { recursive: true, force: true });
   });
 
-  it("rejects a mismatched protocol_version -> NotAdmittedError + quarantine row, NO decisions row", () => {
+  it("rejects a mismatched protocol_version -> NotAdmittedError + quarantine row, NO decisions row", async () => {
     const raw = rawRequest({ protocol_version: "9.9.9" });
-    expect(() => ingest(raw, { db: t.db, protectedStore: store, quarantine })).toThrow(
+    await expect(ingest(raw, { db: t.db, protectedStore: store, quarantine })).rejects.toThrow(
       NotAdmittedError,
     );
-    expect(t.db.select().from(decisions).all()).toHaveLength(0);
-    const q = t.db.select().from(quarantineEvents).all();
+    expect(await t.db.select().from(decisions)).toHaveLength(0);
+    const q = await t.db.select().from(quarantineEvents);
     expect(q).toHaveLength(1);
     expect(q[0]!.reason).toBe("protocol_version_mismatch");
   });
 
-  it("admits the matching protocol_version", () => {
+  it("admits the matching protocol_version", async () => {
     const raw = rawRequest({ protocol_version: PROTOCOL_VERSION, decision_id: "01HXYZABCDEFGHJKMNPQRSTV03" });
-    const { decisionRow } = ingest(raw, { db: t.db, protectedStore: store, quarantine });
+    const { decisionRow } = await ingest(raw, { db: t.db, protectedStore: store, quarantine });
     expect(decisionRow.protocol_version).toBe(PROTOCOL_VERSION);
-    expect(t.db.select().from(quarantineEvents).all()).toHaveLength(0);
+    expect(await t.db.select().from(quarantineEvents)).toHaveLength(0);
   });
 
-  it("admits an OMITTED protocol_version (schema default = PROTOCOL_VERSION) — the daemon build-request path", () => {
+  it("admits an OMITTED protocol_version (schema default = PROTOCOL_VERSION) — the daemon build-request path", async () => {
     const raw = rawRequest({ decision_id: "01HXYZABCDEFGHJKMNPQRSTV04" });
     delete raw.protocol_version;
-    const { decisionRow } = ingest(raw, { db: t.db, protectedStore: store, quarantine });
+    const { decisionRow } = await ingest(raw, { db: t.db, protectedStore: store, quarantine });
     expect(decisionRow.protocol_version).toBe(PROTOCOL_VERSION);
-    expect(t.db.select().from(quarantineEvents).all()).toHaveLength(0);
+    expect(await t.db.select().from(quarantineEvents)).toHaveLength(0);
   });
 });

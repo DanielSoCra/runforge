@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
-import { makeTempDb, type TempDb } from "./helpers/temp-db.js";
+import { makePgliteDb, type PgliteTestDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { makeOutbox, answerItem } from "./helpers/effect-driver.js";
 import { decisions, outbox as outboxTable, workerSessions } from "../src/schema.js";
 
-async function toSourceWritten(t: TempDb, f: ReturnType<typeof makeOutbox>, id: string) {
+async function toSourceWritten(t: PgliteTestDb, f: ReturnType<typeof makeOutbox>, id: string) {
   await answerItem(t, f.outbox, id);
   await f.outbox.runEffect(id, "write_response"); // -> source_written
 }
@@ -27,24 +27,27 @@ async function toSourceWritten(t: TempDb, f: ReturnType<typeof makeOutbox>, id: 
  * is then genuinely the single chokepoint.
  */
 describe("FINDING 3 — fallback requeue routes through the single chokepoint", () => {
-  let t: TempDb;
-  beforeEach(() => (t = makeTempDb()));
-  afterEach(() => t?.cleanup());
+  let t: PgliteTestDb;
+  beforeEach(async () => {
+    t = await makePgliteDb();
+  });
+  afterEach(async () => {
+    await t?.cleanup();
+  });
 
   it("a fallback requeue whose row is already COMMITTED does NOT dispatch a second resume", async () => {
-    const id = seedDecision(t.db, { resume_mode: "mid_run" });
-    t.db
+    const id = await seedDecision(t.db, { resume_mode: "mid_run" });
+    await t.db
       .insert(workerSessions)
-      .values({ decision_id: id, requeue_command: "rq", work_request_ref: "wr-1" })
-      .run();
+      .values({ decision_id: id, requeue_command: "rq", work_request_ref: "wr-1" });
     const f = makeOutbox(t);
     await toSourceWritten(t, f, id);
 
     // A concurrent path ALREADY reserved + dispatched + committed the fallback
     // requeue (the worker was requeued and the row is committed evidence). The
     // decision has not yet advanced past source_written in this racing view.
-    const requeueId = f.outbox.effectIdFor(id, "requeue");
-    t.db
+    const requeueId = await f.outbox.effectIdFor(id, "requeue");
+    await t.db
       .insert(outboxTable)
       .values({
         id: requeueId,
@@ -56,8 +59,7 @@ describe("FINDING 3 — fallback requeue routes through the single chokepoint", 
         committed_at: "2026-05-27T01:59:45.000Z",
         attempts: 0,
         created_at: "2026-05-27T01:59:30.000Z",
-      })
-      .run();
+      });
     // mark the requeue as already applied at the worker too.
     f.resumeDispatcher.applied.add(requeueId);
 
@@ -76,20 +78,20 @@ describe("FINDING 3 — fallback requeue routes through the single chokepoint", 
     expect(f.resumeDispatcher.calls.length).toBe(callsBefore + 1);
 
     // the committed requeue row stays committed (not re-touched).
-    const requeueRow = t.db.select().from(outboxTable).where(eq(outboxTable.id, requeueId)).all()[0]!;
+    const requeueRow = (await t.db.select().from(outboxTable).where(eq(outboxTable.id, requeueId)))[0]!;
     expect(requeueRow.state).toBe("committed");
   });
 
   it("a fallback requeue whose row is already SUPERSEDED/terminal-decision does NOT dispatch", async () => {
-    const id = seedDecision(t.db, { resume_mode: "mid_run" });
-    t.db.insert(workerSessions).values({ decision_id: id, requeue_command: "rq" }).run();
+    const id = await seedDecision(t.db, { resume_mode: "mid_run" });
+    await t.db.insert(workerSessions).values({ decision_id: id, requeue_command: "rq" });
     const f = makeOutbox(t);
     await toSourceWritten(t, f, id);
 
     // Pre-seed the requeue row as reserved but SUPERSEDED (a concurrent path
     // cancelled it as part of driving the decision terminal).
-    const requeueId = f.outbox.effectIdFor(id, "requeue");
-    t.db
+    const requeueId = await f.outbox.effectIdFor(id, "requeue");
+    await t.db
       .insert(outboxTable)
       .values({
         id: requeueId,
@@ -101,8 +103,7 @@ describe("FINDING 3 — fallback requeue routes through the single chokepoint", 
         superseded: true,
         attempts: 0,
         created_at: "2026-05-27T01:59:30.000Z",
-      })
-      .run();
+      });
 
     const callsBefore = f.resumeDispatcher.calls.length;
     f.resumeDispatcher.results = ["unreachable"]; // mid_run resume unreachable
@@ -114,11 +115,10 @@ describe("FINDING 3 — fallback requeue routes through the single chokepoint", 
   });
 
   it("baseline preserved: a fresh fallback requeue (clean row) DOES dispatch and reaches terminal resumed", async () => {
-    const id = seedDecision(t.db, { resume_mode: "mid_run" });
-    t.db
+    const id = await seedDecision(t.db, { resume_mode: "mid_run" });
+    await t.db
       .insert(workerSessions)
-      .values({ decision_id: id, requeue_command: "pm requeue --ref X", work_request_ref: "wr-1" })
-      .run();
+      .values({ decision_id: id, requeue_command: "pm requeue --ref X", work_request_ref: "wr-1" });
     const f = makeOutbox(t);
     await toSourceWritten(t, f, id);
 
@@ -129,7 +129,7 @@ describe("FINDING 3 — fallback requeue routes through the single chokepoint", 
     const requeueCall = f.resumeDispatcher.calls.find((c) => c.mode === "requeue")!;
     expect(requeueCall.requeue_command).toBe("pm requeue --ref X");
     expect(requeueCall.work_request_ref).toBe("wr-1");
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("resumed");
   });
 });

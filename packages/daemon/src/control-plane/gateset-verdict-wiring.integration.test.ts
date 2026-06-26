@@ -267,6 +267,7 @@ function makeDecisionDouble() {
   const ensure = vi.fn().mockResolvedValue({ posted: true });
   const manager = {
     isEnabled: () => true,
+    isAvailable: () => true,
     ledger: () => ({ raise, notify }),
   } as unknown as DecisionIndexManager;
   const publisher = { ensure } as unknown as GitHubBlockPublisher;

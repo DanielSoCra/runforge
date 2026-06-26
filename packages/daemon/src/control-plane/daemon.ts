@@ -1786,7 +1786,7 @@ export async function startDaemon(
             publisher: {
               async publish({ decisionId, chosenOption }) {
                 const reader = decisionManager.ledger().reader;
-                const detail = reader.detail(decisionId);
+                const detail = await reader.detail(decisionId);
                 if (detail === undefined) {
                   throw new Error(`answerDecision: unknown decision ${decisionId}`);
                 }
@@ -2199,7 +2199,7 @@ export async function startDaemon(
         let alreadyResumed = false;
         try {
           alreadyResumed =
-            decisionManager.ledger().statusOf(decisionId) === 'resumed';
+            (await decisionManager.ledger().statusOf(decisionId)) === 'resumed';
         } catch (e) {
           console.warn(
             `[daemon] resumeParkedRuns: statusOf failed for #${run.issueNumber} (failing closed, staying parked): ${e instanceof Error ? e.message : String(e)}`,
@@ -2265,7 +2265,12 @@ export async function startDaemon(
       // advancing on unconfirmed state.
       if (decisionManager.isEnabled()) {
         try {
-          decisionManager.ledger().answer(decisionId, choice, 'operator');
+          // answer() is async (real Postgres writer) — AWAIT it so the row is
+          // durably `answered_pending_source_write` before advanceToResumed runs;
+          // a fire-and-forget call races the advance, which then no-ops on the
+          // not-yet-answered row and strands it. await also routes an async
+          // rejection into this fail-closed catch.
+          await decisionManager.ledger().answer(decisionId, choice, 'operator');
         } catch (e) {
           console.warn(
             `[daemon] resumeParkedRuns: decision-index answer failed for #${run.issueNumber} (failing closed, staying parked): ${e instanceof Error ? e.message : String(e)}`,
@@ -2490,7 +2495,7 @@ export async function startDaemon(
       let alreadyResumed = false;
       try {
         alreadyResumed =
-          decisionManager.ledger().statusOf(decisionId) === 'resumed';
+          (await decisionManager.ledger().statusOf(decisionId)) === 'resumed';
       } catch (e) {
         console.warn(
           `[daemon] resumeParkedRuns: statusOf failed for #${run.issueNumber} (failing closed, staying parked): ${e instanceof Error ? e.message : String(e)}`,
@@ -2529,7 +2534,11 @@ export async function startDaemon(
       // id is `approve-merge` must be answered with `approve-merge`, not `approve`.
       // FAIL-CLOSED: ledger throw -> stay parked.
       try {
-        decisionManager
+        // AWAIT the async answer() (real Postgres writer) so the row is durably
+        // recorded before advanceToResumed; a fire-and-forget call races the
+        // advance and strands the run at answered_pending_source_write. await also
+        // routes an async rejection into this fail-closed catch.
+        await decisionManager
           .ledger()
           .answer(decisionId, answer.rawChosenOption, 'operator');
       } catch (e) {

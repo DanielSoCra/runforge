@@ -5,7 +5,10 @@
 // the field as { kind: 'protected', class, ref }; and the original is recoverable via store.get(ref)
 // — i.e. the operator reveal (5b) is possible. Also pins idempotency across retries and the
 // DecisionIndexManager.protectedStore() exposure (fail-closed when the index is disabled).
-import { describe, it, expect, afterEach } from 'vitest';
+//
+// The real writer opens a postgres-js connection, so the writer-backed chain is gated on a real
+// Postgres URL; the disabled fail-closed check (no writer) runs unconditionally.
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,20 +17,16 @@ import { createIndexWriter, type IndexWriter } from '@auto-claude/decision-index
 import { LogNotifier, RecordingSourceSink, AckResumeDispatcher } from '../decision-escalation/adapters.js';
 import { DecisionLedger } from '../decision-escalation/ledger.js';
 import { DecisionIndexManager } from '../decision-escalation/manager.js';
+import {
+  DECISION_DB_URL,
+  REAL_PG,
+  makeSchemaSerializer,
+} from '../decision-escalation/__fixtures__/pg-test-harness.js';
 import { buildSanitizationPipeline } from './build-pipeline.js';
 import type { DeploymentProfile } from '../deployment-registry/types.js';
 
 const KEY = Buffer.alloc(32, 7).toString('base64');
 const FIXED_NOW = '2026-06-02T00:00:00.000Z';
-const dirs: string[] = [];
-function tmp(): string {
-  const d = mkdtempSync(join(tmpdir(), 'pmps-act-'));
-  dirs.push(d);
-  return d;
-}
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-});
 
 const profileWith = (fields: string[]): DeploymentProfile =>
   ({
@@ -44,20 +43,6 @@ const profileWith = (fields: string[]): DeploymentProfile =>
     capabilityBindings: [],
     sanitizers: [{ plugin: 'withholding', options: { fields, class: 'secret' } }],
   }) as unknown as DeploymentProfile;
-
-function makeWriter(): { writer: IndexWriter; ledger: DecisionLedger; dir: string } {
-  const dir = tmp();
-  const writer = createIndexWriter({
-    dbPath: join(dir, 'decision-index.sqlite'),
-    protectedKey: KEY,
-    protectedDir: join(dir, 'protected'),
-    notifier: new LogNotifier(),
-    sourceSink: new RecordingSourceSink(),
-    resumeDispatcher: new AckResumeDispatcher(),
-    clock: () => new Date(FIXED_NOW),
-  });
-  return { writer, ledger: new DecisionLedger(writer), dir };
-}
 
 function makeRequest(overrides: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -86,9 +71,43 @@ function makeRequest(overrides: Record<string, unknown>): Record<string, unknown
   };
 }
 
-describe('sanitizer activation — end-to-end withhold -> raise -> read-model -> reveal', () => {
+describe.skipIf(!REAL_PG)('sanitizer activation — end-to-end withhold -> raise -> read-model -> reveal (real Postgres)', () => {
+  const serializer = makeSchemaSerializer();
+  const dirs: string[] = [];
+  const writers: IndexWriter[] = [];
+
+  function tmp(): string {
+    const d = mkdtempSync(join(tmpdir(), 'pmps-act-'));
+    dirs.push(d);
+    return d;
+  }
+
+  async function makeWriter(): Promise<{ writer: IndexWriter; ledger: DecisionLedger; dir: string }> {
+    const dir = tmp();
+    const writer = await createIndexWriter({
+      databaseUrl: DECISION_DB_URL!,
+      protectedKey: KEY,
+      protectedDir: join(dir, 'protected'),
+      notifier: new LogNotifier(),
+      sourceSink: new RecordingSourceSink(),
+      resumeDispatcher: new AckResumeDispatcher(),
+      clock: () => new Date(FIXED_NOW),
+    });
+    writers.push(writer);
+    return { writer, ledger: new DecisionLedger(writer), dir };
+  }
+
+  beforeAll(() => serializer.lock());
+  afterAll(() => serializer.release());
+
+  beforeEach(() => serializer.resetSchema());
+  afterEach(async () => {
+    for (const w of writers.splice(0)) await w.close().catch(() => {});
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
   it('a withheld field is stored as a ref, surfaced as protected in detail, and revealable', async () => {
-    const { writer, ledger } = makeWriter();
+    const { writer, ledger } = await makeWriter();
     const pipeline = buildSanitizationPipeline(profileWith(['context']), {
       protectedStore: writer.protectedStore,
     });
@@ -102,9 +121,9 @@ describe('sanitizer activation — end-to-end withhold -> raise -> read-model ->
     expect(sanitized.content.context as string).toMatch(/^protected:\/\//);
 
     // raise the sanitized request, then read it back via the dashboard read-model.
-    const r = ledger.raise(makeRequest({ context: sanitized.content.context }));
+    const r = await ledger.raise(makeRequest({ context: sanitized.content.context }));
     expect(r.outcome).toBe('admitted');
-    const detail = writer.reader.detail(decisionId)!;
+    const detail = (await writer.reader.detail(decisionId))!;
     const ctxField = detail.context!;
     expect(ctxField).toEqual({
       kind: 'protected',
@@ -115,38 +134,41 @@ describe('sanitizer activation — end-to-end withhold -> raise -> read-model ->
     if (ctxField.kind !== 'protected') throw new Error('expected a protected field');
 
     // reveal: the protected ref decrypts back to the original (this is what 5b will call).
-    expect(JSON.parse(writer.protectedStore.get(ctxField.ref))).toBe('SENSITIVE-CONTEXT');
+    expect(JSON.parse(await writer.protectedStore.get(ctxField.ref))).toBe('SENSITIVE-CONTEXT');
 
-    writer.close();
+    await writer.close();
   });
 
   it('is idempotent: re-running the seam yields the same ref (re-raise stays unchanged)', async () => {
-    const { writer } = makeWriter();
+    const { writer } = await makeWriter();
     const pipeline = buildSanitizationPipeline(profileWith(['context']), {
       protectedStore: writer.protectedStore,
     });
     const a = await pipeline.run({ content: { context: 'X' }, subjectRef: 'issue-7:l2-gate:1' });
     const b = await pipeline.run({ content: { context: 'X' }, subjectRef: 'issue-7:l2-gate:1' });
     expect(b.content.context).toBe(a.content.context);
-    writer.close();
+    await writer.close();
   });
 
   it('an EDITED field (same id, changed value) mints a fresh ref revealing the new value', async () => {
-    const { writer } = makeWriter();
+    const { writer } = await makeWriter();
     const pipeline = buildSanitizationPipeline(profileWith(['context']), {
       protectedStore: writer.protectedStore,
     });
     const a = await pipeline.run({ content: { context: 'OLD' }, subjectRef: 'issue-9:l2-gate:1' });
     const b = await pipeline.run({ content: { context: 'NEW' }, subjectRef: 'issue-9:l2-gate:1' });
     expect(b.content.context).not.toBe(a.content.context);
-    expect(JSON.parse(writer.protectedStore.get(b.content.context as string))).toBe('NEW');
-    writer.close();
+    expect(JSON.parse(await writer.protectedStore.get(b.content.context as string))).toBe('NEW');
+    await writer.close();
   });
+});
 
+// The disabled fail-closed check opens NO writer (init() is a no-op), so it needs no Postgres.
+describe('sanitizer activation — protected store exposure is fail-closed when disabled', () => {
   it('exposes the protected store only when the index is enabled (fail-closed otherwise)', async () => {
     const disabled = new DecisionIndexManager({
       enabled: false,
-      dbPath: 'unused.sqlite',
+      databaseUrl: 'postgres://unused',
       protectedKey: '',
       protectedDir: 'unused',
     });

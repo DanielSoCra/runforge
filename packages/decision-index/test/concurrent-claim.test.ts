@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
-import { makeTempDb, type TempDb } from "./helpers/temp-db.js";
+import { makePgliteDb, type PgliteTestDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { makeOutbox, answerItem } from "./helpers/effect-driver.js";
 import { outbox as outboxTable, decisions } from "../src/schema.js";
@@ -20,12 +20,16 @@ import { outbox as outboxTable, decisions } from "../src/schema.js";
  * without touching the adapter.
  */
 describe("CRITICAL 1 — concurrent runEffect claims the row before awaiting the adapter (no double-dispatch)", () => {
-  let t: TempDb;
-  beforeEach(() => (t = makeTempDb()));
-  afterEach(() => t?.cleanup());
+  let t: PgliteTestDb;
+  beforeEach(async () => {
+    t = await makePgliteDb();
+  });
+  afterEach(async () => {
+    await t?.cleanup();
+  });
 
   it("two concurrent runEffect(id, write_response) invoke writeResponse at most once", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" });
+    const id = await seedDecision(t.db, { resume_mode: "requeue" });
     const f = makeOutbox(t);
     await answerItem(t, f.outbox, id); // -> answered_pending_source_write
 
@@ -56,12 +60,12 @@ describe("CRITICAL 1 — concurrent runEffect claims the row before awaiting the
     expect(outcomes).toContain("committed");
 
     // the decision advanced exactly once.
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("source_written");
   });
 
   it("two concurrent runEffect(id, notify) invoke notify at most once", async () => {
-    const id = seedDecision(t.db);
+    const id = await seedDecision(t.db);
     const f = makeOutbox(t);
 
     let inFlight = 0;
@@ -80,12 +84,12 @@ describe("CRITICAL 1 — concurrent runEffect claims the row before awaiting the
 
     expect(f.notifier.calls.length).toBe(1);
     expect(maxConcurrent).toBeLessThanOrEqual(1);
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("notified");
   });
 
   it("runEffect racing reconcile for the same effect dispatches the adapter at most once", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" });
+    const id = await seedDecision(t.db, { resume_mode: "requeue" });
     const f = makeOutbox(t);
     await answerItem(t, f.outbox, id); // answered_pending_source_write -> write_response expected
 
@@ -109,8 +113,8 @@ describe("CRITICAL 1 — concurrent runEffect claims the row before awaiting the
 
   /** Manually create an `executing` (claimed-but-uncommitted) outbox row with an
    * OLD claim timestamp (lease expired), modelling a crash after the CAS claim. */
-  function forceExecutingCrash(id: string, effId: string) {
-    t.db
+  async function forceExecutingCrash(id: string, effId: string) {
+    await t.db
       .insert(outboxTable)
       .values({
         id: effId,
@@ -124,19 +128,18 @@ describe("CRITICAL 1 — concurrent runEffect claims the row before awaiting the
         attempts: 0,
         claimed_at: "2026-05-27T00:00:00.000Z", // far older than the 30s lease
         created_at: "2026-05-27T00:00:00.000Z",
-      })
-      .run();
+      });
   }
 
   it("reconcile treats an `executing` row as crash-recoverable: applied marker -> advance (no re-dispatch)", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" });
+    const id = await seedDecision(t.db, { resume_mode: "requeue" });
     const f = makeOutbox(t);
     await answerItem(t, f.outbox, id); // answered_pending_source_write; write_response is next
 
     // A crash AFTER the adapter applied the write but BEFORE the commit txn: the
     // marker is present at the sink, the row is `executing`, no applied_transition.
-    const effId = f.outbox.effectIdFor(id, "write_response");
-    forceExecutingCrash(id, effId);
+    const effId = await f.outbox.effectIdFor(id, "write_response");
+    await forceExecutingCrash(id, effId);
     f.sourceSink.applied.add(effId); // marker already landed at the source
 
     const before = f.sourceSink.calls.length;
@@ -145,18 +148,18 @@ describe("CRITICAL 1 — concurrent runEffect claims the row before awaiting the
     expect(mine.action).toBe("advanced");
     // applied marker -> NO re-dispatch.
     expect(f.sourceSink.calls.length).toBe(before);
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("source_written");
   });
 
   it("reconcile treats an `executing` row whose marker is absent as re-claimable: re-executes", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" });
+    const id = await seedDecision(t.db, { resume_mode: "requeue" });
     const f = makeOutbox(t);
     await answerItem(t, f.outbox, id);
 
     // A crash AFTER the CAS claim but BEFORE the adapter landed (marker absent).
-    const effId = f.outbox.effectIdFor(id, "write_response");
-    forceExecutingCrash(id, effId);
+    const effId = await f.outbox.effectIdFor(id, "write_response");
+    await forceExecutingCrash(id, effId);
     // sink.applied is empty -> exists() returns absent.
 
     const before = f.sourceSink.calls.length;
@@ -165,12 +168,12 @@ describe("CRITICAL 1 — concurrent runEffect claims the row before awaiting the
     // absent marker on a stale executing row -> re-claim + re-execute (a dispatch).
     expect(mine.action).toBe("re-executed");
     expect(f.sourceSink.calls.length).toBeGreaterThan(before);
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("source_written");
   });
 
   it("a FRESH executing row (live in-flight) is NOT stolen by a concurrent reconcile", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" });
+    const id = await seedDecision(t.db, { resume_mode: "requeue" });
     const f = makeOutbox(t);
     await answerItem(t, f.outbox, id);
 

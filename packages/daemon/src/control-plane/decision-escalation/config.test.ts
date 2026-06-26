@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, isAbsolute } from 'node:path';
 import { readDecisionIndexConfig } from './config.js';
@@ -22,6 +22,8 @@ describe('readDecisionIndexConfig', () => {
     delete process.env.AUTO_CLAUDE_DECISION_INDEX_PATH;
     delete process.env.AUTO_CLAUDE_DECISION_PROTECTED_KEY;
     delete process.env.AUTO_CLAUDE_DECISION_PROTECTED_DIR;
+    delete process.env.AUTO_CLAUDE_DATABASE_URL;
+    delete process.env.AUTO_CLAUDE_DECISION_INDEX_CUTOVER_ACK;
   });
 
   afterEach(() => {
@@ -45,49 +47,53 @@ describe('readDecisionIndexConfig', () => {
     }
   });
 
-  it('resolves db path to an absolute path under stateDir by default', () => {
+  it('returns an empty databaseUrl when disabled (no Postgres URL read when flag OFF)', () => {
+    // Even with AUTO_CLAUDE_DATABASE_URL set, a disabled daemon does ZERO extra
+    // work and never surfaces the connection string.
+    process.env.AUTO_CLAUDE_DATABASE_URL = 'postgres://user:pw@localhost:5432/ac';
     const cfg = readDecisionIndexConfig(stateDir);
-    expect(isAbsolute(cfg.dbPath)).toBe(true);
-    expect(cfg.dbPath).toBe(join(stateDir, 'decision-index.sqlite'));
+    expect(cfg.enabled).toBe(false);
+    expect(cfg.databaseUrl).toBe('');
   });
 
-  it('honors an explicit relative db path resolved against stateDir', () => {
-    process.env.AUTO_CLAUDE_DECISION_INDEX_PATH = 'sub/custom.sqlite';
+  it('reads databaseUrl from AUTO_CLAUDE_DATABASE_URL when enabled', () => {
+    process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED = 'true';
+    process.env.AUTO_CLAUDE_DATABASE_URL = 'postgres://user:pw@localhost:5432/ac';
     const cfg = readDecisionIndexConfig(stateDir);
-    expect(cfg.dbPath).toBe(join(stateDir, 'sub/custom.sqlite'));
+    expect(cfg.databaseUrl).toBe('postgres://user:pw@localhost:5432/ac');
   });
 
-  it('honors an explicit absolute db path as-is', () => {
-    const abs = join(stateDir, 'abs.sqlite');
-    process.env.AUTO_CLAUDE_DECISION_INDEX_PATH = abs;
+  it('returns an empty databaseUrl when enabled but AUTO_CLAUDE_DATABASE_URL is unset', () => {
+    process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED = 'true';
     const cfg = readDecisionIndexConfig(stateDir);
-    expect(cfg.dbPath).toBe(abs);
+    expect(cfg.enabled).toBe(true);
+    expect(cfg.databaseUrl).toBe('');
   });
 
   // FIX (verdict fix_before_flag_on / .env.prod.example): env paths are resolved
   // AGAINST stateDir (which is itself `…/state`). The example files must use BARE
   // names — a leading `state/` would double-resolve to `…/state/state/…`, whose
-  // parent openDb() never creates. These assertions pin both:
+  // parent is never created. These assertions pin both:
   //  (a) the CORRECT (bare) example value resolves directly under stateDir; and
   //  (b) the BUGGY `state/…` value demonstrably double-prefixes (regression guard
   //      so a future edit re-introducing `state/` in the examples is caught).
+  // (The legacy sqlite db path is gone — the store lives in Postgres now — so the
+  //  surviving stateDir-relative path is the protected dir.)
   it('bare example names resolve directly under stateDir (the fixed .env.example values)', () => {
-    process.env.AUTO_CLAUDE_DECISION_INDEX_PATH = 'decision-index.sqlite';
     process.env.AUTO_CLAUDE_DECISION_PROTECTED_DIR = 'decision-protected/';
     const cfg = readDecisionIndexConfig(stateDir);
-    expect(cfg.dbPath).toBe(join(stateDir, 'decision-index.sqlite'));
     expect(cfg.protectedDir).toBe(join(stateDir, 'decision-protected'));
     // NOT double-prefixed.
-    expect(cfg.dbPath).not.toContain(join('state', 'state'));
+    expect(cfg.protectedDir).not.toContain(join('state', 'state'));
   });
 
   it('a leading state/ prefix double-resolves to state/state/… (why bare names are required)', () => {
     // stateDir basename is `state` so a `state/…` value resolves to `state/state/…`.
     const stateLike = join(tmpdir(), 'state');
-    process.env.AUTO_CLAUDE_DECISION_INDEX_PATH = 'state/decision-index.sqlite';
+    process.env.AUTO_CLAUDE_DECISION_PROTECTED_DIR = 'state/decision-protected';
     const cfg = readDecisionIndexConfig(stateLike);
-    expect(cfg.dbPath).toBe(join(stateLike, 'state', 'decision-index.sqlite'));
-    expect(cfg.dbPath).toContain(join('state', 'state'));
+    expect(cfg.protectedDir).toBe(join(stateLike, 'state', 'decision-protected'));
+    expect(cfg.protectedDir).toContain(join('state', 'state'));
   });
 
   it('defaults the protected dir to state/decision-protected (absolute)', () => {
@@ -108,12 +114,12 @@ describe('readDecisionIndexConfig', () => {
     expect(cfg.enabled).toBe(false);
     // No decision-protected.key file is created.
     expect(existsSync(join(stateDir, 'decision-protected.key'))).toBe(false);
-    // No sqlite file (or anything else) is created either.
-    expect(existsSync(cfg.dbPath)).toBe(false);
-    // stateDir is byte-for-byte untouched.
+    // stateDir is byte-for-byte untouched (nothing — sqlite or otherwise — created).
     expect(readdirSync(stateDir)).toEqual(before);
     // A placeholder/empty key is returned — never a freshly-generated one.
     expect(cfg.protectedKey).toBe('');
+    // No Postgres URL is surfaced when disabled.
+    expect(cfg.databaseUrl).toBe('');
   });
 
   it('writes NOTHING to stateDir when the flag is explicitly false', () => {
@@ -122,6 +128,7 @@ describe('readDecisionIndexConfig', () => {
     expect(cfg.enabled).toBe(false);
     expect(existsSync(join(stateDir, 'decision-protected.key'))).toBe(false);
     expect(cfg.protectedKey).toBe('');
+    expect(cfg.databaseUrl).toBe('');
     expect(readdirSync(stateDir)).toEqual([]);
   });
 
@@ -151,5 +158,32 @@ describe('readDecisionIndexConfig', () => {
     expect(cfg.protectedKey).toBe(explicit);
     // no key file written when an explicit key is supplied
     expect(existsSync(join(stateDir, 'decision-protected.key'))).toBe(false);
+  });
+
+  // Greenfield cutover preflight (spec §4): the store moved to Postgres. If a
+  // legacy sqlite file still exists it may hold unanswered escalations the
+  // greenfield migration would silently abandon — so refuse to boot the index
+  // unless the operator acknowledges the cutover. The check is a pure
+  // fs.existsSync — it NEVER opens the sqlite file (no better-sqlite3 native load).
+  it('throws an actionable cutover error when ENABLED and a legacy sqlite store exists without ack', () => {
+    process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED = 'true';
+    // A legacy store sitting at the default path that the operator never ack'd.
+    writeFileSync(join(stateDir, 'decision-index.sqlite'), '');
+    expect(() => readDecisionIndexConfig(stateDir)).toThrow(/legacy sqlite/i);
+  });
+
+  it('proceeds (no throw) when the cutover is acknowledged despite a legacy sqlite store', () => {
+    process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED = 'true';
+    process.env.AUTO_CLAUDE_DECISION_INDEX_CUTOVER_ACK = '1';
+    writeFileSync(join(stateDir, 'decision-index.sqlite'), '');
+    expect(() => readDecisionIndexConfig(stateDir)).not.toThrow();
+  });
+
+  it('does NOT run the cutover preflight when DISABLED (a legacy file is inert)', () => {
+    // Flag OFF => zero filesystem I/O and no preflight, so a stray legacy file
+    // never blocks a disabled daemon.
+    writeFileSync(join(stateDir, 'decision-index.sqlite'), '');
+    expect(() => readDecisionIndexConfig(stateDir)).not.toThrow();
+    expect(readDecisionIndexConfig(stateDir).enabled).toBe(false);
   });
 });

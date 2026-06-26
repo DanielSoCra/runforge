@@ -1,24 +1,36 @@
 /**
- * Drizzle SQLite schema (spec §schema). Slice 1.
+ * Drizzle Postgres schema (spec §3.2). Ported from sqlite-core to pg-core.
  *
- * Invariants encoded structurally:
+ * All tables live in a dedicated `decision_index` Postgres schema (pgSchema) to
+ * keep a hard namespace boundary from packages/db's `public` tables.
+ *
+ * Invariants encoded structurally (unchanged from the sqlite port):
  *  - decision_responses PK = decision_id           => answered-once (DB-enforced)
  *  - applied_transitions PK = (decision_id, transition_key) => idempotent transitions
  *  - outbox PK = id (deterministic <decision_id>:<kind>:<semantic_key>)
  *  - NO plaintext PHI/secret and NO plaintext-hash columns anywhere
  *    (protected_refs holds only the ulid+class; integrity HMAC lives in the
- *     encrypted blob file outside SQLite).
+ *     encrypted blob file outside Postgres).
+ *
+ * Mapping notes (spec §3.2):
+ *  - integer({mode:"boolean"})            -> boolean()
+ *  - integer().primaryKey({autoIncrement}) -> bigint(...).generatedAlwaysAsIdentity()
+ *  - ISO-8601 timestamps stored as text   -> KEEP as text() (zero behavioral drift)
  */
-import { sql } from "drizzle-orm";
 import {
-  sqliteTable,
+  pgSchema,
   text,
+  boolean,
+  bigint,
   integer,
   primaryKey,
-} from "drizzle-orm/sqlite-core";
+} from "drizzle-orm/pg-core";
+
+/** Dedicated Postgres schema namespace for the decision index. */
+export const decisionIndex = pgSchema("decision_index");
 
 /** Durable inbox item. All PHI/secret values already redacted to protected:// refs. */
-export const decisions = sqliteTable("decisions", {
+export const decisions = decisionIndex.table("decisions", {
   decision_id: text("decision_id").primaryKey(),
   protocol_version: text("protocol_version").notNull(),
   status: text("status").notNull(),
@@ -47,17 +59,17 @@ export const decisions = sqliteTable("decisions", {
   expires_at: text("expires_at"),
   last_seen_at: text("last_seen_at"),
   last_notified_at: text("last_notified_at"),
-  stale: integer("stale", { mode: "boolean" }).notNull().default(false),
+  stale: boolean("stale").notNull().default(false),
   superseded_by: text("superseded_by"),
-  pinned: integer("pinned", { mode: "boolean" }).notNull().default(false),
-  muted: integer("muted", { mode: "boolean" }).notNull().default(false),
+  pinned: boolean("pinned").notNull().default(false),
+  muted: boolean("muted").notNull().default(false),
   deferred_until: text("deferred_until"),
   created_at: text("created_at").notNull(),
   updated_at: text("updated_at").notNull(),
 });
 
 /** Answered-once: PK = decision_id. */
-export const decisionResponses = sqliteTable("decision_responses", {
+export const decisionResponses = decisionIndex.table("decision_responses", {
   decision_id: text("decision_id")
     .primaryKey()
     .references(() => decisions.decision_id),
@@ -75,7 +87,7 @@ export const decisionResponses = sqliteTable("decision_responses", {
 });
 
 /** Idempotent transition ledger: existence of a row = "already applied". */
-export const appliedTransitions = sqliteTable(
+export const appliedTransitions = decisionIndex.table(
   "applied_transitions",
   {
     decision_id: text("decision_id")
@@ -90,8 +102,10 @@ export const appliedTransitions = sqliteTable(
 );
 
 /** Append-only audit trail; detail_json is always redacted. */
-export const auditLog = sqliteTable("audit_log", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const auditLog = decisionIndex.table("audit_log", {
+  id: bigint("id", { mode: "number" })
+    .primaryKey()
+    .generatedAlwaysAsIdentity(),
   decision_id: text("decision_id")
     .notNull()
     .references(() => decisions.decision_id),
@@ -106,7 +120,7 @@ export const auditLog = sqliteTable("audit_log", {
 });
 
 /** Two-phase outbox; PK id is deterministic and reconstructable from item state. */
-export const outbox = sqliteTable("outbox", {
+export const outbox = decisionIndex.table("outbox", {
   id: text("id").primaryKey(),
   decision_id: text("decision_id")
     .notNull()
@@ -141,7 +155,7 @@ export const outbox = sqliteTable("outbox", {
   // older `resume` reservation is marked superseded so crash recovery re-executes
   // ONLY the live requeue (never a stale mid_run wake AND a restart for the same
   // decision). Survives restart — it is the source of truth for the pair.
-  superseded: integer("superseded", { mode: "boolean" }).notNull().default(false),
+  superseded: boolean("superseded").notNull().default(false),
   attempts: integer("attempts").notNull().default(0),
   last_error: text("last_error"),
   created_at: text("created_at").notNull(),
@@ -149,7 +163,7 @@ export const outbox = sqliteTable("outbox", {
 });
 
 /** Durable §7 worker metadata so mid_run->requeue is implementable, not just fakeable. */
-export const workerSessions = sqliteTable("worker_sessions", {
+export const workerSessions = decisionIndex.table("worker_sessions", {
   decision_id: text("decision_id")
     .primaryKey()
     .references(() => decisions.decision_id),
@@ -166,7 +180,7 @@ export const workerSessions = sqliteTable("worker_sessions", {
 });
 
 /** Pointer table for the protected store. NO plaintext, NO plaintext hash. */
-export const protectedRefs = sqliteTable("protected_refs", {
+export const protectedRefs = decisionIndex.table("protected_refs", {
   ulid: text("ulid").primaryKey(),
   decision_id: text("decision_id"),
   field: text("field").notNull(),
@@ -175,8 +189,10 @@ export const protectedRefs = sqliteTable("protected_refs", {
 });
 
 /** Content-free rejected-ingestion log (fail-closed path, §5.1). */
-export const quarantineEvents = sqliteTable("quarantine_events", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const quarantineEvents = decisionIndex.table("quarantine_events", {
+  id: bigint("id", { mode: "number" })
+    .primaryKey()
+    .generatedAlwaysAsIdentity(),
   source_url: text("source_url"),
   source_event_id: text("source_event_id"),
   reason: text("reason").notNull(),
@@ -184,5 +200,3 @@ export const quarantineEvents = sqliteTable("quarantine_events", {
   missing_paths: text("missing_paths"),
   created_at: text("created_at").notNull(),
 });
-
-export const SCHEMA_SQL_PRAGMAS = sql`PRAGMA journal_mode=WAL;`;

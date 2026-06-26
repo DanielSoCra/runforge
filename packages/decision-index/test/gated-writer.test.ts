@@ -1,15 +1,28 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { eq } from "drizzle-orm";
+import postgres from "postgres";
 import { TEST_PROTECTED_KEY } from "./helpers/temp-db.js";
 import { openDb, openReadOnlyDb } from "../src/db.js";
 import { migrate } from "../src/migrate.js";
 import { createIndexWriter } from "../src/index-writer.js";
+import { decisions, quarantineEvents } from "../src/schema.js";
 import { FakeNotifier } from "../src/adapters/fakes/fake-notifier.js";
 import { FakeSourceSink } from "../src/adapters/fakes/fake-source-sink.js";
 import { FakeResumeDispatcher } from "../src/adapters/fakes/fake-resume-dispatcher.js";
 import { PROTOCOL_VERSION } from "@auto-claude/decision-protocol";
+
+// openDb / openReadOnlyDb / createIndexWriter all open postgres-js connections to
+// a REAL Postgres (the read-only session + the writer connection cannot be modeled
+// by the in-process PGlite backend). Gate this suite on a real Postgres URL; CI
+// sets AUTO_CLAUDE_TEST_DATABASE_URL so it runs there.
+const DB_URL = process.env.AUTO_CLAUDE_TEST_DATABASE_URL;
+
+// Serialize the real-PG-gated files (they share the decision_index schema) so
+// parallel CI forks never DROP/migrate each other's schema mid-test.
+const SERIALIZE_LOCK = 982_451_653;
 
 const NOW = "2026-05-27T08:00:00.000Z";
 
@@ -38,27 +51,34 @@ function rawRequest(id: string): unknown {
   };
 }
 
-describe("gated single writer (A7/I7)", () => {
-  let dir: string;
-  let dbPath: string;
+describe.skipIf(!DB_URL)("gated single writer (A7/I7) [real Postgres]", () => {
   let protectedDir: string;
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "pm-gated-"));
-    dbPath = join(dir, "pm.sqlite");
+  let serializer: ReturnType<typeof postgres>;
+
+  beforeAll(async () => {
+    serializer = postgres(DB_URL!, { max: 1 });
+    await serializer`SELECT pg_advisory_lock(${SERIALIZE_LOCK})`;
+  });
+  afterAll(async () => {
+    await serializer`SELECT pg_advisory_unlock(${SERIALIZE_LOCK})`;
+    await serializer.end();
+  });
+
+  beforeEach(async () => {
     protectedDir = mkdtempSync(join(tmpdir(), "pm-prot-gated-"));
-    // create + migrate the file once (writable) so the read-only open can attach.
-    const w = openDb({ path: dbPath });
-    migrate(w);
-    w.$client.close();
+    // Reset the schema so each test sees a clean migrated decision_index.
+    const { db, sql } = await openDb({ url: DB_URL! });
+    await sql`DROP SCHEMA IF EXISTS decision_index CASCADE`;
+    await migrate(db);
+    await sql.end();
   });
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
     rmSync(protectedDir, { recursive: true, force: true });
   });
 
   function deps() {
     return {
-      dbPath,
+      databaseUrl: DB_URL!,
       protectedKey: TEST_PROTECTED_KEY,
       protectedDir,
       notifier: new FakeNotifier(),
@@ -70,32 +90,41 @@ describe("gated single writer (A7/I7)", () => {
   }
 
   it("createIndexWriter constructs a working writer that admits + drives to notified", async () => {
-    const writer = createIndexWriter({ ...deps(), skipMigrate: true });
-    const { decision_id } = writer.admit(rawRequest("01HGATED00000000000000001"));
+    const writer = await createIndexWriter({ ...deps(), skipMigrate: true });
+    const { decision_id } = await writer.admit(rawRequest("01HGATED00000000000000001"));
     await writer.runEffect(decision_id, "notify");
-    expect(writer.reader.get(decision_id)!.status).toBe("notified");
-    writer.close();
+    expect((await writer.reader.get(decision_id))!.status).toBe("notified");
+    await writer.close();
   });
 
-  it("openReadOnlyDb rejects writes at the SQLite layer", () => {
-    const ro = openReadOnlyDb({ path: dbPath });
-    expect(() =>
-      ro.$client.prepare("INSERT INTO quarantine_events (reason, created_at) VALUES ('x','y')").run(),
-    ).toThrow(/readonly|read-only/i);
-    ro.$client.close();
+  it("openReadOnlyDb rejects writes at the Postgres session level", async () => {
+    const ro = openReadOnlyDb({ url: DB_URL! });
+    let err: unknown;
+    try {
+      await ro.db.insert(quarantineEvents).values({ reason: "x", created_at: NOW });
+    } catch (e) {
+      err = e;
+    }
+    // drizzle wraps the postgres error; the "read-only transaction" text + 25006
+    // (read_only_sql_transaction) code live on the cause chain.
+    const chain = `${(err as Error)?.message ?? ""} ${String((err as { cause?: unknown })?.cause ?? "")}`;
+    expect(err, "read-only write must be rejected").toBeDefined();
+    expect(chain).toMatch(/read-only|read only|25006/i);
+    await ro.sql.end();
   });
 
   it("a read-only db can still read what the writer committed", async () => {
-    const writer = createIndexWriter({ ...deps(), skipMigrate: true });
-    const { decision_id } = writer.admit(rawRequest("01HGATED00000000000000002"));
+    const writer = await createIndexWriter({ ...deps(), skipMigrate: true });
+    const { decision_id } = await writer.admit(rawRequest("01HGATED00000000000000002"));
     await writer.runEffect(decision_id, "notify");
-    writer.close();
+    await writer.close();
 
-    const ro = openReadOnlyDb({ path: dbPath });
-    const rows = ro.$client.prepare("SELECT status FROM decisions WHERE decision_id = ?").all(
-      "01HGATED00000000000000002",
-    ) as { status: string }[];
+    const ro = openReadOnlyDb({ url: DB_URL! });
+    const rows = await ro.db
+      .select({ status: decisions.status })
+      .from(decisions)
+      .where(eq(decisions.decision_id, "01HGATED00000000000000002"));
     expect(rows[0]!.status).toBe("notified");
-    ro.$client.close();
+    await ro.sql.end();
   });
 });

@@ -49,7 +49,7 @@ export async function supersedeIfMoot(
   decisionId: string,
 ): Promise<void> {
   try {
-    ledger.supersede(decisionId);
+    await ledger.supersede(decisionId);
   } catch (err) {
     console.error(
       `${LOG_PREFIX} supersede-on-moot failed for ${decisionId} (continuing): ${String(err)}`,
@@ -65,7 +65,7 @@ export async function supersedeIfMoot(
  */
 export async function markOverdue(ledger: DecisionLedger, now: Date): Promise<void> {
   try {
-    ledger.expireOverdue(now);
+    await ledger.expireOverdue(now);
   } catch (err) {
     console.error(`${LOG_PREFIX} overdue marking failed (continuing): ${String(err)}`);
   }

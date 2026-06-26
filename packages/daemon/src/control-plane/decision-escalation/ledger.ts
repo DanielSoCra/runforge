@@ -52,7 +52,7 @@ export class DecisionLedger {
   }
 
   /** Reveal a protected field for this decision; delegates to the writer's security-gated reveal. */
-  revealProtected(decisionId: string, ref: string, actor: string): { field: string; value: string } {
+  revealProtected(decisionId: string, ref: string, actor: string): Promise<{ field: string; value: string }> {
     return this.writer.revealProtected(decisionId, ref, actor);
   }
 
@@ -62,10 +62,10 @@ export class DecisionLedger {
    * `superseded` (per the package's `observeRequest` contract). Deterministic-id
    * dedup makes repeated per-tick raises safe.
    */
-  raise(rawRequest: unknown): {
+  raise(rawRequest: unknown): Promise<{
     decision_id: string;
     outcome: 'admitted' | 'unchanged' | 'superseded';
-  } {
+  }> {
     return this.writer.observeRequest(rawRequest);
   }
 
@@ -77,7 +77,7 @@ export class DecisionLedger {
    * An unknown id is also a no-op (nothing to notify).
    */
   async notify(decisionId: string): Promise<NotifyResult> {
-    const view = this.writer.reader.get(decisionId);
+    const view = await this.writer.reader.get(decisionId);
     if (!view) return { applied: false, status: 'unknown' };
     if (view.status !== 'detected') return { applied: false, status: view.status };
     const res = await this.writer.runEffect(decisionId, 'notify');
@@ -98,16 +98,16 @@ export class DecisionLedger {
    * now enabled at resume) must be a no-op, NOT a throw that would fail-close and
    * strand the run parked forever. Returns `{applied:false, status:'unknown'}`.
    */
-  answer(
+  async answer(
     decisionId: string,
     chosenOption: string,
     answerer: string,
     now?: string,
-  ): AnswerResult {
-    const view = this.writer.reader.get(decisionId);
+  ): Promise<AnswerResult> {
+    const view = await this.writer.reader.get(decisionId);
     if (!view) return { applied: false, status: 'unknown' };
     const answeredAt = now ?? new Date().toISOString();
-    const res = this.writer.applyEvent(decisionId, 'answer_submitted', {
+    const res = await this.writer.applyEvent(decisionId, 'answer_submitted', {
       actor: answerer,
       // semanticKey keys the transition; the response idempotency key is its
       // natural value so a re-applied answer is deduped on the same key.
@@ -133,7 +133,7 @@ export class DecisionLedger {
    * Never direct-apply `resume_ack` — that is illegal from this status.
    */
   async advanceToResumed(decisionId: string, mode: ResumeMode = 'requeue'): Promise<void> {
-    const view = this.writer.reader.get(decisionId);
+    const view = await this.writer.reader.get(decisionId);
     if (!view) return;
     if (TERMINAL.has(view.status)) return;
 
@@ -148,7 +148,7 @@ export class DecisionLedger {
 
     // 2) resume/requeue: source_written -> resumed. The outbox commits both
     //    resume_dispatch and resume_ack atomically on a confirmed dispatch.
-    const after = this.writer.reader.get(decisionId);
+    const after = await this.writer.reader.get(decisionId);
     if (after && after.status === 'source_written') {
       await this.writer.runEffect(decisionId, followOn);
     }
@@ -159,8 +159,8 @@ export class DecisionLedger {
    * the read model's `list()` and filters to non-terminal statuses (there is no
    * invented `listPending` — the package exposes `list`/`listRanked`).
    */
-  pending(): DecisionView[] {
-    return this.writer.reader.list().filter((d) => !TERMINAL.has(d.status));
+  async pending(): Promise<DecisionView[]> {
+    return (await this.writer.reader.list()).filter((d) => !TERMINAL.has(d.status));
   }
 
   /**
@@ -171,8 +171,8 @@ export class DecisionLedger {
    * apart from "never answered" (`undefined`/`notified`). Keeps the writer's
    * `reader` private — callers go through this thin facade.
    */
-  statusOf(decisionId: string): string | undefined {
-    return this.writer.reader.get(decisionId)?.status;
+  async statusOf(decisionId: string): Promise<string | undefined> {
+    return (await this.writer.reader.get(decisionId))?.status;
   }
 
   /** reconcile — boot-time/periodic crash recovery; completes in-flight effects. */
@@ -192,11 +192,11 @@ export class DecisionLedger {
    * but the transition table REQUIRES a concrete `ctx.superseded_by`, so we pass a
    * deterministic moot marker. Returns whether the supersede was applied.
    */
-  supersede(decisionId: string, supersededBy?: string, now?: string): boolean {
-    const view = this.writer.reader.get(decisionId);
+  async supersede(decisionId: string, supersededBy?: string, now?: string): Promise<boolean> {
+    const view = await this.writer.reader.get(decisionId);
     if (!view) return false; // missing -> skip
     if (TERMINAL.has(view.status)) return false; // terminal -> skip
-    this.writer.applyEvent(decisionId, 'source_superseded', {
+    await this.writer.applyEvent(decisionId, 'source_superseded', {
       actor: 'daemon',
       semanticKey: `${decisionId}:moot`,
       now,
@@ -218,17 +218,17 @@ export class DecisionLedger {
    * `semanticKey` is derived from `expires_at` so a re-sweep of the same overdue
    * item replays as an idempotent no-op. Returns the ids it expired.
    */
-  expireOverdue(now: Date): string[] {
+  async expireOverdue(now: Date): Promise<string[]> {
     const nowMs = now.getTime();
     const nowIso = now.toISOString();
     const expired: string[] = [];
     // includeSuppressed so a muted/deferred (but still notified/viewed) overdue
     // item is not silently skipped — staleness is independent of view-state.
-    for (const item of this.writer.reader.listRanked({ includeSuppressed: true })) {
+    for (const item of await this.writer.reader.listRanked({ includeSuppressed: true })) {
       if (item.status !== 'notified' && item.status !== 'viewed') continue;
       if (item.expires_at == null || item.expires_at === '') continue;
       if (new Date(item.expires_at).getTime() > nowMs) continue; // not yet overdue
-      this.writer.applyEvent(item.decision_id, 'expire', {
+      await this.writer.applyEvent(item.decision_id, 'expire', {
         actor: 'daemon',
         // deterministic per (id, expiry) so a re-sweep is an idempotent replay.
         semanticKey: `${item.decision_id}:expire:${item.expires_at}`,

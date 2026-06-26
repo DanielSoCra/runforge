@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
-import { makeTempDb, type TempDb } from "./helpers/temp-db.js";
+import { makePgliteDb, type PgliteTestDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { makeOutbox, answerItem, FIXED_NOW } from "./helpers/effect-driver.js";
 import { decisions, outbox as outboxTable, workerSessions } from "../src/schema.js";
 
-async function toSourceWritten(t: TempDb, f: ReturnType<typeof makeOutbox>, id: string) {
+async function toSourceWritten(t: PgliteTestDb, f: ReturnType<typeof makeOutbox>, id: string) {
   await answerItem(t, f.outbox, id);
   await f.outbox.runEffect(id, "write_response"); // -> source_written
 }
@@ -19,22 +19,25 @@ async function toSourceWritten(t: TempDb, f: ReturnType<typeof makeOutbox>, id: 
  * applied, and advances WITHOUT a second requeue dispatch.
  */
 describe("requeue-fallback crash recovery (Finding 4)", () => {
-  let t: TempDb;
-  beforeEach(() => (t = makeTempDb()));
-  afterEach(() => t?.cleanup());
+  let t: PgliteTestDb;
+  beforeEach(async () => {
+    t = await makePgliteDb();
+  });
+  afterEach(async () => {
+    await t?.cleanup();
+  });
 
   it("REAL shape: BOTH reserved resume (absent) AND reserved requeue (applied) -> reconcile resolves the requeue, advances, ZERO new requeue dispatch", async () => {
-    const id = seedDecision(t.db, { resume_mode: "mid_run" });
-    t.db
+    const id = await seedDecision(t.db, { resume_mode: "mid_run" });
+    await t.db
       .insert(workerSessions)
-      .values({ decision_id: id, requeue_command: "rq", work_request_ref: "wr-1" })
-      .run();
+      .values({ decision_id: id, requeue_command: "rq", work_request_ref: "wr-1" });
     const f = makeOutbox(t);
     await toSourceWritten(t, f, id);
 
     // The mid_run resume id and the requeue id are DISTINCT (different effect kind).
-    const resumeId = f.outbox.effectIdFor(id, "resume");
-    const requeueId = f.outbox.effectIdFor(id, "requeue");
+    const resumeId = await f.outbox.effectIdFor(id, "resume");
+    const requeueId = await f.outbox.effectIdFor(id, "requeue");
     expect(resumeId).not.toBe(requeueId);
 
     // CRITICAL C4 REAL shape: runEffect("resume") reserved the ORIGINAL resume row
@@ -47,7 +50,7 @@ describe("requeue-fallback crash recovery (Finding 4)", () => {
     // resume -> absent, falls through to state-derived `resume`, and dispatches
     // the fallback requeue AGAIN. The fix probes/resolves the APPLIED requeue row
     // and never re-dispatches off the superseded resume reservation.
-    t.db
+    await t.db
       .insert(outboxTable)
       .values({
         id: resumeId, // reserved FIRST (older) — the superseded reservation
@@ -57,9 +60,8 @@ describe("requeue-fallback crash recovery (Finding 4)", () => {
         state: "reserved",
         attempts: 0,
         created_at: "2026-05-27T01:59:00.000Z",
-      })
-      .run();
-    t.db
+      });
+    await t.db
       .insert(outboxTable)
       .values({
         id: requeueId, // reserved SECOND (the fallback) — the one actually applied
@@ -69,8 +71,7 @@ describe("requeue-fallback crash recovery (Finding 4)", () => {
         state: "reserved",
         attempts: 0,
         created_at: "2026-05-27T01:59:30.000Z",
-      })
-      .run();
+      });
     f.resumeDispatcher.applied.add(requeueId); // worker already requeued
     // resume id deliberately NOT applied (absent).
 
@@ -87,12 +88,12 @@ describe("requeue-fallback crash recovery (Finding 4)", () => {
     // A4: an applied requeue marker advances directly to terminal `resumed`.
     expect(mine.status).toBe("resumed");
 
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("resumed");
 
     // the superseded resume reservation is left untouched (still reserved), but no
     // requeue was dispatched off it — the key invariant. The requeue row committed.
-    const requeueRow = t.db.select().from(outboxTable).where(eq(outboxTable.id, requeueId)).all()[0]!;
+    const requeueRow = (await t.db.select().from(outboxTable).where(eq(outboxTable.id, requeueId)))[0]!;
     expect(requeueRow.state).toBe("committed");
   });
 });

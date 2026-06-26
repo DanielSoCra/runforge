@@ -139,19 +139,20 @@ export class Outbox {
     return this.clock().toISOString();
   }
 
-  private loadItem(decisionId: string): ItemEffectRow {
-    const r = this.db
-      .select({
-        decision_id: decisions.decision_id,
-        status: decisions.status,
-        run_id: decisions.run_id,
-        resume_mode: decisions.resume_mode,
-        source_etag: decisions.source_etag,
-        source_url: decisions.source_url,
-      })
-      .from(decisions)
-      .where(eq(decisions.decision_id, decisionId))
-      .all()[0];
+  private async loadItem(decisionId: string): Promise<ItemEffectRow> {
+    const r = (
+      await this.db
+        .select({
+          decision_id: decisions.decision_id,
+          status: decisions.status,
+          run_id: decisions.run_id,
+          resume_mode: decisions.resume_mode,
+          source_etag: decisions.source_etag,
+          source_url: decisions.source_url,
+        })
+        .from(decisions)
+        .where(eq(decisions.decision_id, decisionId))
+    )[0];
     if (!r) throw new Error(`unknown decision ${decisionId}`);
     return {
       ...r,
@@ -173,28 +174,30 @@ export class Outbox {
     }
   }
 
-  private responseKey(decisionId: string): string | null {
-    const r = this.db
-      .select({ k: decisionResponses.response_idempotency_key })
-      .from(decisionResponses)
-      .where(eq(decisionResponses.decision_id, decisionId))
-      .all()[0];
+  private async responseKey(decisionId: string): Promise<string | null> {
+    const r = (
+      await this.db
+        .select({ k: decisionResponses.response_idempotency_key })
+        .from(decisionResponses)
+        .where(eq(decisionResponses.decision_id, decisionId))
+    )[0];
     return r?.k ?? null;
   }
 
   /** Load the postable answer payload for the source write (C1). */
-  private responseRow(decisionId: string): {
+  private async responseRow(decisionId: string): Promise<{
     responsePayloadJson: string | null;
     answerRef: string | null;
-  } {
-    const r = this.db
-      .select({
-        responsePayloadJson: decisionResponses.response_payload_json,
-        answerRef: decisionResponses.answer_ref,
-      })
-      .from(decisionResponses)
-      .where(eq(decisionResponses.decision_id, decisionId))
-      .all()[0];
+  }> {
+    const r = (
+      await this.db
+        .select({
+          responsePayloadJson: decisionResponses.response_payload_json,
+          answerRef: decisionResponses.answer_ref,
+        })
+        .from(decisionResponses)
+        .where(eq(decisionResponses.decision_id, decisionId))
+    )[0];
     return {
       responsePayloadJson: r?.responsePayloadJson ?? null,
       answerRef: r?.answerRef ?? null,
@@ -208,8 +211,8 @@ export class Outbox {
    * distinct id (`notify:<channel>:<cycle>` keyed) and a `re_notify:<cycle>`
    * intended transition; the first notify yields `notify:<channel>`.
    */
-  private effectSpecFor(item: ItemEffectRow, kind: EffectKind, opts?: RunEffectOptions): EffectSpec {
-    const responseKey = this.responseKey(item.decision_id);
+  private async effectSpecFor(item: ItemEffectRow, kind: EffectKind, opts?: RunEffectOptions): Promise<EffectSpec> {
+    const responseKey = await this.responseKey(item.decision_id);
     let idKey = this.effectIdKey(kind, item, responseKey);
     let intendedTransition: TransitionEvent;
     let transitionSemanticKey: string;
@@ -249,63 +252,58 @@ export class Outbox {
   }
 
   /** Deterministic id for an effect, reconstructable WITHOUT the outbox row. */
-  effectIdFor(decisionId: string, kind: EffectKind, opts?: RunEffectOptions): string {
-    const item = this.loadItem(decisionId);
-    return this.effectSpecFor(item, kind, opts).id;
+  async effectIdFor(decisionId: string, kind: EffectKind, opts?: RunEffectOptions): Promise<string> {
+    const item = await this.loadItem(decisionId);
+    return (await this.effectSpecFor(item, kind, opts)).id;
   }
 
   /** Phase 1: reserve (txn). Idempotent on the deterministic id. */
-  private reserve(spec: EffectSpec, decisionId: string): void {
-    withTx(this.db, (tx) => {
-      const existing = tx.select().from(outbox).where(eq(outbox.id, spec.id)).all()[0];
+  private async reserve(spec: EffectSpec, decisionId: string): Promise<void> {
+    await withTx(this.db, async (tx) => {
+      const existing = (await tx.select().from(outbox).where(eq(outbox.id, spec.id)))[0];
       if (existing) return; // already reserved (or committed) — idempotent
-      tx.insert(outbox)
-        .values({
-          id: spec.id,
-          decision_id: decisionId,
-          kind: spec.kind,
-          intended_transition: spec.intendedTransition,
-          // Finding I6: persist the transition semantic key EXPLICITLY so reconcile
-          // recovers it from this column (a re_notify cycle may contain ':').
-          semantic_key: spec.transitionSemanticKey,
-          payload_ref: null,
-          state: "reserved",
-          attempts: 0,
-          created_at: this.now(),
-        })
-        .run();
+      await tx.insert(outbox).values({
+        id: spec.id,
+        decision_id: decisionId,
+        kind: spec.kind,
+        intended_transition: spec.intendedTransition,
+        // Finding I6: persist the transition semantic key EXPLICITLY so reconcile
+        // recovers it from this column (a re_notify cycle may contain ':').
+        semantic_key: spec.transitionSemanticKey,
+        payload_ref: null,
+        state: "reserved",
+        attempts: 0,
+        created_at: this.now(),
+      });
     });
   }
 
   /**
-   * CRITICAL 1 — durable CAS claim. Transition the row `reserved -> executing`
-   * in its OWN committed txn BEFORE any adapter await, so a concurrent
-   * runEffect()/reconcile() that passed the same pre-await guard cannot ALSO
-   * dispatch the same effect. The flip is a conditional UPDATE
-   * (`WHERE id=? AND state='reserved'`); we then re-read to learn whether THIS
-   * caller won the race:
-   *   - row now `executing` AND we observed it `reserved` pre-flip -> WE claimed it,
-   *     proceed to dispatch the adapter;
-   *   - row already `executing`/`committed`/`failed` -> a concurrent claim (or a
-   *     prior crash) owns it: BACK OFF, never touch the adapter.
-   * better-sqlite3 serializes writes on the single connection, so the
-   * conditional UPDATE is atomic; the loser's UPDATE matches zero rows.
+   * CRITICAL 1 — durable CAS claim (spec §3.4). Transition the row
+   * `reserved -> executing` in its OWN committed txn BEFORE any adapter await, so a
+   * concurrent runEffect()/reconcile() that passed the same pre-await guard cannot
+   * ALSO dispatch the same effect.
+   *
+   * On Postgres the win is decided by the AFFECTED-ROW COUNT of a single atomic
+   * conditional UPDATE ... RETURNING, NOT by a read-before/read-after (which is
+   * unsound under READ COMMITTED on concurrent connections — both claimers could
+   * re-read `executing` and both return true). The row-lock + predicate re-check
+   * guarantees EXACTLY ONE UPDATE matches `state='reserved'`; the loser's UPDATE
+   * matches zero rows. Correct under any isolation level.
    */
-  private claim(id: string): boolean {
+  private async claim(id: string): Promise<boolean> {
     const now = this.now();
-    return withTx(this.db, (tx) => {
-      const before = tx.select({ state: outbox.state }).from(outbox).where(eq(outbox.id, id)).all()[0];
-      if (!before || before.state !== "reserved") return false; // already claimed/settled
-      tx.update(outbox)
+    return withTx(this.db, async (tx) => {
+      const claimed = await tx
+        .update(outbox)
         // CRITICAL 1: stamp BOTH the lease timestamp and the owner generation, so
         // reconcile can distinguish a LIVE current-process claim from a crashed
         // prior-process one.
         .set({ state: "executing", claimed_at: now, claimed_by: this.generation })
         .where(and(eq(outbox.id, id), eq(outbox.state, "reserved")))
-        .run();
-      const after = tx.select({ state: outbox.state }).from(outbox).where(eq(outbox.id, id)).all()[0];
-      // we win only if the flip we just issued is the one that set `executing`.
-      return after?.state === "executing";
+        .returning({ id: outbox.id });
+      // Won iff the conditional UPDATE actually flipped exactly one row.
+      return claimed.length === 1;
     });
   }
 
@@ -340,13 +338,13 @@ export class Outbox {
   /** Release a claimed (`executing`) row back to `reserved` for a later retry
    * (transient failure / deferred freshness probe). Idempotent; leaves
    * committed/failed/superseded rows untouched. */
-  private releaseClaim(id: string): void {
-    withTx(this.db, (tx) => {
-      tx.update(outbox)
+  private async releaseClaim(id: string): Promise<void> {
+    await withTx(this.db, async (tx) => {
+      await tx
+        .update(outbox)
         // clear the owner token too: a released row is back to unclaimed `reserved`.
         .set({ state: "reserved", claimed_at: null, claimed_by: null })
-        .where(and(eq(outbox.id, id), eq(outbox.state, "executing")))
-        .run();
+        .where(and(eq(outbox.id, id), eq(outbox.state, "executing")));
     });
   }
 
@@ -357,25 +355,25 @@ export class Outbox {
    * (Finding 5). `apply` is itself transactional; we run it inside the same
    * outer txn and update the outbox row before returning.
    */
-  private commit(spec: EffectSpec, decisionId: string, supersededBy?: string): ItemStatus {
-    const status = withTx(this.db, (tx) => {
-      const res = apply(tx, decisionId, spec.intendedTransition, {
+  private async commit(spec: EffectSpec, decisionId: string, supersededBy?: string): Promise<ItemStatus> {
+    const status = await withTx(this.db, async (tx) => {
+      const res = await apply(tx, decisionId, spec.intendedTransition, {
         semanticKey: spec.transitionSemanticKey,
         now: this.now(),
         actor: "outbox",
         superseded_by: supersededBy,
       });
-      tx.update(outbox)
+      await tx
+        .update(outbox)
         .set({ state: "committed", committed_at: this.now() })
-        .where(eq(outbox.id, spec.id))
-        .run();
+        .where(eq(outbox.id, spec.id));
       return res.status;
     });
     // INVARIANT (a): if this commit advanced the decision INTO a terminal state
     // (e.g. resume_ack -> resumed), cancel any sibling reserved rows. The row we
     // just committed is already `committed`, so cancelReservedRows leaves it alone.
     if (TERMINAL_STATUSES.has(status)) {
-      this.cancelReservedRows(decisionId);
+      await this.cancelReservedRows(decisionId);
     }
     return status;
   }
@@ -394,30 +392,30 @@ export class Outbox {
    * resume_requested — a crash recovered the dispatch), the resume_dispatch apply
    * is an idempotent no-op (same applied key) and only resume_ack fires.
    */
-  private commitResumeTerminal(spec: EffectSpec, decisionId: string): ItemStatus {
+  private async commitResumeTerminal(spec: EffectSpec, decisionId: string): Promise<ItemStatus> {
     const runIdKey = spec.transitionSemanticKey; // == item.run_id for resume/requeue
-    const status = withTx(this.db, (tx) => {
+    const status = await withTx(this.db, async (tx) => {
       // (1) resume_dispatch: source_written -> resume_requested (idempotent if
       //     already applied by a recovered crash).
-      apply(tx, decisionId, "resume_dispatch", {
+      await apply(tx, decisionId, "resume_dispatch", {
         semanticKey: runIdKey,
         now: this.now(),
         actor: "outbox",
       });
       // (2) resume_ack: resume_requested -> resumed (terminal), SAME txn.
-      const acked = apply(tx, decisionId, "resume_ack", {
+      const acked = await apply(tx, decisionId, "resume_ack", {
         semanticKey: runIdKey,
         now: this.now(),
         actor: "outbox",
       });
-      tx.update(outbox)
+      await tx
+        .update(outbox)
         .set({ state: "committed", committed_at: this.now() })
-        .where(eq(outbox.id, spec.id))
-        .run();
+        .where(eq(outbox.id, spec.id));
       return acked.status;
     });
     if (TERMINAL_STATUSES.has(status)) {
-      this.cancelReservedRows(decisionId);
+      await this.cancelReservedRows(decisionId);
     }
     return status;
   }
@@ -428,27 +426,27 @@ export class Outbox {
    * resume_ack). The dispatch already happened; the marker probe confirmed
    * applied, so we never re-dispatch — we just finish the atomic pair.
    */
-  private applyResumeAck(spec: EffectSpec, decisionId: string): ItemStatus {
-    const status = withTx(this.db, (tx) => {
-      const acked = apply(tx, decisionId, "resume_ack", {
+  private async applyResumeAck(spec: EffectSpec, decisionId: string): Promise<ItemStatus> {
+    const status = await withTx(this.db, async (tx) => {
+      const acked = await apply(tx, decisionId, "resume_ack", {
         semanticKey: spec.transitionSemanticKey,
         now: this.now(),
         actor: "reconcile",
       });
-      tx.update(outbox)
+      await tx
+        .update(outbox)
         .set({ state: "committed", committed_at: this.now() })
-        .where(eq(outbox.id, spec.id))
-        .run();
+        .where(eq(outbox.id, spec.id));
       return acked.status;
     });
     if (TERMINAL_STATUSES.has(status)) {
-      this.cancelReservedRows(decisionId);
+      await this.cancelReservedRows(decisionId);
     }
     return status;
   }
 
   private async markSuperseded(decisionId: string, newEtag: string): Promise<ItemStatus> {
-    const res = withTx(this.db, (tx) =>
+    const res = await withTx(this.db, (tx) =>
       apply(tx, decisionId, "source_superseded", {
         semanticKey: newEtag,
         now: this.now(),
@@ -459,7 +457,7 @@ export class Outbox {
     // INVARIANT (a): superseded is terminal — cancel any outstanding reserved
     // rows (e.g. the write_response row that just precondition-failed) so a later
     // reconcile never re-dispatches a stale external write against this decision.
-    this.cancelReservedRows(decisionId);
+    await this.cancelReservedRows(decisionId);
     await this.sourceSink.markSuperseded(decisionId, newEtag);
     return res.status;
   }
@@ -484,50 +482,52 @@ export class Outbox {
    * Returns `{ attempts, exhausted, status }`; `status` is `"failed"` when the
    * transition fired, else the decision's unchanged (retryable) status.
    */
-  private recordFailure(
+  private async recordFailure(
     id: string,
     decisionId: string,
     msg: string,
-  ): { attempts: number; exhausted: boolean; status: ItemStatus } {
-    return withTx(this.db, (tx) => {
-      const row = tx.select().from(outbox).where(eq(outbox.id, id)).all()[0]!;
+  ): Promise<{ attempts: number; exhausted: boolean; status: ItemStatus }> {
+    return withTx(this.db, async (tx) => {
+      const row = (await tx.select().from(outbox).where(eq(outbox.id, id)))[0]!;
       const attempts = row.attempts + 1;
       const exhausted = attempts >= this.maxAttempts;
       if (!exhausted) {
         // transient failure: bump + release back to (unclaimed) reserved so a
         // retry can re-claim. Clearing the owner token avoids a released row
         // looking like a live current-process claim to a later reconcile.
-        tx.update(outbox)
+        await tx
+          .update(outbox)
           .set({ attempts, last_error: msg, state: "reserved", claimed_at: null, claimed_by: null })
-          .where(eq(outbox.id, id))
-          .run();
-        const cur = tx
-          .select({ status: decisions.status })
-          .from(decisions)
-          .where(eq(decisions.decision_id, decisionId))
-          .all()[0]!;
+          .where(eq(outbox.id, id));
+        const cur = (
+          await tx
+            .select({ status: decisions.status })
+            .from(decisions)
+            .where(eq(decisions.decision_id, decisionId))
+        )[0]!;
         return { attempts, exhausted: false, status: cur.status as ItemStatus };
       }
 
       // EXHAUSTED — atomic terminal failure transition, all in THIS txn.
       const now = this.now();
-      const cur = tx
-        .select({ status: decisions.status })
-        .from(decisions)
-        .where(eq(decisions.decision_id, decisionId))
-        .all()[0]!;
+      const cur = (
+        await tx
+          .select({ status: decisions.status })
+          .from(decisions)
+          .where(eq(decisions.decision_id, decisionId))
+      )[0]!;
       // (2) triggering outbox row -> terminal.
-      tx.update(outbox)
+      await tx
+        .update(outbox)
         .set({ attempts, last_error: msg, state: "failed" })
-        .where(eq(outbox.id, id))
-        .run();
+        .where(eq(outbox.id, id));
       // (3) decision -> failed.
-      tx.update(decisions)
+      await tx
+        .update(decisions)
         .set({ status: "failed", updated_at: now })
-        .where(eq(decisions.decision_id, decisionId))
-        .run();
+        .where(eq(decisions.decision_id, decisionId));
       // (4) terminal audit row.
-      appendAudit(tx, {
+      await appendAudit(tx, {
         decision_id: decisionId,
         from: cur.status as ItemStatus,
         to: "failed",
@@ -541,10 +541,10 @@ export class Outbox {
       // (5) INVARIANT (a): a terminal decision owns NO live reserved effect.
       // Cancel ALL OTHER non-committed reserved rows. The triggering row is now
       // `state="failed"` (not "reserved"), so this leaves it as terminal evidence.
-      tx.update(outbox)
+      await tx
+        .update(outbox)
         .set({ superseded: true })
-        .where(and(eq(outbox.decision_id, decisionId), ne(outbox.state, "committed")))
-        .run();
+        .where(and(eq(outbox.decision_id, decisionId), ne(outbox.state, "committed")));
       return { attempts, exhausted: true, status: "failed" as ItemStatus };
     });
   }
@@ -556,22 +556,23 @@ export class Outbox {
    * OLD split window). Drive the decision to `failed` + audit + cancel reserved
    * rows in ONE txn. NEVER re-dispatches the adapter. Idempotent if already failed.
    */
-  private failDecisionTerminal(decisionId: string, triggeringId: string, msg: string): ItemStatus {
-    return withTx(this.db, (tx) => {
-      const cur = tx
-        .select({ status: decisions.status })
-        .from(decisions)
-        .where(eq(decisions.decision_id, decisionId))
-        .all()[0]!;
+  private async failDecisionTerminal(decisionId: string, triggeringId: string, msg: string): Promise<ItemStatus> {
+    return withTx(this.db, async (tx) => {
+      const cur = (
+        await tx
+          .select({ status: decisions.status })
+          .from(decisions)
+          .where(eq(decisions.decision_id, decisionId))
+      )[0]!;
       if (TERMINAL_STATUSES.has(cur.status as ItemStatus)) {
         return cur.status as ItemStatus; // already terminal — idempotent no-op
       }
       const now = this.now();
-      tx.update(decisions)
+      await tx
+        .update(decisions)
         .set({ status: "failed", updated_at: now })
-        .where(eq(decisions.decision_id, decisionId))
-        .run();
-      appendAudit(tx, {
+        .where(eq(decisions.decision_id, decisionId));
+      await appendAudit(tx, {
         decision_id: decisionId,
         from: cur.status as ItemStatus,
         to: "failed",
@@ -580,21 +581,22 @@ export class Outbox {
         at: now,
         detail: { effect_id: triggeringId, last_error: msg, recovered: "limbo" },
       });
-      tx.update(outbox)
+      await tx
+        .update(outbox)
         .set({ superseded: true })
-        .where(and(eq(outbox.decision_id, decisionId), ne(outbox.state, "committed")))
-        .run();
+        .where(and(eq(outbox.decision_id, decisionId), ne(outbox.state, "committed")));
       return "failed" as ItemStatus;
     });
   }
 
   /** Is the decision's CURRENT durable status terminal (resumed/superseded/failed)? */
-  private isTerminal(decisionId: string): boolean {
-    const r = this.db
-      .select({ status: decisions.status })
-      .from(decisions)
-      .where(eq(decisions.decision_id, decisionId))
-      .all()[0];
+  private async isTerminal(decisionId: string): Promise<boolean> {
+    const r = (
+      await this.db
+        .select({ status: decisions.status })
+        .from(decisions)
+        .where(eq(decisions.decision_id, decisionId))
+    )[0];
     return r ? TERMINAL_STATUSES.has(r.status as ItemStatus) : false;
   }
 
@@ -606,12 +608,12 @@ export class Outbox {
    * across restart. Committed rows are left untouched (they record a real effect).
    * Idempotent: a row already marked stays marked.
    */
-  private cancelReservedRows(decisionId: string): void {
-    withTx(this.db, (tx) => {
-      tx.update(outbox)
+  private async cancelReservedRows(decisionId: string): Promise<void> {
+    await withTx(this.db, async (tx) => {
+      await tx
+        .update(outbox)
         .set({ superseded: true })
-        .where(and(eq(outbox.decision_id, decisionId), ne(outbox.state, "committed")))
-        .run();
+        .where(and(eq(outbox.decision_id, decisionId), ne(outbox.state, "committed")));
     });
   }
 
@@ -640,7 +642,7 @@ export class Outbox {
       // Record the attempt + release/terminal the claim defensively. If THIS
       // itself throws (a SQLite-level failure), the original error still wins.
       try {
-        this.recordFailure(id, decisionId, `${label} threw: ${msg}`);
+        await this.recordFailure(id, decisionId, `${label} threw: ${msg}`);
       } catch {
         // best-effort settle; surface the original adapter error below.
       }
@@ -653,8 +655,8 @@ export class Outbox {
    * Returns the resulting status + any follow-on effects.
    */
   async runEffect(decisionId: string, kind: EffectKind, opts?: RunEffectOptions): Promise<RunEffectResult> {
-    const item = this.loadItem(decisionId);
-    const spec = this.effectSpecFor(item, kind, opts);
+    const item = await this.loadItem(decisionId);
+    const spec = await this.effectSpecFor(item, kind, opts);
 
     // TERMINAL SHORT-CIRCUIT (chokepoint idempotency): a decision already in a
     // terminal status (resumed/superseded/failed) is settled — re-calling
@@ -664,7 +666,7 @@ export class Outbox {
     // preflight below throw `IllegalTransitionError` for an effect that simply
     // arrived after the decision settled. This mirrors reconcile's terminal guard
     // (0/0b): once failed via the chokepoint, a repeat call no-ops the same way.
-    if (this.isTerminal(decisionId)) {
+    if (await this.isTerminal(decisionId)) {
       return await this.executeReserved(decisionId, item, spec);
     }
 
@@ -678,7 +680,7 @@ export class Outbox {
       { superseded_by: "preflight" },
     );
 
-    this.reserve(spec, decisionId);
+    await this.reserve(spec, decisionId);
     return await this.executeReserved(decisionId, item, spec);
   }
 
@@ -726,29 +728,30 @@ export class Outbox {
     // adapter. This is the last line guaranteeing no stale external effect is ever
     // dispatched for a terminal decision, a superseded reservation, or a row that
     // already reached a terminal/applied row-state.
-    const persistedRow = this.db
-      .select({ state: outbox.state, superseded: outbox.superseded, attempts: outbox.attempts, last_error: outbox.last_error })
-      .from(outbox)
-      .where(eq(outbox.id, id))
-      .all()[0];
+    const persistedRow = (
+      await this.db
+        .select({ state: outbox.state, superseded: outbox.superseded, attempts: outbox.attempts, last_error: outbox.last_error })
+        .from(outbox)
+        .where(eq(outbox.id, id))
+    )[0];
     const rowSuperseded = persistedRow?.superseded === true;
-    if (this.isTerminal(decisionId)) {
+    if (await this.isTerminal(decisionId)) {
       // Terminal decision: cancel ALL its outstanding reserved rows.
-      this.cancelReservedRows(decisionId);
-      return { status: this.loadItem(decisionId).status, kind, outcome: "superseded", effects: [] };
+      await this.cancelReservedRows(decisionId);
+      return { status: (await this.loadItem(decisionId)).status, kind, outcome: "superseded", effects: [] };
     }
     if (rowSuperseded) {
       // Superseded reservation on a NON-terminal decision: this specific row must
       // not be dispatched, but sibling LIVE rows (e.g. the requeue fallback that
       // superseded this resume) are the real recovery path — leave them untouched.
       // The row is already marked superseded; refuse and return without the adapter.
-      return { status: this.loadItem(decisionId).status, kind, outcome: "superseded", effects: [] };
+      return { status: (await this.loadItem(decisionId)).status, kind, outcome: "superseded", effects: [] };
     }
     if (persistedRow && persistedRow.state === "failed" && persistedRow.attempts >= this.maxAttempts) {
       // Exhausted terminal-on-row failure whose decision was never marked failed
       // (OLD-split crash limbo). Drive the decision terminal via the SAME
       // idempotent helper reconcile's 0b guard uses — no adapter dispatch.
-      const status = this.failDecisionTerminal(
+      const status = await this.failDecisionTerminal(
         decisionId,
         id,
         persistedRow.last_error ?? "effect attempts exhausted",
@@ -757,7 +760,7 @@ export class Outbox {
     }
     if (persistedRow && persistedRow.state === "committed") {
       // Already-applied effect for this id: never re-dispatch the adapter.
-      return { status: this.loadItem(decisionId).status, kind, outcome: "superseded", effects: [] };
+      return { status: (await this.loadItem(decisionId)).status, kind, outcome: "superseded", effects: [] };
     }
 
     // CRITICAL 1 — durable CAS claim BEFORE any adapter await. Flip the row
@@ -770,8 +773,8 @@ export class Outbox {
     // `failed` (non-exhausted, retryable) or `reserved` row is claimable; a row
     // already `executing` belongs to a concurrent claimer / a prior crash (which
     // reconcile recovers), so we refuse without re-dispatch.
-    if (!this.claim(id)) {
-      return { status: this.loadItem(decisionId).status, kind, outcome: "deferred", effects: [] };
+    if (!(await this.claim(id))) {
+      return { status: (await this.loadItem(decisionId)).status, kind, outcome: "deferred", effects: [] };
     }
 
     if (kind === "notify") {
@@ -779,19 +782,19 @@ export class Outbox {
         this.notifier.notify({ decision_id: decisionId, channel: this.channel, effectId: id }),
       );
       if (out === "failed") {
-        const f = this.recordFailure(id, decisionId, "notify failed");
+        const f = await this.recordFailure(id, decisionId, "notify failed");
         return { status: f.status, kind, outcome: "failed", effects: [] };
       }
-      const status = this.commit(spec, decisionId);
+      const status = await this.commit(spec, decisionId);
       return { status, kind, outcome: "committed", effects: [] };
     }
 
     if (kind === "write_response") {
-      const resp = this.responseRow(decisionId);
-      const res = await this.dispatchClaimed(id, decisionId, "writeResponse", () =>
+      const resp = await this.responseRow(decisionId);
+      const res = await this.dispatchClaimed(id, decisionId, "writeResponse", async () =>
         this.sourceSink.writeResponse({
           decision_id: decisionId,
-          responseRef: this.responseKey(decisionId) ?? decisionId,
+          responseRef: (await this.responseKey(decisionId)) ?? decisionId,
           expectedSourceEtag: item.source_etag,
           effectId: id,
           sourceLocator: item.source_url,
@@ -808,10 +811,10 @@ export class Outbox {
         return { status, kind, outcome: "superseded", effects: [] };
       }
       if (res.status === "failed") {
-        const f = this.recordFailure(id, decisionId, `writeResponse failed: ${res.error}`);
+        const f = await this.recordFailure(id, decisionId, `writeResponse failed: ${res.error}`);
         return { status: f.status, kind, outcome: "failed", effects: [] };
       }
-      const status = this.commit(spec, decisionId);
+      const status = await this.commit(spec, decisionId);
       // follow-on: dispatch resume/requeue per resume_mode
       const next: EffectKind = item.resume_mode === "requeue" ? "requeue" : "resume";
       return { status, kind, outcome: "committed", effects: [next] };
@@ -854,15 +857,16 @@ export class Outbox {
       // supersede etag. RELEASE the CAS claim (back to `reserved`) so a later
       // retry/reconcile can re-claim it; the decision stays source_written.
       // Never resume on uncertainty (fail-closed).
-      this.releaseClaim(id);
+      await this.releaseClaim(id);
       return { status: item.status, kind, outcome: "deferred", effects: [] };
     }
 
-    const ws = this.db
-      .select()
-      .from(workerSessions)
-      .where(eq(workerSessions.decision_id, decisionId))
-      .all()[0];
+    const ws = (
+      await this.db
+        .select()
+        .from(workerSessions)
+        .where(eq(workerSessions.decision_id, decisionId))
+    )[0];
     const res = await this.dispatchClaimed(id, decisionId, "resume", () =>
       this.resumeDispatcher.resume({
         decision_id: decisionId,
@@ -877,7 +881,7 @@ export class Outbox {
     if (res === "acked") {
       // A4: a confirmed resume/requeue lands DIRECTLY in terminal `resumed`
       // (atomic resume_dispatch + resume_ack), no separate daemon ack step.
-      const status = this.commitResumeTerminal(spec, decisionId);
+      const status = await this.commitResumeTerminal(spec, decisionId);
       return { status, kind, outcome: "committed", effects: [] };
     }
 
@@ -887,8 +891,8 @@ export class Outbox {
       // if we crash after the requeue ack but before commit, reconcile finds the
       // reserved requeue row and probes the REQUEUE id (not the resume id),
       // preventing a second requeue dispatch (Finding 4).
-      const requeueSpec = this.effectSpecFor(item, "requeue");
-      this.reserve(requeueSpec, decisionId);
+      const requeueSpec = await this.effectSpecFor(item, "requeue");
+      await this.reserve(requeueSpec, decisionId);
       // The fallback requeue SUPERSEDES this resume reservation: the two are not
       // independent recovery effects. Mark the resume row superseded DURABLY so a
       // crash-before-execute on both never re-executes a stale mid_run wake AND a
@@ -904,11 +908,12 @@ export class Outbox {
       // expires) and to pendingEffectDecisions, worsening recovery. A superseded
       // `reserved` row is inert evidence (the chokepoint refuses it on `superseded`),
       // and the live recovery effect is the requeue.
-      this.db
-        .update(outbox)
-        .set({ superseded: true, state: "reserved", claimed_at: null, claimed_by: null })
-        .where(eq(outbox.id, spec.id))
-        .run();
+      await withTx(this.db, async (tx) => {
+        await tx
+          .update(outbox)
+          .set({ superseded: true, state: "reserved", claimed_at: null, claimed_by: null })
+          .where(eq(outbox.id, spec.id));
+      });
       // FINDING 3: route the fallback requeue dispatch through executeReserved —
       // the SINGLE adapter-dispatch chokepoint — instead of claiming + calling the
       // dispatcher directly (which IGNORED the claim result and bypassed the
@@ -923,7 +928,7 @@ export class Outbox {
     }
 
     // failed (or requeue unreachable) -> record (atomic terminal on exhaustion)
-    const f = this.recordFailure(id, decisionId, `${kind} ${res}`);
+    const f = await this.recordFailure(id, decisionId, `${kind} ${res}`);
     return { status: f.status, kind, outcome: "failed", effects: [] };
   }
 
@@ -937,10 +942,10 @@ export class Outbox {
    */
   async reconcile(): Promise<{ decision_id: string; kind: EffectKind; action: string; status: ItemStatus }[]> {
     const out: { decision_id: string; kind: EffectKind; action: string; status: ItemStatus }[] = [];
-    const items = this.db.select().from(decisions).all();
+    const items = await this.db.select().from(decisions);
     for (const row of items) {
       const status = row.status as ItemStatus;
-      const item = this.loadItem(row.decision_id);
+      const item = await this.loadItem(row.decision_id);
 
       // (0) DEFENSIVE GUARD (b): a TERMINAL decision (resumed/superseded/failed)
       // must never have an effect dispatched or committed for it. If terminal
@@ -950,13 +955,13 @@ export class Outbox {
       // resume/requeue/notify) is ever sent against a terminal decision, AND no
       // commit() is attempted (which would throw an illegal transition).
       if (TERMINAL_STATUSES.has(status)) {
-        const hasLive = this.db
-          .select()
-          .from(outbox)
-          .where(eq(outbox.decision_id, row.decision_id))
-          .all()
-          .some((o) => o.state !== "committed" && !o.superseded);
-        if (hasLive) this.cancelReservedRows(row.decision_id);
+        const hasLive = (
+          await this.db
+            .select()
+            .from(outbox)
+            .where(eq(outbox.decision_id, row.decision_id))
+        ).some((o) => o.state !== "committed" && !o.superseded);
+        if (hasLive) await this.cancelReservedRows(row.decision_id);
         continue;
       }
 
@@ -967,12 +972,12 @@ export class Outbox {
       // through to the state-derived expectedEffect path (which would re-derive
       // the same effect and attempt a fresh dispatch). The live runEffect owns the
       // step; reconcile is a no-op for this decision until it settles.
-      const hasLiveOwnClaim = this.db
-        .select()
-        .from(outbox)
-        .where(eq(outbox.decision_id, row.decision_id))
-        .all()
-        .some((o) => o.state === "executing" && !this.executingIsReclaimable(o.claimed_by, o.claimed_at));
+      const hasLiveOwnClaim = (
+        await this.db
+          .select()
+          .from(outbox)
+          .where(eq(outbox.decision_id, row.decision_id))
+      ).some((o) => o.state === "executing" && !this.executingIsReclaimable(o.claimed_by, o.claimed_at));
       if (hasLiveOwnClaim) continue;
 
       // (0b) LIMBO GUARD (failure crash-atomicity): a NON-terminal decision whose
@@ -986,14 +991,14 @@ export class Outbox {
       // external effect). More generally: an effect whose outbox row is terminal/
       // exhausted is never re-dispatched. We co-commit the decision-failed mark +
       // audit + reserved cleanup atomically.
-      const exhaustedFailedRow = this.db
-        .select()
-        .from(outbox)
-        .where(eq(outbox.decision_id, row.decision_id))
-        .all()
-        .find((o) => o.state === "failed" && o.attempts >= this.maxAttempts);
+      const exhaustedFailedRow = (
+        await this.db
+          .select()
+          .from(outbox)
+          .where(eq(outbox.decision_id, row.decision_id))
+      ).find((o) => o.state === "failed" && o.attempts >= this.maxAttempts);
       if (exhaustedFailedRow) {
-        const failed = this.failDecisionTerminal(
+        const failed = await this.failDecisionTerminal(
           row.decision_id,
           exhaustedFailedRow.id,
           exhaustedFailedRow.last_error ?? "effect attempts exhausted",
@@ -1028,20 +1033,20 @@ export class Outbox {
       // exactly like a reserved row: probe the deterministic marker — applied ->
       // commit/advance (no re-dispatch); absent -> re-claim+re-execute; unknown ->
       // fail-closed.
-      const reservedRows = this.db
-        .select()
-        .from(outbox)
-        .where(eq(outbox.decision_id, row.decision_id))
-        .all()
-        .filter(
-          (o) =>
-            (o.state === "reserved" ||
-              (o.state === "executing" && this.executingIsReclaimable(o.claimed_by, o.claimed_at))) &&
-            (o.kind === "resume" ||
-              o.kind === "requeue" ||
-              o.kind === "write_response" ||
-              o.kind === "notify"),
-        );
+      const reservedRows = (
+        await this.db
+          .select()
+          .from(outbox)
+          .where(eq(outbox.decision_id, row.decision_id))
+      ).filter(
+        (o) =>
+          (o.state === "reserved" ||
+            (o.state === "executing" && this.executingIsReclaimable(o.claimed_by, o.claimed_at))) &&
+          (o.kind === "resume" ||
+            o.kind === "requeue" ||
+            o.kind === "write_response" ||
+            o.kind === "notify"),
+      );
       if (reservedRows.length > 0) {
         // Supersession-aware filtering for the resume/requeue fallback pair. A
         // mid_run `resume` and its fallback `requeue` are NOT independent: the
@@ -1062,7 +1067,7 @@ export class Outbox {
         const probed = await Promise.all(
           liveRows.map(async (o) => {
             const kind = o.kind as EffectKind;
-            const spec = this.specFromRow(item, o.id, kind, o.intended_transition, o.semantic_key);
+            const spec = await this.specFromRow(item, o.id, kind, o.intended_transition, o.semantic_key);
             return { row: o, kind, spec, probe: await this.probe(kind, spec.id) };
           }),
         );
@@ -1085,15 +1090,15 @@ export class Outbox {
           // commitResumeTerminal's resume_dispatch is an idempotent no-op.
           const newStatus =
             appliedRow.kind === "resume" || appliedRow.kind === "requeue"
-              ? this.commitResumeTerminal(appliedRow.spec, row.decision_id)
-              : this.commit(appliedRow.spec, row.decision_id);
+              ? await this.commitResumeTerminal(appliedRow.spec, row.decision_id)
+              : await this.commit(appliedRow.spec, row.decision_id);
           out.push({ decision_id: row.decision_id, kind: appliedRow.kind, action: "advanced", status: newStatus });
           continue;
         }
         // No applied reservation but an indeterminate one -> fail (never risk dup).
         const unknownRow = probed.find((p) => p.probe === "unknown");
         if (unknownRow) {
-          const failed = this.failDecisionTerminal(
+          const failed = await this.failDecisionTerminal(
             row.decision_id,
             unknownRow.spec.id,
             `${unknownRow.kind} probe unknown`,
@@ -1116,7 +1121,7 @@ export class Outbox {
           for (const a of absentRows) {
             // CRITICAL 1: if a crash left this row `executing`, release the claim
             // back to `reserved` so executeReserved's CAS claim can re-acquire it.
-            if (a.row.state === "executing") this.releaseClaim(a.spec.id);
+            if (a.row.state === "executing") await this.releaseClaim(a.spec.id);
             const r = await this.executeReserved(row.decision_id, item, a.spec);
             out.push({ decision_id: row.decision_id, kind: a.kind, action: "re-executed", status: r.status });
           }
@@ -1126,19 +1131,19 @@ export class Outbox {
 
       const expected = this.expectedEffect(status, item.resume_mode);
       if (!expected) continue;
-      const spec = this.effectSpecFor(item, expected);
+      const spec = await this.effectSpecFor(item, expected);
       const isResume = expected === "resume" || expected === "requeue";
       const probe = await this.probe(expected, spec.id);
       if (probe === "applied") {
         // ensure an outbox row exists so commit() is consistent, then advance.
-        this.reserve(spec, row.decision_id);
+        await this.reserve(spec, row.decision_id);
         // A4: an applied resume/requeue marker drives the decision directly to
         // terminal `resumed` (atomic resume_dispatch + resume_ack). For a
         // resume_requested decision (crash after resume_dispatch), the
         // resume_dispatch apply is an idempotent no-op and only resume_ack fires.
         const newStatus = isResume
-          ? this.commitResumeTerminal(spec, row.decision_id)
-          : this.commit(spec, row.decision_id);
+          ? await this.commitResumeTerminal(spec, row.decision_id)
+          : await this.commit(spec, row.decision_id);
         out.push({ decision_id: row.decision_id, kind: expected, action: "advanced", status: newStatus });
       } else if (probe === "absent") {
         if (status === "resume_requested") {
@@ -1149,7 +1154,7 @@ export class Outbox {
           // (illegal). runResume re-applies the freshness guard then dispatches;
           // on ack commitResumeTerminal's resume_dispatch no-ops + resume_ack
           // fires -> resumed.
-          this.reserve(spec, row.decision_id);
+          await this.reserve(spec, row.decision_id);
           const r = await this.runResume(row.decision_id, item, spec);
           out.push({ decision_id: row.decision_id, kind: expected, action: "re-executed", status: r.status });
         } else {
@@ -1157,7 +1162,7 @@ export class Outbox {
           out.push({ decision_id: row.decision_id, kind: expected, action: "re-executed", status: r.status });
         }
       } else {
-        const failed = this.failDecisionTerminal(row.decision_id, spec.id, `${expected} probe unknown`);
+        const failed = await this.failDecisionTerminal(row.decision_id, spec.id, `${expected} probe unknown`);
         out.push({ decision_id: row.decision_id, kind: expected, action: "failed", status: failed });
       }
     }
@@ -1165,13 +1170,13 @@ export class Outbox {
   }
 
   /** Rebuild an EffectSpec from a persisted outbox row (its id + intended_transition). */
-  private specFromRow(
+  private async specFromRow(
     item: ItemEffectRow,
     id: string,
     kind: EffectKind,
     intendedTransition: string,
     semanticKey: string | null,
-  ): EffectSpec {
+  ): Promise<EffectSpec> {
     // Finding I6: the transition semantic key is recovered from the persisted
     // `semantic_key` column — the source of truth — NEVER by string-splitting the
     // deterministic id. A re_notify cycle token may itself contain ':' (e.g. an
@@ -1188,7 +1193,7 @@ export class Outbox {
       transitionSemanticKey =
         kind === "notify"
           ? this.channel
-          : this.effectIdKey(kind, item, this.responseKey(item.decision_id));
+          : this.effectIdKey(kind, item, await this.responseKey(item.decision_id));
     }
     return { kind, id, intendedTransition: intendedTransition as TransitionEvent, transitionSemanticKey };
   }
@@ -1242,8 +1247,8 @@ export class Outbox {
    * One entry per distinct (decision_id, kind) so a decision is never double-driven
    * for the same effect.
    */
-  pendingEffectDecisions(): PendingEffect[] {
-    const rows = this.db.select().from(outbox).all();
+  async pendingEffectDecisions(): Promise<PendingEffect[]> {
+    const rows = await this.db.select().from(outbox);
     const seen = new Set<string>();
     const pending: PendingEffect[] = [];
     for (const o of rows) {
@@ -1252,7 +1257,7 @@ export class Outbox {
       if (o.attempts >= this.maxAttempts) continue;
       // a terminal decision's reserved rows are inert (reconcile/terminal-cleanup
       // cancels them) — never report them.
-      if (this.isTerminal(o.decision_id)) continue;
+      if (await this.isTerminal(o.decision_id)) continue;
       const dedupKey = `${o.decision_id}|${o.kind}`;
       if (seen.has(dedupKey)) continue;
       seen.add(dedupKey);

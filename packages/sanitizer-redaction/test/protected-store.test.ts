@@ -2,63 +2,72 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { ProtectedStore, ProtectedIntegrityError } from "../src/index.js";
+import { PGlite } from "@electric-sql/pglite";
+import { drizzle } from "drizzle-orm/pglite";
+import { ProtectedStore, ProtectedIntegrityError, type Db } from "../src/index.js";
 
 const KEY = Buffer.alloc(32, 7).toString("base64");
-const CREATE_REFS =
-  "CREATE TABLE protected_refs (ulid TEXT PRIMARY KEY, decision_id TEXT, field TEXT NOT NULL, class TEXT NOT NULL, created_at TEXT NOT NULL);";
+// protected_refs lives in the decision_index schema (created by the decision-index
+// migration in prod); create it directly here (no cross-package dep).
+const CREATE_REFS = `
+  CREATE SCHEMA IF NOT EXISTS decision_index;
+  CREATE TABLE decision_index.protected_refs (
+    ulid text PRIMARY KEY,
+    decision_id text,
+    field text NOT NULL,
+    class text NOT NULL,
+    created_at text NOT NULL
+  );`;
 
-function makeStore() {
-  const sqlite = new Database(":memory:");
-  sqlite.exec(CREATE_REFS);
+async function makeStore() {
+  const client = new PGlite();
+  await client.exec(CREATE_REFS);
   const dir = mkdtempSync(join(tmpdir(), "pmps-"));
-  return { store: new ProtectedStore({ key: KEY, dir, db: drizzle(sqlite) }), dir, sqlite };
+  const db = drizzle(client) as unknown as Db;
+  return { store: new ProtectedStore({ key: KEY, dir, db }), dir, client };
 }
 
 describe("ProtectedStore", () => {
-  let ctx: ReturnType<typeof makeStore>;
-  beforeEach(() => {
-    ctx = makeStore();
+  let ctx: Awaited<ReturnType<typeof makeStore>>;
+  beforeEach(async () => {
+    ctx = await makeStore();
   });
-  afterEach(() => {
-    ctx.sqlite.close();
+  afterEach(async () => {
+    await ctx.client.close();
     rmSync(ctx.dir, { recursive: true, force: true });
   });
 
   it("rejects a key that does not decode to 32 bytes", () => {
-    const sqlite = new Database(":memory:");
-    sqlite.exec(CREATE_REFS);
+    // The constructor validates the key synchronously, before it ever touches db.
     expect(
-      () => new ProtectedStore({ key: "tooshort", dir: ctx.dir, db: drizzle(sqlite) }),
+      () => new ProtectedStore({ key: "tooshort", dir: ctx.dir, db: {} as Db }),
     ).toThrow();
   });
 
-  it("round-trips plaintext through put → get", () => {
-    const ref = ctx.store.put({ decision_id: "d1", field: "question", class: "withheld", plaintext: "secret value" });
+  it("round-trips plaintext through put → get", async () => {
+    const ref = await ctx.store.put({ decision_id: "d1", field: "question", class: "withheld", plaintext: "secret value" });
     expect(ref).toMatch(/^protected:\/\//);
-    expect(ctx.store.get(ref)).toBe("secret value");
+    expect(await ctx.store.get(ref)).toBe("secret value");
   });
 
-  it("verifyIntegrity passes for a stored ref", () => {
-    const ref = ctx.store.put({ decision_id: "d1", field: "f", class: "withheld", plaintext: "x" });
-    expect(ctx.store.verifyIntegrity(ref)).toBe(true);
+  it("verifyIntegrity passes for a stored ref", async () => {
+    const ref = await ctx.store.put({ decision_id: "d1", field: "f", class: "withheld", plaintext: "x" });
+    expect(await ctx.store.verifyIntegrity(ref)).toBe(true);
   });
 
-  it("distinct puts yield distinct refs", () => {
-    const a = ctx.store.put({ decision_id: "d1", field: "f", class: "withheld", plaintext: "x" });
-    const b = ctx.store.put({ decision_id: "d1", field: "f", class: "withheld", plaintext: "x" });
+  it("distinct puts yield distinct refs", async () => {
+    const a = await ctx.store.put({ decision_id: "d1", field: "f", class: "withheld", plaintext: "x" });
+    const b = await ctx.store.put({ decision_id: "d1", field: "f", class: "withheld", plaintext: "x" });
     expect(a).not.toBe(b);
   });
 
-  it("rejects a non-protected ref", () => {
-    expect(() => ctx.store.get("not-a-ref")).toThrow(ProtectedIntegrityError);
+  it("rejects a non-protected ref", async () => {
+    await expect(ctx.store.get("not-a-ref")).rejects.toThrow(ProtectedIntegrityError);
   });
 
-  it("never writes plaintext to the on-disk blob (encrypted at rest)", () => {
-    const ref = ctx.store.put({ decision_id: "d1", field: "f", class: "withheld", plaintext: "TOPSECRET-NEEDLE" });
-    expect(ctx.store.get(ref)).toBe("TOPSECRET-NEEDLE");
+  it("never writes plaintext to the on-disk blob (encrypted at rest)", async () => {
+    const ref = await ctx.store.put({ decision_id: "d1", field: "f", class: "withheld", plaintext: "TOPSECRET-NEEDLE" });
+    expect(await ctx.store.get(ref)).toBe("TOPSECRET-NEEDLE");
     for (const f of readdirSync(ctx.dir)) {
       const bytes = readFileSync(join(ctx.dir, f)).toString("latin1");
       expect(bytes.includes("TOPSECRET-NEEDLE"), `${f} leaks plaintext`).toBe(false);

@@ -185,9 +185,12 @@ STACK-AC-DECISION-ESCALATION-STORE:
   code_paths:
     - packages/decision-protocol/
     - packages/decision-index/
+    - packages/sanitizer-redaction/src/protected-store.ts
+    - packages/sanitizer-redaction/src/schema.ts
   test_paths:
     - packages/decision-protocol/**/*.test.ts
     - packages/decision-index/**/*.test.ts
+    - packages/sanitizer-redaction/**/*.test.ts
   status: approved
 
 STACK-AC-DECISION-ESCALATION-EMITTER:

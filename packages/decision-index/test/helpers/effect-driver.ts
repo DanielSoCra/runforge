@@ -1,4 +1,4 @@
-import type { TempDb } from "./temp-db.js";
+import type { PgliteTestDb } from "./temp-db.js";
 import { apply } from "../../src/state-machine.js";
 import { Outbox } from "../../src/outbox.js";
 import { FakeNotifier } from "../../src/adapters/fakes/fake-notifier.js";
@@ -7,7 +7,7 @@ import { FakeResumeDispatcher } from "../../src/adapters/fakes/fake-resume-dispa
 
 export const FIXED_NOW = "2026-05-27T02:00:00.000Z";
 
-export function makeOutbox(t: TempDb) {
+export function makeOutbox(t: PgliteTestDb) {
   const notifier = new FakeNotifier();
   const sourceSink = new FakeSourceSink();
   const resumeDispatcher = new FakeResumeDispatcher();
@@ -23,10 +23,10 @@ export function makeOutbox(t: TempDb) {
 }
 
 /** Drive an item from detected to viewed+answered (ready for write_response). */
-export async function answerItem(t: TempDb, outbox: Outbox, id: string) {
+export async function answerItem(t: PgliteTestDb, outbox: Outbox, id: string) {
   await outbox.runEffect(id, "notify"); // detected -> notified
-  apply(t.db, id, "opened", { semanticKey: "daniel", now: FIXED_NOW }); // -> viewed
-  apply(t.db, id, "answer_submitted", {
+  await apply(t.db, id, "opened", { semanticKey: "daniel", now: FIXED_NOW }); // -> viewed
+  await apply(t.db, id, "answer_submitted", {
     semanticKey: "resp-1",
     now: FIXED_NOW,
     answer: {

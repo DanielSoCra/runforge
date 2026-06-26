@@ -1,24 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
-import { makeTempDb, type TempDb } from "./helpers/temp-db.js";
+import { makePgliteDb, type PgliteTestDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { makeOutbox, answerItem } from "./helpers/effect-driver.js";
 import { decisions, appliedTransitions, outbox as outboxTable } from "../src/schema.js";
 
-async function toSourceWritten(t: TempDb, f: ReturnType<typeof makeOutbox>, id: string) {
+async function toSourceWritten(t: PgliteTestDb, f: ReturnType<typeof makeOutbox>, id: string) {
   await answerItem(t, f.outbox, id);
   await f.outbox.runEffect(id, "write_response"); // -> source_written
 }
 
-function statusOf(t: TempDb, id: string): string {
-  return t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!.status;
+async function statusOf(t: PgliteTestDb, id: string): Promise<string> {
+  return (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!.status;
 }
 
-function transitionKeys(t: TempDb, id: string): string[] {
-  return t.db
-    .select()
-    .from(appliedTransitions)
-    .all()
+async function transitionKeys(t: PgliteTestDb, id: string): Promise<string[]> {
+  return (await t.db.select().from(appliedTransitions))
     .filter((k) => k.decision_id === id)
     .map((k) => k.transition_key);
 }
@@ -31,20 +28,24 @@ function transitionKeys(t: TempDb, id: string): string[] {
  * duplicate requeue dispatch).
  */
 describe("crash-safe requeue terminality (A4)", () => {
-  let t: TempDb;
-  beforeEach(() => (t = makeTempDb()));
-  afterEach(() => t?.cleanup());
+  let t: PgliteTestDb;
+  beforeEach(async () => {
+    t = await makePgliteDb();
+  });
+  afterEach(async () => {
+    await t?.cleanup();
+  });
 
   it("confirmed requeue -> terminal resumed with BOTH transition keys present", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" }); // run_id = run-1
+    const id = await seedDecision(t.db, { resume_mode: "requeue" }); // run_id = run-1
     const f = makeOutbox(t);
     await toSourceWritten(t, f, id);
 
     const r = await f.outbox.runEffect(id, "requeue");
     expect(r.outcome).toBe("committed");
-    expect(statusOf(t, id)).toBe("resumed");
+    expect(await statusOf(t, id)).toBe("resumed");
 
-    const keys = transitionKeys(t, id);
+    const keys = await transitionKeys(t, id);
     expect(keys).toContain("resume_dispatch:run-1");
     expect(keys).toContain("resume_ack:run-1");
 
@@ -53,14 +54,14 @@ describe("crash-safe requeue terminality (A4)", () => {
   });
 
   it("crash after resume_dispatch before resume_ack -> reconcile reaches resumed, NO duplicate requeue dispatch", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" });
+    const id = await seedDecision(t.db, { resume_mode: "requeue" });
     const f = makeOutbox(t);
     await toSourceWritten(t, f, id);
 
     // Simulate the crash: resume_dispatch committed (status resume_requested, the
     // requeue marker IS present at the worker) but resume_ack never ran.
-    const requeueId = f.outbox.effectIdFor(id, "requeue");
-    t.db
+    const requeueId = await f.outbox.effectIdFor(id, "requeue");
+    await t.db
       .insert(outboxTable)
       .values({
         id: requeueId,
@@ -71,12 +72,11 @@ describe("crash-safe requeue terminality (A4)", () => {
         state: "reserved",
         attempts: 0,
         created_at: "2026-05-27T01:59:00.000Z",
-      })
-      .run();
+      });
     // resume_dispatch was applied before the crash:
     const { apply } = await import("../src/state-machine.js");
-    apply(t.db, id, "resume_dispatch", { semanticKey: "run-1", now: "2026-05-27T01:59:00.000Z" });
-    expect(statusOf(t, id)).toBe("resume_requested");
+    await apply(t.db, id, "resume_dispatch", { semanticKey: "run-1", now: "2026-05-27T01:59:00.000Z" });
+    expect(await statusOf(t, id)).toBe("resume_requested");
     // the worker DID receive the requeue (marker applied):
     f.resumeDispatcher.applied.add(requeueId);
 
@@ -85,8 +85,8 @@ describe("crash-safe requeue terminality (A4)", () => {
 
     // NO duplicate requeue dispatch — the marker was applied, only resume_ack fires.
     expect(f.resumeDispatcher.calls.length).toBe(dispatchesBefore);
-    expect(statusOf(t, id)).toBe("resumed");
-    const keys = transitionKeys(t, id);
+    expect(await statusOf(t, id)).toBe("resumed");
+    const keys = await transitionKeys(t, id);
     expect(keys).toContain("resume_dispatch:run-1");
     expect(keys).toContain("resume_ack:run-1");
     expect(results.find((x) => x.decision_id === id)).toBeDefined();
@@ -95,23 +95,23 @@ describe("crash-safe requeue terminality (A4)", () => {
     const callsBefore = f.resumeDispatcher.calls.length;
     await f.outbox.reconcile();
     expect(f.resumeDispatcher.calls.length).toBe(callsBefore);
-    expect(statusOf(t, id)).toBe("resumed");
+    expect(await statusOf(t, id)).toBe("resumed");
   });
 
   it("crash after resume_dispatch, marker ABSENT -> reconcile re-dispatches the requeue then reaches resumed", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" });
+    const id = await seedDecision(t.db, { resume_mode: "requeue" });
     const f = makeOutbox(t);
     await toSourceWritten(t, f, id);
 
-    const requeueId = f.outbox.effectIdFor(id, "requeue");
+    const requeueId = await f.outbox.effectIdFor(id, "requeue");
     const { apply } = await import("../src/state-machine.js");
-    apply(t.db, id, "resume_dispatch", { semanticKey: "run-1", now: "2026-05-27T01:59:00.000Z" });
-    expect(statusOf(t, id)).toBe("resume_requested");
+    await apply(t.db, id, "resume_dispatch", { semanticKey: "run-1", now: "2026-05-27T01:59:00.000Z" });
+    expect(await statusOf(t, id)).toBe("resume_requested");
     // marker deliberately NOT applied -> probe absent -> re-dispatch.
 
     const results = await f.outbox.reconcile();
     expect(f.resumeDispatcher.calls.filter((c) => c.mode === "requeue").length).toBeGreaterThanOrEqual(1);
-    expect(statusOf(t, id)).toBe("resumed");
+    expect(await statusOf(t, id)).toBe("resumed");
     expect(results.find((x) => x.decision_id === id)).toBeDefined();
     // marker now present from the re-dispatch
     expect(f.resumeDispatcher.applied.has(requeueId)).toBe(true);

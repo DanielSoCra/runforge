@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
-import { makeTempDb, type TempDb } from "./helpers/temp-db.js";
+import { makePgliteDb, type PgliteTestDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { FIXED_NOW } from "./helpers/effect-driver.js";
 import { Outbox } from "../src/outbox.js";
@@ -69,17 +69,17 @@ class ThrowingResume implements ResumeDispatcher {
   }
 }
 
-function statusOf(t: TempDb, id: string): string {
-  return t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!.status;
+async function statusOf(t: PgliteTestDb, id: string): Promise<string> {
+  return (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!.status;
 }
 
-function rowState(t: TempDb, effectId: string) {
-  return t.db.select().from(outboxTable).where(eq(outboxTable.id, effectId)).all()[0];
+async function rowState(t: PgliteTestDb, effectId: string) {
+  return (await t.db.select().from(outboxTable).where(eq(outboxTable.id, effectId)))[0];
 }
 
 /** Build an Outbox over the temp db with the supplied (possibly throwing) adapters. */
 function makeOutboxWith(
-  t: TempDb,
+  t: PgliteTestDb,
   adapters: { notifier?: Notifier; sourceSink?: SourceSink; resumeDispatcher?: ResumeDispatcher },
   maxAttempts = 3,
 ) {
@@ -98,11 +98,11 @@ function makeOutboxWith(
 }
 
 /** Drive an item to answered_pending_source_write WITHOUT a throwing write sink. */
-function bringToWrite(t: TempDb, id: string) {
+async function bringToWrite(t: PgliteTestDb, id: string) {
   // notify -> notified
-  apply(t.db, id, "notify", { semanticKey: "slack", now: FIXED_NOW });
-  apply(t.db, id, "opened", { semanticKey: "daniel", now: FIXED_NOW });
-  apply(t.db, id, "answer_submitted", {
+  await apply(t.db, id, "notify", { semanticKey: "slack", now: FIXED_NOW });
+  await apply(t.db, id, "opened", { semanticKey: "daniel", now: FIXED_NOW });
+  await apply(t.db, id, "answer_submitted", {
     semanticKey: "resp-1",
     now: FIXED_NOW,
     answer: {
@@ -115,91 +115,95 @@ function bringToWrite(t: TempDb, id: string) {
 }
 
 describe("outbox adapter-throw does not strand rows as executing", () => {
-  let t: TempDb;
-  beforeEach(() => (t = makeTempDb()));
-  afterEach(() => t?.cleanup());
+  let t: PgliteTestDb;
+  beforeEach(async () => {
+    t = await makePgliteDb();
+  });
+  afterEach(async () => {
+    await t?.cleanup();
+  });
 
   it("THROWING notify: row is recorded as a failed attempt and released, NOT left executing", async () => {
-    const id = seedDecision(t.db);
+    const id = await seedDecision(t.db);
     const ob = makeOutboxWith(t, { notifier: new ThrowingNotifier() });
-    const notifyId = ob.effectIdFor(id, "notify");
+    const notifyId = await ob.effectIdFor(id, "notify");
 
     // The throw propagates (the daemon tick / driver sees it), but the row must
     // not be stranded executing.
     await expect(ob.runEffect(id, "notify")).rejects.toThrow(/notify boom/);
 
-    const row = rowState(t, notifyId);
+    const row = await rowState(t, notifyId);
     expect(row).toBeDefined();
     expect(row!.state).not.toBe("executing"); // <-- the bug: it WAS left executing
     // a transient (non-exhausted) failure is released back to reserved for retry.
     expect(row!.state).toBe("reserved");
     expect(row!.attempts).toBe(1);
     expect(row!.claimed_by).toBeNull();
-    expect(statusOf(t, id)).toBe("detected"); // not advanced
+    expect(await statusOf(t, id)).toBe("detected"); // not advanced
   });
 
   it("THROWING writeResponse: row released to reserved (not executing), decision unchanged", async () => {
-    const id = seedDecision(t.db);
+    const id = await seedDecision(t.db);
     const ob = makeOutboxWith(t, { sourceSink: new ThrowingWriteSink() });
-    bringToWrite(t, id);
-    const writeId = ob.effectIdFor(id, "write_response");
+    await bringToWrite(t, id);
+    const writeId = await ob.effectIdFor(id, "write_response");
 
     await expect(ob.runEffect(id, "write_response")).rejects.toThrow(/writeResponse boom/);
 
-    const row = rowState(t, writeId);
+    const row = await rowState(t, writeId);
     expect(row!.state).not.toBe("executing");
     expect(row!.state).toBe("reserved");
     expect(row!.attempts).toBe(1);
-    expect(statusOf(t, id)).toBe("answered_pending_source_write");
+    expect(await statusOf(t, id)).toBe("answered_pending_source_write");
   });
 
   it("THROWING currentEtag (freshness probe): resume row released, not stranded executing", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" });
+    const id = await seedDecision(t.db, { resume_mode: "requeue" });
     // advance to source_written via a NON-throwing write sink.
     const setup = makeOutboxWith(t, {});
-    bringToWrite(t, id);
+    await bringToWrite(t, id);
     await setup.runEffect(id, "write_response"); // -> source_written
-    expect(statusOf(t, id)).toBe("source_written");
+    expect(await statusOf(t, id)).toBe("source_written");
 
     const ob = makeOutboxWith(t, { sourceSink: new ThrowingEtagSink() });
-    const requeueId = ob.effectIdFor(id, "requeue");
+    const requeueId = await ob.effectIdFor(id, "requeue");
     await expect(ob.runEffect(id, "requeue")).rejects.toThrow(/currentEtag boom/);
 
-    const row = rowState(t, requeueId);
+    const row = await rowState(t, requeueId);
     expect(row!.state).not.toBe("executing");
     expect(row!.state).toBe("reserved");
-    expect(statusOf(t, id)).toBe("source_written"); // not resumed
+    expect(await statusOf(t, id)).toBe("source_written"); // not resumed
   });
 
   it("THROWING resume: row released, decision not resumed", async () => {
-    const id = seedDecision(t.db, { resume_mode: "requeue" });
+    const id = await seedDecision(t.db, { resume_mode: "requeue" });
     const setup = makeOutboxWith(t, {});
-    bringToWrite(t, id);
+    await bringToWrite(t, id);
     await setup.runEffect(id, "write_response"); // -> source_written
-    expect(statusOf(t, id)).toBe("source_written");
+    expect(await statusOf(t, id)).toBe("source_written");
 
     const ob = makeOutboxWith(t, { resumeDispatcher: new ThrowingResume() });
-    const requeueId = ob.effectIdFor(id, "requeue");
+    const requeueId = await ob.effectIdFor(id, "requeue");
     await expect(ob.runEffect(id, "requeue")).rejects.toThrow(/resume boom/);
 
-    const row = rowState(t, requeueId);
+    const row = await rowState(t, requeueId);
     expect(row!.state).not.toBe("executing");
     expect(row!.state).toBe("reserved");
-    expect(statusOf(t, id)).toBe("source_written");
+    expect(await statusOf(t, id)).toBe("source_written");
   });
 
   it("EXHAUSTION: a persistently throwing adapter eventually drives the decision terminal (failed), never stuck executing", async () => {
-    const id = seedDecision(t.db);
+    const id = await seedDecision(t.db);
     const ob = makeOutboxWith(t, { notifier: new ThrowingNotifier() }, 2); // maxAttempts=2
-    const notifyId = ob.effectIdFor(id, "notify");
+    const notifyId = await ob.effectIdFor(id, "notify");
 
     await expect(ob.runEffect(id, "notify")).rejects.toThrow(/notify boom/);
-    expect(rowState(t, notifyId)!.state).toBe("reserved"); // attempt 1, released
+    expect((await rowState(t, notifyId))!.state).toBe("reserved"); // attempt 1, released
 
     await expect(ob.runEffect(id, "notify")).rejects.toThrow(/notify boom/);
     // attempt 2 == maxAttempts -> terminal failure
-    const row = rowState(t, notifyId)!;
+    const row = (await rowState(t, notifyId))!;
     expect(row.state).toBe("failed");
-    expect(statusOf(t, id)).toBe("failed");
+    expect(await statusOf(t, id)).toBe("failed");
   });
 });

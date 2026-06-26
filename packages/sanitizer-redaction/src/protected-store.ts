@@ -16,10 +16,19 @@ import { monotonicFactory } from "ulid";
 // the same ms could mis-sort, breaking edit convergence (repeated retries of an edited field
 // would keep minting fresh refs). Monotonic ids close that.
 const ulid = monotonicFactory();
-import { type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import { type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { protectedRefs } from "./schema.js";
 
-export type Db = BetterSQLite3Database<any>;
+export type Db = PostgresJsDatabase<any>;
+
+/**
+ * A guarded-write runner injected by the decision-index writer factory: it runs
+ * `fn` inside the writer mutex + per-tx advisory lock (and re-uses an open writer
+ * tx when nested), so the protected_refs pointer insert goes through the SAME
+ * single-writer primitive as every other mutation (spec §3.5a). When omitted (a
+ * standalone ProtectedStore in tests), the insert runs directly on the shared db.
+ */
+export type RunWrite = <T>(fn: (tx: Db) => Promise<T>) => Promise<T>;
 
 export class ProtectedIntegrityError extends Error {
   constructor(message: string) {
@@ -34,6 +43,8 @@ export interface ProtectedStoreOptions {
   /** directory where <ulid>.enc blobs live (default ~/.agents/pm/protected). */
   dir: string;
   db: Db;
+  /** guarded-write runner from the writer factory (spec §3.5a); optional in tests. */
+  runWrite?: RunWrite;
   clock?: () => Date;
 }
 
@@ -63,6 +74,7 @@ export class ProtectedStore {
   private readonly respKey: Buffer;
   private readonly dir: string;
   private readonly db: Db;
+  private readonly runWrite: RunWrite;
   private readonly clock: () => Date;
 
   constructor(opts: ProtectedStoreOptions) {
@@ -77,6 +89,9 @@ export class ProtectedStore {
     this.respKey = this.subkey(key, "response-hash");
     this.dir = opts.dir;
     this.db = opts.db;
+    // Default: run the insert directly on the shared db (standalone/tests). The
+    // writer factory injects a guarded runner (mutex + advisory lock).
+    this.runWrite = opts.runWrite ?? ((fn) => fn(opts.db));
     this.clock = opts.clock ?? (() => new Date());
     mkdirSync(this.dir, { recursive: true });
   }
@@ -97,7 +112,7 @@ export class ProtectedStore {
     return Buffer.concat(chunks);
   }
 
-  put(args: PutArgs): string {
+  async put(args: PutArgs): Promise<string> {
     const id = ulid();
     const meta: BoundMeta = {
       ulid: id,
@@ -124,16 +139,16 @@ export class ProtectedStore {
     const blob = Buffer.concat([MAGIC, iv, gcmTag, hmac, ciphertext]);
     writeFileSync(this.blobPath(id), blob);
 
-    this.db
-      .insert(protectedRefs)
-      .values({
+    // §3.5a: the pointer insert goes through the guarded writer primitive.
+    await this.runWrite(async (tx) => {
+      await tx.insert(protectedRefs).values({
         ulid: id,
         decision_id: args.decision_id,
         field: args.field,
         class: args.class,
         created_at: this.clock().toISOString(),
-      })
-      .run();
+      });
+    });
 
     return REF_PREFIX + id;
   }
@@ -142,8 +157,8 @@ export class ProtectedStore {
     return createHmac("sha256", this.respKey).update(canonical).digest("hex");
   }
 
-  get(ref: string): string {
-    const { iv, gcmTag, ciphertext, meta } = this.readVerified(ref);
+  async get(ref: string): Promise<string> {
+    const { iv, gcmTag, ciphertext, meta } = await this.readVerified(ref);
     const decipher = createDecipheriv(ALGO, this.encKey, iv);
     decipher.setAAD(Buffer.concat([MAGIC, this.metaBytes(meta)]));
     decipher.setAuthTag(gcmTag);
@@ -155,8 +170,8 @@ export class ProtectedStore {
     }
   }
 
-  verifyIntegrity(ref: string): true {
-    this.readVerified(ref);
+  async verifyIntegrity(ref: string): Promise<true> {
+    await this.readVerified(ref);
     return true;
   }
 
@@ -168,23 +183,22 @@ export class ProtectedStore {
    * reuse-vs-mint, which converges. Returns undefined when no row exists. Reads the pointer
    * table only — no blob I/O, no decryption.
    */
-  findRefForField(decision_id: string, field: string): string | undefined {
-    const row = this.db
-      .select()
-      .from(protectedRefs)
-      .where(and(eq(protectedRefs.decision_id, decision_id), eq(protectedRefs.field, field)))
-      .orderBy(desc(protectedRefs.ulid))
-      .limit(1)
-      .all()[0];
+  async findRefForField(decision_id: string, field: string): Promise<string | undefined> {
+    const row = (
+      await this.db
+        .select()
+        .from(protectedRefs)
+        .where(and(eq(protectedRefs.decision_id, decision_id), eq(protectedRefs.field, field)))
+        .orderBy(desc(protectedRefs.ulid))
+        .limit(1)
+    )[0];
     return row ? REF_PREFIX + row.ulid : undefined;
   }
 
-  private metaOf(id: string): BoundMeta {
-    const row = this.db
-      .select()
-      .from(protectedRefs)
-      .where(eq(protectedRefs.ulid, id))
-      .all()[0];
+  private async metaOf(id: string): Promise<BoundMeta> {
+    const row = (
+      await this.db.select().from(protectedRefs).where(eq(protectedRefs.ulid, id))
+    )[0];
     if (!row) {
       throw new ProtectedIntegrityError(`no protected_refs row for ${id}`);
     }
@@ -196,11 +210,11 @@ export class ProtectedStore {
     };
   }
 
-  private readVerified(
+  private async readVerified(
     ref: string,
-  ): { iv: Buffer; gcmTag: Buffer; ciphertext: Buffer; meta: BoundMeta } {
+  ): Promise<{ iv: Buffer; gcmTag: Buffer; ciphertext: Buffer; meta: BoundMeta }> {
     const id = this.ulidOf(ref);
-    const meta = this.metaOf(id);
+    const meta = await this.metaOf(id);
     const metaBytes = this.metaBytes(meta);
     const path = this.blobPath(id);
     if (!existsSync(path)) {

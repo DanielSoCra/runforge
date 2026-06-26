@@ -21,12 +21,14 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 export interface DecisionIndexEnvConfig {
   enabled: boolean;
-  dbPath: string;
+  /** Postgres URL the writer connects to (AUTO_CLAUDE_DATABASE_URL). */
+  databaseUrl: string;
   protectedKey: string;
   protectedDir: string;
 }
 
-const DEFAULT_DB_PATH = 'decision-index.sqlite';
+/** Legacy sqlite store path — cutover preflight only; the runtime NEVER opens it. */
+const DEFAULT_LEGACY_SQLITE_PATH = 'decision-index.sqlite';
 const DEFAULT_PROTECTED_DIR = 'decision-protected';
 const KEY_FILE = 'decision-protected.key';
 
@@ -76,11 +78,14 @@ function loadOrGenerateKey(stateDir: string): string {
  * manager from this config inside a guarded boot block (see daemon.ts).
  */
 export function readDecisionIndexConfig(stateDir: string): DecisionIndexEnvConfig {
+  // NOTE (spec §3.8 / §9): the default stays OFF for the store migration. The
+  // default-ON opt-out flip is an operator-gated follow-up (plan Task 11b).
   const enabled = envEnabled(process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED);
-  const dbPath = resolveAgainst(
-    stateDir,
-    process.env.AUTO_CLAUDE_DECISION_INDEX_PATH ?? DEFAULT_DB_PATH,
-  );
+  // The decision index reuses the daemon's existing Postgres (no separate sqlite
+  // file). Read it only when enabled, so a flag-OFF daemon does ZERO extra work.
+  const databaseUrl = enabled
+    ? (process.env.AUTO_CLAUDE_DATABASE_URL ?? '')
+    : '';
   const protectedDir = resolveAgainst(
     stateDir,
     process.env.AUTO_CLAUDE_DECISION_PROTECTED_DIR ?? DEFAULT_PROTECTED_DIR,
@@ -88,5 +93,32 @@ export function readDecisionIndexConfig(stateDir: string): DecisionIndexEnvConfi
   // Disabled => NO filesystem I/O at all. The key is only needed in the manager's
   // enabled branch, so a placeholder/empty key is sufficient and keeps boot inert.
   const protectedKey = enabled ? loadOrGenerateKey(stateDir) : '';
-  return { enabled, dbPath, protectedKey, protectedDir };
+  if (enabled) assertLegacyStoreCutoverAcked(stateDir);
+  return { enabled, databaseUrl, protectedKey, protectedDir };
+}
+
+/**
+ * Greenfield cutover preflight (spec §4) — fail-closed, NATIVE-FREE. If a legacy
+ * sqlite decision store FILE still exists, it may hold unanswered escalations the
+ * Postgres greenfield migration would silently abandon. Refuse to boot the index
+ * unless the operator acknowledges the cutover (AUTO_CLAUDE_DECISION_INDEX_CUTOVER_ACK).
+ *
+ * This is a pure `fs.existsSync` check — it MUST NOT open the sqlite file (that
+ * would reintroduce the very better-sqlite3 native module the migration removes,
+ * codex round-2 Critical). Row salvage is a separate optional operator tool.
+ */
+function assertLegacyStoreCutoverAcked(stateDir: string): void {
+  const acked = envEnabled(process.env.AUTO_CLAUDE_DECISION_INDEX_CUTOVER_ACK);
+  if (acked) return;
+  const legacyPath = resolveAgainst(
+    stateDir,
+    process.env.AUTO_CLAUDE_DECISION_INDEX_PATH ?? DEFAULT_LEGACY_SQLITE_PATH,
+  );
+  if (!existsSync(legacyPath)) return;
+  throw new Error(
+    `decision-index: a legacy sqlite decision store exists at ${legacyPath}; it may hold ` +
+      `unanswered escalations. The store now lives in Postgres (greenfield) — run the one-shot ` +
+      `export tool to salvage rows, OR set AUTO_CLAUDE_DECISION_INDEX_CUTOVER_ACK=1 to proceed ` +
+      `greenfield, then delete the file. (The runtime never opens the sqlite file.)`,
+  );
 }

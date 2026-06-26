@@ -24,7 +24,8 @@ type DecisionIndexModule = typeof import('@auto-claude/decision-index');
 
 export interface DecisionIndexManagerOptions {
   enabled: boolean;
-  dbPath: string;
+  /** Postgres URL the writer connects to (AUTO_CLAUDE_DATABASE_URL). */
+  databaseUrl: string;
   protectedKey: string;
   protectedDir: string;
   /** clock injection (tests pin a fixed clock); defaults to wall-clock. */
@@ -53,6 +54,17 @@ export class DecisionIndexManager {
   }
 
   /**
+   * Whether structured decision surfacing is actually USABLE right now (codex
+   * Critical, spec §3.8): enabled AND not broken AND the ledger is built. Distinct
+   * from isEnabled() (just the configured flag) — an enabled-but-broken index
+   * (Postgres unreachable) must fail VISIBLY, not silently return success. The
+   * phases gate structured surfacing on this, not isEnabled().
+   */
+  isAvailable(): boolean {
+    return this.#enabled && !this.#broken && this.#ledger !== null;
+  }
+
+  /**
    * Initialize the index when enabled. Disabled -> immediate no-op (NEVER imports
    * native code). Enabled -> dynamic-import the package, open the writer with the
    * v1 adapters + protected key/dir, wrap it in a DecisionLedger. Any failure sets
@@ -63,8 +75,8 @@ export class DecisionIndexManager {
     try {
       const mod = await (this.#opts.importer ??
         (() => import('@auto-claude/decision-index')))();
-      const writer = mod.createIndexWriter({
-        dbPath: this.#opts.dbPath,
+      const writer = await mod.createIndexWriter({
+        databaseUrl: this.#opts.databaseUrl,
         protectedKey: this.#opts.protectedKey,
         protectedDir: this.#opts.protectedDir,
         notifier: new LogNotifier(),
@@ -110,15 +122,15 @@ export class DecisionIndexManager {
     decisionId: string,
     ref: string,
     actor: string,
-  ): { field: string; value: string } {
+  ): Promise<{ field: string; value: string }> {
     return this.ledger().revealProtected(decisionId, ref, actor);
   }
 
-  /** Graceful shutdown: close the underlying writable connection if open. */
+  /** Graceful shutdown: close the underlying writer connection if open. */
   async close(): Promise<void> {
     if (this.#writer) {
       try {
-        this.#writer.close();
+        await this.#writer.close();
       } catch {
         /* already closed */
       }

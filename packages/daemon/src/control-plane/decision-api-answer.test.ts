@@ -63,10 +63,10 @@ function detailView(id: string, status: string): DetailView {
 /** A read-model fake seeded with detail views. */
 function fakeReadModel(details: Record<string, DetailView>): DecisionReadModel {
   return {
-    listRanked(_args?: ListRankedArgs): RankedListItem[] {
+    async listRanked(_args?: ListRankedArgs): Promise<RankedListItem[]> {
       return [];
     },
-    detail(id: string): DetailView | undefined {
+    async detail(id: string): Promise<DetailView | undefined> {
       return details[id];
     },
   };
@@ -75,10 +75,10 @@ function fakeReadModel(details: Record<string, DetailView>): DecisionReadModel {
 /** A read-model fake that THROWS on detail (index disabled/broken). */
 function throwingReadModel(): DecisionReadModel {
   return {
-    listRanked(): RankedListItem[] {
+    async listRanked(): Promise<RankedListItem[]> {
       return [];
     },
-    detail(): DetailView | undefined {
+    async detail(): Promise<DetailView | undefined> {
       throw new Error('decision index unavailable');
     },
   };

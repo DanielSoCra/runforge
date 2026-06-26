@@ -2,28 +2,39 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { ProtectedStore, createWithholdingSanitizer } from "../src/index.js";
+import { PGlite } from "@electric-sql/pglite";
+import { drizzle } from "drizzle-orm/pglite";
+import { ProtectedStore, createWithholdingSanitizer, type Db } from "../src/index.js";
 
 const KEY = Buffer.alloc(32, 7).toString("base64");
-const CREATE_REFS =
-  "CREATE TABLE protected_refs (ulid TEXT PRIMARY KEY, decision_id TEXT, field TEXT NOT NULL, class TEXT NOT NULL, created_at TEXT NOT NULL);";
+// The protected_refs pointer table lives in the decision_index schema (created by
+// the decision-index migration in production). sanitizer-redaction cannot depend on
+// decision-index (circular), so spin up the schema+table directly for the test.
+const CREATE_REFS = `
+  CREATE SCHEMA IF NOT EXISTS decision_index;
+  CREATE TABLE decision_index.protected_refs (
+    ulid text PRIMARY KEY,
+    decision_id text,
+    field text NOT NULL,
+    class text NOT NULL,
+    created_at text NOT NULL
+  );`;
 
-function makeStore() {
-  const sqlite = new Database(":memory:");
-  sqlite.exec(CREATE_REFS);
+async function makeStore() {
+  const client = new PGlite();
+  await client.exec(CREATE_REFS);
   const dir = mkdtempSync(join(tmpdir(), "pmws-"));
-  return { store: new ProtectedStore({ key: KEY, dir, db: drizzle(sqlite) }), dir, sqlite };
+  const db = drizzle(client) as unknown as Db;
+  return { store: new ProtectedStore({ key: KEY, dir, db }), dir, client };
 }
 
 describe("withholding sanitizer", () => {
-  let ctx: ReturnType<typeof makeStore>;
-  beforeEach(() => {
-    ctx = makeStore();
+  let ctx: Awaited<ReturnType<typeof makeStore>>;
+  beforeEach(async () => {
+    ctx = await makeStore();
   });
-  afterEach(() => {
-    ctx.sqlite.close();
+  afterEach(async () => {
+    await ctx.client.close();
     rmSync(ctx.dir, { recursive: true, force: true });
   });
 
@@ -38,7 +49,7 @@ describe("withholding sanitizer", () => {
     const w = r.withholdings[0]!;
     expect(w.field).toBe("question");
     expect(w.ref).toBe(r.content.question);
-    expect(ctx.store.get(w.ref)).toBe(JSON.stringify("secret"));
+    expect(await ctx.store.get(w.ref)).toBe(JSON.stringify("secret"));
   });
 
   it("uses a custom marker", async () => {
@@ -54,9 +65,9 @@ describe("withholding sanitizer", () => {
     expect(r.content).toEqual({ question: "x" });
   });
 
-  it("throws when input.subjectRef is missing or empty", () => {
+  it("rejects when input.subjectRef is missing or empty", async () => {
     const s = createWithholdingSanitizer({ fields: ["question"], store: ctx.store });
-    expect(() => s.sanitize({ content: { question: "x" } })).toThrow();
-    expect(() => s.sanitize({ content: { question: "x" }, subjectRef: "" })).toThrow();
+    await expect(s.sanitize({ content: { question: "x" } })).rejects.toThrow();
+    await expect(s.sanitize({ content: { question: "x" }, subjectRef: "" })).rejects.toThrow();
   });
 });

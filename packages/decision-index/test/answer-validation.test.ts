@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
-import { makeTempDb, type TempDb } from "./helpers/temp-db.js";
+import { makePgliteDb, type PgliteTestDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { apply } from "../src/state-machine.js";
 import { decisionResponses, auditLog, decisions } from "../src/schema.js";
@@ -7,20 +7,24 @@ import { eq } from "drizzle-orm";
 
 const NOW = "2026-05-27T01:00:00.000Z";
 
-function toViewed(db: TempDb["db"], id: string) {
-  apply(db, id, "notify", { semanticKey: "slack", now: NOW });
-  apply(db, id, "opened", { semanticKey: "daniel", now: NOW });
+async function toViewed(db: PgliteTestDb["db"], id: string) {
+  await apply(db, id, "notify", { semanticKey: "slack", now: NOW });
+  await apply(db, id, "opened", { semanticKey: "daniel", now: NOW });
 }
 
 describe("answer-schema validation (synchronous, pure)", () => {
-  let t: TempDb;
-  beforeEach(() => (t = makeTempDb()));
-  afterEach(() => t?.cleanup());
+  let t: PgliteTestDb;
+  beforeEach(async () => {
+    t = await makePgliteDb();
+  });
+  afterEach(async () => {
+    await t?.cleanup();
+  });
 
-  it("option not in options[] -> rejected, stays viewed, no response row", () => {
-    const id = seedDecision(t.db);
-    toViewed(t.db, id);
-    const r = apply(t.db, id, "answer_submitted", {
+  it("option not in options[] -> rejected, stays viewed, no response row", async () => {
+    const id = await seedDecision(t.db);
+    await toViewed(t.db, id);
+    const r = await apply(t.db, id, "answer_submitted", {
       semanticKey: "resp-1",
       now: NOW,
       answer: {
@@ -32,20 +36,20 @@ describe("answer-schema validation (synchronous, pure)", () => {
     });
     expect(r.applied).toBe(false);
     expect(r.rejected?.reason).toMatch(/not in options/);
-    expect(t.db.select().from(decisionResponses).all()).toHaveLength(0);
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    expect(await t.db.select().from(decisionResponses)).toHaveLength(0);
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("viewed");
   });
 
-  it("json answer failing answer_schema -> rejected", () => {
-    const id = seedDecision(t.db, {
+  it("json answer failing answer_schema -> rejected", async () => {
+    const id = await seedDecision(t.db, {
       answer_schema_json: JSON.stringify({
         kind: "json",
         schema: { type: "object", required: ["amount"] },
       }),
     });
-    toViewed(t.db, id);
-    const r = apply(t.db, id, "answer_submitted", {
+    await toViewed(t.db, id);
+    const r = await apply(t.db, id, "answer_submitted", {
       semanticKey: "resp-1",
       now: NOW,
       answer: {
@@ -57,11 +61,11 @@ describe("answer-schema validation (synchronous, pure)", () => {
     });
     expect(r.applied).toBe(false);
     expect(r.rejected?.reason).toMatch(/required/);
-    expect(t.db.select().from(decisionResponses).all()).toHaveLength(0);
+    expect(await t.db.select().from(decisionResponses)).toHaveLength(0);
   });
 
-  it("Finding 7: json answer with a WRONG-TYPED property is rejected (full JSON Schema validation, not just required[])", () => {
-    const id = seedDecision(t.db, {
+  it("Finding 7: json answer with a WRONG-TYPED property is rejected (full JSON Schema validation, not just required[])", async () => {
+    const id = await seedDecision(t.db, {
       answer_schema_json: JSON.stringify({
         kind: "json",
         schema: {
@@ -72,10 +76,10 @@ describe("answer-schema validation (synchronous, pure)", () => {
         },
       }),
     });
-    toViewed(t.db, id);
+    await toViewed(t.db, id);
     // amount present but a string, not a number -> the OLD impl (top-level
     // required-only) accepted this; full schema validation rejects it.
-    const r = apply(t.db, id, "answer_submitted", {
+    const r = await apply(t.db, id, "answer_submitted", {
       semanticKey: "resp-1",
       now: NOW,
       answer: {
@@ -87,11 +91,11 @@ describe("answer-schema validation (synchronous, pure)", () => {
     });
     expect(r.applied).toBe(false);
     expect(r.rejected?.reason).toMatch(/schema/);
-    expect(t.db.select().from(decisionResponses).all()).toHaveLength(0);
+    expect(await t.db.select().from(decisionResponses)).toHaveLength(0);
   });
 
-  it("Finding 7: json answer violating a numeric constraint (minimum) is rejected", () => {
-    const id = seedDecision(t.db, {
+  it("Finding 7: json answer violating a numeric constraint (minimum) is rejected", async () => {
+    const id = await seedDecision(t.db, {
       answer_schema_json: JSON.stringify({
         kind: "json",
         schema: {
@@ -101,8 +105,8 @@ describe("answer-schema validation (synchronous, pure)", () => {
         },
       }),
     });
-    toViewed(t.db, id);
-    const r = apply(t.db, id, "answer_submitted", {
+    await toViewed(t.db, id);
+    const r = await apply(t.db, id, "answer_submitted", {
       semanticKey: "resp-1",
       now: NOW,
       answer: {
@@ -116,8 +120,8 @@ describe("answer-schema validation (synchronous, pure)", () => {
     expect(r.rejected?.reason).toMatch(/schema/);
   });
 
-  it("Finding 7: a well-typed json answer is accepted", () => {
-    const id = seedDecision(t.db, {
+  it("Finding 7: a well-typed json answer is accepted", async () => {
+    const id = await seedDecision(t.db, {
       answer_schema_json: JSON.stringify({
         kind: "json",
         schema: {
@@ -127,8 +131,8 @@ describe("answer-schema validation (synchronous, pure)", () => {
         },
       }),
     });
-    toViewed(t.db, id);
-    const r = apply(t.db, id, "answer_submitted", {
+    await toViewed(t.db, id);
+    const r = await apply(t.db, id, "answer_submitted", {
       semanticKey: "resp-1",
       now: NOW,
       answer: {
@@ -139,13 +143,13 @@ describe("answer-schema validation (synchronous, pure)", () => {
       },
     });
     expect(r.applied).toBe(true);
-    expect(t.db.select().from(decisionResponses).all()).toHaveLength(1);
+    expect(await t.db.select().from(decisionResponses)).toHaveLength(1);
   });
 
-  it("accepted answer records answering + validated audit sub-steps, no durable answering/validated status", () => {
-    const id = seedDecision(t.db);
-    toViewed(t.db, id);
-    apply(t.db, id, "answer_submitted", {
+  it("accepted answer records answering + validated audit sub-steps, no durable answering/validated status", async () => {
+    const id = await seedDecision(t.db);
+    await toViewed(t.db, id);
+    await apply(t.db, id, "answer_submitted", {
       semanticKey: "resp-1",
       now: NOW,
       answer: {
@@ -155,10 +159,7 @@ describe("answer-schema validation (synchronous, pure)", () => {
         answered_at: NOW,
       },
     });
-    const events = t.db
-      .select()
-      .from(auditLog)
-      .all()
+    const events = (await t.db.select().from(auditLog))
       .filter((a) => a.decision_id === id)
       .map((a) => a.event);
     expect(events).toContain("answering");
@@ -166,12 +167,12 @@ describe("answer-schema validation (synchronous, pure)", () => {
     expect(events).toContain("answer_submitted");
 
     // no row ever has a durable answering/validated status
-    const statuses = t.db
-      .select({ status: decisions.status })
-      .from(decisions)
-      .where(eq(decisions.decision_id, id))
-      .all()
-      .map((r) => r.status);
+    const statuses = (
+      await t.db
+        .select({ status: decisions.status })
+        .from(decisions)
+        .where(eq(decisions.decision_id, id))
+    ).map((r) => r.status);
     expect(statuses).toEqual(["answered_pending_source_write"]);
   });
 });

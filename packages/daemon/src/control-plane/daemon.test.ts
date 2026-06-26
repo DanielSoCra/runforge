@@ -1,5 +1,5 @@
 // src/control-plane/daemon.test.ts
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +10,11 @@ import { DecisionIndexManager } from './decision-escalation/manager.js';
 import { buildL2GateRequest } from './decision-escalation/build-request.js';
 import { buildMergeDecisionRequest } from './merge-decision/build-request.js';
 import type { MergeDecision } from './merge-decision/types.js';
+import {
+  DECISION_DB_URL,
+  REAL_PG,
+  makeSchemaSerializer,
+} from './decision-escalation/__fixtures__/pg-test-harness.js';
 
 // --- Hoisted mocks (vi.mock factories are hoisted above all other code) ---
 
@@ -542,6 +547,20 @@ const loadDaemon = () => {
   vi.resetModules();
   return import('./daemon.js');
 };
+
+/**
+ * The decision-index Postgres suites fake ONLY the setInterval poll loop; the real
+ * postgres-js writer runs on REAL setTimeout/setImmediate + sockets. advanceTimers-
+ * ByTimeAsync fires the faked poll but returns before those real round-trips settle,
+ * so drain the real event loop until the daemon's async resume chain has finished
+ * before asserting on its Postgres-backed effects.
+ */
+async function settleRealAsync(turns = 60): Promise<void> {
+  // Use a small REAL delay per turn (setTimeout is unfaked in these suites) so each
+  // turn guarantees a full event-loop iteration — enough for the ~10 sequential
+  // localhost Postgres round-trips of a full answer→advanceToResumed resume chain.
+  for (let i = 0; i < turns; i++) await new Promise((r) => setTimeout(r, 5));
+}
 
 describe('daemon', () => {
   const signalHandlers: Record<string, () => Promise<void>> = {};
@@ -3582,7 +3601,8 @@ describe('daemon', () => {
       expect(mockRunPipeline).toHaveBeenCalled();
     });
 
-    describe('decision-index enabled mode (real writer over temp sqlite)', () => {
+    describe.skipIf(!REAL_PG)('decision-index enabled mode (real writer over real Postgres)', () => {
+      const serializer = makeSchemaSerializer();
       let dir: string;
       let manager: DecisionIndexManager;
 
@@ -3602,12 +3622,25 @@ describe('daemon', () => {
           1,
           'test-owner/test-repo',
         );
-        const { decision_id } = m.ledger().raise(req);
+        const { decision_id } = await m.ledger().raise(req);
         await m.ledger().notify(decision_id);
         return decision_id;
       };
 
-      beforeEach(() => {
+      beforeAll(() => serializer.lock());
+      afterAll(() => serializer.release());
+
+      beforeEach(async () => {
+        // The real postgres-js writer drives connect via setTimeout and write-flush
+        // via setImmediate, so those MUST stay REAL. The daemon poll loop is
+        // setInterval-driven, so fake ONLY setInterval/clearInterval/Date here. The
+        // parent beforeEach already installed a full useFakeTimers(); RESTORE real
+        // timers first (re-configuring without this leaves setTimeout/setImmediate
+        // faked → postgres-js hangs) then re-fake just the interval loop, so
+        // advanceTimersByTimeAsync still drives the poll while Postgres works.
+        vi.useRealTimers();
+        vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+        await serializer.resetSchema();
         dir = mkdtempSync(join(tmpdir(), 'daemon-decision-'));
       });
 
@@ -3619,7 +3652,7 @@ describe('daemon', () => {
       it('records the answer BEFORE save and drives the ledger to resumed AFTER save (crash-safe ordering)', async () => {
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 3).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -3631,38 +3664,48 @@ describe('daemon', () => {
         });
         mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
 
-        // Capture the ledger status at the instant saveRunState is invoked so we
-        // can prove the answer was recorded BEFORE the requeue commit.
-        let statusAtSave: string | undefined;
-        mockStateMgr.saveRunState.mockImplementation(async () => {
-          statusAtSave = manager.ledger().pending()[0]?.status;
-          return undefined;
-        });
-
         const { startDaemon } = await loadDaemon();
         // startDaemon calls manager.init() internally; seed AFTER it returns so
         // the row lands in the live writer.
         await startDaemon('config.json', { decisionManager: manager });
         const decisionId = await seedNotified(manager, 100);
 
+        // Prove the answer was recorded BEFORE the requeue commit. The async
+        // Postgres writer means the row's status can no longer be sampled
+        // synchronously inside the save mock, so compare invocation order of the
+        // real ledger.answer vs the durable resume save (same approach as the
+        // integrate-park CRASH-SAFE test).
+        const answerSpy = vi.spyOn(manager.ledger(), 'answer');
+
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
-        // Answer recorded before the save committed.
-        expect(statusAtSave).toBe('answered_pending_source_write');
+        // Answer recorded BEFORE the resume save committed (crash-safe ordering).
+        expect(answerSpy).toHaveBeenCalled();
+        const resumeSaveCall = mockStateMgr.saveRunState.mock.calls.findIndex((c) => {
+          const s = c[0] as Record<string, unknown>;
+          return s.issueNumber === 100 && s.pausedAtPhase === undefined;
+        });
+        expect(resumeSaveCall).toBeGreaterThanOrEqual(0);
+        expect(answerSpy.mock.invocationCallOrder[0]!).toBeLessThan(
+          mockStateMgr.saveRunState.mock.invocationCallOrder[resumeSaveCall]!,
+        );
         // After the tick, advanceToResumed drove the row to terminal `resumed`
         // (terminal rows are excluded from pending()).
-        const stillPending = manager
-          .ledger()
-          .pending()
-          .find((d) => d.decision_id === decisionId);
+        const stillPending = (await manager.ledger().pending()).find(
+          (d) => d.decision_id === decisionId,
+        );
         expect(stillPending).toBeUndefined();
       });
 
       it('records the answer once when the resume tick sees the label twice (answered-once)', async () => {
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 4).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -3687,15 +3730,16 @@ describe('daemon', () => {
         // .finally() clears activeIssues before the second scan.
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         // Row reached terminal resumed exactly once (no crash on the replayed
         // answer; second attempt failed closed without re-opening the row).
-        const stillPending = manager
-          .ledger()
-          .pending()
-          .find((d) => d.decision_id === decisionId);
+        const stillPending = (await manager.ledger().pending()).find(
+          (d) => d.decision_id === decisionId,
+        );
         expect(stillPending).toBeUndefined();
       });
 
@@ -3706,7 +3750,7 @@ describe('daemon', () => {
         // and strand the run. The label-driven requeue must still fire.
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 5).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -3724,6 +3768,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         // Not stuck: the requeue committed (phase reset) and the pipeline re-entered.
         expect(mockStateMgr.saveRunState).toHaveBeenCalledWith(
@@ -3739,7 +3784,7 @@ describe('daemon', () => {
       it('runs a periodic reconcile each tick (recovers crash-stranded in-flight effects)', async () => {
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 6).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -3753,6 +3798,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         expect(reconcileSpy).toHaveBeenCalled();
       });
@@ -3780,6 +3826,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         // Fail-closed: no requeue this tick, no pipeline re-entry, no phase reset.
         expect(mockRunPipeline).not.toHaveBeenCalled();
@@ -3799,7 +3846,7 @@ describe('daemon', () => {
         // re-notifies. This is the correct new behavior — gated, not reverted.
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 9).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -3824,6 +3871,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         // Extra GitHub round-trip happens ONLY when enabled.
         expect(mockOctokit.issues.listComments).toHaveBeenCalledWith(
@@ -3846,7 +3894,7 @@ describe('daemon', () => {
       it('FLAG ON: sanitizes {{placeholder}} patterns and caps length when capturing rejection feedback', async () => {
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 10).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -3867,6 +3915,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         const rejectedSave = mockStateMgr.saveRunState.mock.calls
           .map((c) => c[0] as Record<string, unknown>)
@@ -3885,7 +3934,8 @@ describe('daemon', () => {
     // close the loop: the EXACT parked run re-enters, idempotently, with NO
     // double-resume and NO duplicate run.
     // ----------------------------------------------------------------------
-    describe('cockpit answer consumer (Slice 2)', () => {
+    describe.skipIf(!REAL_PG)('cockpit answer consumer (Slice 2)', () => {
+      const serializer = makeSchemaSerializer();
       let dir: string;
       let manager: DecisionIndexManager;
 
@@ -3925,12 +3975,20 @@ describe('daemon', () => {
           1,
           'test-owner/test-repo',
         );
-        const { decision_id } = m.ledger().raise(req);
+        const { decision_id } = await m.ledger().raise(req);
         await m.ledger().notify(decision_id);
         return decision_id;
       };
 
-      beforeEach(() => {
+      beforeAll(() => serializer.lock());
+      afterAll(() => serializer.release());
+
+      beforeEach(async () => {
+        // Keep setTimeout/setImmediate REAL for the postgres-js writer; fake only the
+        // setInterval-driven poll loop. See the rationale in the enabled-mode describe.
+        vi.useRealTimers();
+        vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+        await serializer.resetSchema();
         dir = mkdtempSync(join(tmpdir(), 'daemon-cockpit-'));
       });
       afterEach(async () => {
@@ -3941,7 +3999,7 @@ describe('daemon', () => {
       it('HAPPY PATH: cockpit approve (answered label + DecisionResponse) re-enters the SAME run past l2-gate, no duplicate from ready', async () => {
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 20).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -3971,6 +4029,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         // NO duplicate run: detectReadyWork's claim must NOT have fired for #100.
         expect(mockDetector.claimWork).not.toHaveBeenCalledWith(100);
@@ -3985,14 +4044,14 @@ describe('daemon', () => {
           expect.objectContaining({ issue_number: 100, labels: ['l2-approved'] }),
         );
         // The ledger reached terminal resumed exactly once.
-        expect(manager.ledger().statusOf(decisionId)).toBe('resumed');
+        expect(await manager.ledger().statusOf(decisionId)).toBe('resumed');
         expect(mockRunPipeline).toHaveBeenCalled();
       });
 
       it('DOUBLE-DELIVERY: same answer seen across two ticks AND exposed to both pollers re-enters EXACTLY ONCE', async () => {
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 21).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -4024,8 +4083,10 @@ describe('daemon', () => {
         // Two full poll cycles (the answer is "delivered"/seen twice).
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         // EXACTLY ONE re-entry: the new-work poll never claimed #100, and the run
         // re-entered the pipeline exactly once across both ticks.
@@ -4036,13 +4097,13 @@ describe('daemon', () => {
         });
         expect(resumeReentries).toHaveLength(1);
         // Terminal resumed (recorded once; the replayed answer did not re-open it).
-        expect(manager.ledger().statusOf(decisionId)).toBe('resumed');
+        expect(await manager.ledger().statusOf(decisionId)).toBe('resumed');
       });
 
       it('REJECT PATH: cockpit reject lands at l2-design with l2Feedback populated from the rejection comment', async () => {
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 22).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -4067,6 +4128,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         const rejectedSave = mockStateMgr.saveRunState.mock.calls
           .map((c) => c[0] as Record<string, unknown>)
@@ -4088,7 +4150,7 @@ describe('daemon', () => {
       it('NO-ANSWER: answered/ready labels present but NO matching DecisionResponse comment -> stays parked', async () => {
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 23).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -4114,6 +4176,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         // Stays parked: no phase reset, no pipeline re-entry, ledger still notified.
         const resetSaves = mockStateMgr.saveRunState.mock.calls.filter(
@@ -4123,13 +4186,13 @@ describe('daemon', () => {
         );
         expect(resetSaves).toHaveLength(0);
         expect(mockRunPipeline).not.toHaveBeenCalled();
-        expect(manager.ledger().statusOf(decisionId)).toBe('notified');
+        expect(await manager.ledger().statusOf(decisionId)).toBe('notified');
       });
 
       it('removes the ready label on a committed cockpit resume (closes the duplicate-work loop)', async () => {
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 24).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -4153,6 +4216,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         expect(mockOctokit.issues.removeLabel).toHaveBeenCalledWith(
           expect.objectContaining({ name: 'ready', issue_number: 100 }),
@@ -4174,7 +4238,8 @@ describe('daemon', () => {
     // byte-identical (a separate, parallel branch handles `integrate`).
     // RED until Kimi adds the integrate branch to resumeParkedRuns.
     // ----------------------------------------------------------------------
-    describe('integrate park resume (follow-up #9)', () => {
+    describe.skipIf(!REAL_PG)('integrate park resume (follow-up #9)', () => {
+      const serializer = makeSchemaSerializer();
       let dir: string;
       let manager: DecisionIndexManager;
 
@@ -4250,12 +4315,20 @@ describe('daemon', () => {
           'test-owner/test-repo',
           decision,
         );
-        const { decision_id } = m.ledger().raise(req);
+        const { decision_id } = await m.ledger().raise(req);
         await m.ledger().notify(decision_id);
         return decision_id;
       };
 
-      beforeEach(() => {
+      beforeAll(() => serializer.lock());
+      afterAll(() => serializer.release());
+
+      beforeEach(async () => {
+        // Keep setTimeout/setImmediate REAL for the postgres-js writer; fake only the
+        // setInterval-driven poll loop. See the rationale in the enabled-mode describe.
+        vi.useRealTimers();
+        vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+        await serializer.resetSchema();
         dir = mkdtempSync(join(tmpdir(), 'daemon-integrate-park-'));
       });
       afterEach(async () => {
@@ -4266,7 +4339,7 @@ describe('daemon', () => {
       it('APPROVE: cockpit approve re-enters integrate with mergeDecisionApprovedEpoch === mergeDecisionEpoch, pausedAtPhase cleared, ledger answered+resumed', async () => {
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 30).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -4287,6 +4360,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         const resumedSave = mockStateMgr.saveRunState.mock.calls
           .map((c) => c[0] as Record<string, unknown>)
@@ -4298,7 +4372,7 @@ describe('daemon', () => {
         expect(resumedSave?.mergeDecisionApprovedEpoch).toBe(1);
         expect(resumedSave?.mergeDecisionEpoch).toBe(1);
         // The ledger reached terminal resumed exactly once.
-        expect(manager.ledger().statusOf(decisionId)).toBe('resumed');
+        expect(await manager.ledger().statusOf(decisionId)).toBe('resumed');
         expect(mockRunPipeline).toHaveBeenCalled();
         // The cockpit `ready` requeue label is stripped so detectReadyWork cannot
         // reclaim the resumed issue and start a duplicate run (codex r5).
@@ -4310,7 +4384,7 @@ describe('daemon', () => {
       it('APPROVE (legacy/migrated): a parked run with NO mergeDecisionEpoch resolves the epoch to 1 and stores it on BOTH fields so the integrate handler honors it (codex r4)', async () => {
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 31).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -4336,6 +4410,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         const resumedSave = mockStateMgr.saveRunState.mock.calls
           .map((c) => c[0] as Record<string, unknown>)
@@ -4345,14 +4420,14 @@ describe('daemon', () => {
         // Both fields defaulted to 1 and EQUAL — the override is honorable.
         expect(resumedSave?.mergeDecisionEpoch).toBe(1);
         expect(resumedSave?.mergeDecisionApprovedEpoch).toBe(1);
-        expect(manager.ledger().statusOf(decisionId)).toBe('resumed');
+        expect(await manager.ledger().statusOf(decisionId)).toBe('resumed');
         expect(mockRunPipeline).toHaveBeenCalled();
       });
 
       it('APPROVE (pre-rename park): a stored request whose approve option is the legacy `approve-merge` resumes — the daemon answers the ledger with the RAW id so state-machine option validation passes (codex P1)', async () => {
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 32).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -4396,11 +4471,12 @@ describe('daemon', () => {
             { id: 'reject', label: 'Reject and send back for rework.' },
           ],
         };
-        const { decision_id } = manager.ledger().raise(legacyReq);
+        const { decision_id } = await manager.ledger().raise(legacyReq);
         await manager.ledger().notify(decision_id);
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         const resumedSave = mockStateMgr.saveRunState.mock.calls
           .map((c) => c[0] as Record<string, unknown>)
@@ -4410,14 +4486,14 @@ describe('daemon', () => {
         expect(resumedSave?.mergeDecisionApprovedEpoch).toBe(1);
         // The ledger ACCEPTED the raw `approve-merge` answer and reached resumed —
         // it would have thrown AnswerRejectedError on a normalized `approve`.
-        expect(manager.ledger().statusOf(decision_id)).toBe('resumed');
+        expect(await manager.ledger().statusOf(decision_id)).toBe('resumed');
         expect(mockRunPipeline).toHaveBeenCalled();
       });
 
       it('REJECT: cockpit reject routes to implement with mergeDecisionFeedback captured + mergeDecisionBlockPublished reset, ledger answered+resumed', async () => {
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 31).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -4441,6 +4517,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         const rejectedSave = mockStateMgr.saveRunState.mock.calls
           .map((c) => c[0] as Record<string, unknown>)
@@ -4457,14 +4534,14 @@ describe('daemon', () => {
         expect(rejectedSave?.mergeDecisionBlockPublished).toBe(false);
         // No approve override is set on a reject.
         expect(rejectedSave?.mergeDecisionApprovedEpoch).toBeUndefined();
-        expect(manager.ledger().statusOf(decisionId)).toBe('resumed');
+        expect(await manager.ledger().statusOf(decisionId)).toBe('resumed');
         expect(mockRunPipeline).toHaveBeenCalled();
       });
 
       it('NO-ANSWER: notified but NO matching DecisionResponse for this epoch -> stays parked at integrate', async () => {
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 32).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -4486,6 +4563,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         // Stays parked: no resume-save (pausedAtPhase cleared) happened.
         const resetSaves = mockStateMgr.saveRunState.mock.calls.filter(
@@ -4495,13 +4573,13 @@ describe('daemon', () => {
         );
         expect(resetSaves).toHaveLength(0);
         expect(mockRunPipeline).not.toHaveBeenCalled();
-        expect(manager.ledger().statusOf(decisionId)).toBe('notified');
+        expect(await manager.ledger().statusOf(decisionId)).toBe('notified');
       });
 
       it('CRASH-SAFE: ledger.answer is recorded BEFORE saveRunState on an integrate resume', async () => {
         manager = new DecisionIndexManager({
           enabled: true,
-          dbPath: join(dir, 'index.sqlite'),
+          databaseUrl: DECISION_DB_URL!,
           protectedKey: Buffer.alloc(32, 33).toString('base64'),
           protectedDir: join(dir, 'protected'),
         });
@@ -4526,6 +4604,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
 
         // Both must have happened, and answer must precede the durable save so a
         // crash between them never advances on an unrecorded answer.

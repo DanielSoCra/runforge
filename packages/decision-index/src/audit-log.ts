@@ -26,19 +26,24 @@ export interface AuditEntry {
   trace_id?: string | null;
 }
 
-/** Append one audit row. The caller is responsible for never passing plaintext. */
-export function appendAudit(db: Db, entry: AuditEntry): void {
-  db.insert(auditLog)
-    .values({
-      decision_id: entry.decision_id,
-      from_status: entry.from ?? null,
-      to_status: entry.to ?? null,
-      event: entry.event,
-      transition_key: entry.transition_key ?? null,
-      actor: entry.actor ?? null,
-      at: entry.at,
-      detail_json: entry.detail !== undefined ? JSON.stringify(entry.detail) : null,
-      trace_id: entry.trace_id ?? null,
-    })
-    .run();
+/**
+ * Append one audit row. The caller is responsible for never passing plaintext.
+ *
+ * tx-scoped: `db` here is ALWAYS a writer transaction (the caller opens the
+ * withTx and passes its tx), so this does NOT open its own withTx — it just
+ * awaits the insert on the supplied tx. A caller that appends outside an open
+ * tx (e.g. revealProtected) must wrap it in withTx itself (spec §3.5a).
+ */
+export async function appendAudit(db: Db, entry: AuditEntry): Promise<void> {
+  await db.insert(auditLog).values({
+    decision_id: entry.decision_id,
+    from_status: entry.from ?? null,
+    to_status: entry.to ?? null,
+    event: entry.event,
+    transition_key: entry.transition_key ?? null,
+    actor: entry.actor ?? null,
+    at: entry.at,
+    detail_json: entry.detail !== undefined ? JSON.stringify(entry.detail) : null,
+    trace_id: entry.trace_id ?? null,
+  });
 }

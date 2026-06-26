@@ -2743,6 +2743,7 @@ describe('createPhaseHandlers', () => {
       const ledger = vi.fn();
       const disabled = {
         isEnabled: () => false,
+        isAvailable: () => false,
         ledger,
       } as unknown as import('./decision-escalation/manager.js').DecisionIndexManager;
       const { handlers } = createHandlers(
@@ -2767,6 +2768,7 @@ describe('createPhaseHandlers', () => {
       const notify = vi.fn().mockResolvedValue({ applied: true, status: 'notified' });
       const enabled = {
         isEnabled: () => true,
+        isAvailable: () => true,
         ledger: () => ({ raise, notify }),
       } as unknown as import('./decision-escalation/manager.js').DecisionIndexManager;
       // Inject a publisher stub: notify happens only AFTER a confirmed publish
@@ -2796,6 +2798,7 @@ describe('createPhaseHandlers', () => {
       });
       const enabled = {
         isEnabled: () => true,
+        isAvailable: () => true,
         ledger: () => {
           throw new Error('decision index unavailable');
         },
@@ -2824,6 +2827,7 @@ describe('createPhaseHandlers', () => {
         const notify = vi.fn().mockResolvedValue({ applied: true, status: 'notified' });
         const manager = {
           isEnabled: () => true,
+          isAvailable: () => true,
           ledger: () => ({ raise, notify }),
         } as unknown as import('./decision-escalation/manager.js').DecisionIndexManager;
         return { manager, raise, notify };
@@ -2863,6 +2867,7 @@ describe('createPhaseHandlers', () => {
         const ensure = vi.fn();
         const disabled = {
           isEnabled: () => false,
+          isAvailable: () => false,
           ledger: vi.fn(),
         } as unknown as import('./decision-escalation/manager.js').DecisionIndexManager;
         const { handlers } = createHandlers(

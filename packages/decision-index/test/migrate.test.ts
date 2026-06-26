@@ -1,10 +1,23 @@
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect, afterEach } from "vitest";
-import { makeTempDb, type TempDb } from "./helpers/temp-db.js";
-import { migrate } from "../src/migrate.js";
+import { eq } from "drizzle-orm";
+import { drizzle as pgliteDrizzle } from "drizzle-orm/pglite";
+import { migrate as pgliteMigrate } from "drizzle-orm/pglite/migrator";
+import { makePgliteDb, type PgliteTestDb } from "./helpers/temp-db.js";
+import { decisions } from "../src/schema.js";
+import * as schema from "../src/schema.js";
 
-describe("migrate (on-disk temp SQLite)", () => {
-  let t: TempDb;
-  afterEach(() => t?.cleanup());
+const migrationsFolder = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../drizzle",
+);
+
+describe("migrate (in-memory PGlite, decision_index schema)", () => {
+  let t: PgliteTestDb;
+  afterEach(async () => {
+    await t?.cleanup();
+  });
 
   const expectedTables = [
     "decisions",
@@ -17,65 +30,94 @@ describe("migrate (on-disk temp SQLite)", () => {
     "quarantine_events",
   ];
 
-  it("creates all tables", () => {
-    t = makeTempDb();
-    const rows = t.db.$client
-      .prepare("SELECT name FROM sqlite_master WHERE type='table'")
-      .all() as { name: string }[];
-    const names = new Set(rows.map((r) => r.name));
+  async function pkColumns(table: string): Promise<string[]> {
+    const res = await t.client.query<{ column_name: string }>(
+      `SELECT kcu.column_name
+         FROM information_schema.table_constraints tc
+         JOIN information_schema.key_column_usage kcu
+           ON tc.constraint_name = kcu.constraint_name
+          AND tc.table_schema = kcu.table_schema
+        WHERE tc.constraint_type = 'PRIMARY KEY'
+          AND tc.table_schema = 'decision_index'
+          AND tc.table_name = $1
+        ORDER BY kcu.ordinal_position`,
+      [table],
+    );
+    return res.rows.map((r) => r.column_name);
+  }
+
+  it("creates all tables in the decision_index schema", async () => {
+    t = await makePgliteDb();
+    const res = await t.client.query<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'decision_index'",
+    );
+    const names = new Set(res.rows.map((r) => r.table_name));
     for (const tbl of expectedTables) {
       expect(names.has(tbl), `missing table ${tbl}`).toBe(true);
     }
   });
 
-  it("enables WAL journal mode", () => {
-    t = makeTempDb();
-    const mode = t.db.$client.pragma("journal_mode", { simple: true });
-    expect(String(mode).toLowerCase()).toBe("wal");
+  it("decision_responses PK is decision_id (answered-once)", async () => {
+    t = await makePgliteDb();
+    expect(await pkColumns("decision_responses")).toEqual(["decision_id"]);
   });
 
-  it("decision_responses PK is decision_id (answered-once)", () => {
-    t = makeTempDb();
-    const pk = t.db.$client
-      .prepare("PRAGMA table_info('decision_responses')")
-      .all() as { name: string; pk: number }[];
-    const pkCols = pk.filter((c) => c.pk > 0).map((c) => c.name);
-    expect(pkCols).toEqual(["decision_id"]);
+  it("applied_transitions PK is (decision_id, transition_key)", async () => {
+    t = await makePgliteDb();
+    expect(await pkColumns("applied_transitions")).toEqual([
+      "decision_id",
+      "transition_key",
+    ]);
   });
 
-  it("applied_transitions PK is (decision_id, transition_key)", () => {
-    t = makeTempDb();
-    const pk = t.db.$client
-      .prepare("PRAGMA table_info('applied_transitions')")
-      .all() as { name: string; pk: number }[];
-    const pkCols = pk
-      .filter((c) => c.pk > 0)
-      .sort((a, b) => a.pk - b.pk)
-      .map((c) => c.name);
-    expect(pkCols).toEqual(["decision_id", "transition_key"]);
-  });
-
-  it("outbox carries the CRITICAL 1 claim-lease column (claimed_at)", () => {
-    t = makeTempDb();
-    const cols = t.db.$client
-      .prepare("PRAGMA table_info('outbox')")
-      .all() as { name: string }[];
-    const names = new Set(cols.map((c) => c.name));
+  it("outbox carries the CRITICAL 1 lease + owner columns (claimed_at, claimed_by)", async () => {
+    t = await makePgliteDb();
+    const res = await t.client.query<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_schema='decision_index' AND table_name='outbox'",
+    );
+    const names = new Set(res.rows.map((r) => r.column_name));
     expect(names.has("claimed_at")).toBe(true);
-  });
-
-  it("outbox carries the CRITICAL 1 owner-token column (claimed_by, migration 0005)", () => {
-    t = makeTempDb();
-    const cols = t.db.$client
-      .prepare("PRAGMA table_info('outbox')")
-      .all() as { name: string }[];
-    const names = new Set(cols.map((c) => c.name));
     expect(names.has("claimed_by")).toBe(true);
   });
 
-  it("is idempotent across repeated startup", () => {
-    t = makeTempDb();
-    // re-running migrate must not throw
-    expect(() => migrate(t.db)).not.toThrow();
+  it("round-trips an insert/select through drizzle", async () => {
+    t = await makePgliteDb();
+    const now = new Date().toISOString();
+    await t.db.insert(decisions).values({
+      decision_id: "d1",
+      protocol_version: "1",
+      status: "open",
+      source_url: "https://example.test/1",
+      deployment: "dep",
+      run_id: "r1",
+      risk_class: "GREEN",
+      question: "q",
+      options_json: "[]",
+      answer_schema_json: "{}",
+      resume_mode: "mid_run",
+      idempotency_key: "idem-1",
+      created_at: now,
+      updated_at: now,
+    });
+    const got = await t.db
+      .select()
+      .from(decisions)
+      .where(eq(decisions.decision_id, "d1"));
+    expect(got.length).toBe(1);
+    // booleans default false (mapped from integer(boolean))
+    expect(got[0]?.stale).toBe(false);
+  });
+
+  it("is idempotent across repeated startup", async () => {
+    t = await makePgliteDb();
+    // Re-running the migrator on the same db must be a no-op (tracked in
+    // decision_index.__drizzle_migrations), not an error. Re-derive a pglite-typed
+    // drizzle over the same client (t.db is typed as the production Db).
+    await expect(
+      pgliteMigrate(pgliteDrizzle(t.client, { schema }), {
+        migrationsFolder,
+        migrationsSchema: "decision_index",
+      }),
+    ).resolves.toBeUndefined();
   });
 });

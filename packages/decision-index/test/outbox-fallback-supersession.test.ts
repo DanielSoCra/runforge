@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
-import { makeTempDb, type TempDb } from "./helpers/temp-db.js";
+import { makePgliteDb, type PgliteTestDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { makeOutbox, answerItem } from "./helpers/effect-driver.js";
 import { decisions, outbox as outboxTable, workerSessions } from "../src/schema.js";
 
-async function toSourceWritten(t: TempDb, f: ReturnType<typeof makeOutbox>, id: string) {
+async function toSourceWritten(t: PgliteTestDb, f: ReturnType<typeof makeOutbox>, id: string) {
   await answerItem(t, f.outbox, id);
   await f.outbox.runEffect(id, "write_response"); // -> source_written
 }
@@ -21,28 +21,31 @@ async function toSourceWritten(t: TempDb, f: ReturnType<typeof makeOutbox>, id: 
  * requeue is reserved, so reconcile re-executes ONLY the live requeue.
  */
 describe("absent-reserved recovery: resume/requeue supersession", () => {
-  let t: TempDb;
-  beforeEach(() => (t = makeTempDb()));
-  afterEach(() => t?.cleanup());
+  let t: PgliteTestDb;
+  beforeEach(async () => {
+    t = await makePgliteDb();
+  });
+  afterEach(async () => {
+    await t?.cleanup();
+  });
 
   it("BOTH resume (absent) AND fallback requeue (absent) reserved -> reconcile dispatches ONLY requeue", async () => {
-    const id = seedDecision(t.db, { resume_mode: "mid_run" });
-    t.db
+    const id = await seedDecision(t.db, { resume_mode: "mid_run" });
+    await t.db
       .insert(workerSessions)
-      .values({ decision_id: id, requeue_command: "rq", work_request_ref: "wr-1" })
-      .run();
+      .values({ decision_id: id, requeue_command: "rq", work_request_ref: "wr-1" });
     const f = makeOutbox(t);
     await toSourceWritten(t, f, id);
 
-    const resumeId = f.outbox.effectIdFor(id, "resume");
-    const requeueId = f.outbox.effectIdFor(id, "requeue");
+    const resumeId = await f.outbox.effectIdFor(id, "resume");
+    const requeueId = await f.outbox.effectIdFor(id, "requeue");
     expect(resumeId).not.toBe(requeueId);
 
     // Crash window: the mid_run resume probed unreachable, the fallback reserved a
     // requeue (which supersedes the resume), but the worker crashed BEFORE either
     // executed. So BOTH rows are `reserved` and BOTH probe ABSENT. The resume row
     // carries the durable `superseded` marker set when the fallback was reserved.
-    t.db
+    await t.db
       .insert(outboxTable)
       .values({
         id: resumeId,
@@ -53,9 +56,8 @@ describe("absent-reserved recovery: resume/requeue supersession", () => {
         superseded: true, // marked superseded by the fallback requeue
         attempts: 0,
         created_at: "2026-05-27T01:59:00.000Z",
-      })
-      .run();
-    t.db
+      });
+    await t.db
       .insert(outboxTable)
       .values({
         id: requeueId,
@@ -65,8 +67,7 @@ describe("absent-reserved recovery: resume/requeue supersession", () => {
         state: "reserved",
         attempts: 0,
         created_at: "2026-05-27T01:59:30.000Z",
-      })
-      .run();
+      });
     // Neither applied: both probe absent.
 
     const results = await f.outbox.reconcile();
@@ -82,33 +83,29 @@ describe("absent-reserved recovery: resume/requeue supersession", () => {
     // A4: a confirmed requeue lands directly in terminal `resumed`.
     expect(mine.status).toBe("resumed");
 
-    const row = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row.status).toBe("resumed");
 
     // No stuck reserved rows: requeue committed, the superseded resume is resolved
     // (not left lingering as reserved+live).
-    const reservedAfter = t.db
-      .select()
-      .from(outboxTable)
-      .where(eq(outboxTable.decision_id, id))
-      .all()
-      .filter((o) => o.state === "reserved" && !o.superseded);
+    const reservedAfter = (
+      await t.db.select().from(outboxTable).where(eq(outboxTable.decision_id, id))
+    ).filter((o) => o.state === "reserved" && !o.superseded);
     expect(reservedAfter.length).toBe(0);
 
     // A second reconcile is a no-op (no further dispatch, no state change).
     const callsBefore = f.resumeDispatcher.calls.length;
     await f.outbox.reconcile();
     expect(f.resumeDispatcher.calls.length).toBe(callsBefore);
-    const row2 = t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!;
+    const row2 = (await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!;
     expect(row2.status).toBe("resumed");
   });
 
   it("UNIFIED GUARD: after fallback supersedes the resume row and requeue fails (status still source_written), a retry runEffect(resume) does NOT dispatch a mid_run wake", async () => {
-    const id = seedDecision(t.db, { resume_mode: "mid_run" });
-    t.db
+    const id = await seedDecision(t.db, { resume_mode: "mid_run" });
+    await t.db
       .insert(workerSessions)
-      .values({ decision_id: id, wake_command: "wake", requeue_command: "rq", work_request_ref: "wr-1" })
-      .run();
+      .values({ decision_id: id, wake_command: "wake", requeue_command: "rq", work_request_ref: "wr-1" });
     const f = makeOutbox(t);
     await toSourceWritten(t, f, id); // -> source_written
 
@@ -119,11 +116,11 @@ describe("absent-reserved recovery: resume/requeue supersession", () => {
     f.resumeDispatcher.results = ["unreachable", "failed"];
     const r = await f.outbox.runEffect(id, "resume");
     expect(r.outcome).toBe("failed");
-    expect(t.db.select().from(decisions).where(eq(decisions.decision_id, id)).all()[0]!.status).toBe(
+    expect((await t.db.select().from(decisions).where(eq(decisions.decision_id, id)))[0]!.status).toBe(
       "source_written",
     );
-    const resumeId = f.outbox.effectIdFor(id, "resume");
-    const resumeRow = t.db.select().from(outboxTable).where(eq(outboxTable.id, resumeId)).all()[0]!;
+    const resumeId = await f.outbox.effectIdFor(id, "resume");
+    const resumeRow = (await t.db.select().from(outboxTable).where(eq(outboxTable.id, resumeId)))[0]!;
     expect(resumeRow.superseded).toBe(true);
 
     const midRunBefore = f.resumeDispatcher.calls.filter((c) => c.mode === "mid_run").length;
@@ -140,29 +137,25 @@ describe("absent-reserved recovery: resume/requeue supersession", () => {
     expect(midRunAfter).toBe(midRunBefore);
 
     // The live recovery path is the requeue, which is still reserved+live.
-    const liveRequeue = t.db
-      .select()
-      .from(outboxTable)
-      .where(eq(outboxTable.decision_id, id))
-      .all()
-      .filter((o) => o.kind === "requeue" && o.state === "reserved" && !o.superseded);
+    const liveRequeue = (
+      await t.db.select().from(outboxTable).where(eq(outboxTable.decision_id, id))
+    ).filter((o) => o.kind === "requeue" && o.state === "reserved" && !o.superseded);
     expect(liveRequeue.length).toBe(1);
   });
 
   it("lone resume (absent) reserved, no fallback -> reconcile still re-executes resume", async () => {
-    const id = seedDecision(t.db, { resume_mode: "mid_run" });
-    t.db
+    const id = await seedDecision(t.db, { resume_mode: "mid_run" });
+    await t.db
       .insert(workerSessions)
-      .values({ decision_id: id, wake_command: "wake", requeue_command: "rq", work_request_ref: "wr-1" })
-      .run();
+      .values({ decision_id: id, wake_command: "wake", requeue_command: "rq", work_request_ref: "wr-1" });
     const f = makeOutbox(t);
     await toSourceWritten(t, f, id);
 
-    const resumeId = f.outbox.effectIdFor(id, "resume");
+    const resumeId = await f.outbox.effectIdFor(id, "resume");
 
     // Only a resume reservation, absent, NOT superseded — the worker is reachable
     // again on retry, so the resume must re-execute as a mid_run wake.
-    t.db
+    await t.db
       .insert(outboxTable)
       .values({
         id: resumeId,
@@ -172,8 +165,7 @@ describe("absent-reserved recovery: resume/requeue supersession", () => {
         state: "reserved",
         attempts: 0,
         created_at: "2026-05-27T01:59:00.000Z",
-      })
-      .run();
+      });
 
     const results = await f.outbox.reconcile();
 

@@ -30,10 +30,10 @@ export type DecisionRow = typeof decisions.$inferInsert;
  * enforcement is config-driven via the sanitization pipeline (ARCH-AC-SANITIZATION),
  * selected per deployment; core ingest remains content-agnostic.
  */
-export function ingest(
+export async function ingest(
   rawRequest: unknown,
   deps: IngestDeps,
-): { decisionRow: DecisionRow; request: DecisionRequest } {
+): Promise<{ decisionRow: DecisionRow; request: DecisionRequest }> {
   const clock = deps.clock ?? (() => new Date());
 
   // Parse syntactically. A parse failure is a fail-closed quarantine.
@@ -41,7 +41,7 @@ export function ingest(
   if (!parsed.success) {
     // Parse failure: source_url/source_event_id are operational and passed plainly.
     const raw = rawRequest as Record<string, unknown>;
-    deps.quarantine.record({
+    await deps.quarantine.record({
       source_url: typeof raw.source_url === "string" ? raw.source_url : undefined,
       source_event_id: typeof raw.source_event_id === "string" ? raw.source_event_id : undefined,
       reason: "schema_invalid",
@@ -62,7 +62,7 @@ export function ingest(
   // A concrete mismatch is QUARANTINED content-free (the version string is
   // operational, never PHI) and NOT admitted — drift is surfaced, not absorbed.
   if (request.protocol_version !== PROTOCOL_VERSION) {
-    deps.quarantine.record({
+    await deps.quarantine.record({
       decision_id: request.decision_id,
       source_url: request.source_url,
       source_event_id: request.source_event_id,
