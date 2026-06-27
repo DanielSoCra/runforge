@@ -35,15 +35,34 @@ jobs:
       # with any local Postgres) and export the connection URL.
       - name: Start Postgres
         run: |
-          docker rm -f "ci-pg-${{ github.run_id }}" 2>/dev/null || true
-          docker run -d --name "ci-pg-${{ github.run_id }}" \
+          set -u
+          CONTAINER="ci-pg-${{ github.run_id }}"
+          docker rm -f "$CONTAINER" 2>/dev/null || true
+          docker run -d --name "$CONTAINER" \
             -e POSTGRES_DB=auto_claude_ci -e POSTGRES_USER=auto_claude -e POSTGRES_PASSWORD=auto_claude \
             -p 127.0.0.1::5432 postgres:18-alpine
+          # Wait for readiness and FAIL FAST if it never comes: otherwise the loop
+          # falls through silently and PG_URL points at a non-ready DB, surfacing as
+          # opaque connection errors deep in the decision-index suite instead of here.
+          ready=""
           for i in $(seq 1 30); do
-            if docker exec "ci-pg-${{ github.run_id }}" pg_isready -U auto_claude -d auto_claude_ci >/dev/null 2>&1; then break; fi
+            if docker exec "$CONTAINER" pg_isready -U auto_claude -d auto_claude_ci >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
             sleep 1
           done
-          PORT="$(docker port "ci-pg-${{ github.run_id }}" 5432/tcp | head -1 | sed 's/.*://')"
+          if [ -z "$ready" ]; then
+            echo "::error::Postgres did not become ready within 30s — failing fast."
+            docker logs "$CONTAINER" 2>&1 | tail -50 || true
+            exit 1
+          fi
+          PORT="$(docker port "$CONTAINER" 5432/tcp | head -1 | sed 's/.*://')"
+          if [ -z "$PORT" ]; then
+            echo "::error::Could not resolve mapped Postgres host port (container may have exited)."
+            docker logs "$CONTAINER" 2>&1 | tail -50 || true
+            exit 1
+          fi
           echo "PG_URL=postgres://auto_claude:auto_claude@127.0.0.1:${PORT}/auto_claude_ci" >> "$GITHUB_ENV"
 
       - name: Lint
