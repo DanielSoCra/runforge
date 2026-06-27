@@ -542,6 +542,7 @@ STACK-AC-CONVENTIONS:
     - .husky/pre-commit
     - .husky/pre-push
     - package.json
+    - scripts/check-ci-workflows.mjs
     - packages/daemon/package.json
     - packages/daemon/eslint.config.js
     - packages/daemon/.eslint-suppressions.json
@@ -556,6 +557,7 @@ STACK-AC-CONVENTIONS:
   test_paths:
     - packages/daemon/src/**/*.test.ts
     - packages/daemon/src/lib/structured-output.test.ts
+    - scripts/check-ci-workflows.test.mjs
   status: draft
 
 STACK-AC-CONTROL-PLANE:
