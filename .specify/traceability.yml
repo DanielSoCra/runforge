@@ -540,6 +540,7 @@ STACK-AC-CONVENTIONS:
   code_paths:
     - .github/workflows/ci.yml
     - .husky/pre-commit
+    - .husky/pre-push
     - package.json
     - packages/daemon/package.json
     - packages/daemon/eslint.config.js
