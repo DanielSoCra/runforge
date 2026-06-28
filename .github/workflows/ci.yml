@@ -36,6 +36,16 @@ jobs:
       - name: Start Postgres
         run: |
           set -u
+          # Preflight: this whole step depends on a running Docker daemon on the
+          # self-hosted macOS runner. If Docker is stopped, `docker run` below
+          # fails with an opaque "Cannot connect to the Docker daemon at
+          # unix:///…/docker.sock" several lines in; surface it here with an
+          # actionable message instead (mirrors the Postgres readiness fail-fast
+          # below — same "fail fast with a clear message" principle as RC-3, #788).
+          if ! docker info >/dev/null 2>&1; then
+            echo "::error::Docker daemon is not running on the self-hosted runner — start it (e.g. \`open -a Docker\` or \`colima start\`) so CI can launch the Postgres container."
+            exit 1
+          fi
           CONTAINER="ci-pg-${{ github.run_id }}"
           docker rm -f "$CONTAINER" 2>/dev/null || true
           docker run -d --name "$CONTAINER" \
