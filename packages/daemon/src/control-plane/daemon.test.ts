@@ -541,11 +541,28 @@ const makeWorkRequest = (overrides?: Partial<WorkRequest>): WorkRequest => ({
   ...overrides,
 });
 
-// daemon.ts has module-level state (dailyRunCount, dailyRunCountResetDate),
-// so we reset modules before each import to ensure a fresh state per test.
-const loadDaemon = () => {
-  vi.resetModules();
-  return import('./daemon.js');
+// daemon.ts's daily run-count module state (dailyRunState) is reset via the exported
+// __resetDailyRunStateForTests() instead of vi.resetModules()+re-import, so the large
+// daemon.js graph is imported ONCE (warm) and reused across the suite rather than cold
+// esbuild-transformed per test. That per-test cold re-import is what flaked CI under
+// shared-runner contention (RC-3, #770); with the resettable holder it is gone.
+// Hoisted vi.mock() factories stay applied across the cached import, and per-test mock
+// state is reset by beforeEach/afterEach — so the run-count holder is the only daemon.ts
+// state needing an explicit per-test reset. (The one test that uses vi.doMock to swap a
+// dependency must still re-import cold — it does so inline, then evicts it.)
+//
+// FORWARD-INVARIANT (codex review, #790): warm-reuse is safe ONLY because every OTHER
+// module-level mutable singleton reachable from the daemon.js graph is neutralized for
+// tests — promptCache (session-runtime/runtime.ts), `active` (managed-processes.ts) and
+// repoGitLock (control-plane/phases.ts) are hoisted-vi.mock()'d out, and governanceCache
+// (session-runtime/governance-context.ts) is short-circuited in test mode. If you add a
+// NEW module-scope mutable singleton to that graph, neutralize it the same way (a hoisted
+// vi.mock, a test-mode bypass, or its own __resetForTests() called here) — otherwise it
+// leaks across the 100+ warm loadDaemon() calls and reintroduces an RC-3-class flake.
+const loadDaemon = async () => {
+  const mod = await import('./daemon.js');
+  mod.__resetDailyRunStateForTests();
+  return mod;
 };
 
 /**
@@ -778,6 +795,16 @@ describe('daemon', () => {
     for (const key in signalHandlers) delete signalHandlers[key];
   });
 
+  it('RC-3 root-cause guard: loadDaemon imports warm and does NOT reset modules', () => {
+    // The whole point of the dailyRunState holder + __resetDailyRunStateForTests is
+    // that loadDaemon() stops cold-re-importing daemon.js per test (RC-3, #770). If
+    // someone re-adds vi.resetModules() to the helper, the 131 cold imports come back.
+    // (The single vi.doMock test still resets modules inline — that's intentional and
+    // not covered by this helper-scoped guard.)
+    expect(loadDaemon.toString()).not.toMatch(/resetModules/);
+    expect(loadDaemon.toString()).toContain('__resetDailyRunStateForTests');
+  });
+
   describe('startDaemon', () => {
     it('returns error when GITHUB_TOKEN is not set', async () => {
       const originalToken = process.env.GITHUB_TOKEN;
@@ -962,50 +989,65 @@ describe('daemon', () => {
           sessionContinuation: false,
         }),
       };
-      vi.doMock('../session-runtime/adapters/index.js', () => ({
-        createProviderAdapter: vi.fn().mockReturnValue(failingAdapter),
-        createAdapter: vi.fn(),
-        CliAdapter: class {},
-        CodexCliAdapter: class {},
-        PiCliAdapter: class {},
-      }));
+      // vi.doMock (unlike hoisted vi.mock) only affects the NEXT import, so this test
+      // re-imports daemon.js cold (vi.resetModules + import) to pick up the failing
+      // adapter — the warm cached loadDaemon() would miss it. This is the one carve-out
+      // from the RC-3 warm-import change. The try/finally is load-bearing: the finally
+      // doUnmock + vi.resetModules() EVICTS this doMock-bound daemon.js from the module
+      // cache so the next warm loadDaemon() re-imports a clean graph. Without it the
+      // next test could inherit a daemon.js still wired to the failing adapter — a
+      // latent, order-dependent leak (codex review, 2026-06-24): it does not surface in
+      // the current suite, but the eviction makes the carve-out order-independent. A
+      // fresh import also gets fresh dailyRunState, so no __resetDailyRunStateForTests().
+      try {
+        vi.doMock('../session-runtime/adapters/index.js', () => ({
+          createProviderAdapter: vi.fn().mockReturnValue(failingAdapter),
+          createAdapter: vi.fn(),
+          CliAdapter: class {},
+          CodexCliAdapter: class {},
+          PiCliAdapter: class {},
+        }));
 
-      mockLoadConfig.mockResolvedValue(
-        ok(
-          makeConfig({
-            providers: {
-              defaultProvider: 'codex-impl',
-              fallbackChain: [],
-              requireSmokeProof: true,
-              definitions: {
-                'codex-impl': {
-                  name: 'codex-impl',
-                  adapterClass: 'process-based',
-                  providerKind: 'codex-cli',
-                  supportedModelTiers: ['higher-capability'],
-                  required: true,
-                  cliTool: 'codex',
-                  model: 'gpt-5.5',
-                  executionFlags: [],
-                  env: {},
+        mockLoadConfig.mockResolvedValue(
+          ok(
+            makeConfig({
+              providers: {
+                defaultProvider: 'codex-impl',
+                fallbackChain: [],
+                requireSmokeProof: true,
+                definitions: {
+                  'codex-impl': {
+                    name: 'codex-impl',
+                    adapterClass: 'process-based',
+                    providerKind: 'codex-cli',
+                    supportedModelTiers: ['higher-capability'],
+                    required: true,
+                    cliTool: 'codex',
+                    model: 'gpt-5.5',
+                    executionFlags: [],
+                    env: {},
+                  },
                 },
               },
-            },
-          }),
-        ),
-      );
+            }),
+          ),
+        );
 
-      const { startDaemon } = await loadDaemon();
-      const result = await startDaemon('config.json');
+        vi.resetModules();
+        const { startDaemon } = await import('./daemon.js');
+        const result = await startDaemon('config.json');
 
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.error.message).toContain('codex-impl');
-        expect(result.error.message).toContain('smoke admission');
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error.message).toContain('codex-impl');
+          expect(result.error.message).toContain('smoke admission');
+        }
+        expect(mockServerStart).not.toHaveBeenCalled();
+      } finally {
+        vi.doUnmock('../session-runtime/adapters/index.js');
+        // Evict the doMock-bound daemon.js so the next warm loadDaemon() is clean.
+        vi.resetModules();
       }
-      expect(mockServerStart).not.toHaveBeenCalled();
-
-      vi.doUnmock('../session-runtime/adapters/index.js');
     });
 
     // --- gap #7 tests: consolidated env validation at startDaemon ---

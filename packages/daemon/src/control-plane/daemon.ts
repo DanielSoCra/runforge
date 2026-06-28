@@ -157,8 +157,27 @@ import {
   startInteractivePOSession,
 } from '../coordination/product-owner/interactive-session-context.js';
 
-let dailyRunCount = 0;
-let dailyRunCountResetDate = new Date().toISOString().split('T')[0];
+// Daily run-count state. Held in one resettable object rather than bare module-level
+// `let`s so tests can reset it with __resetDailyRunStateForTests() instead of
+// vi.resetModules()+re-importing the whole daemon.js graph per test. That cold
+// re-import is what flaked CI under shared-runner contention (RC-3, #770): with a
+// resettable holder, daemon.test.ts imports daemon.js once (warm) and resets state
+// via a call. Production behavior is unchanged — the daily run-count limit still
+// resets at the UTC date boundary in beginRun() below.
+const dailyRunState: { count: number; resetDate: string } = {
+  count: 0,
+  resetDate: new Date().toISOString().split('T')[0]!,
+};
+
+/**
+ * Test-only: reset the daily run-count state to a clean slate. Exported solely so
+ * daemon.test.ts's loadDaemon() can drop vi.resetModules() (RC-3) — it is NOT part
+ * of the daemon's runtime contract and must not be called from production code.
+ */
+export function __resetDailyRunStateForTests(): void {
+  dailyRunState.count = 0;
+  dailyRunState.resetDate = new Date().toISOString().split('T')[0]!;
+}
 
 // Mirrors the config-reader's DEFAULT_SYNC_INTERVAL_MS (60s). Used as the
 // background degraded-recovery poll cadence when no explicit opts are passed.
@@ -1629,7 +1648,7 @@ export async function startDaemon(
         return {
           activeRuns,
           activeIssues: [...activeIssues],
-          dailyRunCount,
+          dailyRunCount: dailyRunState.count,
           dailyCost: costTracker.getDailyCost(),
           paused,
           draining,
@@ -2956,11 +2975,11 @@ async function processWorkRequest(
   onDetectSettled?: () => void,
 ): Promise<string> {
   const today = new Date().toISOString().split('T')[0];
-  if (today !== dailyRunCountResetDate) {
-    dailyRunCount = 0;
-    dailyRunCountResetDate = today;
+  if (today !== dailyRunState.resetDate) {
+    dailyRunState.count = 0;
+    dailyRunState.resetDate = today!;
   }
-  dailyRunCount++;
+  dailyRunState.count++;
   const repoConfig = configReader?.getRepoConfig(owner, repoName);
   const variant = selectVariant(request);
   const run: RunState = {
