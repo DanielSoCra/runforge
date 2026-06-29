@@ -39,6 +39,7 @@ import {
   type WorkDetector,
   type FeaturePipelineWorkType,
 } from './work-detection.js';
+import { retryStuckIssue } from './operator-retry.js';
 import { createPhaseHandlers } from './phases.js';
 import {
   createDeploymentRegistry,
@@ -1913,7 +1914,52 @@ export async function startDaemon(
           console.log('[daemon] Drain cancelled — resuming normal operation');
         }
       },
-      retry: (_issueNumber) => err(new Error('retry not yet implemented')),
+      // Operator-triggered from-scratch retry of a `stuck` work request
+      // (STACK-AC-CONTROL-PLANE; realizes FUNC-AC-PIPELINE "Operator retries a
+      // stuck request"). Targets the seed repo (`config.repo`) — the route
+      // carries only an issue number. The admission rule + strand-safe reset
+      // live in the unit-tested `retryStuckIssue`; here we just resolve the live
+      // octokit and wire the in-memory/run-state hooks. `clearInMemoryRunState`
+      // drops the activeIssues claim entry; `deleteRunState` removes the parked/
+      // partial run file so detection starts a NEW run (never a resume). We do
+      // NOT call `releaseClaim` (it strips GitHub tier labels) — the GitHub
+      // label choreography is owned by `retryStuckIssue`.
+      retry: async (issueNumber) => {
+        const seedRepo = config.repo;
+        if (!seedRepo) {
+          return {
+            status: 501,
+            body: { error: 'retry unavailable: no repository configured' },
+          };
+        }
+        const retryOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+        return retryStuckIssue(
+          {
+            octokit: retryOctokit,
+            owner: seedRepo.owner,
+            repo: seedRepo.name,
+            clearBackoff: (n) => {
+              stuckBackoff.delete(issueKey(seedRepo.owner, seedRepo.name, n));
+            },
+            clearInMemoryRunState: (n) => {
+              activeIssues.delete(n);
+            },
+            deleteRunState: (n) => stateMgr.deleteRunState(n),
+            // STRICT reader: the lenient findParkedRuns() swallows scan/read
+            // failures into [] (state.ts), which would make the decision-park
+            // admission check pass on an UNREADABLE run store and re-admit a
+            // decision-owned issue. findParkedRunsStrict() PROPAGATES the error
+            // so retryStuckIssue's fail-closed 503 actually fires in production.
+            findParkedRuns: async () =>
+              (await stateMgr.findParkedRunsStrict()).map((run) => ({
+                issueNumber: run.issueNumber,
+                pausedAtPhase: run.pausedAtPhase,
+              })),
+            log: (message) => console.log(message),
+          },
+          issueNumber,
+        );
+      },
       reloadRepos: repoManager ? async () => repoManager!.reload() : undefined,
       restartRemoteControl: async () => {
         await remoteControl.restart();

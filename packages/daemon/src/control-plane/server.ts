@@ -20,7 +20,13 @@ export interface ControlHandlers {
   resume: () => void | Result<void> | Promise<void | Result<void>>;
   drain: () => void;
   cancelDrain: () => void;
-  retry: (issueNumber: number) => Result<void>;
+  /**
+   * Operator-triggered from-scratch retry of a `stuck` work request. Async +
+   * status-carrying (mirrors `answerDecision`): the route emits `result.status`
+   * / `result.body` directly (200 re-admitted, 404 not-stuck, 409 blocked /
+   * decision-parked / indeterminate, 503 transient). An unexpected throw → 500.
+   */
+  retry: (issueNumber: number) => Promise<HandlerResult<{ retrying: number } | ErrorBody>>;
   reloadRepos?: () => Promise<{ active: number }>;
   restartRemoteControl?: () => void | Promise<void>;
   scanIssues?: () => Promise<{ scanned: number }>;
@@ -490,12 +496,13 @@ export function createControlServer(
         json(res, 400, { error: 'invalid issue number' });
         return;
       }
-      const result = handlers.retry(issue);
-      json(
-        res,
-        result.ok ? 200 : 404,
-        result.ok ? { retrying: issue } : { error: (result as { ok: false; error: Error }).error.message },
-      );
+      try {
+        const result = await handlers.retry(issue);
+        json(res, result.status, result.body);
+      } catch (e: unknown) {
+        console.error('[control-plane] POST /retry/:issue failed:', e);
+        json(res, 500, { error: 'retry failed' });
+      }
     } else {
       json(res, 404, { error: 'not found' });
     }

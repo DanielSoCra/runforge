@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { createControlServer, type ControlHandlers } from './server.js';
-import { ok, err } from '../lib/result.js';
+import { err } from '../lib/result.js';
 import type { Server } from 'http';
 import type { AddressInfo } from 'net';
 import * as results from './results.js';
@@ -47,7 +47,12 @@ const handlers = {
   resume: () => {},
   drain: () => {},
   cancelDrain: () => {},
-  retry: (n: number) => n === 42 ? ok(undefined) : err(new Error('not found')),
+  retry: (n: number) =>
+    Promise.resolve(
+      n === 42
+        ? { status: 200, body: { retrying: n } }
+        : { status: 404, body: { error: 'not found' } },
+    ),
 };
 
 // Bind on port 0 so the OS assigns a free ephemeral port; the real port is
@@ -152,16 +157,54 @@ describe('ControlServer', () => {
     }
   });
 
-  it('POST /retry/42 succeeds', async () => {
+  it('POST /retry/42 succeeds (emits handler 200 + body)', async () => {
     const { port } = await startServer();
     const res = await fetch(`http://127.0.0.1:${port}/retry/42`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
     expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ retrying: 42 });
   });
 
-  it('POST /retry/999 returns 404', async () => {
+  it('POST /retry/999 returns 404 (emits handler 404)', async () => {
     const { port } = await startServer();
     const res = await fetch(`http://127.0.0.1:${port}/retry/999`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
     expect(res.status).toBe(404);
+  });
+
+  it('POST /retry/:issue emits the handler 409 (blocked / decision-parked)', async () => {
+    const { port } = await startServer({
+      retry: () => Promise.resolve({ status: 409, body: { error: 'issue is blocked' } }),
+    });
+    const res = await fetch(`http://127.0.0.1:${port}/retry/7`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'issue is blocked' });
+  });
+
+  it('POST /retry/:issue emits the handler 503 (transient)', async () => {
+    const { port } = await startServer({
+      retry: () => Promise.resolve({ status: 503, body: { error: 'retry again later' } }),
+    });
+    const res = await fetch(`http://127.0.0.1:${port}/retry/7`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+    expect(res.status).toBe(503);
+  });
+
+  it('POST /retry/abc returns 400 (NaN issue number)', async () => {
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/retry/abc`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /retry/42 without X-Requested-By returns 403 (CSRF)', async () => {
+    const { port } = await startServer();
+    const res = await fetch(`http://127.0.0.1:${port}/retry/42`, { method: 'POST' });
+    expect(res.status).toBe(403);
+  });
+
+  it('POST /retry/:issue maps a thrown handler error to 500', async () => {
+    const { port } = await startServer({
+      retry: () => Promise.reject(new Error('boom')),
+    });
+    const res = await fetch(`http://127.0.0.1:${port}/retry/42`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+    expect(res.status).toBe(500);
   });
 
   it('rejects second instance on same port', async () => {
@@ -531,7 +574,7 @@ describe('ControlServer', () => {
       resume: () => {},
       drain: () => {},
       cancelDrain: () => {},
-      retry: () => ok(undefined),
+      retry: () => Promise.resolve({ status: 200, body: { retrying: 0 } }),
     });
     const result2 = await start2();
     expect(result2.ok).toBe(true);

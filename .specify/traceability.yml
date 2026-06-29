@@ -575,11 +575,13 @@ STACK-AC-CONTROL-PLANE:
   code_paths:
     - packages/daemon/src/control-plane/
     - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/control-plane/operator-retry.ts
     - packages/daemon/src/control-plane/remote-control.ts
     - packages/daemon/src/control-plane/classifier.ts
     - packages/daemon/src/control-plane/classifier-schema.ts
   test_paths:
     - packages/daemon/src/control-plane/**/*.test.ts
+    - packages/daemon/src/control-plane/operator-retry.test.ts
     - packages/daemon/src/control-plane/remote-control.test.ts
     - packages/daemon/src/control-plane/classifier.test.ts
   status: draft

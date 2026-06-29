@@ -119,4 +119,37 @@ describe('StateManager', () => {
     const loaded = await mgr.loadRunState(42);
     expect(loaded.ok).toBe(false);
   });
+
+  // findParkedRunsStrict — FAIL-CLOSED variant for the operator-retry admission
+  // check: it must PROPAGATE read/parse failures (unlike lenient findParkedRuns,
+  // which returns [] on error), while still treating an empty scan as "no parked
+  // run → []".
+  describe('findParkedRunsStrict', () => {
+    const makeParked = (issueNumber: number): RunState => {
+      const run = makeRun(issueNumber, 'paused');
+      run.pausedAtPhase = 'l2-gate';
+      return run;
+    };
+
+    it('returns [] when there are no parked runs (clean store)', async () => {
+      await mgr.saveRunState(makeRun(1)); // not parked
+      await expect(mgr.findParkedRunsStrict()).resolves.toEqual([]);
+    });
+
+    it('returns parked runs when present', async () => {
+      await mgr.saveRunState(makeParked(7));
+      const parked = await mgr.findParkedRunsStrict();
+      expect(parked.map((r) => r.issueNumber)).toEqual([7]);
+    });
+
+    it('THROWS (does not swallow) on a corrupt/unreadable run file', async () => {
+      await writeFile(join(dir, 'runs', '9.json'), '{ not valid json');
+      await expect(mgr.findParkedRunsStrict()).rejects.toThrow();
+    });
+
+    it('THROWS when the runs dir cannot be scanned', async () => {
+      await rm(join(dir, 'runs'), { recursive: true, force: true });
+      await expect(mgr.findParkedRunsStrict()).rejects.toThrow();
+    });
+  });
 });

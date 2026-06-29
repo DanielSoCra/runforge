@@ -72,6 +72,36 @@ export class StateManager {
     }
   }
 
+  /**
+   * Like {@link findParkedRuns} but FAIL-CLOSED: it PROPAGATES scan/read/parse
+   * failures instead of swallowing them into `[]`. A caller that must
+   * distinguish "genuinely no parked run" from "could not read the run store"
+   * injects THIS — e.g. the operator-retry decision-park admission check, which
+   * fail-closes to 503 on an unreadable store rather than risk re-admitting a
+   * decision-owned issue it simply could not see. `[]` still means "no parked
+   * run → proceed"; only an ERROR throws. A benign TOCTOU (a run file deleted
+   * mid-scan → ENOENT) is skipped, since that candidate no longer exists.
+   */
+  async findParkedRunsStrict(): Promise<RunState[]> {
+    const runsDir = join(this.stateDir, 'runs');
+    const files = await readdir(runsDir);
+    const runs: RunState[] = [];
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue;
+      const result = await readJsonSafe<RunState>(join(runsDir, file));
+      if (!result.ok) {
+        if (isMissingFileError(result.error)) continue; // TOCTOU delete — benign
+        throw new Error(
+          `failed to read parked-run candidate ${file}: ${result.error.message}`,
+        );
+      }
+      if (isRunParked(result.value)) {
+        runs.push(result.value);
+      }
+    }
+    return runs;
+  }
+
   async deleteRunState(issueNumber: number): Promise<void> {
     try {
       await unlink(this.runStatePath(issueNumber));
@@ -115,4 +145,14 @@ function isRunComplete(run: RunState): boolean {
 
 function isRunParked(run: RunState): boolean {
   return run.phase === 'paused' && run.pausedAtPhase !== undefined;
+}
+
+/** A missing file (ENOENT) — a benign TOCTOU during a strict run-store scan. */
+function isMissingFileError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ENOENT'
+  );
 }

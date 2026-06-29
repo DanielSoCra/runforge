@@ -1,7 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { createControlServer } from './server.js';
 import { createCli } from './cli.js';
-import { ok, err } from '../lib/result.js';
 import type { Server } from 'http';
 import type { AddressInfo } from 'net';
 
@@ -18,7 +17,12 @@ const handlers = {
   resume: vi.fn(),
   drain: vi.fn(),
   cancelDrain: vi.fn(),
-  retry: (n: number) => n === 42 ? ok(undefined) : err(new Error('not found')),
+  retry: (n: number) =>
+    Promise.resolve(
+      n === 42
+        ? { status: 200, body: { retrying: n } }
+        : { status: 404, body: { error: 'not found' } },
+    ),
 };
 
 async function startServer() {

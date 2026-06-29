@@ -196,6 +196,174 @@ export function createWorkDetector(octokit: Octokit, owner: string, repo: string
   };
 }
 
+// ── Operator-retry: work-type → entry-label restoration ──────────────────────
+//
+// A `stuck` work request has LOST its entry label (consumed at CLAIM:
+// `ready` removed at claimWork, `ready-to-implement` removed at
+// claimFeaturePipelineWork). To re-admit it from scratch the operator-retry
+// handler must RESTORE the correct entry label for the issue's work type and
+// strip the now-stale active/claim labels so the restored tier re-detects it.
+// This helper keeps that mapping co-located with the detection tiers above so
+// the two never drift (the `removeActiveLabels` set is exactly each tier's
+// dynamic exclude — the tier exclude minus the static `blocked`/`stuck`/
+// `awaiting-l2-review` guards).
+
+/** The entry label a stuck issue is re-admitted at, by work type. */
+export type RetryEntryLabel =
+  | 'ready'
+  | 'review-finding'
+  | 'ready-to-implement'
+  | 'l2-approved'
+  | 'l2-in-progress'
+  | 'l1-approved';
+
+export interface RetryRestorationPlan {
+  /** Human-readable work type for the audit trail. */
+  workType: string;
+  /** The entry label to ADD/ensure so the restored tier re-detects the issue. */
+  entryLabel: RetryEntryLabel;
+  /** Stale active/claim labels to strip so the restored tier's exclude passes. */
+  removeActiveLabels: string[];
+}
+
+export type RetryRestorationResult =
+  | { ok: true; plan: RetryRestorationPlan }
+  | { ok: false; reason: string };
+
+function planFromFeaturePipelineWorkType(
+  workType: string | undefined,
+): RetryRestorationPlan | null {
+  // Run-history fallback when no tier label survives. `l2-brainstorm` is
+  // deliberately NOT resolvable here: it spans both the `l2-in-progress` and
+  // `l1-approved` tiers, which only the labels disambiguate — so a bare
+  // `l2-brainstorm` history with no tier label stays indeterminate (→ 409)
+  // rather than guessing the wrong tier.
+  switch (workType) {
+    case 'implementation':
+      return {
+        workType: 'feature-impl',
+        entryLabel: 'ready-to-implement',
+        removeActiveLabels: ['implementing'],
+      };
+    case 'l3-generate':
+      return {
+        workType: 'l3-generate',
+        entryLabel: 'l2-approved',
+        removeActiveLabels: ['l3-in-progress', 'l3-review'],
+      };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Infer the from-scratch restoration plan for a `stuck` issue from its CURRENT
+ * labels (the authoritative signal — detection is label-driven), with the last
+ * run's `workType` as a fallback only when no tier label survives. Returns
+ * `{ ok: false }` (→ the handler maps to 409) when the work type is
+ * indeterminate, so a wrong-tier re-admit never happens.
+ */
+export function inferRetryRestoration(
+  labels: string[],
+  lastWorkType?: string,
+): RetryRestorationResult {
+  const has = (label: string): boolean => labels.includes(label);
+
+  // Bug-fix: `review-finding` is PRESERVED across claim (claimBugFixWork only
+  // adds `in-progress`), so it is still present when stuck. Not a feature
+  // pipeline item.
+  if (has('review-finding') && !has('feature-pipeline')) {
+    return {
+      ok: true,
+      plan: {
+        workType: 'bug',
+        entryLabel: 'review-finding',
+        removeActiveLabels: ['in-progress'],
+      },
+    };
+  }
+
+  if (has('feature-pipeline')) {
+    // feature-impl: claim swapped `ready-to-implement` → `implementing`.
+    if (has('implementing') || has('ready-to-implement')) {
+      return {
+        ok: true,
+        plan: {
+          workType: 'feature-impl',
+          entryLabel: 'ready-to-implement',
+          removeActiveLabels: ['implementing'],
+        },
+      };
+    }
+    // l3-generate: claim added `l3-in-progress` (kept `l2-approved`).
+    if (has('l3-in-progress') || has('l3-review')) {
+      return {
+        ok: true,
+        plan: {
+          workType: 'l3-generate',
+          entryLabel: 'l2-approved',
+          removeActiveLabels: ['l3-in-progress', 'l3-review'],
+        },
+      };
+    }
+    // l1-approved tier: claim added `l2-in-progress` ON TOP of `l1-approved`.
+    // Check before the bare `l2-in-progress` tier so the entry label is the
+    // ORIGINAL `l1-approved` (and the claim `l2-in-progress` is stripped, since
+    // the l1-approved tier excludes it).
+    if (has('l1-approved')) {
+      return {
+        ok: true,
+        plan: {
+          workType: 'l2-brainstorm (l1-approved)',
+          entryLabel: 'l1-approved',
+          removeActiveLabels: ['l2-in-progress'],
+        },
+      };
+    }
+    // l2-in-progress tier: the entry label IS the claim label (idempotent).
+    if (has('l2-in-progress')) {
+      return {
+        ok: true,
+        plan: {
+          workType: 'l2-brainstorm (l2-in-progress)',
+          entryLabel: 'l2-in-progress',
+          removeActiveLabels: [],
+        },
+      };
+    }
+    // l3-generate not yet started (only `l2-approved` survives).
+    if (has('l2-approved')) {
+      return {
+        ok: true,
+        plan: {
+          workType: 'l3-generate',
+          entryLabel: 'l2-approved',
+          removeActiveLabels: ['l3-in-progress', 'l3-review'],
+        },
+      };
+    }
+    // feature-pipeline with no surviving tier label — last resort: run history.
+    const fromHistory = planFromFeaturePipelineWorkType(lastWorkType);
+    if (fromHistory !== null) return { ok: true, plan: fromHistory };
+    return {
+      ok: false,
+      reason:
+        'indeterminate feature-pipeline work type (no surviving tier label and no usable run-history work type)',
+    };
+  }
+
+  // No feature-pipeline and no review-finding: a standard ready-work item whose
+  // `ready` entry label was consumed at claim. Restore it.
+  return {
+    ok: true,
+    plan: {
+      workType: 'standard',
+      entryLabel: 'ready',
+      removeActiveLabels: ['in-progress'],
+    },
+  };
+}
+
 /**
  * Picks the highest-priority review-finding issue by severity label.
  * P0 > P1 > P2 (only with auto-fix-approved). P3 is never returned.
