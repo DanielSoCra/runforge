@@ -11,6 +11,10 @@ import { buildL2GateRequest } from './decision-escalation/build-request.js';
 import { buildMergeDecisionRequest } from './merge-decision/build-request.js';
 import type { MergeDecision } from './merge-decision/types.js';
 import {
+  createFakeDecisionManager,
+  asDecisionManager,
+} from './decision-escalation/__fixtures__/fake-decision-ledger.js';
+import {
   DECISION_DB_URL,
   REAL_PG,
   makeSchemaSerializer,
@@ -4416,6 +4420,25 @@ describe('daemon', () => {
         // The ledger reached terminal resumed exactly once.
         expect(await manager.ledger().statusOf(decisionId)).toBe('resumed');
         expect(mockRunPipeline).toHaveBeenCalled();
+        // T1.6 — THROUGH THE MERGE: the run handed back to the pipeline carries the
+        // operator-approved override ARMED (mergeDecisionApprovedEpoch === current
+        // mergeDecisionEpoch). That is the EXACT precondition the integrate handler
+        // checks (`phases.ts` `decision.kind === 'auto-merge' || approvedEpoch ===
+        // epoch`) before executing the held merge via integrateToStaging. This
+        // real-PG test proves the WRITER semantics (answer + advanceToResumed over
+        // real Postgres) drive the run to the merge-armed state; the held merge's
+        // actual EXECUTION (integrateToStaging CALLED on this precondition) is proven
+        // CI-default by the real integrate handler in
+        // merge-decision-wiring.integration.test.ts (h).
+        const reenteredRun = mockRunPipeline.mock.calls[0]?.[0] as Record<
+          string,
+          unknown
+        >;
+        expect(reenteredRun?.mergeDecisionApprovedEpoch).toBe(
+          reenteredRun?.mergeDecisionEpoch,
+        );
+        expect(reenteredRun?.mergeDecisionApprovedEpoch).toBe(1);
+        expect(reenteredRun?.phase).toBe('integrate');
         // The cockpit `ready` requeue label is stripped so detectReadyWork cannot
         // reclaim the resumed issue and start a duplicate run (codex r5).
         expect(mockOctokit.issues.removeLabel).toHaveBeenCalledWith(
@@ -4664,6 +4687,390 @@ describe('daemon', () => {
         expect(answerOrder).toBeDefined();
         expect(saveOrder).toBeDefined();
         expect(answerOrder!).toBeLessThan(saveOrder!);
+      });
+    });
+
+    // --- CI-default (no Postgres) joined round-trip via the T1.4 lifecycle fake --
+    // resumeIntegrateParkedRun is PRIVATE — driven here through the PUBLIC
+    // startDaemon + poll-tick harness with the fake injected (mirrors the real-PG
+    // describe above, minus Postgres). This proves the RESUME half of A2:
+    //   approve -> mergeDecisionApprovedEpoch === mergeDecisionEpoch (the integrate
+    //     override's exact precondition) + ledger driven to 'resumed';
+    //   reject  -> routed to implement with feedback + block-published reset;
+    //   already-resumed -> idempotent no-op (answer-once at the daemon level).
+    // The MERGE half (approvedEpoch armed -> integrateToStaging CALLED on approve,
+    // NOT called on reject) is proven CI-default by the real integrate handler in
+    // merge-decision-wiring.integration.test.ts (h)/(a) — daemon.test.ts mocks
+    // createPhaseHandlers + runPipeline, so the handler never runs in THIS harness.
+    describe('integrate park resume (round-trip, CI-default fake — no Postgres)', () => {
+      const DECISION_ID = 'issue-100:integrate:1';
+
+      const makeIntegrateParkedRun = (
+        overrides?: Record<string, unknown>,
+      ): Record<string, unknown> => ({
+        id: 'run-parked-integrate-fake',
+        issueNumber: 100,
+        title: 'Parked at integrate',
+        phase: 'paused',
+        pausedAtPhase: 'integrate',
+        variant: 'feature',
+        phaseCompletions: {
+          detect: true,
+          classify: true,
+          'l1-design': true,
+          'l2-design': true,
+          implement: true,
+        },
+        checkpoints: [],
+        cost: 5,
+        perRunBudget: 10,
+        fixAttempts: [],
+        errorHashes: {},
+        repoOwner: 'test-owner',
+        repoName: 'test-repo',
+        body: 'Feature body',
+        labels: ['feature-pipeline'],
+        specRefs: ['FUNC-100'],
+        startedAt: '2026-03-21T00:00:00Z',
+        updatedAt: '2026-03-21T06:00:00Z',
+        mergeDecisionEpoch: 1,
+        mergeDecisionBlockPublished: true,
+        ...overrides,
+      });
+
+      const decisionResponseComment = (
+        decisionId: string,
+        chosenOption: string,
+      ): { body: string } => {
+        const effectId = `${decisionId}:write_response:idem-${chosenOption}`;
+        const marker = `<!-- pm-cockpit:effect:${effectId}:etag=sha256:etag-abc -->`;
+        const payload = JSON.stringify({ chosen_option: chosenOption });
+        return {
+          body: [marker, '**DecisionResponse**', '```json', payload, '```'].join(
+            '\n',
+          ),
+        };
+      };
+
+      // A minimal VALID deployment profile (mirrors merge-decision-wiring's
+      // makeProfile) so a governed config registers + boots past the A1 guard.
+      const validProfile = (): Record<string, unknown> => ({
+        repositories: [{ owner: 'test-owner', name: 'test-repo' }],
+        riskPathMap: [],
+        defaultMinLevel: 'green',
+        laneSet: {
+          declaredPhases: ['velocity'],
+          mostCautiousLane: 'standard',
+          lanes: [
+            {
+              name: 'auto',
+              qualify: { complexity: ['simple'], changeKind: ['docs'] },
+              allowedPaths: ['docs/**'],
+              roleRouting: {},
+              gateSet: 'gate1',
+              mergePolicy: 'auto',
+              verifier: { kind: 'test-suite', invoke: { ref: 'pnpm test' } },
+            },
+            {
+              name: 'standard',
+              qualify: { complexity: ['standard', 'complex'] },
+              allowedPaths: ['**'],
+              roleRouting: {},
+              gateSet: 'full',
+              mergePolicy: 'hold',
+              verifier: { kind: 'test-suite', invoke: { ref: 'pnpm test' } },
+            },
+          ],
+        },
+        lifecycleMode: 'velocity',
+        complianceReviewers: [],
+        honestAutomation: { automatable: [], strained: [], irreduciblyHuman: [] },
+        budget: 1000,
+        landing: { landsOn: 'main', productionReleasePath: 'tag-and-deploy' },
+        capabilityBindings: [],
+      });
+
+      beforeEach(() => {
+        // Mirror the real-PG describe: fake only the setInterval poll loop + Date.
+        vi.useRealTimers();
+        vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+        mockOctokit.issues.get.mockResolvedValue({
+          data: { labels: [{ name: 'answered' }], state: 'open' },
+        });
+        mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+      });
+
+      const resumedSaveFor = (issueNumber: number) =>
+        mockStateMgr.saveRunState.mock.calls
+          .map((c) => c[0] as Record<string, unknown>)
+          .find(
+            (s) => s.issueNumber === issueNumber && s.pausedAtPhase === undefined,
+          );
+
+      it('APPROVE: re-enters integrate MERGE-ARMED (approvedEpoch === epoch), ledger driven to resumed', async () => {
+        const { manager, ledger } = createFakeDecisionManager();
+        mockStateMgr.findParkedRuns.mockResolvedValue([makeIntegrateParkedRun()]);
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment(DECISION_ID, 'approve')],
+        });
+
+        const { startDaemon } = await loadDaemon();
+        const boot = await startDaemon('config.json', {
+          decisionManager: asDecisionManager(manager),
+        });
+        expect(boot.ok).toBe(true);
+        ledger.seedNotified(DECISION_ID, ['approve', 'reject']);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
+
+        const resumed = resumedSaveFor(100);
+        expect(resumed).toBeDefined();
+        // The integrate override's EXACT precondition: approved epoch == park epoch.
+        expect(resumed?.phase).toBe('integrate');
+        expect(resumed?.mergeDecisionApprovedEpoch).toBe(1);
+        expect(resumed?.mergeDecisionEpoch).toBe(1);
+        // The ledger reached terminal resumed (the fake's advanceToResumed).
+        expect(await ledger.statusOf(DECISION_ID)).toBe('resumed');
+        // The merge-armed run was handed to the pipeline for re-entry.
+        expect(mockRunPipeline).toHaveBeenCalled();
+        const reenteredRun = mockRunPipeline.mock.calls[0]?.[0] as Record<
+          string,
+          unknown
+        >;
+        expect(reenteredRun?.mergeDecisionApprovedEpoch).toBe(1);
+      });
+
+      it('REJECT: routes to implement with feedback + block-published reset, ledger resumed, NO approve override', async () => {
+        const { manager, ledger } = createFakeDecisionManager();
+        mockStateMgr.findParkedRuns.mockResolvedValue([makeIntegrateParkedRun()]);
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment(DECISION_ID, 'reject')],
+        });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', {
+          decisionManager: asDecisionManager(manager),
+        });
+        ledger.seedNotified(DECISION_ID, ['approve', 'reject']);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
+
+        const resumed = resumedSaveFor(100);
+        expect(resumed).toBeDefined();
+        expect(resumed?.phase).toBe('implement');
+        expect(resumed?.mergeDecisionApprovedEpoch).toBeUndefined();
+        expect(resumed?.mergeDecisionBlockPublished).toBe(false);
+        const feedback = resumed?.mergeDecisionFeedback as string;
+        expect(feedback).toContain('"chosen_option":"reject"');
+        expect(await ledger.statusOf(DECISION_ID)).toBe('resumed');
+      });
+
+      it('IDEMPOTENT (answer-once at the daemon): an already-resumed decision is a no-op (no re-consume, no re-run)', async () => {
+        const { manager, ledger } = createFakeDecisionManager();
+        mockStateMgr.findParkedRuns.mockResolvedValue([makeIntegrateParkedRun()]);
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment(DECISION_ID, 'approve')],
+        });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', {
+          decisionManager: asDecisionManager(manager),
+        });
+        // Seed a terminal `resumed` row directly (a prior cycle already consumed
+        // it). seedResumed — NOT advanceToResumed on a notified row — because the
+        // fake (like the real ledger) only reaches resumed from the answered state.
+        ledger.seedResumed(DECISION_ID, ['approve', 'reject']);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
+
+        // The idempotency guard short-circuits: no resume-save, no re-run.
+        expect(resumedSaveFor(100)).toBeUndefined();
+        expect(mockRunPipeline).not.toHaveBeenCalled();
+      });
+
+      it('GOVERNED APPROVE: a successful resume CLEARS the runtime-degraded marker (advanceToResumed success)', async () => {
+        const { manager, ledger } = createFakeDecisionManager();
+        // A prior approval-path failure had marked the index runtime-degraded.
+        manager.markRuntimeDegraded('earlier transient failure');
+        expect(manager.isRuntimeDegraded()).toBe(true);
+
+        mockLoadConfig.mockResolvedValue(
+          ok(
+            makeConfig({
+              deployment: { id: 'dep-a', profile: validProfile() },
+            }),
+          ),
+        );
+        mockStateMgr.findParkedRuns.mockResolvedValue([makeIntegrateParkedRun()]);
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment(DECISION_ID, 'approve')],
+        });
+
+        const { startDaemon } = await loadDaemon();
+        const boot = await startDaemon('config.json', {
+          decisionManager: asDecisionManager(manager),
+        });
+        expect(boot.ok).toBe(true); // governed + available fake → boots past A1.
+        ledger.seedNotified(DECISION_ID, ['approve', 'reject']);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
+
+        expect(resumedSaveFor(100)).toBeDefined();
+        // The successful governed advanceToResumed cleared the marker.
+        expect(manager.degradedClears).toBeGreaterThanOrEqual(1);
+        expect(manager.isRuntimeDegraded()).toBe(false);
+      });
+
+      it('GOVERNED: a resume-path ledger failure MARKS runtime-degraded and stays parked (fail-closed)', async () => {
+        const { manager, ledger } = createFakeDecisionManager();
+        mockLoadConfig.mockResolvedValue(
+          ok(
+            makeConfig({
+              deployment: { id: 'dep-a', profile: validProfile() },
+            }),
+          ),
+        );
+        mockStateMgr.findParkedRuns.mockResolvedValue([makeIntegrateParkedRun()]);
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment(DECISION_ID, 'approve')],
+        });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', {
+          decisionManager: asDecisionManager(manager),
+        });
+        ledger.seedNotified(DECISION_ID, ['approve', 'reject']);
+        // The decision-index answer() throws at runtime (e.g. Postgres dropped).
+        vi.spyOn(ledger, 'answer').mockRejectedValueOnce(
+          new Error('postgres connection lost'),
+        );
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
+
+        // Fail-closed: the run stays parked (no resume-save), and the governed
+        // failure marked the index runtime-degraded (observable at /health).
+        expect(resumedSaveFor(100)).toBeUndefined();
+        expect(manager.degradedMarks.length).toBeGreaterThanOrEqual(1);
+        expect(manager.isRuntimeDegraded()).toBe(true);
+      });
+    });
+
+    // --- governed decision-index /health signal (first-use PR1) ---------------
+    // getHealth() is the minimal signal the real control server's /health handler
+    // maps to 503. A GOVERNED daemon (deployment profile configured) is unhealthy
+    // when its approval transport is down — runtime-degraded marker set, OR
+    // enabled-but-unreachable. A non-governed daemon's index state never makes it
+    // unhealthy. (The full stuck/watchdog/pauseReason mapping is PR2/T2.6.)
+    describe('governed decision-index /health signal (first-use PR1)', () => {
+      const validProfile = (): Record<string, unknown> => ({
+        repositories: [{ owner: 'test-owner', name: 'test-repo' }],
+        riskPathMap: [],
+        defaultMinLevel: 'green',
+        laneSet: {
+          declaredPhases: ['velocity'],
+          mostCautiousLane: 'standard',
+          lanes: [
+            {
+              name: 'standard',
+              qualify: { complexity: ['standard', 'complex'] },
+              allowedPaths: ['**'],
+              roleRouting: {},
+              gateSet: 'full',
+              mergePolicy: 'hold',
+              verifier: { kind: 'test-suite', invoke: { ref: 'pnpm test' } },
+            },
+          ],
+        },
+        lifecycleMode: 'velocity',
+        complianceReviewers: [],
+        honestAutomation: { automatable: [], strained: [], irreduciblyHuman: [] },
+        budget: 1000,
+        landing: { landsOn: 'main', productionReleasePath: 'tag-and-deploy' },
+        capabilityBindings: [],
+      });
+
+      const bootGoverned = async (manager: ReturnType<typeof createFakeDecisionManager>['manager']) => {
+        mockLoadConfig.mockResolvedValue(
+          ok(makeConfig({ deployment: { id: 'dep-a', profile: validProfile() } })),
+        );
+        const { startDaemon } = await loadDaemon();
+        const { createControlServer } = await import('./server.js');
+        const result = await startDaemon('config.json', {
+          decisionManager: asDecisionManager(manager),
+        });
+        expect(result.ok).toBe(true);
+        return vi.mocked(createControlServer).mock.lastCall![1];
+      };
+
+      it('governed + runtime-degraded marker set → getHealth unhealthy (503 mapping) + /status surfaces it', async () => {
+        const { manager } = createFakeDecisionManager(); // available at boot
+        const handlers = await bootGoverned(manager);
+        manager.markRuntimeDegraded('postgres dropped after boot');
+
+        expect(handlers.getHealth!()).toEqual({
+          ok: false,
+          degraded: true,
+          reason: 'decision-index-unavailable',
+        });
+        const status = handlers.getStatus() as Record<string, unknown>;
+        expect(status.isGoverned).toBe(true);
+        expect(status.isRuntimeDegraded).toBe(true);
+      });
+
+      it('governed + enabled-but-unreachable at runtime → getHealth unhealthy', async () => {
+        const { manager } = createFakeDecisionManager(); // available at boot (passes A1)
+        const handlers = await bootGoverned(manager);
+        manager.setAvailable(false); // the index became unreachable AFTER boot
+
+        expect(handlers.getHealth!()).toEqual({
+          ok: false,
+          degraded: true,
+          reason: 'decision-index-unavailable',
+        });
+      });
+
+      it('governed + healthy index → getHealth ok', async () => {
+        const { manager } = createFakeDecisionManager();
+        const handlers = await bootGoverned(manager);
+
+        expect(handlers.getHealth!()).toEqual({
+          ok: true,
+          degraded: false,
+          reason: null,
+        });
+        const status = handlers.getStatus() as Record<string, unknown>;
+        expect(status.isGoverned).toBe(true);
+        expect(status.isRuntimeDegraded).toBe(false);
+      });
+
+      it('NON-governed + index disabled → getHealth ok (index state never degrades a non-governed daemon)', async () => {
+        const { manager } = createFakeDecisionManager({ enabled: false });
+        // Default config (no deployment) is non-governed; boot is not A1-guarded.
+        const { startDaemon } = await loadDaemon();
+        const { createControlServer } = await import('./server.js');
+        const result = await startDaemon('config.json', {
+          decisionManager: asDecisionManager(manager),
+        });
+        expect(result.ok).toBe(true);
+        const handlers = vi.mocked(createControlServer).mock.lastCall![1];
+
+        expect(handlers.getHealth!()).toEqual({
+          ok: true,
+          degraded: false,
+          reason: null,
+        });
+        const status = handlers.getStatus() as Record<string, unknown>;
+        expect(status.isGoverned).toBe(false);
       });
     });
 

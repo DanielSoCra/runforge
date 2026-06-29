@@ -71,6 +71,35 @@ describe('ControlServer', () => {
     expect(body).toEqual({ ok: true, degraded: false, lastConfigError: null });
   });
 
+  it('GET /health returns 200 ok when getHealth reports healthy (shape unchanged)', async () => {
+    const { port } = await startServer({
+      getHealth: () => ({ ok: true, degraded: false, reason: null }),
+    });
+    const res = await fetch(`http://127.0.0.1:${port}/health`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual({ ok: true, degraded: false, lastConfigError: null });
+  });
+
+  it('GET /health returns 503 degraded when getHealth reports unhealthy (governed index down)', async () => {
+    const { port } = await startServer({
+      getHealth: () => ({
+        ok: false,
+        degraded: true,
+        reason: 'decision-index-unavailable',
+      }),
+    });
+    const res = await fetch(`http://127.0.0.1:${port}/health`);
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body).toEqual({
+      ok: false,
+      degraded: true,
+      reason: 'decision-index-unavailable',
+      lastConfigError: null,
+    });
+  });
+
   it('GET /status returns daemon status', async () => {
     const { port } = await startServer();
     const res = await fetch(`http://127.0.0.1:${port}/status`);

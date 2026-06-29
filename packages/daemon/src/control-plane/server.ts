@@ -9,6 +9,13 @@ import type { RiskClass, AutonomyLevel, WideningOutcome } from './deployment-reg
 
 export interface ControlHandlers {
   getStatus: () => unknown;
+  /**
+   * Minimal liveness/health signal (first-use PR1). Returns the governed
+   * decision-index health only — `ok:false` ⇒ HTTP 503. The full /health mapping
+   * (stuck / watchdog / pauseReason) lands in PR2 (T2.6). Absent ⇒ the server
+   * falls back to the legacy always-ok response.
+   */
+  getHealth?: () => { ok: boolean; degraded: boolean; reason: string | null };
   pause: () => void;
   resume: () => void | Result<void> | Promise<void | Result<void>>;
   drain: () => void;
@@ -69,10 +76,24 @@ export function createControlServer(
         json(res, 500, { error: 'read failed' });
       });
     } else if (method === 'GET' && url.pathname === '/health') {
-      // Shape mirrors the throwaway degraded server (degraded-server.ts) so
-      // both /health endpoints are uniform. The real server only binds
-      // post-recovery, so these are always literal constants here.
-      json(res, 200, { ok: true, degraded: false, lastConfigError: null });
+      // First-use PR1: a GOVERNED daemon whose decision-index approval transport
+      // is unhealthy at runtime (the runtime-degraded marker, or enabled-but-
+      // unreachable) returns 503 so an external monitor sees the outage. The full
+      // /health mapping (stuck / watchdog / pauseReason) is PR2 (T2.6). A
+      // non-governed daemon, or a governed-and-healthy one, keeps the legacy
+      // 200-ok shape byte-for-byte (index state never degrades a non-governed
+      // daemon). The degraded-boot server (degraded-server.ts) is unchanged.
+      const health = handlers.getHealth?.();
+      if (health && !health.ok) {
+        json(res, 503, {
+          ok: false,
+          degraded: true,
+          reason: health.reason,
+          lastConfigError: null,
+        });
+      } else {
+        json(res, 200, { ok: true, degraded: false, lastConfigError: null });
+      }
     } else if (method === 'GET' && url.pathname === '/status') {
       json(res, 200, handlers.getStatus());
     } else if (method === 'POST' && url.pathname === '/pause') {

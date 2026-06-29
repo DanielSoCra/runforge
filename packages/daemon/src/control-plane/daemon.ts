@@ -45,7 +45,11 @@ import {
   buildSanitizationPipelineForDeployment,
 } from './sanitization/build-pipeline.js';
 import { ensureWorkspaceRepo } from './workspace-bootstrap.js';
-import { DecisionIndexManager } from './decision-escalation/manager.js';
+import {
+  DecisionIndexManager,
+  markRuntimeDegradedIfGoverned,
+  clearRuntimeDegradedIfGoverned,
+} from './decision-escalation/manager.js';
 import type { ProtectedStore } from '@auto-claude/sanitizer-redaction';
 import { readDecisionIndexConfig } from './decision-escalation/config.js';
 import { decisionIdFor } from './decision-escalation/build-request.js';
@@ -368,9 +372,43 @@ export async function startDaemon(
       config.deployment.id,
       config.deployment.profile,
     );
+    // A1 boot guard (i): a configured (merge-governed) deployment whose profile is
+    // REJECTED has no governance surface at all. Refuse boot (fail closed) instead
+    // of running with an empty registry that surfaces the rejection only later, at
+    // integrate. The message names the offenders so the operator can fix the profile.
     if (!registered.ok) {
-      console.error(
-        `[daemon] Deployment registration failed for ${config.deployment.id}: ${registered.offenders.join('; ')}`,
+      return err(
+        new Error(
+          `[daemon] Deployment registration failed for "${config.deployment.id}" — ` +
+            `refusing boot for a configured deployment (fix the profile): ${registered.offenders.join('; ')}`,
+        ),
+      );
+    }
+    // A1 boot guard (ii): a merge-governed deployment REQUIRES an available decision
+    // index — escalate/hold/compliance merge decisions must reach the Operator, and
+    // the index is the only transport for that. When the approval surface is dead we
+    // refuse boot rather than convert every required park into a silent runtime
+    // failure. Distinguish DISABLED (set the flag) from ENABLED-BUT-UNREACHABLE so
+    // the underlying cause is operator-observable (FUNC-AC-SAFETY).
+    if (!decisionManager.isAvailable()) {
+      if (!decisionManager.isEnabled()) {
+        return err(
+          new Error(
+            `[daemon] Refusing boot for configured deployment "${config.deployment.id}": the ` +
+              `decision index is DISABLED, but a merge-governed deployment requires it to ` +
+              `surface escalate/hold merge decisions for Operator approval. Set ` +
+              `AUTO_CLAUDE_DECISION_INDEX_ENABLED=1 (and AUTO_CLAUDE_DATABASE_URL) to enable ` +
+              `it, or remove the deployment profile to run ungoverned.`,
+          ),
+        );
+      }
+      return err(
+        new Error(
+          `[daemon] Refusing boot for configured deployment "${config.deployment.id}": the ` +
+            `decision index is enabled but unreachable — the approval surface is dead, so ` +
+            `escalate/hold merge decisions cannot reach the Operator. Check ` +
+            `AUTO_CLAUDE_DATABASE_URL / Postgres connectivity for the decision index.`,
+        ),
       );
     }
   }
@@ -1293,6 +1331,14 @@ export async function startDaemon(
           try {
             await decisionManager.ledger().reconcile();
           } catch (e) {
+            // Governed-only marking: a per-tick reconcile failure means the
+            // decision index (Postgres) is unreachable at runtime, degrading the
+            // whole approval surface for this configured deployment.
+            markRuntimeDegradedIfGoverned(
+              decisionManager,
+              config.deployment?.id,
+              e instanceof Error ? e.message : String(e),
+            );
             console.error('[daemon] tick reconcile error:', e);
           }
           // Overdue marking: mark past-expiry notified/viewed decisions stale
@@ -1300,6 +1346,11 @@ export async function startDaemon(
           try {
             await markOverdue(decisionManager.ledger(), new Date());
           } catch (e) {
+            markRuntimeDegradedIfGoverned(
+              decisionManager,
+              config.deployment?.id,
+              e instanceof Error ? e.message : String(e),
+            );
             console.error('[daemon] markOverdue error:', e);
           }
         }
@@ -1655,8 +1706,33 @@ export async function startDaemon(
           consecutiveStuckCount,
           uptime: process.uptime(),
           runtimeSource: runtimeSourceStatus,
+          // First-use PR1: surface the governed decision-index health on /status.
+          // `isGoverned` = a deployment profile is configured (the merge-governance
+          // boundary); `isRuntimeDegraded` = a governed approval-path op failed at
+          // runtime. Both are observability-only here; /health maps them to 503.
+          isGoverned: config.deployment !== undefined,
+          isRuntimeDegraded: decisionManager.isRuntimeDegraded(),
           ...safeState,
         };
+      },
+      // First-use PR1: the minimal governed decision-index health signal. A
+      // GOVERNED daemon is unhealthy when its approval transport is down — the
+      // runtime-degraded marker is set, OR the index is enabled-but-unreachable.
+      // A non-governed daemon's index state never makes it unhealthy. The full
+      // /health mapping (stuck/watchdog/pauseReason) is PR2 (T2.6).
+      getHealth: () => {
+        const governed = config.deployment !== undefined;
+        const indexUnhealthy =
+          decisionManager.isRuntimeDegraded() ||
+          (decisionManager.isEnabled() && !decisionManager.isAvailable());
+        if (governed && indexUnhealthy) {
+          return {
+            ok: false,
+            degraded: true,
+            reason: 'decision-index-unavailable',
+          };
+        }
+        return { ok: true, degraded: false, reason: null };
       },
       pause: () => {
         paused = true;
@@ -2516,6 +2592,15 @@ export async function startDaemon(
         alreadyResumed =
           (await decisionManager.ledger().statusOf(decisionId)) === 'resumed';
       } catch (e) {
+        // Governed-only marking: a statusOf failure here means the approval
+        // surface is unreachable at runtime for this configured deployment. Mark
+        // the index runtime-degraded (observable at /health) — fail-closed flow is
+        // unchanged (stay parked).
+        markRuntimeDegradedIfGoverned(
+          decisionManager,
+          config.deployment?.id,
+          e instanceof Error ? e.message : String(e),
+        );
         console.warn(
           `[daemon] resumeParkedRuns: statusOf failed for #${run.issueNumber} (failing closed, staying parked): ${e instanceof Error ? e.message : String(e)}`,
         );
@@ -2561,6 +2646,13 @@ export async function startDaemon(
           .ledger()
           .answer(decisionId, answer.rawChosenOption, 'operator');
       } catch (e) {
+        // Governed-only marking: an answer() failure is a runtime decision-index
+        // fault for this configured deployment. Mark runtime-degraded; stay parked.
+        markRuntimeDegradedIfGoverned(
+          decisionManager,
+          config.deployment?.id,
+          e instanceof Error ? e.message : String(e),
+        );
         console.warn(
           `[daemon] resumeParkedRuns: decision-index answer failed for #${run.issueNumber} (failing closed, staying parked): ${e instanceof Error ? e.message : String(e)}`,
         );
@@ -2619,7 +2711,16 @@ export async function startDaemon(
       // do we drive the ledger to terminal `resumed`.
       try {
         await decisionManager.ledger().advanceToResumed(decisionId, 'requeue');
+        // A successful advanceToResumed is a successful GOVERNED merge-decision op:
+        // the approval surface is reachable + writable again, so clear any
+        // runtime-degraded marker a prior approval-path failure set.
+        clearRuntimeDegradedIfGoverned(decisionManager, config.deployment?.id);
       } catch (e) {
+        markRuntimeDegradedIfGoverned(
+          decisionManager,
+          config.deployment?.id,
+          e instanceof Error ? e.message : String(e),
+        );
         console.warn(
           `[daemon] resumeParkedRuns: decision-index advanceToResumed failed for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
         );

@@ -47,6 +47,11 @@ import {
   type DeliverableSpecPhase,
 } from './spec-pipeline/delivery.js';
 import type { DecisionIndexManager } from './decision-escalation/manager.js';
+import {
+  withGovernedDecisionMarking,
+  markRuntimeDegradedIfGoverned,
+  clearRuntimeDegradedIfGoverned,
+} from './decision-escalation/manager.js';
 import { buildL2GateRequest } from './decision-escalation/build-request.js';
 import { GitHubBlockPublisher } from './decision-escalation/github-block-notifier.js';
 import type { DeploymentRegistry } from './deployment-registry/registry.js';
@@ -2175,6 +2180,14 @@ export function createPhaseHandlers(
             `[integrate] Successfully merged to ${config.branches.staging}`,
           );
         }
+        // NOTE: a successful Git MERGE does NOT clear the runtime-degraded marker.
+        // The marker tracks decision-index TRANSPORT health, not merge success —
+        // clearing it here would erase a real index failure (e.g. a prior
+        // advanceToResumed() failure that left the run merge-armed but the
+        // transport still broken), and a governed auto-merge would clear it without
+        // ever touching the ledger. The marker is cleared ONLY by a successful
+        // governed decision-index op (a successful raise+notify in the publish
+        // block below, or a successful advanceToResumed in resume).
         return 'success';
       }
 
@@ -2191,6 +2204,11 @@ export function createPhaseHandlers(
       // (invisible park) — the exact gap-#2 invisible-stuck regression. isAvailable()
       // routes both disabled AND broken to this visible 'failure' floor.
       if (decisionManager?.isAvailable() !== true) {
+        markRuntimeDegradedIfGoverned(
+          decisionManager,
+          deploymentId,
+          `decision index unavailable for governed deployment ${deploymentId ?? '?'}`
+        );
         console.error(
           `[integrate] Merge decision for #${workRequest.issueNumber} is ${decision.kind} but the ` +
             `decision index is unavailable (disabled or unreachable) — cannot surface it for approval; ` +
@@ -2228,23 +2246,38 @@ export function createPhaseHandlers(
             decision,
           );
           const sanitized = await sanitizeDecisionRequest(request);
-          const { decision_id } = await ledger.raise(sanitized);
+          const { decision_id } = await withGovernedDecisionMarking(
+            decisionManager,
+            deploymentId,
+            () => ledger.raise(sanitized),
+          );
           const published = await resolveDecisionPublisher().ensure({
             request: sanitized,
             octokit,
             owner,
-            repo,
+            repo: repoName,
             issueNumber: workRequest.issueNumber,
           });
           if (published.posted) {
-            await ledger.notify(decision_id);
+            await withGovernedDecisionMarking(decisionManager, deploymentId, () =>
+              ledger.notify(decision_id),
+            );
             run.mergeDecisionBlockPublished = true;
+            // A successful raise + notify is a successful governed decision-index
+            // op: the approval TRANSPORT just proved it is reachable + writable, so
+            // clear any runtime-degraded marker a prior approval-path failure set.
+            clearRuntimeDegradedIfGoverned(decisionManager, deploymentId);
           } else {
             console.warn(
               `[integrate] decision block not published for #${workRequest.issueNumber} (${published.reason ?? 'unknown'}) — staying parked, will retry`,
             );
           }
         } catch (e) {
+          // A raise()/notify() throw is a runtime decision-index failure for a
+          // governed deployment — withGovernedDecisionMarking already flipped the
+          // runtime-degraded marker before re-throwing into this catch. A publish
+          // (GitHub) failure is NOT an index-runtime fault, so it is not marked.
+          // Either way we fail closed: the run stays parked and will retry.
           console.warn(
             `[integrate] decision-index raise/publish/notify failed (failing closed, run stays parked): ${e instanceof Error ? e.message : String(e)}`,
           );

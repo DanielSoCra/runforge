@@ -43,6 +43,7 @@ export class DecisionIndexManager {
   #writer: IndexWriter | null = null;
   #ledger: DecisionLedger | null = null;
   #broken = false;
+  #runtimeDegraded = false;
 
   constructor(opts: DecisionIndexManagerOptions) {
     this.#enabled = opts.enabled;
@@ -62,6 +63,24 @@ export class DecisionIndexManager {
    */
   isAvailable(): boolean {
     return this.#enabled && !this.#broken && this.#ledger !== null;
+  }
+
+  /**
+   * Runtime-degraded marker for governed deployments (PR1 first-use safety).
+   * Set by the governed-only marking policy whenever an approval-path ledger
+   * interaction fails for a governed deployment; cleared only by a successful
+   * governed merge-decision op. Independent of #enabled/#broken.
+   */
+  markRuntimeDegraded(_reason: string): void {
+    this.#runtimeDegraded = true;
+  }
+
+  clearRuntimeDegraded(): void {
+    this.#runtimeDegraded = false;
+  }
+
+  isRuntimeDegraded(): boolean {
+    return this.#runtimeDegraded;
   }
 
   /**
@@ -137,5 +156,67 @@ export class DecisionIndexManager {
       this.#writer = null;
       this.#ledger = null;
     }
+  }
+}
+
+/**
+ * The minimal runtime-marker surface the governed-only marking helpers depend on.
+ * Both the real {@link DecisionIndexManager} and the test fake satisfy it, so the
+ * helpers stay decoupled from the concrete manager (and from the test double).
+ */
+export interface RuntimeDegradable {
+  markRuntimeDegraded(reason: string): void;
+  clearRuntimeDegraded(): void;
+}
+
+/**
+ * Governed-only marking wrapper for approval-path ledger interactions.
+ * For a governed run (deploymentId !== undefined), an error from fn marks the
+ * manager runtime-degraded; the error is re-thrown so the existing fail-closed
+ * control flow is unchanged. For a non-governed run the marker is untouched and
+ * fn is awaited verbatim.
+ */
+export async function withGovernedDecisionMarking<T>(
+  manager: RuntimeDegradable | undefined,
+  deploymentId: string | undefined,
+  fn: () => Promise<T>,
+): Promise<T> {
+  if (deploymentId === undefined || manager === undefined) {
+    return fn();
+  }
+  try {
+    return await fn();
+  } catch (e) {
+    manager.markRuntimeDegraded(e instanceof Error ? e.message : String(e));
+    throw e;
+  }
+}
+
+/**
+ * Mark the manager runtime-degraded only for a governed run (no-op when the run
+ * is non-governed OR no manager is present — a disabled index passes `undefined`).
+ */
+export function markRuntimeDegradedIfGoverned(
+  manager: RuntimeDegradable | undefined,
+  deploymentId: string | undefined,
+  reason: string,
+): void {
+  if (deploymentId !== undefined && manager !== undefined) {
+    manager.markRuntimeDegraded(reason);
+  }
+}
+
+/**
+ * Clear the runtime-degraded marker only for a governed run. The marker is
+ * cleared EXCLUSIVELY by a successful governed merge-decision op; a non-governed
+ * (deploymentId === undefined) success is a no-op and never clears a marker a
+ * governed failure set.
+ */
+export function clearRuntimeDegradedIfGoverned(
+  manager: RuntimeDegradable | undefined,
+  deploymentId: string | undefined,
+): void {
+  if (deploymentId !== undefined && manager !== undefined) {
+    manager.clearRuntimeDegraded();
   }
 }

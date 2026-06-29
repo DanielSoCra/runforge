@@ -909,6 +909,7 @@ STACK-AC-OPERATIONAL-SAFETY:
     - packages/daemon/src/session-runtime/runtime.test.ts
     - packages/daemon/src/session-runtime/session-error.test.ts
     - packages/daemon/src/control-plane/daemon.test.ts
+    - packages/daemon/src/control-plane/first-use-boot-guard.test.ts
     - packages/daemon/src/control-plane/pipeline.test.ts
     - packages/daemon/src/control-plane/startup-retry.test.ts
     - packages/daemon/src/control-plane/degraded-server.test.ts

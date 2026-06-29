@@ -1,10 +1,16 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PROTOCOL_VERSION } from '@auto-claude/decision-protocol';
 import * as decisionIndex from '@auto-claude/decision-index';
-import { DecisionIndexManager } from './manager.js';
+import {
+  DecisionIndexManager,
+  withGovernedDecisionMarking,
+  markRuntimeDegradedIfGoverned,
+  clearRuntimeDegradedIfGoverned,
+  type RuntimeDegradable,
+} from './manager.js';
 import {
   DECISION_DB_URL,
   REAL_PG,
@@ -74,6 +80,24 @@ describe('DecisionIndexManager (no writer — disabled / broken paths)', () => {
     await mgr.close();
   });
 
+  it('runtime-degraded marker: default false; mark -> true; clear -> false; independent of enabled/broken', async () => {
+    const mgr = new DecisionIndexManager({
+      enabled: false,
+      databaseUrl: 'postgres://unused',
+      protectedKey: TEST_PROTECTED_KEY,
+      protectedDir: join(tmp(), 'protected'),
+    });
+    expect(mgr.isRuntimeDegraded()).toBe(false);
+    mgr.markRuntimeDegraded('test reason');
+    expect(mgr.isRuntimeDegraded()).toBe(true);
+    mgr.clearRuntimeDegraded();
+    expect(mgr.isRuntimeDegraded()).toBe(false);
+    // marker is independent of enabled/available state
+    expect(mgr.isEnabled()).toBe(false);
+    expect(mgr.isAvailable()).toBe(false);
+    await mgr.close();
+  });
+
   it('enabled but importer throws: ledger() throws /unavailable/ (fail-closed), daemon keeps running', async () => {
     const mgr = new DecisionIndexManager({
       enabled: true,
@@ -91,6 +115,84 @@ describe('DecisionIndexManager (no writer — disabled / broken paths)', () => {
     expect(mgr.isAvailable()).toBe(false);
     expect(() => mgr.ledger()).toThrow(/unavailable/);
     await mgr.close();
+  });
+});
+
+describe('governed-only marking helpers', () => {
+  const makeMarkable = () => {
+    const markRuntimeDegraded = vi.fn();
+    const clearRuntimeDegraded = vi.fn();
+    const manager: RuntimeDegradable = {
+      markRuntimeDegraded,
+      clearRuntimeDegraded,
+    };
+    return { manager, markRuntimeDegraded, clearRuntimeDegraded };
+  };
+
+  describe('withGovernedDecisionMarking', () => {
+    it('non-governed (deploymentId undefined): returns fn() verbatim, never marks — even on throw', async () => {
+      const { manager, markRuntimeDegraded } = makeMarkable();
+      await expect(
+        withGovernedDecisionMarking(manager, undefined, async () => 'ok'),
+      ).resolves.toBe('ok');
+      await expect(
+        withGovernedDecisionMarking(manager, undefined, async () => {
+          throw new Error('boom');
+        }),
+      ).rejects.toThrow('boom');
+      expect(markRuntimeDegraded).not.toHaveBeenCalled();
+    });
+
+    it('governed + fn succeeds: returns value, does NOT mark', async () => {
+      const { manager, markRuntimeDegraded } = makeMarkable();
+      await expect(
+        withGovernedDecisionMarking(manager, 'dep-a', async () => 42),
+      ).resolves.toBe(42);
+      expect(markRuntimeDegraded).not.toHaveBeenCalled();
+    });
+
+    it('governed + fn throws: marks runtime-degraded with the message, then RE-THROWS (fail-closed unchanged)', async () => {
+      const { manager, markRuntimeDegraded } = makeMarkable();
+      await expect(
+        withGovernedDecisionMarking(manager, 'dep-a', async () => {
+          throw new Error('postgres unreachable');
+        }),
+      ).rejects.toThrow('postgres unreachable');
+      expect(markRuntimeDegraded).toHaveBeenCalledTimes(1);
+      expect(markRuntimeDegraded).toHaveBeenCalledWith('postgres unreachable');
+    });
+
+    it('undefined manager: never throws on the marking path (disabled index passes undefined)', async () => {
+      await expect(
+        withGovernedDecisionMarking(undefined, 'dep-a', async () => {
+          throw new Error('boom');
+        }),
+      ).rejects.toThrow('boom');
+    });
+  });
+
+  describe('markRuntimeDegradedIfGoverned / clearRuntimeDegradedIfGoverned', () => {
+    it('mark: governed → marks; non-governed → no-op; undefined manager → no-op', () => {
+      const { manager, markRuntimeDegraded } = makeMarkable();
+      markRuntimeDegradedIfGoverned(manager, 'dep-a', 'reason');
+      expect(markRuntimeDegraded).toHaveBeenCalledWith('reason');
+      markRuntimeDegraded.mockClear();
+      markRuntimeDegradedIfGoverned(manager, undefined, 'reason');
+      expect(markRuntimeDegraded).not.toHaveBeenCalled();
+      expect(() =>
+        markRuntimeDegradedIfGoverned(undefined, 'dep-a', 'reason'),
+      ).not.toThrow();
+    });
+
+    it('clear: governed → clears; non-governed → no-op (clear is governed-only); undefined manager → no-op', () => {
+      const { manager, clearRuntimeDegraded } = makeMarkable();
+      clearRuntimeDegradedIfGoverned(manager, 'dep-a');
+      expect(clearRuntimeDegraded).toHaveBeenCalledTimes(1);
+      clearRuntimeDegraded.mockClear();
+      clearRuntimeDegradedIfGoverned(manager, undefined);
+      expect(clearRuntimeDegraded).not.toHaveBeenCalled();
+      expect(() => clearRuntimeDegradedIfGoverned(undefined, 'dep-a')).not.toThrow();
+    });
   });
 });
 

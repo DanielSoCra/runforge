@@ -105,6 +105,10 @@ import { observeVerifierStatus } from './merge-decision/observe-verifier.js';
 import { DeploymentRegistry } from './deployment-registry/registry.js';
 import type { DecisionIndexManager } from './decision-escalation/manager.js';
 import type { GitHubBlockPublisher } from './decision-escalation/github-block-notifier.js';
+import {
+  createFakeDecisionManager,
+  asDecisionManager,
+} from './decision-escalation/__fixtures__/fake-decision-ledger.js';
 
 const mockGit = vi.mocked(git);
 const mockIntegrate = vi.mocked(integrateToStaging);
@@ -290,13 +294,29 @@ function makeDecisionDouble() {
   const raise = vi.fn().mockReturnValue({ decision_id: 'issue-42:integrate:1', outcome: 'admitted' });
   const notify = vi.fn().mockResolvedValue({ applied: true, status: 'notified' });
   const ensure = vi.fn().mockResolvedValue({ posted: true });
+  // The governed-only runtime-degraded marker surface (PR1 first-use safety).
+  const markRuntimeDegraded = vi.fn();
+  const clearRuntimeDegraded = vi.fn();
+  const isRuntimeDegraded = vi.fn(() => false);
   const manager = {
     isEnabled: () => true,
     isAvailable: () => true,
     ledger: () => ({ raise, notify }),
+    markRuntimeDegraded,
+    clearRuntimeDegraded,
+    isRuntimeDegraded,
   } as unknown as DecisionIndexManager;
   const publisher = { ensure } as unknown as GitHubBlockPublisher;
-  return { manager, publisher, raise, notify, ensure };
+  return {
+    manager,
+    publisher,
+    raise,
+    notify,
+    ensure,
+    markRuntimeDegraded,
+    clearRuntimeDegraded,
+    isRuntimeDegraded,
+  };
 }
 
 describe('merge-decision live wiring — integrate handler', () => {
@@ -596,6 +616,143 @@ describe('merge-decision live wiring — integrate handler', () => {
     expect(decision.raise).toHaveBeenCalled();
     // The stale flag is left untouched (NOT cleared) — only a matching epoch consumes.
     expect(run.mergeDecisionApprovedEpoch).toBe(1);
+  });
+
+  // --- governed-only runtime-degraded marking (PR1 first-use safety, T1.2) ----
+  // The integrate handler is the merge-decision approval path; for a GOVERNED run
+  // an approval-path failure marks the index runtime-degraded (observable at
+  // /health) without changing the existing fail-closed control flow. The marker is
+  // cleared ONLY by a successful governed decision-index op that proves the
+  // approval TRANSPORT recovered (a successful raise+notify in publish) — NOT by a
+  // successful Git merge (which never touches the ledger), and never by a
+  // non-governed op.
+
+  /** A manager double that is enabled but UNREACHABLE at runtime (isAvailable=false). */
+  function makeUnavailableDecisionDouble() {
+    const markRuntimeDegraded = vi.fn();
+    const clearRuntimeDegraded = vi.fn();
+    const manager = {
+      isEnabled: () => true,
+      isAvailable: () => false,
+      ledger: () => {
+        throw new Error('decision index unavailable');
+      },
+      markRuntimeDegraded,
+      clearRuntimeDegraded,
+      isRuntimeDegraded: () => false,
+    } as unknown as DecisionIndexManager;
+    return { manager, markRuntimeDegraded, clearRuntimeDegraded };
+  }
+
+  it('(marker-floor) governed run + escalate decision + index UNAVAILABLE → marks runtime-degraded, fails closed (no merge, no park)', async () => {
+    const decision = makeUnavailableDecisionDouble();
+    const { handlers } = createHandlers({
+      config: { deployment: { id: DEPLOYMENT_ID, profile: {} } },
+      registry: registryNotWidened(), // escalate decision
+      decisionManager: decision.manager,
+    });
+    const run = makeRun();
+
+    const result = await handlers.integrate!(run);
+
+    // Existing fail-closed flow is UNCHANGED: the floor returns 'failure'.
+    expect(result).toBe('failure');
+    expect(mockIntegrate).not.toHaveBeenCalled();
+    // The new side-effect: the governed run marked the index runtime-degraded.
+    expect(decision.markRuntimeDegraded).toHaveBeenCalledTimes(1);
+    expect(decision.clearRuntimeDegraded).not.toHaveBeenCalled();
+  });
+
+  it('(marker-publish) governed run + ledger.raise throws → marks runtime-degraded, stays parked (fail-closed)', async () => {
+    const decision = makeDecisionDouble();
+    decision.raise.mockImplementation(() => {
+      throw new Error('ledger raise boom (postgres down)');
+    });
+    const { handlers } = createHandlers({
+      config: { deployment: { id: DEPLOYMENT_ID, profile: {} } },
+      registry: registryNotWidened(),
+      decisionManager: decision.manager,
+      decisionPublisher: decision.publisher,
+    });
+    const run = makeRun();
+
+    const result = await handlers.integrate!(run);
+
+    // The run parks (control flow unchanged) and never merges.
+    expect(result).toBe('success');
+    expect(run.pausedAtPhase).toBe('integrate');
+    expect(mockIntegrate).not.toHaveBeenCalled();
+    // The raise() failure marked the index runtime-degraded for the governed run.
+    expect(decision.markRuntimeDegraded).toHaveBeenCalledTimes(1);
+    expect(decision.clearRuntimeDegraded).not.toHaveBeenCalled();
+  });
+
+  it('(marker-clear-on-publish) governed park: a successful raise+notify CLEARS the runtime-degraded marker (transport recovered)', async () => {
+    const decision = makeDecisionDouble(); // raise/notify succeed, publish posts
+    const { handlers } = createHandlers({
+      config: { deployment: { id: DEPLOYMENT_ID, profile: {} } },
+      registry: registryNotWidened(), // escalate → parks → raise + publish + notify
+      decisionManager: decision.manager,
+      decisionPublisher: decision.publisher,
+    });
+    const run = makeRun();
+
+    const result = await handlers.integrate!(run);
+
+    // Parks (control flow unchanged), never merges.
+    expect(result).toBe('success');
+    expect(run.pausedAtPhase).toBe('integrate');
+    expect(mockIntegrate).not.toHaveBeenCalled();
+    expect(decision.raise).toHaveBeenCalledTimes(1);
+    expect(decision.notify).toHaveBeenCalledTimes(1);
+    // A successful raise+notify is a successful governed DECISION-INDEX op → clear.
+    expect(decision.clearRuntimeDegraded).toHaveBeenCalledTimes(1);
+    expect(decision.markRuntimeDegraded).not.toHaveBeenCalled();
+  });
+
+  it('(marker-regression Finding-1) governed operator-approved merge SUCCEEDS but the index is still degraded → the merge does NOT clear the marker', async () => {
+    // Models the bug: resumeIntegrateParkedRun marked the index degraded when
+    // advanceToResumed() failed, then the run re-entered integrate merge-armed.
+    // A successful Git merge must NOT erase that real index-transport failure.
+    const { manager } = createFakeDecisionManager(); // tracks REAL marker state
+    manager.markRuntimeDegraded('advanceToResumed failed earlier');
+    expect(manager.isRuntimeDegraded()).toBe(true);
+
+    const { handlers } = createHandlers({
+      config: { deployment: { id: DEPLOYMENT_ID, profile: {} } },
+      registry: registryNotWidened(),
+      decisionManager: asDecisionManager(manager),
+    });
+    // Operator-approved override (epoch-matched) → the held merge executes — and
+    // this path never touches the ledger, so it cannot prove transport recovery.
+    const run = makeRun({ mergeDecisionEpoch: 1, mergeDecisionApprovedEpoch: 1 });
+
+    const result = await handlers.integrate!(run);
+
+    expect(result).toBe('success');
+    expect(mockIntegrate).toHaveBeenCalled(); // the merge DID succeed
+    // ...but the runtime-degraded marker is STILL set (merge success ≠ index health).
+    expect(manager.isRuntimeDegraded()).toBe(true);
+    expect(manager.degradedClears).toBe(0);
+  });
+
+  it('(marker-clear-boundary) NON-governed merge success does NOT clear the marker (clear is governed-only)', async () => {
+    const decision = makeDecisionDouble();
+    // No config.deployment + run.deploymentId undefined → non-governed unconditional merge.
+    const { handlers } = createHandlers({
+      decisionManager: decision.manager,
+      decisionPublisher: decision.publisher,
+    });
+    const run = makeRun({ deploymentId: undefined });
+
+    const result = await handlers.integrate!(run);
+
+    expect(result).toBe('success');
+    expect(mockIntegrate).toHaveBeenCalled();
+    // The clear is governed-only: a non-governed success must NOT clear a marker a
+    // governed failure may have set.
+    expect(decision.clearRuntimeDegraded).not.toHaveBeenCalled();
+    expect(decision.markRuntimeDegraded).not.toHaveBeenCalled();
   });
 
   it('(c) flag-OFF byte-identity: no config.deployment AND no registry → integrate merges unconditionally, no decision logic', async () => {
