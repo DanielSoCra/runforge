@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { loadConfig, ConfigSchema, validateRequiredBootEnv } from './config.js';
+import {
+  loadConfig,
+  ConfigSchema,
+  validateRequiredBootEnv,
+  hasConfiguredAlertChannel,
+} from './config.js';
 import { mkdtemp, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -623,5 +628,64 @@ describe('validateRequiredBootEnv', () => {
     };
     const result = validateRequiredBootEnv(env);
     expect(result.ok).toBe(true);
+  });
+});
+
+// --- B1/B2 first-use safety net: hasConfiguredAlertChannel truth table ---
+describe('hasConfiguredAlertChannel', () => {
+  it('returns false when webhooks is empty (the silent-no-op case)', () => {
+    expect(hasConfiguredAlertChannel({ webhooks: [] })).toBe(false);
+  });
+
+  it('returns true when at least one webhook is configured', () => {
+    expect(
+      hasConfiguredAlertChannel({ webhooks: ['https://hooks.example.com/x'] }),
+    ).toBe(true);
+  });
+
+  it('returns true when multiple webhooks are configured', () => {
+    expect(
+      hasConfiguredAlertChannel({
+        webhooks: ['https://a.example.com', 'https://b.example.com'],
+      }),
+    ).toBe(true);
+  });
+
+  it('is the abstraction used by the parsed config (default = no channel)', () => {
+    const result = ConfigSchema.safeParse(validConfig);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(hasConfiguredAlertChannel(result.data)).toBe(false);
+    }
+  });
+});
+
+// --- B5 first-use safety net: optional watchdog idle-timeout override ---
+describe('watchdogIdleTimeoutMs', () => {
+  it('is absent (undefined) by default so the daemon applies its own default', () => {
+    const result = ConfigSchema.safeParse(validConfig);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.watchdogIdleTimeoutMs).toBeUndefined();
+    }
+  });
+
+  it('accepts a downward override for watched pilots', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      watchdogIdleTimeoutMs: 600_000,
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.watchdogIdleTimeoutMs).toBe(600_000);
+    }
+  });
+
+  it('rejects an implausibly small idle-timeout (< 60s)', () => {
+    const result = ConfigSchema.safeParse({
+      ...validConfig,
+      watchdogIdleTimeoutMs: 1000,
+    });
+    expect(result.success).toBe(false);
   });
 });

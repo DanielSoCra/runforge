@@ -218,6 +218,48 @@ The daemon writes a heartbeat file to `~/logs/claude-daemon.heartbeat` on each p
 - ThrottleInterval: 30 seconds (prevents rapid restart loops)
 - Logs: `~/logs/claude-daemon.log`
 
+> **Crash-loop caveat (KeepAlive + ThrottleInterval).** With `KeepAlive=true`,
+> launchd respawns the daemon on every hard exit, and `ThrottleInterval=30`
+> only spaces restarts 30 s apart — it does **not** stop them. A *permanent*
+> failure (a categorical `rejected` config outcome, a recurring
+> `uncaughtException`, a bad migration) will therefore restart every ~30 s
+> indefinitely. The daemon now notifies the configured alert channel on an
+> uncaught crash and exits with a non-zero code, but launchd will still
+> respawn — watch `~/logs/claude-daemon.log` and the alert channel for a
+> repeating crash and fix the root cause (or `launchctl unload` the plist)
+> rather than relying on the throttle to "settle" it.
+
+### Unattended monitoring (REQUIRED for a governed deployment)
+
+The daemon's `/health` endpoint reports a truthful three-state liveness signal
+so an external monitor can detect a wedged or degraded daemon that the process
+supervisor alone cannot see (a hung-but-alive process keeps launchd happy):
+
+```bash
+curl -fsS localhost:3847/health   # 200 ok | 200 degraded | 503 unhealthy
+```
+
+- **200 `{ok:true, degraded:false}`** — normal.
+- **200 `{ok:true, degraded:true}`** — observable but intentional/transient: a
+  manual pause, draining, the startup-degraded window, a governed deployment
+  with **no** configured alert channel, or a transient alert-send failure.
+- **503 `{ok:false}`** — unsafe / no forward progress: the consecutive-stuck
+  threshold was hit, the work-loop **watchdog** detected a stall (a run or poll
+  that stopped progressing past the idle-timeout — the daemon self-pauses but
+  the held concurrency slot is NOT auto-released; **restart the daemon to
+  recover it**), a **governed** deployment whose decision index failed at
+  runtime, or a safety auto-pause.
+
+**Operator prerequisite (Codex Q7): a governed/unattended deployment MUST
+configure an external monitor that polls `/health`** (e.g. healthchecks.io, a
+launchd/cron `curl` job, or an uptime monitor) and alerts on a non-200. The
+in-process supervisor (launchd `KeepAlive`) restarts a *crashed* process but
+cannot observe a *wedged* one — `/health` 503 + the external monitor is what
+closes the "goes dark" gap until the deferred outbound dead-man's-switch (B3)
+lands. A governed deployment should also configure at least one `webhook` (else
+it boots `degraded:true` with a loud warning and auto-pause/escalation/crash
+alerts are logged locally instead of delivered).
+
 ### Operator commands
 
 The daemon exposes a control API on `localhost:3847`:

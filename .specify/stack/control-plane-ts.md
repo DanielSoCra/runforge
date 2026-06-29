@@ -23,6 +23,8 @@ test_paths:
 
 **HTTP server for operator control.** A minimal HTTP server (Node.js `http` module, no framework) bound to a configurable port. The port also serves as the instance lock — if the port is in use, a second instance fails to bind. Endpoints: `/status`, `/health`, `/pause`, `/resume`, `/retry/:issue`, `/release`, `/logs`.
 
+**`/health` reflects a truthful three-state liveness signal (B4).** The server maps a `getHealth()` result onto the HTTP status code: `ok:false → 503`; `ok:true, degraded:true → 200` with `degraded:true`; otherwise `200 ok`. The daemon supplies `getHealth` by gathering a live-state snapshot and delegating the matrix to the pure `evaluateHealth` (STACK-AC-OPERATIONAL-SAFETY). A non-governed/healthy daemon keeps the legacy `{ ok:true, degraded:false, lastConfigError:null }` shape byte-for-byte; the throwaway degraded-boot server is unchanged and hands off once the real server binds.
+
 ## Key Decisions
 
 **FSM: Plain transition table.** Chosen over XState (too heavy — we need ~10 states and ~15 transitions, not a visual state chart editor). The transition table is a `Record<Phase, Record<Event, { next: Phase; action: () => Promise<void> }>>`. Type-safe, testable, zero dependencies.
@@ -33,7 +35,9 @@ test_paths:
 
 **State persistence: JSON files.** `RunState` written to `state/runs/{issue-number}.json` via atomic write (see STACK-AC-CONVENTIONS). `DaemonState` written to `state/daemon.json`. On crash recovery: scan `state/runs/` for incomplete runs, restore FSM position.
 
-**Notifications: Webhook POST with retry.** A configurable array of webhook URLs. Each notification is a POST via `fetch()` with a JSON body containing event type, issue number, phase, and message. On failure: retry once after 5 seconds. On second failure: log a warning and continue — notification failure must not block pipeline execution. Timeout: 10 seconds per request.
+**Notifications: Webhook POST with retry.** A configurable array of webhook URLs. Each notification is a POST via `fetch()` with a JSON body containing event type, issue number, phase, and message. On failure: retry once after 5 seconds. On second failure: log a warning and continue — notification failure must not block pipeline execution. Timeout: 10 seconds per request. **Empty-channel delivery is non-silent (B1):** the daemon routes auto-pause/escalation/crash alerts through a single `notifyOperator` closure that, when `hasConfiguredAlertChannel(config)` is false, emits a structured local warning instead of `notify()`'s silent no-op on an empty `webhooks` array.
+
+**Repo poller liveness snapshot (B5 input).** `RepoManager` tracks `pollStartedAt` (epoch-ms, set when `pollInProgress` flips true, cleared when false) per repo, behind an injectable clock, and exposes a read-only `pollerSnapshot()`. The work-loop watchdog reads it to detect a poll that started but never settled past the idle-timeout (a hung orchestration await). Read-only by design — the watchdog observes, it does not mutate poller state.
 
 **Results ledger: JSONL file.** Append-only `state/results.jsonl`. One JSON object per completed run. Query by reading + filtering. Simple, crash-safe, no database.
 

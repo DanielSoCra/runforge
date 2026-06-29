@@ -76,17 +76,27 @@ export function createControlServer(
         json(res, 500, { error: 'read failed' });
       });
     } else if (method === 'GET' && url.pathname === '/health') {
-      // First-use PR1: a GOVERNED daemon whose decision-index approval transport
-      // is unhealthy at runtime (the runtime-degraded marker, or enabled-but-
-      // unreachable) returns 503 so an external monitor sees the outage. The full
-      // /health mapping (stuck / watchdog / pauseReason) is PR2 (T2.6). A
-      // non-governed daemon, or a governed-and-healthy one, keeps the legacy
-      // 200-ok shape byte-for-byte (index state never degrades a non-governed
-      // daemon). The degraded-boot server (degraded-server.ts) is unchanged.
+      // B4 truthful /health (first-use PR2, T2.6). getHealth() returns the full
+      // evaluation; this maps it onto the HTTP status code:
+      //   - ok:false              → 503 (unsafe / no progress: stuck, watchdog
+      //                              stall, governed index down, safety pause, …)
+      //   - ok:true, degraded:true → 200 with degraded:true (intentional/transient:
+      //                              manual pause, draining, governed-without-channel,
+      //                              startup-degraded, transient alert failure)
+      //   - ok:true, degraded:false → 200 ok (normal)
+      // A non-governed/healthy daemon keeps the legacy 200-ok shape byte-for-byte.
+      // The degraded-boot server (degraded-server.ts) is unchanged.
       const health = handlers.getHealth?.();
       if (health && !health.ok) {
         json(res, 503, {
           ok: false,
+          degraded: true,
+          reason: health.reason,
+          lastConfigError: null,
+        });
+      } else if (health && health.degraded) {
+        json(res, 200, {
+          ok: true,
           degraded: true,
           reason: health.reason,
           lastConfigError: null,

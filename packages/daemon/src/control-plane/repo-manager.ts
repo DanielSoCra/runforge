@@ -11,10 +11,24 @@ interface PollEntry {
   intervalHandle: ReturnType<typeof setInterval>;
   activeRuns: number;
   pollInProgress: boolean;
+  // Epoch-ms when the in-flight poll started, or null when idle (B5 tick-stall
+  // detection, first-use safety net). Set when pollInProgress flips true, cleared
+  // when it flips false. The watchdog reads it via pollerSnapshot() to detect a
+  // poll that started but never settled (a hung orchestration await).
+  pollStartedAt: number | null;
   pendingDisable: boolean;
   owner: string;
   name: string;
   connectionId: string | null;
+}
+
+/** Read-only per-repo poller liveness snapshot (B5 watchdog input). */
+export interface PollerSnapshot {
+  repoId: string;
+  owner: string;
+  name: string;
+  pollInProgress: boolean;
+  pollStartedAt: number | null;
 }
 
 export class RepoManager {
@@ -31,8 +45,30 @@ export class RepoManager {
       name: string,
       detector: WorkDetector,
     ) => void | Promise<void>,
+    // Injectable clock (epoch-ms) so the B5 watchdog tick-stall window is
+    // deterministic under fake timers. Defaults to wall-clock in production.
+    private readonly now: () => number = () => Date.now(),
   ) {
     this.source = source;
+  }
+
+  /**
+   * Read-only liveness snapshot of every poller (B5 watchdog input). Returns the
+   * per-repo `pollInProgress` flag plus `pollStartedAt` (epoch-ms or null) so the
+   * watchdog can detect a poll that started but never settled past idle-timeout.
+   */
+  pollerSnapshot(): PollerSnapshot[] {
+    const out: PollerSnapshot[] = [];
+    for (const [repoId, entry] of this.pollers) {
+      out.push({
+        repoId,
+        owner: entry.owner,
+        name: entry.name,
+        pollInProgress: entry.pollInProgress,
+        pollStartedAt: entry.pollStartedAt,
+      });
+    }
+    return out;
   }
 
   async initialize(): Promise<Result<void>> {
@@ -159,6 +195,7 @@ export class RepoManager {
       intervalHandle,
       activeRuns: 0,
       pollInProgress: false,
+      pollStartedAt: null,
       pendingDisable: false,
       owner: repo.owner,
       name: repo.name,
@@ -169,6 +206,7 @@ export class RepoManager {
   private startPoll(repoId: string, entry: PollEntry): boolean {
     if (entry.pendingDisable || entry.pollInProgress) return false;
     entry.pollInProgress = true;
+    entry.pollStartedAt = this.now();
     Promise.resolve()
       .then(() => this.onPoll(repoId, entry.owner, entry.name, entry.detector))
       .catch((e) =>
@@ -179,7 +217,10 @@ export class RepoManager {
       )
       .finally(() => {
         const latest = this.pollers.get(repoId);
-        if (latest) latest.pollInProgress = false;
+        if (latest) {
+          latest.pollInProgress = false;
+          latest.pollStartedAt = null;
+        }
       });
     return true;
   }

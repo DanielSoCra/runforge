@@ -377,6 +377,14 @@ export const ConfigSchema = z.object({
     })
     .optional(),
   maxConsecutiveStuck: z.number().int().min(1).default(30),
+  // B5 watchdog idle-timeout (first-use safety net). The work-loop watchdog
+  // self-pauses (pauseReason='stuck') and reports /health 503 when an active
+  // run's progress (`updatedAt`) or a repo poll (`pollStartedAt`) has not
+  // advanced for longer than this. Default (applied in the daemon, not here) =
+  // the 3h subprocess-kill bound + 15m grace; configurable DOWNWARD for watched
+  // pilots. Optional — absent means "use the daemon default" — so existing
+  // hand-built Config literals in tests stay valid without restating it.
+  watchdogIdleTimeoutMs: z.number().int().min(60_000).optional(),
   gracePeriodMs: z.number().int().default(30000),
   maxRunsPerIssue: z.number().int().min(1).default(3),
   retryBackoffBaseMs: z.number().int().min(1000).default(60_000),
@@ -574,6 +582,20 @@ export const ConfigSchema = z.object({
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
+
+/**
+ * Whether the daemon has at least one usable operator alert channel (B1/B2,
+ * first-use safety net). An abstraction over the raw transport so callers — the
+ * auto-pause sites (non-silent empty channel), the governed-without-channel boot
+ * warning, and the `/health` evaluator — never inspect `webhooks` directly and a
+ * future channel type can be added in one place. Today a usable channel is a
+ * non-empty `webhooks` array.
+ */
+export function hasConfiguredAlertChannel(
+  config: Pick<Config, 'webhooks'>,
+): boolean {
+  return config.webhooks.length > 0;
+}
 
 export interface RepoConfig {
   id: string;

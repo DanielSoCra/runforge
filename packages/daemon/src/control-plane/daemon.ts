@@ -1,7 +1,12 @@
 // src/control-plane/daemon.ts
 import { isIP } from 'node:net';
 import { Octokit } from '@octokit/rest';
-import { loadConfig, validateRequiredBootEnv, type Config } from '../config.js';
+import {
+  loadConfig,
+  validateRequiredBootEnv,
+  hasConfiguredAlertChannel,
+  type Config,
+} from '../config.js';
 import { SessionRuntime } from '../session-runtime/runtime.js';
 import { CostTracker } from '../session-runtime/cost.js';
 import { createProviderAdapter } from '../session-runtime/adapters/index.js';
@@ -81,7 +86,19 @@ import { runPipeline } from './pipeline.js';
 import { createPhaseLabelMirror } from './phase-labels.js';
 import { getPipeline, getStartPhase } from './fsm.js';
 import { selectVariant } from './variants.js';
-import { notify } from './notify.js';
+import { notify, type NotificationPayload } from './notify.js';
+import {
+  createWatchdog,
+  readActiveRunProgress,
+  type WatchdogStall,
+  type WatchdogSignals,
+} from './watchdog.js';
+import {
+  evaluateHealth,
+  type PauseReason,
+  type HealthSignals,
+} from './health.js';
+import { createCrashHandlers } from './crash-handlers.js';
 import type {
   ProviderDefinition,
   RunState,
@@ -199,7 +216,25 @@ export interface StartDaemonOptions {
    * coverage). Production constructs one from `readDecisionIndexConfig(stateDir)`.
    */
   decisionManager?: DecisionIndexManager;
+  /**
+   * B5 work-loop watchdog test seam (first-use safety net). Injects a clock,
+   * tick cadence, idle-timeout, and optionally the live-signal reader so the
+   * detect→self-pause path is deterministic under fake timers. Production uses
+   * wall-clock + the real activeRunProgress/pollerSnapshot readers.
+   */
+  watchdog?: {
+    now?: () => number;
+    intervalMs?: number;
+    idleTimeoutMs?: number;
+    readSignals?: () => Promise<WatchdogSignals>;
+  };
 }
+
+// B5 watchdog default idle-timeout: the 3h subprocess-kill bound + 15m grace.
+// Chosen so a long-but-PROGRESSING in-worker phase (capped at 3h) never
+// false-positives, while an orchestration-level untimed await is caught after the
+// threshold. Configurable downward via config.watchdogIdleTimeoutMs for pilots.
+const DEFAULT_WATCHDOG_IDLE_TIMEOUT_MS = 3 * 60 * 60 * 1000 + 15 * 60 * 1000;
 
 /**
  * Resolve the gate issue's repo coordinates from a decision's `source_url`
@@ -411,6 +446,24 @@ export async function startDaemon(
         ),
       );
     }
+  }
+
+  // B2 (first-use safety net, Codex CRITICAL 1): a GOVERNED deployment with no
+  // configured alert channel boots with a LOUD warning and is reported
+  // `degraded:true` by /health — but is NOT refused. Existing L1 mandates "don't
+  // run silently" + "make degraded state observable" (which warn + degraded fully
+  // satisfy); no L1 makes an alert channel *required* (that hard-refuse is the
+  // deferred B2-strict, an Operator L1 decision). Non-governed local runs are
+  // unaffected. The flag is read by /health (T2.6) and surfaced on /status.
+  const alertChannelDegraded =
+    config.deployment !== undefined && !hasConfiguredAlertChannel(config);
+  if (alertChannelDegraded) {
+    console.warn(
+      `[daemon] WARNING: governed deployment "${config.deployment!.id}" has NO configured ` +
+        `alert channel (webhooks is empty). Auto-pause / escalation / crash alerts will NOT ` +
+        `reach the Operator — the daemon will report /health degraded:true. Configure at ` +
+        `least one webhook (and an external /health monitor) for unattended operation.`,
+    );
   }
 
   // 2d. Input-boundary sanitization pipeline (default = identity). Built once
@@ -1156,10 +1209,11 @@ export async function startDaemon(
         onTickErrorThresholdReached: (consecutiveErrors, lastError) => {
           if (!paused) {
             paused = true;
+            pauseReason = 'tick-error';
             console.warn(
               `[daemon] Auto-paused: coordinator hit ${consecutiveErrors} consecutive tick errors`,
             );
-            void notify(config.webhooks, {
+            notifyOperator({
               event: 'auto-paused',
               issueNumber: 0,
               phase: 'tick-error',
@@ -1176,10 +1230,81 @@ export async function startDaemon(
 
   // 4. State tracking
   let paused = shouldPauseForRuntimeSource(runtimeSourceStatus);
+  // pauseReason (first-use safety net, T2.1): WHY the daemon is paused, stamped at
+  // every set-paused site so /health can distinguish an intentional MANUAL pause
+  // (200 degraded) from a SAFETY pause (503). An un-tagged pause defaults to the
+  // cautious safety interpretation downstream. The initial pause (if any) is the
+  // runtime-source preflight.
+  let pauseReason: PauseReason | null = paused ? 'runtime-source' : null;
+  // B5 watchdog detection state (null = no stall) — surfaced on /status and
+  // mapped to /health 503.
+  let watchdogStall: WatchdogStall | null = null;
+  // B5 watchdog clock + idle-timeout (injectable for deterministic tests). The
+  // idle-timeout prefers an explicit test override, then config, then the default
+  // (3h subprocess bound + 15m grace).
+  const watchdogNow = opts?.watchdog?.now ?? ((): number => Date.now());
+  // The test seam (opts.watchdog.idleTimeoutMs) is unclamped for deterministic
+  // fake-timer tests. The CONFIG override is clamped to the default ceiling: the
+  // knob is configurable DOWNWARD only (tighten for pilots) — an upward override
+  // would silently weaken the safety net, so it can never raise the timeout.
+  const watchdogIdleTimeoutMs =
+    opts?.watchdog?.idleTimeoutMs ??
+    Math.min(
+      config.watchdogIdleTimeoutMs ?? DEFAULT_WATCHDOG_IDLE_TIMEOUT_MS,
+      DEFAULT_WATCHDOG_IDLE_TIMEOUT_MS,
+    );
+  // B1/B4: whether the most recent operator alert send failed transiently
+  // (reported as /health 200-degraded). Reset on the next successful send.
+  let lastAlertSendFailed = false;
   let draining = false;
   let activeRuns = 0;
   let shuttingDown = false;
   let consecutiveStuckCount = 0;
+
+  // Resolves when shutdown() has ACTUALLY completed all its cleanup. The crash
+  // handler (T2.7) awaits this so a fatal crash during an active run waits for a
+  // clean graceful shutdown (NOT the immediate-return enterDrainMode flag-flip) —
+  // while a wedged run that never settles leaves this pending so the crash
+  // handler's bounded force-exit timer performs the exit.
+  let resolveShutdownComplete!: () => void;
+  const shutdownComplete = new Promise<void>((resolve) => {
+    resolveShutdownComplete = resolve;
+  });
+
+  // Decrement the active-run count when a run settles, and — crucially — complete
+  // a graceful drain HERE (after the decrement). handleRunOutcome's drain check
+  // runs in the run promise's `.then`, BEFORE this `.finally` decrement, so for
+  // the final in-flight run it sees activeRuns>0 and never fires; this post-
+  // decrement trigger is what actually finishes the drain (and resolves
+  // shutdownComplete for the crash handler).
+  function finishActiveRun(): void {
+    activeRuns--;
+    if (draining && activeRuns === 0 && !shuttingDown) {
+      console.log('[daemon] Drain complete — all runs finished, shutting down');
+      void shutdown();
+    }
+  }
+
+  // B1 (first-use safety net): a single operator-alert entry point that makes the
+  // empty-channel case NON-SILENT. notify() with zero webhooks is a silent no-op;
+  // here, when no channel is configured, we emit a structured console.warn so an
+  // auto-pause / escalation / crash never disappears into the void. SSRF behavior
+  // is unchanged (notify() still validates each URL).
+  function notifyOperator(payload: NotificationPayload): void {
+    if (!hasConfiguredAlertChannel(config)) {
+      console.warn(
+        `[daemon] ALERT NOT DELIVERED (no alert channel configured): ${payload.event} — ${payload.message}`,
+      );
+      return;
+    }
+    void notify(config.webhooks, payload)
+      .then((result) => {
+        lastAlertSendFailed = result.failedUrls.length > 0;
+      })
+      .catch(() => {
+        lastAlertSendFailed = true;
+      });
+  }
   // Synchronous in-process guard for the single-session interactive PO launch.
   // The fs marker (the session record) is written only AFTER async context
   // assembly, so two concurrent launches can both pass hasActiveInteractiveSession()
@@ -1224,6 +1349,7 @@ export async function startDaemon(
     if (latest.healthy || latest.action === 'warn') return ok(undefined);
 
     paused = true;
+    pauseReason = 'runtime-source';
     const message =
       latest.message ?? latest.failureKind ?? 'unknown runtime source failure';
     console.warn(
@@ -1242,10 +1368,11 @@ export async function startDaemon(
     if (outcome === 'paused') {
       if (!paused) {
         paused = true;
+        pauseReason = 'budget';
         console.warn(
           `[daemon] Auto-paused: daily budget exceeded (issue #${issueNumber})`,
         );
-        void notify(config.webhooks, {
+        notifyOperator({
           event: 'auto-paused',
           issueNumber,
           phase: 'paused',
@@ -1273,10 +1400,11 @@ export async function startDaemon(
       );
       if (consecutiveStuckCount >= config.maxConsecutiveStuck && !paused) {
         paused = true;
+        pauseReason = 'stuck';
         console.warn(
           `[daemon] Auto-paused: ${consecutiveStuckCount} consecutive stuck runs reached threshold`,
         );
-        void notify(config.webhooks, {
+        notifyOperator({
           event: 'auto-paused',
           issueNumber,
           phase: 'stuck',
@@ -1492,7 +1620,7 @@ export async function startDaemon(
               console.error(`Run failed for #${request.issueNumber}:`, e),
             )
             .finally(() => {
-              activeRuns--;
+              finishActiveRun();
               activeIssues.delete(request.issueNumber);
               repoManager!.notifyRunEnd(repoId);
               // gap #6 setup-throw backstop: a throw in processWorkRequest's
@@ -1574,7 +1702,7 @@ export async function startDaemon(
                   console.error(`Run failed for #${bugRequest.issueNumber}:`, e),
                 )
                 .finally(() => {
-                  activeRuns--;
+                  finishActiveRun();
                   activeIssues.delete(bugRequest.issueNumber);
                   repoManager!.notifyRunEnd(repoId);
                   releaseBugDetectGateOnce();
@@ -1649,7 +1777,7 @@ export async function startDaemon(
                   console.error(`Run failed for #${fpRequest.issueNumber}:`, e),
                 )
                 .finally(() => {
-                  activeRuns--;
+                  finishActiveRun();
                   activeIssues.delete(fpRequest.issueNumber);
                   repoManager!.notifyRunEnd(repoId);
                   releaseFpDetectGateOnce();
@@ -1702,6 +1830,8 @@ export async function startDaemon(
           dailyRunCount: dailyRunState.count,
           dailyCost: costTracker.getDailyCost(),
           paused,
+          // T2.1: WHY the daemon is paused (manual vs safety) — drives /health.
+          pauseReason,
           draining,
           consecutiveStuckCount,
           uptime: process.uptime(),
@@ -1712,35 +1842,65 @@ export async function startDaemon(
           // runtime. Both are observability-only here; /health maps them to 503.
           isGoverned: config.deployment !== undefined,
           isRuntimeDegraded: decisionManager.isRuntimeDegraded(),
+          // B2/B5 first-use safety net: governed-without-channel + watchdog state.
+          alertChannelDegraded,
+          watchdogStall,
           ...safeState,
         };
       },
-      // First-use PR1: the minimal governed decision-index health signal. A
-      // GOVERNED daemon is unhealthy when its approval transport is down — the
-      // runtime-degraded marker is set, OR the index is enabled-but-unreachable.
-      // A non-governed daemon's index state never makes it unhealthy. The full
-      // /health mapping (stuck/watchdog/pauseReason) is PR2 (T2.6).
+      // B4 (first-use safety net, T2.6): the FULL truthful /health mapping. The
+      // daemon gathers a HealthSignals snapshot from its live state and delegates
+      // the 503 / 200-degraded / 200-ok decision to the pure evaluateHealth (the
+      // status-code matrix is unit-tested there). Extends PR1's minimal governed
+      // decision-index signal; a non-governed daemon's index state is never a
+      // health signal (legacy integrate is normal there).
       getHealth: () => {
-        const governed = config.deployment !== undefined;
-        const indexUnhealthy =
-          decisionManager.isRuntimeDegraded() ||
-          (decisionManager.isEnabled() && !decisionManager.isAvailable());
-        if (governed && indexUnhealthy) {
-          return {
-            ok: false,
-            degraded: true,
-            reason: 'decision-index-unavailable',
-          };
-        }
-        return { ok: true, degraded: false, reason: null };
+        const snaps = repoManager?.pollerSnapshot() ?? [];
+        const now = watchdogNow();
+        // An on-demand read of the SAME tick-stall condition the watchdog records
+        // (it just lets /health report 503 immediately, before the watchdog's next
+        // interval tick). It MUST use the watchdog idle-timeout, not an earlier
+        // threshold: a poll legitimately awaits a long-but-bounded classifier run
+        // (preClassifyReadyWork, 3h subprocess cap), so an earlier threshold would
+        // false-503 a healthy long poll. Aligned with the watchdog so the two
+        // signals can never disagree.
+        const repoTickStale = snaps.some(
+          (s) =>
+            s.pollInProgress &&
+            s.pollStartedAt !== null &&
+            now - s.pollStartedAt > watchdogIdleTimeoutMs,
+        );
+        const signals: HealthSignals = {
+          isGoverned: config.deployment !== undefined,
+          indexRuntimeDegraded: decisionManager.isRuntimeDegraded(),
+          indexEnabledButUnavailable:
+            decisionManager.isEnabled() && !decisionManager.isAvailable(),
+          paused,
+          pauseReason,
+          draining,
+          consecutiveStuckCount,
+          maxConsecutiveStuck: config.maxConsecutiveStuck,
+          watchdogStalled: watchdogStall !== null,
+          repoTickStale,
+          startupDegradedRetrying: configReader?.isStartupDegraded() ?? false,
+          alertChannelDegraded,
+          transientAlertFailure: lastAlertSendFailed,
+        };
+        return evaluateHealth(signals);
       },
       pause: () => {
+        // Operator/manual pause — intentional, reported as /health 200-degraded.
         paused = true;
+        pauseReason = 'manual';
       },
       resume: async () => {
         const sourceReady = await refreshRuntimeSourceForWork('resume');
         if (!sourceReady.ok) return sourceReady;
         paused = false;
+        pauseReason = null;
+        // A successful resume clears any watchdog stall — the operator has
+        // (re)assessed; the held slot, if any, is the operator's restart concern.
+        watchdogStall = null;
         draining = false;
         return ok(undefined);
       },
@@ -2117,7 +2277,7 @@ export async function startDaemon(
           console.error(`Resumed run failed for #${run.issueNumber}:`, e),
         )
         .finally(() => {
-          activeRuns--;
+          finishActiveRun();
           activeIssues.delete(run.issueNumber);
           if (repoManager && resumeRepoId) {
             repoManager.notifyRunEnd(resumeRepoId);
@@ -2131,7 +2291,7 @@ export async function startDaemon(
       // runPipeline `.finally` exists, so a throw here must free the gate directly
       // (a plain outer `finally` would release synchronously BEFORE detect runs).
       releaseDetectGateOnce();
-      activeRuns--;
+      finishActiveRun();
       activeIssues.delete(run.issueNumber);
       if (repoManager !== null && resumeRepoId !== '') {
         repoManager.notifyRunEnd(resumeRepoId);
@@ -2170,6 +2330,50 @@ export async function startDaemon(
     'claude-daemon.heartbeat',
   );
   const stopHeartbeat = startHeartbeat(heartbeatPath, config.pollIntervalMs);
+
+  // 6c-bis. B5 work-loop watchdog (first-use safety net). DETECTS a stalled work
+  // loop (run-stall or tick-stall past idle-timeout) and self-pauses
+  // (pauseReason='stuck') + notifies + flips /health to 503. CRITICAL SAFETY: it
+  // never decrements activeRuns and never cancels the run — the held slot is
+  // recovered by operator restart (see watchdog.ts header). The signal reader is
+  // injectable for deterministic tests; production reads the persisted run
+  // progress + the repo poller snapshots.
+  const readWatchdogSignals =
+    opts?.watchdog?.readSignals ??
+    (async (): Promise<WatchdogSignals> => ({
+      activeRunProgress: await readActiveRunProgress(activeIssues, (issue) =>
+        stateMgr.loadRunState(issue),
+      ),
+      pollerSnapshots: repoManager?.pollerSnapshot() ?? [],
+    }));
+  const watchdog = createWatchdog({
+    now: watchdogNow,
+    idleTimeoutMs: watchdogIdleTimeoutMs,
+    readSignals: readWatchdogSignals,
+    isPaused: () => paused,
+    isShuttingDown: () => shuttingDown || draining,
+    onStall: (stall) => {
+      paused = true;
+      pauseReason = 'stuck';
+      watchdogStall = stall;
+      console.warn(
+        `[daemon] Watchdog detected ${stall.kind}: ${stall.detail} — self-pausing ` +
+          `(claiming no new work). The held concurrency slot is NOT auto-released; ` +
+          `restart the daemon to recover it. /health is now 503.`,
+      );
+      notifyOperator({
+        event: 'watchdog-stall',
+        issueNumber: 0,
+        phase: stall.kind,
+        message: `Daemon watchdog self-paused: ${stall.detail}`,
+      });
+    },
+  });
+  const watchdogIntervalMs =
+    opts?.watchdog?.intervalMs ?? Math.min(config.pollIntervalMs, 60_000);
+  const watchdogHandle = setInterval(() => {
+    void watchdog.tick();
+  }, watchdogIntervalMs);
 
   // 6d. resumeParkedRuns — check parked runs for l2-approved/l2-rejected label, re-enter pipeline
   async function resumeParkedRuns(): Promise<void> {
@@ -2833,7 +3037,7 @@ export async function startDaemon(
           console.error(`Parked run failed for #${run.issueNumber}:`, e),
         )
         .finally(() => {
-          activeRuns--;
+          finishActiveRun();
           activeIssues.delete(run.issueNumber);
           if (repoManager && resumeRepoId)
             repoManager.notifyRunEnd(resumeRepoId);
@@ -2854,13 +3058,16 @@ export async function startDaemon(
     stopReviewScheduler();
     stopPOAgent?.();
     stopTechLeadScheduler?.();
+    clearInterval(watchdogHandle);
     repoManager?.stop();
     // If no active runs, shut down immediately
     if (activeRuns === 0) {
       console.log('[daemon] No active runs — shutting down immediately');
       await shutdown();
     }
-    // Otherwise, handleRunOutcome will call shutdown() when activeRuns hits 0
+    // Otherwise, finishActiveRun() calls shutdown() when activeRuns hits 0 (it
+    // runs AFTER the run-promise's activeRuns decrement, so the final run reliably
+    // completes the drain — see finishActiveRun).
   };
 
   const shutdown = async () => {
@@ -2870,6 +3077,7 @@ export async function startDaemon(
     if (knowledgeSyncPoller) clearInterval(knowledgeSyncPoller);
     knowledgeMaintenance.stop();
     stopHeartbeat();
+    clearInterval(watchdogHandle);
     if (stopCoordinator) stopCoordinator();
     stopReviewScheduler();
     stopPOAgent?.();
@@ -2882,6 +3090,9 @@ export async function startDaemon(
     await new Promise<void>((resolve) => server.close(() => resolve()));
     console.log('[daemon] Instance lock released');
     console.log('Daemon stopped.');
+    // Signal the crash handler (and any other awaiter) that graceful shutdown
+    // has ACTUALLY completed. Idempotent — Promise resolution only counts once.
+    resolveShutdownComplete();
   };
 
   // SIGTERM/SIGINT enter DRAIN mode — wait for active runs to finish, then exit.
@@ -2910,6 +3121,33 @@ export async function startDaemon(
     process.exit(1);
   };
   process.on('SIGUSR2', forceKill);
+
+  // T2.7 (first-use safety net): top-level crash handlers, installed INSIDE
+  // startDaemon (after config load) so the alert channel + the private drain are
+  // in scope — main.ts has neither. An uncaughtException / unhandledRejection
+  // notifies the Operator (non-silent even with no channel, via notifyOperator)
+  // and exits gracefully instead of going dark or hard-exiting. NOTE the plist
+  // crash-loop caveat (KeepAlive=true + ThrottleInterval=30) in docs/running.md.
+  //
+  // `shutdown` triggers the drain AND returns `shutdownComplete`, which resolves
+  // ONLY after the real graceful shutdown() finishes (active runs drained + the
+  // server/DB closed). enterDrainMode() alone returns immediately while runs are
+  // active, so awaiting IT would exit instantly — instead we await actual
+  // completion: a clean active run drains then exits, while a WEDGED run leaves
+  // shutdownComplete pending so the crash handler's bounded force-exit timer (5s)
+  // performs the exit. exit-once is guaranteed inside createCrashHandlers.
+  const crashHandlers = createCrashHandlers({
+    notifyOperator,
+    shutdown: () => {
+      void enterDrainMode();
+      return shutdownComplete;
+    },
+    setExitCode: (code) => {
+      process.exitCode = code;
+    },
+  });
+  process.on('uncaughtException', crashHandlers.onUncaughtException);
+  process.on('unhandledRejection', crashHandlers.onUnhandledRejection);
 
   return ok(undefined);
 }
@@ -2963,12 +3201,19 @@ export async function runDegradedUntilRecovered(
       `[daemon] startup config fetch failed (background, attempt ${consecutive}, unreachable, ${code ?? 'no-code'}): ${message}`,
     );
     if (consecutive >= opts.maxConsecutiveStuck && !notified) {
-      void notify(opts.webhooks, {
-        event: 'startup-degraded',
-        issueNumber: 0,
-        phase: 'startup',
-        message: `Daemon startup-degraded: Data Service unreachable after ${consecutive} background attempts (${code ?? 'no-code'}: ${message})`,
-      });
+      const degradedMessage = `Daemon startup-degraded: Data Service unreachable after ${consecutive} background attempts (${code ?? 'no-code'}: ${message})`;
+      if (opts.webhooks.length === 0) {
+        // B1: never let the escalation disappear into the void when no channel
+        // is configured.
+        console.warn(`[daemon] ALERT NOT DELIVERED (no alert channel configured): startup-degraded — ${degradedMessage}`);
+      } else {
+        void notify(opts.webhooks, {
+          event: 'startup-degraded',
+          issueNumber: 0,
+          phase: 'startup',
+          message: degradedMessage,
+        });
+      }
       notified = true;
     }
   }

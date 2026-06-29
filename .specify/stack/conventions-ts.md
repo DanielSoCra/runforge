@@ -46,6 +46,10 @@ All services share a common runtime, persistence strategy, error handling patter
 
 **Structured output schemas: Zod as single source of truth.** All session types that require structured output define their schema using Zod. Convert to JSON Schema via `zod-to-json-schema` for the CLI Adapter's `--json-schema` flag. The SDK Adapter uses the Zod schema directly via `outputSchema`. One schema definition produces: TypeScript types (via `z.infer`), runtime validation, and CLI-compatible JSON Schema.
 
+**Config exposes derived predicates next to the schema, not inline at call sites.** Cross-cutting reads of `config` are wrapped in small exported helpers in `config.ts` so call sites depend on intent, not shape — e.g. `hasConfiguredAlertChannel(config)` (true iff ≥1 usable operator alert channel; today a non-empty `webhooks`) is the single abstraction the auto-pause sites, the governed-without-channel boot warning, and `/health` consume. A future channel type changes one function, not every reader.
+
+**New tuning knobs are added as *optional* schema fields with the default applied at the consumer.** A field whose absence must remain valid for the many hand-built `Config` literals in tests (e.g. `watchdogIdleTimeoutMs?: z.number().int().min(60_000).optional()`) is declared optional and the real default lives at the daemon consumer (`config.watchdogIdleTimeoutMs ?? DEFAULT`). A `.default(...)` would make the inferred type non-optional and force every literal to restate it — avoid that for pilot-tunable knobs.
+
 ## Examples
 
 ```typescript

@@ -899,6 +899,9 @@ STACK-AC-OPERATIONAL-SAFETY:
     - packages/daemon/src/session-runtime/runtime.ts
     - packages/daemon/src/session-runtime/session-error.ts
     - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/control-plane/watchdog.ts
+    - packages/daemon/src/control-plane/health.ts
+    - packages/daemon/src/control-plane/crash-handlers.ts
     - packages/daemon/src/control-plane/pipeline.ts
     - packages/daemon/src/control-plane/startup-retry.ts
     - packages/daemon/src/control-plane/degraded-server.ts
@@ -910,6 +913,10 @@ STACK-AC-OPERATIONAL-SAFETY:
     - packages/daemon/src/session-runtime/session-error.test.ts
     - packages/daemon/src/control-plane/daemon.test.ts
     - packages/daemon/src/control-plane/first-use-boot-guard.test.ts
+    - packages/daemon/src/control-plane/first-use-safety-net.test.ts
+    - packages/daemon/src/control-plane/watchdog.test.ts
+    - packages/daemon/src/control-plane/health.test.ts
+    - packages/daemon/src/control-plane/crash-handlers.test.ts
     - packages/daemon/src/control-plane/pipeline.test.ts
     - packages/daemon/src/control-plane/startup-retry.test.ts
     - packages/daemon/src/control-plane/degraded-server.test.ts

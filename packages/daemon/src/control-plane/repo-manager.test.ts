@@ -235,6 +235,68 @@ describe('RepoManager', () => {
     }
   });
 
+  it('pollerSnapshot reflects pollStartedAt while a poll runs and clears it after (injected clock)', async () => {
+    vi.useFakeTimers();
+    let now = 1_000_000;
+    const clock = () => now;
+    let resolvePoll!: () => void;
+    const pendingPoll = new Promise<void>((resolve) => {
+      resolvePoll = resolve;
+    });
+    const onPoll = vi.fn(() => pendingPoll);
+    const source = new FakeRepoSource([
+      { ...repo('r1'), poll_interval_ms: 1000 },
+    ]);
+    const mgr = new RepoManager(source, 60_000, onPoll, clock);
+
+    try {
+      await mgr.initialize();
+
+      // Before any poll fires: not in progress, no start time.
+      expect(mgr.pollerSnapshot()).toEqual([
+        {
+          repoId: 'r1',
+          owner: 'acme',
+          name: 'r1',
+          pollInProgress: false,
+          pollStartedAt: null,
+        },
+      ]);
+
+      now = 1_005_000;
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(onPoll).toHaveBeenCalledTimes(1);
+
+      // While the poll is unresolved: in progress, start time = the injected clock.
+      const mid = mgr.pollerSnapshot();
+      expect(mid[0]).toMatchObject({
+        repoId: 'r1',
+        pollInProgress: true,
+        pollStartedAt: 1_005_000,
+      });
+
+      resolvePoll();
+      await vi.advanceTimersByTimeAsync(0);
+
+      // After settle: cleared.
+      const after = mgr.pollerSnapshot();
+      expect(after[0]).toMatchObject({
+        pollInProgress: false,
+        pollStartedAt: null,
+      });
+    } finally {
+      mgr.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it('pollerSnapshot is empty when no pollers are active', async () => {
+    const mgr = new RepoManager(new FakeRepoSource([]), 60_000, vi.fn());
+    await mgr.initialize();
+    expect(mgr.pollerSnapshot()).toEqual([]);
+    mgr.stop();
+  });
+
   it('skips pollers when per-connection token resolution fails', async () => {
     const source = new FakeRepoSource([repo('r1', 'acme', 'web', 'conn-1')]);
     source.tokenResult = undefined;

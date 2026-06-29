@@ -5000,8 +5000,15 @@ describe('daemon', () => {
       });
 
       const bootGoverned = async (manager: ReturnType<typeof createFakeDecisionManager>['manager']) => {
+        // Configure an alert channel so this PR1 decision-index health test is not
+        // also tripped by PR2's B2 governed-without-channel degraded signal.
         mockLoadConfig.mockResolvedValue(
-          ok(makeConfig({ deployment: { id: 'dep-a', profile: validProfile() } })),
+          ok(
+            makeConfig({
+              webhooks: ['https://hooks.example.com/test'],
+              deployment: { id: 'dep-a', profile: validProfile() },
+            }),
+          ),
         );
         const { startDaemon } = await loadDaemon();
         const { createControlServer } = await import('./server.js');
