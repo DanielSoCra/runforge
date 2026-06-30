@@ -32,6 +32,7 @@
  * crash the control server.
  */
 import type { RankedListItem, DetailView, ListRankedArgs } from '@auto-claude/decision-index';
+import type { InboxItem, RankedItem, RankingExplanation } from '../operator-learning/types.js';
 
 /** The narrow read surface a list/detail handler needs (structurally satisfied by `ReadModel`). */
 export interface DecisionReadModel {
@@ -60,14 +61,256 @@ export interface ErrorBody {
  */
 export const PENDING_DECISION_STATUSES: readonly string[] = ['notified', 'viewed'];
 
+// ── learned-attention inbox ranking (FUNC-AC-OPERATOR-LEARNING rung 1) ────────
+//
+// The pending-decisions inbox is re-ordered by the Operator's LEARNED attention
+// on top of the explainable base priority. This is the read-side actuator of
+// operator-learning's `rankInboxItems` — the ONLY action L1 permits for the
+// decision-classes the daemon currently observes (`l2_gate`/`merge_decision`,
+// both guarded → capped at the 'surface' rung). It NEVER adds, drops, hides, or
+// pre-fills an item; it only re-orders the SAME set and annotates `why_ranked`.
+
+/**
+ * The learning key for a pending row — the `{decisionClass, context}` pair that
+ * must EXACTLY match what `observeDecisionAnswer` records (daemon.ts:2628/2914:
+ * `l2_gate`/`merge_decision` × `${owner}/${repo}`), or it learns nothing.
+ */
+export interface LearningKey {
+  decisionClass: string;
+  context: string;
+}
+
+/** Injected ranker: layers learned attention over base priority. Untrusted output. */
+export type InboxRanker = (items: InboxItem[]) => Promise<RankedItem[]>;
+
+/**
+ * A GitHub issue URL: `https://github.com/<owner>/<repo>/issues/<n>`. Same shape
+ * the observe path used to build `context` (`${runOwner}/${runRepoName}`), so the
+ * derived context is byte-identical to what was recorded.
+ */
+const ISSUE_URL_RE = /github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)(?:[/?#]|$)/;
+
+/**
+ * Reserved class for a row whose learning key cannot be derived (unrecognized
+ * phase or malformed `source_url`). No real observation path emits this class
+ * (`observeDecisionAnswer` records only `l2_gate`/`merge_decision`), so a neutral
+ * row matches NO observation → zero learned boost → keeps its base position. The
+ * per-row context (built from the decisionId) makes the key UNMATCHABLE even by a
+ * deliberately seeded `__neutral__/__neutral__` observation. NEVER drop such a row.
+ */
+const NEUTRAL_LEARNING_CLASS = '__neutral__';
+
+/** The literal rung values an explanation may carry (the allowlist for `why_ranked`). */
+const VALID_RUNGS: ReadonlySet<string> = new Set<string>(['surface', 'pre-fill', 'propose-ask-less']);
+
+/**
+ * Derive the learning key for a pending row from its DETERMINISTIC `decision_id`
+ * phase segment and its `source_url`:
+ *   - `decisionClass`: `…:l2-gate:…` → `l2_gate`; `…:integrate:…` → `merge_decision`;
+ *     any other (or absent) phase → `null` (unlearnable / neutral).
+ *   - `context`: `${owner}/${repo}` parsed from the GitHub issue `source_url` (NOT
+ *     `deployment`, which is the deployment id, not `owner/repo`). A `source_url`
+ *     that is not a recognizable issue URL → `null` (neutral, never dropped).
+ *
+ * Pure. Returns `null` (rather than throwing) in BOTH failure modes so the caller
+ * maps it to the neutral sentinel.
+ */
+export function deriveLearningKey(
+  row: Pick<RankedListItem, 'decision_id' | 'source_url'>,
+): LearningKey | null {
+  const phase = row.decision_id.split(':')[1];
+  let decisionClass: string;
+  if (phase === 'l2-gate') {
+    decisionClass = 'l2_gate';
+  } else if (phase === 'integrate') {
+    decisionClass = 'merge_decision';
+  } else {
+    return null;
+  }
+
+  const m = ISSUE_URL_RE.exec(row.source_url);
+  if (m === null) return null;
+  const owner = m[1];
+  const repo = m[2];
+  if (owner === undefined || owner.length === 0 || repo === undefined || repo.length === 0) {
+    return null;
+  }
+  return { decisionClass, context: `${owner}/${repo}` };
+}
+
+/** Map a base row → an `InboxItem` (per-row unmatchable sentinel when underivable). */
+function toInboxItem(row: RankedListItem): InboxItem {
+  const key = deriveLearningKey(row);
+  if (key !== null) {
+    return {
+      decisionId: row.decision_id,
+      decisionClass: key.decisionClass,
+      context: key.context,
+      basePriority: row.score,
+    };
+  }
+  // Neutral row: a per-row sentinel that can never equal a real OR seeded
+  // observation key. The reserved class is never observed, and tying the context
+  // to the decisionId removes the shared-key amplification (one seeded
+  // `__neutral__/__neutral__` observation must not boost EVERY underivable row).
+  return {
+    decisionId: row.decision_id,
+    decisionClass: NEUTRAL_LEARNING_CLASS,
+    context: `${NEUTRAL_LEARNING_CLASS}:${row.decision_id}`,
+    basePriority: row.score,
+  };
+}
+
+/**
+ * The "never suppress" guard against an untrusted ranker: the returned decision-id
+ * multiset must EXACTLY equal the full base multiset — no missing, extra, or
+ * duplicate id, over EVERY row (including neutral ones). Only an exact match is
+ * trusted; anything else falls back to base order.
+ */
+function rankingMultisetMatches(ranked: RankedItem[], base: RankedListItem[]): boolean {
+  if (ranked.length !== base.length) return false;
+  const counts = new Map<string, number>();
+  for (const row of base) {
+    counts.set(row.decision_id, (counts.get(row.decision_id) ?? 0) + 1);
+  }
+  for (const item of ranked) {
+    const remaining = counts.get(item.decisionId);
+    if (remaining === undefined || remaining === 0) return false;
+    counts.set(item.decisionId, remaining - 1);
+  }
+  for (const remaining of counts.values()) {
+    if (remaining !== 0) return false;
+  }
+  return true;
+}
+
+/**
+ * Runtime guard over the ONLY explanation fields that reach `why_ranked`. The
+ * injected ranker is UNTRUSTED — its TS type is not a runtime guarantee — so an
+ * item with correct ids can still carry an arbitrary-string `rung` (e.g.
+ * `"surface protected://x"`) or a non-finite number. The multiset check validates
+ * ids only; this validates the explanation BEFORE `learnedNote` stringifies it, so
+ * no arbitrary text or `protected://` ref can be appended to the inbox response.
+ * Any failing item is treated exactly like a multiset mismatch → base order.
+ */
+function rankedItemIsSafe(item: RankedItem): boolean {
+  const explanation: unknown = item.explanation;
+  if (typeof explanation !== 'object' || explanation === null) return false;
+  const { rung, confidence, attentionWeight } = explanation as Record<string, unknown>;
+  return (
+    typeof rung === 'string' &&
+    VALID_RUNGS.has(rung) &&
+    typeof confidence === 'number' &&
+    Number.isFinite(confidence) &&
+    typeof attentionWeight === 'number' &&
+    Number.isFinite(attentionWeight)
+  );
+}
+
+/**
+ * Whether the explanation carries an ACTUAL learned signal. With zero observations
+ * the engine yields `rung='surface'`, `confidence=0`, `attentionWeight=0` — no
+ * signal → no note → `why_ranked` is left byte-for-byte unchanged (no behavior
+ * change until something is learned).
+ */
+function hasLearnedSignal(explanation: RankingExplanation): boolean {
+  return (
+    explanation.rung !== 'surface' ||
+    explanation.confidence > 0 ||
+    explanation.attentionWeight !== 0
+  );
+}
+
+/**
+ * The allowlisted learned note appended to `why_ranked`. Uses ONLY the structured
+ * `explanation` fields `rung`/`confidence`/`attentionWeight` — NEVER the row
+ * `context`, a protected/PHI field, or arbitrary ranker output.
+ */
+function learnedNote(explanation: RankingExplanation): string {
+  const confidence = Math.round(explanation.confidence * 100) / 100;
+  return `· learned: rung=${explanation.rung} confidence=${confidence} attentionWeight=${explanation.attentionWeight}`;
+}
+
+/**
+ * Re-order the SAME base set by the validated ranker order and append the
+ * allowlisted learned note to each row that carries a learned signal. Returns the
+ * base order unchanged if any id is unexpectedly unmatched (belt-and-braces after
+ * the multiset validation).
+ */
+function reorderWithLearnedNotes(
+  base: RankedListItem[],
+  ranked: RankedItem[],
+): RankedListItem[] {
+  const byId = new Map<string, RankedListItem[]>();
+  for (const row of base) {
+    const queue = byId.get(row.decision_id);
+    if (queue === undefined) {
+      byId.set(row.decision_id, [row]);
+    } else {
+      queue.push(row);
+    }
+  }
+
+  const result: RankedListItem[] = [];
+  for (const item of ranked) {
+    const queue = byId.get(item.decisionId);
+    if (queue === undefined || queue.length === 0) return base;
+    const row = queue.shift() as RankedListItem;
+    result.push(
+      hasLearnedSignal(item.explanation)
+        ? { ...row, why_ranked: `${row.why_ranked} ${learnedNote(item.explanation)}` }
+        : row,
+    );
+  }
+  return result;
+}
+
+/**
+ * Apply learned-attention re-ranking over the base rows. FAIL-SAFE: any error,
+ * invalid/partial ranker output, or unavailable store → the base order (+ log).
+ * Learning is an enhancement of the inbox, NEVER a dependency of it — the inbox
+ * must never fail or hide an item because learning hiccupped.
+ */
+async function applyLearnedRanking(
+  base: RankedListItem[],
+  rankItems: InboxRanker,
+): Promise<RankedListItem[]> {
+  if (base.length === 0) return base;
+  try {
+    const ranked = await rankItems(base.map(toInboxItem));
+    // Trust the ranker ONLY when (a) its decision-id multiset equals the base set
+    // exactly (never suppress) AND (b) every item's explanation is well-formed
+    // (no arbitrary string reaches why_ranked). Either failure → base order.
+    if (!rankingMultisetMatches(ranked, base) || !ranked.every(rankedItemIsSafe)) {
+      console.warn(
+        '[decision-api] learned ranking output failed validation (multiset or explanation); using base order',
+      );
+      return base;
+    }
+    return reorderWithLearnedNotes(base, ranked);
+  } catch (e: unknown) {
+    console.warn(
+      `[decision-api] learned ranking failed; using base order: ${e instanceof Error ? e.message : String(e)}`,
+    );
+    return base;
+  }
+}
+
 /**
  * GET /decisions/pending — the ranked inbox. Returns `RankedListItem[]` (protected
  * fields class-only, never a resolvable ref). A throwing read model → `503`
  * (index unavailable), never a crash.
+ *
+ * When a learned-attention `rankItems` ranker is injected, the base order is
+ * re-ranked by the Operator's learned preference on top of base priority (rung 1).
+ * The re-rank is membership-preserving and fail-safe: any error / invalid ranker
+ * output falls back to the base order, so the inbox never fails or hides an item.
+ * Absent ranker → the base order unchanged.
  */
 export async function listPendingDecisions(
   readModel: DecisionReadModel,
   query: ListRankedArgs,
+  rankItems?: InboxRanker,
 ): Promise<HandlerResult<RankedListItem[] | ErrorBody>> {
   try {
     // Default the inbox to awaiting-Operator statuses so terminal/answered rows
@@ -80,7 +323,11 @@ export async function listPendingDecisions(
         status: query.filters?.status ?? [...PENDING_DECISION_STATUSES],
       },
     };
-    return { status: 200, body: await readModel.listRanked(effective) };
+    const base = await readModel.listRanked(effective);
+    if (rankItems === undefined) {
+      return { status: 200, body: base };
+    }
+    return { status: 200, body: await applyLearnedRanking(base, rankItems) };
   } catch {
     return { status: 503, body: { error: 'decision index unavailable' } };
   }

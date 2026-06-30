@@ -2052,8 +2052,16 @@ export async function startDaemon(
       // it is called lazily inside the closure so the route's try/catch maps it to
       // a clean 503. (The operator ANSWER flow is a follow-up that reuses the
       // decision-escalation resume path, not a direct ledger write here.)
+      // Inject operator-learning's read-side actuator so the inbox order reflects
+      // the Operator's LEARNED attention on top of the explainable base priority
+      // (FUNC-AC-OPERATOR-LEARNING rung 1). Membership-preserving + fail-safe: the
+      // handler falls back to the base order on any ranker error/invalid output.
       listPendingDecisions: (query) =>
-        listPendingDecisions(decisionManager.ledger().reader, query),
+        listPendingDecisions(
+          decisionManager.ledger().reader,
+          query,
+          (items) => operatorLearning.rankInboxItems(items),
+        ),
       getDecisionDetail: (id) =>
         getDecisionDetail(decisionManager.ledger().reader, id),
       // REVEAL (5b). Decrypts a protected ref that belongs to the decision.
