@@ -193,4 +193,9 @@ export const DEFAULT_GUARDED_CLASSES: string[] = [
   // oversight: they must never silently auto-advance to pre-fill/ask-less.
   'l2_gate',
   'merge_decision',
+  // Finding-dismissal: security findings are guarded by default — the guard is a
+  // whole-class `guardedClasses.has(decisionClass)` check, so the string must
+  // match the observe/derive key EXACTLY (`finding_dismissal:<category>`). A
+  // guarded class is capped at the `surface` rung (never pre-filled / asked-less).
+  'finding_dismissal:security',
 ];

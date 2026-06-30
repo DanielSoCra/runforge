@@ -440,6 +440,7 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
   controlHost: '127.0.0.1',
   pollIntervalMs: 30000,
   maxConcurrentRuns: 1,
+  operatorReviewCategories: [],
   classifierBatchSize: 10,
   dailyBudget: 50,
   perRunBudget: 10,

@@ -33,6 +33,8 @@
  */
 import type { RankedListItem, DetailView, ListRankedArgs } from '@auto-claude/decision-index';
 import type { InboxItem, RankedItem, RankingExplanation } from '../operator-learning/types.js';
+import { parseFindingDismissalDecisionId } from './finding-dismissal/build-request.js';
+import { findingDismissalClass } from './finding-dismissal/labels.js';
 
 /** The narrow read surface a list/detail handler needs (structurally satisfied by `ReadModel`). */
 export interface DecisionReadModel {
@@ -107,7 +109,10 @@ const VALID_RUNGS: ReadonlySet<string> = new Set<string>(['surface', 'pre-fill',
  * Derive the learning key for a pending row from its DETERMINISTIC `decision_id`
  * phase segment and its `source_url`:
  *   - `decisionClass`: `…:l2-gate:…` → `l2_gate`; `…:integrate:…` → `merge_decision`;
- *     any other (or absent) phase → `null` (unlearnable / neutral).
+ *     `finding-<n>:finding-dismissal:<category>:<epoch>` → `finding_dismissal:<category>`
+ *     (the category comes FROM the strict id — `RankedListItem` carries no category
+ *     field — so it is byte-identical to what the apply-consumer observes); any
+ *     other (or absent / malformed finding) phase → `null` (unlearnable / neutral).
  *   - `context`: `${owner}/${repo}` parsed from the GitHub issue `source_url` (NOT
  *     `deployment`, which is the deployment id, not `owner/repo`). A `source_url`
  *     that is not a recognizable issue URL → `null` (neutral, never dropped).
@@ -124,6 +129,13 @@ export function deriveLearningKey(
     decisionClass = 'l2_gate';
   } else if (phase === 'integrate') {
     decisionClass = 'merge_decision';
+  } else if (phase === 'finding-dismissal') {
+    // The category lives in the strict id, not in a row field. A malformed/short
+    // finding id → neutral (never crash, never mis-key). The resulting class
+    // EXACTLY matches the apply-consumer's observe key (both parse the same id).
+    const parsed = parseFindingDismissalDecisionId(row.decision_id);
+    if (parsed === null) return null;
+    decisionClass = findingDismissalClass(parsed.category);
   } else {
     return null;
   }

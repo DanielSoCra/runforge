@@ -217,6 +217,16 @@ export const ConfigSchema = z.object({
     .default('127.0.0.1'),
   pollIntervalMs: z.number().int().min(5000).default(30000),
   maxConcurrentRuns: z.number().int().min(1).default(1),
+  // Finding-dismissal allowlist (FUNC-AC-OPERATOR-LEARNING rung-1, PR1): the
+  // review categories whose findings the Operator wants surfaced as a personal
+  // keep/dismiss decision. Default `[]` = NO emit (nothing new is surfaced) — a
+  // per-deployment opt-in — but the apply-CONSUMER still runs whenever the
+  // decision index is available, to drain/settle any finding decisions already
+  // emitted (so answered rows never dangle if the allowlist is later emptied). A
+  // finding also emits when it carries the `needs-discussion` human-route label,
+  // once the allowlist is non-empty. Categories: correctness|consistency|security|
+  // performance|test-gaps (review-scheduler.ts).
+  operatorReviewCategories: z.array(z.string()).default([]),
   classifierBatchSize: z.number().int().min(1).max(100).default(10),
   dailyBudget: z.number().positive().default(50),
   perRunBudget: z.number().positive().default(10),

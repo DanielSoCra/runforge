@@ -72,6 +72,7 @@ import {
   revealProtected,
 } from './decision-api.js';
 import { postDecisionResponse } from './decision-escalation/answer-publisher.js';
+import { runFindingDismissalTick } from './finding-dismissal/tick.js';
 import {
   parseCockpitAnswer,
   isDecisionOwnedIssue,
@@ -1791,6 +1792,32 @@ export async function startDaemon(
         await resumeParkedRuns().catch((e) =>
           console.error('[daemon] resumeParkedRuns error:', e),
         );
+
+        // Finding-dismissal decision flow (PR1) — a SIBLING scan beside
+        // resumeParkedRuns (NOT inside it: a finding is an issue, not a parked
+        // run). Gated on an available decision index. The tick gates EMIT on a
+        // non-empty allowlist (the per-deployment opt-in), but ALWAYS runs the
+        // apply-consumer so answered decisions never dangle if the allowlist is
+        // later emptied (a cheap no-op scan when there are no finding rows). Fully
+        // fail-safe.
+        const findingAllowlist = config.operatorReviewCategories ?? [];
+        if (decisionManager.isAvailable()) {
+          try {
+            const fdToken = repoManager
+              ? await repoManager.resolveTokenForRepo(repoId)
+              : process.env.GITHUB_TOKEN;
+            await runFindingDismissalTick({
+              ledger: decisionManager.ledger(),
+              octokit: new Octokit({ auth: fdToken }),
+              operatorLearning,
+              owner,
+              repo: name,
+              allowlist: findingAllowlist,
+            });
+          } catch (e) {
+            console.error('[daemon] finding-dismissal tick error:', e);
+          }
+        }
       },
     );
 

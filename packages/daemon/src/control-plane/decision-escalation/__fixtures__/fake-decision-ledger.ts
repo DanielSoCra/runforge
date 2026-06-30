@@ -50,6 +50,7 @@ export interface DecisionLedgerLike {
   ): Promise<AnswerResult>;
   statusOf(decisionId: string): Promise<string | undefined>;
   advanceToResumed(decisionId: string, mode?: ResumeMode): Promise<void>;
+  pending(): Promise<DecisionView[]>;
   reconcile(): Promise<unknown>;
   supersede(
     decisionId: string,
@@ -261,6 +262,16 @@ export class FakeDecisionLedger implements DecisionLedgerLike {
 
   async statusOf(decisionId: string): Promise<string | undefined> {
     return this.rows.get(decisionId)?.status;
+  }
+
+  /**
+   * pending — non-terminal rows. The approval-path round-trip never exercises it
+   * (the finding-dismissal sibling consumer does, as a cheap no-op scan), so the
+   * simplified fake reports an EMPTY pending set: this fake seeds no finding rows,
+   * and its simplified `FakeStatus` vocabulary carries no DecisionView shape.
+   */
+  async pending(): Promise<DecisionView[]> {
+    return [];
   }
 
   async advanceToResumed(

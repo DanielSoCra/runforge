@@ -158,6 +158,36 @@ describe('OperatorLearningService', () => {
       }
     });
 
+    it('never advances finding_dismissal:security past surface (guarded by default)', async () => {
+      // Regression: the exact guarded-class string `finding_dismissal:security`
+      // must match the whole-class guard so a security finding-dismissal stays
+      // capped at surface (never pre-filled / asked-less), even with strong,
+      // consistent evidence from many distinct sources.
+      const { service } = await makeService();
+      for (let i = 0; i < 10; i += 1) {
+        await service.observeDecisionAnswer({
+          decisionClass: 'finding_dismissal:security',
+          context: 'acme/widgets',
+          sourceDecisionId: `finding-${i}:finding-dismissal:security:1`,
+          chosenOption: 'reject',
+        });
+      }
+      const pref = await service.getPreference('finding_dismissal:security', 'acme/widgets');
+      expect(pref.rung).toBe('surface');
+      // A NON-guarded finding category does earn pre-fill on the same evidence —
+      // proving the guard is class-specific, not a blanket finding_dismissal block.
+      for (let i = 0; i < 10; i += 1) {
+        await service.observeDecisionAnswer({
+          decisionClass: 'finding_dismissal:correctness',
+          context: 'acme/widgets',
+          sourceDecisionId: `finding-${i}:finding-dismissal:correctness:1`,
+          chosenOption: 'reject',
+        });
+      }
+      const earned = await service.getPreference('finding_dismissal:correctness', 'acme/widgets');
+      expect(earned.rung).toBe('pre-fill');
+    });
+
     it('lowers confidence and stays cautious after contradiction', async () => {
       const { service } = await makeService();
       for (let i = 0; i < 4; i += 1) {

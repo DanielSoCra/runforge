@@ -25,6 +25,8 @@ import {
   deriveLearningKey,
   type DecisionReadModel,
 } from './decision-api.js';
+import { buildFindingDismissalDecisionId } from './finding-dismissal/build-request.js';
+import { findingDismissalClass } from './finding-dismissal/labels.js';
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -322,6 +324,44 @@ describe('deriveLearningKey', () => {
     });
     expect(key?.context).toBe('some-owner/some-repo');
     expect(key?.context).not.toContain('cause-driven-tasks');
+  });
+
+  it('maps a repo-scoped finding-dismissal decision_id to {finding_dismissal:<category>, owner/repo}', () => {
+    const key = deriveLearningKey({
+      decision_id: 'finding-acme/widgets#42:finding-dismissal:correctness:1',
+      source_url: 'https://github.com/acme/widgets/issues/42',
+    });
+    // The category comes FROM the id; EXACTLY what the apply-consumer observes.
+    expect(key).toEqual({ decisionClass: 'finding_dismissal:correctness', context: 'acme/widgets' });
+  });
+
+  it('PARITY: the derived finding-dismissal key === the observe key for the same id', () => {
+    // The consumer observes `finding_dismissal:<category>` + `${owner}/${repo}`;
+    // deriveLearningKey must produce the identical pair so rung-1 ranking matches.
+    const decisionId = buildFindingDismissalDecisionId('acme', 'widgets', 7, 'security', 3);
+    const key = deriveLearningKey({
+      decision_id: decisionId,
+      source_url: 'https://github.com/acme/widgets/issues/7',
+    });
+    expect(key).toEqual({
+      decisionClass: findingDismissalClass('security'),
+      context: 'acme/widgets',
+    });
+  });
+
+  it('returns null for a malformed finding-dismissal id (neutral, never mis-keyed)', () => {
+    expect(
+      deriveLearningKey({
+        decision_id: 'finding-acme/widgets#42:finding-dismissal:bogus:1', // unknown category
+        source_url: 'https://github.com/acme/widgets/issues/42',
+      }),
+    ).toBeNull();
+    expect(
+      deriveLearningKey({
+        decision_id: 'finding-acme/widgets#42:finding-dismissal:correctness', // short id
+        source_url: 'https://github.com/acme/widgets/issues/42',
+      }),
+    ).toBeNull();
   });
 });
 

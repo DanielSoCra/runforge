@@ -292,11 +292,24 @@ STACK-AC-OPERATOR-SURFACE-API:
   code_paths:
     - packages/daemon/src/control-plane/decision-api.ts
     - packages/daemon/src/control-plane/decision-escalation/answer-publisher.ts
+    # Finding-dismissal decision flow (PR1): a parallel issue-level decision path
+    # reusing the decision-index ledger + /decisions/pending + binary transport.
+    # deriveLearningKey (decision-api.ts) parses the strict finding id.
+    - packages/daemon/src/control-plane/finding-dismissal/labels.ts
+    - packages/daemon/src/control-plane/finding-dismissal/build-request.ts
+    - packages/daemon/src/control-plane/finding-dismissal/emit.ts
+    - packages/daemon/src/control-plane/finding-dismissal/apply-consumer.ts
+    - packages/daemon/src/control-plane/finding-dismissal/tick.ts
   test_paths:
     - packages/daemon/src/control-plane/decision-api.test.ts
     - packages/daemon/src/control-plane/decision-api-answer.test.ts
     - packages/daemon/src/control-plane/decision-api-reveal.test.ts
     - packages/daemon/src/control-plane/decision-escalation/answer-publisher.test.ts
+    - packages/daemon/src/control-plane/finding-dismissal/labels.test.ts
+    - packages/daemon/src/control-plane/finding-dismissal/build-request.test.ts
+    - packages/daemon/src/control-plane/finding-dismissal/emit.test.ts
+    - packages/daemon/src/control-plane/finding-dismissal/apply-consumer.test.ts
+    - packages/daemon/src/control-plane/finding-dismissal/tick.test.ts
   status: draft
 
 # Operator Surface Client (dashboard) — L3 authored 2026-06-18 (slice 7b: the
