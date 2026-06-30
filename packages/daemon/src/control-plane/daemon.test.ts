@@ -583,6 +583,53 @@ async function settleRealAsync(turns = 60): Promise<void> {
   for (let i = 0; i < turns; i++) await new Promise((r) => setTimeout(r, 5));
 }
 
+/**
+ * Drain real async until `predicate(read())` holds, then return the last read value.
+ * For the real-Postgres resume suites: the faked poll tick KICKS the resume chain, which
+ * then proceeds on REAL timers (postgres-js). This waits on the durable effect the test
+ * asserts instead of a fixed wall-clock budget, so it cannot flake under runner CPU load.
+ *
+ * - performance.now(), not Date.now() — `Date` is faked in these suites.
+ * - advances NO fake timers (extra poll ticks would mask a genuine double-re-entry).
+ * - checks the deadline BEFORE sleeping so the diagnostic fires tight.
+ * - per-call default 8s: a healthy wait returns in <1s; on a genuine hang a labelled
+ *   throw beats vitest's opaque 30s testTimeout (even for tests with 2-3 sequential waits).
+ */
+async function settleRealUntil<T>(
+  read: () => Promise<T> | T,
+  predicate: (v: T) => boolean,
+  opts: { label: string; timeoutMs?: number; intervalMs?: number },
+): Promise<T> {
+  const timeoutMs = opts.timeoutMs ?? 8_000;
+  const intervalMs = opts.intervalMs ?? 15;
+  const deadline = performance.now() + timeoutMs;
+  let last = await read();
+  while (!predicate(last)) {
+    if (performance.now() >= deadline) {
+      throw new Error(
+        `settleRealUntil: '${opts.label}' not satisfied within ${timeoutMs}ms; last=${JSON.stringify(last)}`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+    await Promise.resolve();
+    last = await read();
+  }
+  return last;
+}
+
+/** A run was re-entered into the pipeline (the LAST effect of a successful resume). */
+function reenteredPipeline(issueNumber: number): boolean {
+  return mockRunPipeline.mock.calls.some(
+    (c) => (c[0] as { issueNumber?: number } | undefined)?.issueNumber === issueNumber,
+  );
+}
+/** Count of pipeline re-entries for an issue (for exact-once assertions). */
+function reentryCount(issueNumber: number): number {
+  return mockRunPipeline.mock.calls.filter(
+    (c) => (c[0] as { issueNumber?: number } | undefined)?.issueNumber === issueNumber,
+  ).length;
+}
+
 describe('daemon', () => {
   const signalHandlers: Record<string, () => Promise<void>> = {};
 
@@ -3703,8 +3750,11 @@ describe('daemon', () => {
           protectedDir: join(dir, 'protected'),
         });
 
-        const parkedRun = makeParkedRun({ decisionEpoch: 1 });
-        mockStateMgr.findParkedRuns.mockResolvedValue([parkedRun]);
+        // Return a FRESH parked copy each scan so the second tick genuinely re-processes
+        // the same decision (mirrors answered-once; the spy edge needs a real second pass).
+        mockStateMgr.findParkedRuns.mockImplementation(async () => [
+          makeParkedRun({ decisionEpoch: 1 }),
+        ]);
         mockOctokit.issues.get.mockResolvedValue({
           data: { labels: [{ name: 'l2-approved' }] },
         });
@@ -3725,10 +3775,15 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => reenteredPipeline(100), Boolean, {
+          label: 'crash-safe ordering tick1 re-entry #100',
+        });
+        const seen = answerSpy.mock.calls.length;
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => answerSpy.mock.calls.length, (n) => n > seen, {
+          label: 'crash-safe ordering tick2 second-poll answer re-call',
+        });
 
         // Answer recorded BEFORE the resume save committed (crash-safe ordering).
         expect(answerSpy).toHaveBeenCalled();
@@ -3772,19 +3827,36 @@ describe('daemon', () => {
         await startDaemon('config.json', { decisionManager: manager });
         const decisionId = await seedNotified(manager, 100);
 
+        const answerSpy = vi.spyOn(manager.ledger(), 'answer');
+
         // Two poll cycles, flushing microtasks between so the first resume's
         // .finally() clears activeIssues before the second scan.
+        // Tick 1 waits on re-entry (the LAST effect — so the whole resume incl.
+        // advanceToResumed has run and activeIssues is cleared before tick 2).
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => reenteredPipeline(100), Boolean, {
+          label: 'answered-once tick1 re-entry #100',
+        });
+        const seen = answerSpy.mock.calls.length;
+        // Tick 2: the replayed answer; wait until the second poll re-called answer().
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
-
-        // Row reached terminal resumed exactly once (no crash on the replayed
-        // answer; second attempt failed closed without re-opening the row).
-        const stillPending = (await manager.ledger().pending()).find(
-          (d) => d.decision_id === decisionId,
+        await settleRealUntil(() => answerSpy.mock.calls.length, (n) => n > seen, {
+          label: 'answered-once tick2 second-poll answer re-call',
+        });
+        // Then wait on the EXACT asserted terminal state — the row has left pending()
+        // (terminal `resumed`) and STAYS out after the replay. This final wait is the
+        // assertion itself, so under heavy shared-runner load it cannot observe the row
+        // mid-chain (e.g. `viewed`) the way a bare post-tick read could.
+        const stillPending = await settleRealUntil(
+          () =>
+            manager
+              .ledger()
+              .pending()
+              .then((rows) => rows.find((d) => d.decision_id === decisionId)),
+          (row) => row === undefined,
+          { label: 'answered-once terminal (pending excludes #100) after replay' },
         );
         expect(stillPending).toBeUndefined();
       });
@@ -3814,7 +3886,23 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        // Wait on the EXACT asserted side effect (the requeue save with phase reset), not the
+        // generic re-entry proxy — this is a row-MISSING case (no terminal ledger state to
+        // wait on), and the assertion is the durable requeue itself, so waiting on it cannot
+        // race the assertion under load.
+        await settleRealUntil(
+          () =>
+            mockStateMgr.saveRunState.mock.calls.some((c) => {
+              const s = c[0] as Record<string, unknown>;
+              return (
+                s.issueNumber === 100 &&
+                s.phase === 'l2-gate' &&
+                s.pausedAtPhase === undefined
+              );
+            }),
+          Boolean,
+          { label: 'missing-row requeue save #100' },
+        );
 
         // Not stuck: the requeue committed (phase reset) and the pipeline re-entered.
         expect(mockStateMgr.saveRunState).toHaveBeenCalledWith(
@@ -3844,7 +3932,9 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => reconcileSpy.mock.calls.length, (n) => n > 0, {
+          label: 'tick reconcile',
+        });
 
         expect(reconcileSpy).toHaveBeenCalled();
       });
@@ -3872,6 +3962,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        // fixed-drain-ok: negative — decision index unavailable / fail-closed; asserts no re-entry, no phase reset
         await settleRealAsync();
 
         // Fail-closed: no requeue this tick, no pipeline re-entry, no phase reset.
@@ -3917,7 +4008,9 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => reenteredPipeline(100), Boolean, {
+          label: 'flag-on reject re-entry #100',
+        });
 
         // Extra GitHub round-trip happens ONLY when enabled.
         expect(mockOctokit.issues.listComments).toHaveBeenCalledWith(
@@ -3961,7 +4054,9 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => reenteredPipeline(100), Boolean, {
+          label: 'flag-on sanitize re-entry #100',
+        });
 
         const rejectedSave = mockStateMgr.saveRunState.mock.calls
           .map((c) => c[0] as Record<string, unknown>)
@@ -4075,7 +4170,9 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => reenteredPipeline(100), Boolean, {
+          label: 'cockpit approve re-entry #100',
+        });
 
         // NO duplicate run: detectReadyWork's claim must NOT have fired for #100.
         expect(mockDetector.claimWork).not.toHaveBeenCalledWith(100);
@@ -4126,13 +4223,25 @@ describe('daemon', () => {
         await startDaemon('config.json', { decisionManager: manager });
         const decisionId = await seedNotified(manager, 100);
 
-        // Two full poll cycles (the answer is "delivered"/seen twice).
+        const statusSpy = vi.spyOn(manager.ledger(), 'statusOf');
+
+        // Tick 1: the answer is delivered; wait until the run re-entered EXACTLY once
+        // (re-entry is the last effect, so the row is durably `resumed` by now).
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => reentryCount(100), (n) => n === 1, {
+          label: 'double-delivery tick1 single re-entry #100',
+        });
+        const seen = statusSpy.mock.calls.length;
+
+        // Tick 2: the SAME answer is seen again. Wait until the second poll has actually
+        // re-executed its statusOf idempotency guard (daemon.ts:2544, cockpit branch),
+        // then assert it did NOT re-enter.
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => statusSpy.mock.calls.length, (n) => n > seen, {
+          label: 'double-delivery tick2 second-poll guard re-read',
+        });
 
         // EXACTLY ONE re-entry: the new-work poll never claimed #100, and the run
         // re-entered the pipeline exactly once across both ticks.
@@ -4174,7 +4283,9 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => reenteredPipeline(100), Boolean, {
+          label: 'cockpit reject re-entry #100',
+        });
 
         const rejectedSave = mockStateMgr.saveRunState.mock.calls
           .map((c) => c[0] as Record<string, unknown>)
@@ -4222,6 +4333,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        // fixed-drain-ok: negative — asserts stays-parked (no re-entry, statusOf stays 'notified')
         await settleRealAsync();
 
         // Stays parked: no phase reset, no pipeline re-entry, ledger still notified.
@@ -4262,7 +4374,9 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => reenteredPipeline(100), Boolean, {
+          label: 'cockpit ready-removal re-entry #100',
+        });
 
         expect(mockOctokit.issues.removeLabel).toHaveBeenCalledWith(
           expect.objectContaining({ name: 'ready', issue_number: 100 }),
@@ -4406,7 +4520,9 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => reenteredPipeline(100), Boolean, {
+          label: 'integrate approve re-entry #100',
+        });
 
         const resumedSave = mockStateMgr.saveRunState.mock.calls
           .map((c) => c[0] as Record<string, unknown>)
@@ -4475,7 +4591,9 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => reenteredPipeline(100), Boolean, {
+          label: 'integrate approve-legacy re-entry #100',
+        });
 
         const resumedSave = mockStateMgr.saveRunState.mock.calls
           .map((c) => c[0] as Record<string, unknown>)
@@ -4541,7 +4659,9 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => reenteredPipeline(100), Boolean, {
+          label: 'integrate approve-pre-rename re-entry #100',
+        });
 
         const resumedSave = mockStateMgr.saveRunState.mock.calls
           .map((c) => c[0] as Record<string, unknown>)
@@ -4582,7 +4702,9 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => reenteredPipeline(100), Boolean, {
+          label: 'integrate reject re-entry #100',
+        });
 
         const rejectedSave = mockStateMgr.saveRunState.mock.calls
           .map((c) => c[0] as Record<string, unknown>)
@@ -4628,6 +4750,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        // fixed-drain-ok: negative — stays parked at integrate (no re-entry, statusOf 'notified')
         await settleRealAsync();
 
         // Stays parked: no resume-save (pausedAtPhase cleared) happened.
@@ -4669,7 +4792,9 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
-        await settleRealAsync();
+        await settleRealUntil(() => reenteredPipeline(100), Boolean, {
+          label: 'integrate crash-safe re-entry #100',
+        });
 
         // Both must have happened, and answer must precede the durable save so a
         // crash between them never advances on an unrecorded answer.
@@ -4823,6 +4948,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        // fixed-drain-ok: fake in-memory ledger (no real PG round-trip)
         await settleRealAsync();
 
         const resumed = resumedSaveFor(100);
@@ -4857,6 +4983,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        // fixed-drain-ok: fake in-memory ledger (no real PG round-trip)
         await settleRealAsync();
 
         const resumed = resumedSaveFor(100);
@@ -4887,6 +5014,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        // fixed-drain-ok: fake in-memory ledger (no real PG round-trip)
         await settleRealAsync();
 
         // The idempotency guard short-circuits: no resume-save, no re-run.
@@ -4921,6 +5049,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        // fixed-drain-ok: fake in-memory ledger (no real PG round-trip)
         await settleRealAsync();
 
         expect(resumedSaveFor(100)).toBeDefined();
@@ -4955,6 +5084,7 @@ describe('daemon', () => {
 
         await vi.advanceTimersByTimeAsync(30000);
         await vi.advanceTimersByTimeAsync(0);
+        // fixed-drain-ok: fake in-memory ledger (no real PG round-trip)
         await settleRealAsync();
 
         // Fail-closed: the run stays parked (no resume-save), and the governed

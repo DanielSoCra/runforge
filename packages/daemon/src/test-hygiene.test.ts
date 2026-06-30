@@ -95,6 +95,92 @@ export function findHygieneViolations(rawSrc: string, label: string): string[] {
   return violations;
 }
 
+// Blank out string-literal and comment CONTENT while PRESERVING line count (every '\n' stays),
+// so brace-depth tracking ignores braces in strings/comments AND sanitized line indices stay
+// aligned with the raw source. The existing stripComments folds a /* */ block to ONE space,
+// which desyncs the indices and drifts the region scan (codex plan review). Char state machine.
+function blankStringsAndComments(src: string): string {
+  let out = '';
+  type Mode = 'code' | 'line' | 'block' | 'sq' | 'dq' | 'tpl';
+  let mode: Mode = 'code';
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]!;
+    const c2 = src[i + 1];
+    if (c === '\n') { out += '\n'; if (mode === 'line') mode = 'code'; continue; }
+    if (mode === 'code') {
+      if (c === '/' && c2 === '/') { mode = 'line'; out += '  '; i++; continue; }
+      if (c === '/' && c2 === '*') { mode = 'block'; out += '  '; i++; continue; }
+      if (c === "'") { mode = 'sq'; out += ' '; continue; }
+      if (c === '"') { mode = 'dq'; out += ' '; continue; }
+      if (c === '`') { mode = 'tpl'; out += ' '; continue; }
+      out += c; continue;
+    }
+    if (mode === 'line') { out += ' '; continue; }
+    if (mode === 'block') {
+      if (c === '*' && c2 === '/') { mode = 'code'; out += '  '; i++; continue; }
+      out += ' '; continue;
+    }
+    if (c === '\\') {
+      if (c2 === '\n') { out += ' \n'; i++; continue; } // line-continuation: keep the newline
+      out += '  '; i++; continue; // other escape: blank both chars
+    }
+    if ((mode === 'sq' && c === "'") || (mode === 'dq' && c === '"') || (mode === 'tpl' && c === '`')) {
+      mode = 'code'; out += ' '; continue;
+    }
+    out += ' ';
+  }
+  return out;
+}
+
+// RC-4 (CI flake, 2026-06-29/30): the real-Postgres resume tests bridge the faked poll loop
+// and the real postgres-js writer with a settle helper. A FIXED-budget drain (settleRealAsync)
+// is adequate at idle but overruns under shared-runner CPU contention, so a positive
+// resume-completion assertion runs before the durable effect lands (the cockpit-consumer
+// flake). The deterministic fix is settleRealUntil(predicate). This guard forbids a fixed
+// drain inside any real-PG resume describe (describe.skipIf(!REAL_PG)) unless an explicit
+// `fixed-drain-ok` marker documents a legitimate negative / non-advancement drain.
+//
+// Region + call are matched on the line-preserving sanitized copy (so braces or a
+// `settleRealAsync` mention inside a string/comment never count). The `fixed-drain-ok` marker
+// IS a comment, so it is matched on the RAW lines (sanitizing erases it); indices align because
+// the sanitizer preserves line count.
+export function findFixedDrainViolations(rawSrc: string, label: string): string[] {
+  const rawLines = rawSrc.split('\n');
+  const codeLines = blankStringsAndComments(rawSrc).split('\n');
+  const violations: string[] = [];
+  let inRealPg = false;
+  let depth = 0;
+  let sawBody = false;
+  for (let i = 0; i < codeLines.length; i++) {
+    const code = codeLines[i] ?? '';
+    if (!inRealPg && /describe\s*\.\s*skipIf\s*\(\s*!\s*REAL_PG\s*\)/.test(code)) {
+      inRealPg = true;
+      depth = 0;
+      sawBody = false;
+    }
+    if (!inRealPg) continue;
+    for (const ch of code) {
+      if (ch === '{') {
+        depth++;
+        sawBody = true;
+      } else if (ch === '}') depth--;
+    }
+    if (/\bawait\s+settleRealAsync\s*\(/.test(code)) {
+      const window = `${rawLines[i - 1] ?? ''}\n${rawLines[i] ?? ''}\n${rawLines[i + 1] ?? ''}`;
+      if (!/fixed-drain-ok/.test(window)) {
+        violations.push(
+          `${label}:${i + 1}: settleRealAsync() inside a describe.skipIf(!REAL_PG) resume describe — a fixed wall-clock drain flakes under shared-runner contention (RC-4). Use settleRealUntil(predicate) to wait on the asserted resume effect, or add a \`// fixed-drain-ok: <reason>\` marker for a legitimate negative/non-advancement drain.`,
+        );
+      }
+    }
+    // Close the region only AFTER its body brace has opened — a describe whose `() => {`
+    // body brace lands on a LATER line than the `describe.skipIf(!REAL_PG)(` opener must not
+    // close immediately at depth 0 (codex deep-review minor).
+    if (sawBody && depth <= 0) inRealPg = false; // describe block closed
+  }
+  return violations;
+}
+
 // RC-3 cold-import pattern detector — package-level signal: does this test source
 // call vi.resetModules()? A test resets the module registry for exactly one reason:
 // to force the NEXT dynamic import() to re-evaluate cold. Under shared-runner
@@ -276,6 +362,82 @@ describe('test hygiene: no concurrent-load flake anti-patterns in any package te
     // Both at/above the floor -> clean.
     expect(
       findTimeoutHardeningViolations({ testTimeout: 30_000, hookTimeout: 30_000 }, 'ok'),
+    ).toEqual([]);
+  });
+
+  it('RC-4: forbids fixed-budget settleRealAsync in real-PG resume describes (and the real file is clean)', () => {
+    // Fires on a fixed drain inside a skipIf(!REAL_PG) describe with no marker.
+    const bad = [
+      "describe.skipIf(!REAL_PG)('x', () => {",
+      "  it('y', async () => {",
+      '    await settleRealUntil(() => reenteredPipeline(100), Boolean, { label: "ok" });',
+      '    await settleRealAsync();',
+      "    expect(await m.ledger().statusOf(id)).toBe('resumed');",
+      '  });',
+      '});',
+    ].join('\n');
+    expect(findFixedDrainViolations(bad, 'synthetic-bad').length).toBe(1);
+
+    // Passes when the drain carries a fixed-drain-ok marker.
+    const marked = [
+      "describe.skipIf(!REAL_PG)('x', () => {",
+      "  it('y', async () => {",
+      '    // fixed-drain-ok: negative — stays parked',
+      '    await settleRealAsync();',
+      "    expect(await m.ledger().statusOf(id)).toBe('notified');",
+      '  });',
+      '});',
+    ].join('\n');
+    expect(findFixedDrainViolations(marked, 'synthetic-marked')).toEqual([]);
+
+    // Passes when the drain is OUTSIDE a real-PG describe (plain describe).
+    const plain = [
+      "describe('fake', () => {",
+      '  it("y", async () => { await settleRealAsync(); });',
+      '});',
+    ].join('\n');
+    expect(findFixedDrainViolations(plain, 'synthetic-plain')).toEqual([]);
+
+    // Line-stability: a MULTI-LINE block comment before/inside the real-PG describe must not
+    // shift indices or close the region early — an unmarked trailing drain still fires
+    // (regression guard for the collapse-to-one-line desync, codex plan review).
+    const withBlockComment = [
+      '/* a multi-line',
+      '   block comment',
+      '   before the describe { with a brace } in prose */',
+      "describe.skipIf(!REAL_PG)('x', () => {",
+      '  /* inner block',
+      '     comment */',
+      "  it('y', async () => {",
+      '    await settleRealUntil(() => reenteredPipeline(100), Boolean, { label: "ok" });',
+      '    await settleRealAsync();', // unmarked trailing drain, near the region tail
+      "    expect(await m.ledger().statusOf(id)).toBe('resumed');",
+      '  });',
+      '});',
+    ].join('\n');
+    expect(findFixedDrainViolations(withBlockComment, 'synthetic-block').length).toBe(1);
+
+    // Multi-line describe opener: the `() => {` body brace lands on the line AFTER the
+    // `describe.skipIf(!REAL_PG)(` opener. The region must NOT close at depth 0 before the
+    // body brace opens, or the unmarked drain escapes (codex deep-review minor).
+    const multilineOpener = [
+      'describe.skipIf(!REAL_PG)(',
+      "  'x',",
+      '  () => {',
+      "    it('y', async () => {",
+      '      await settleRealAsync();',
+      "      expect(await m.ledger().statusOf(id)).toBe('resumed');",
+      '    });',
+      '  },',
+      ');',
+    ].join('\n');
+    expect(findFixedDrainViolations(multilineOpener, 'synthetic-multiline').length).toBe(1);
+
+    // The REAL daemon test file is clean after migration.
+    const daemonTest = join(PACKAGES_DIR, 'daemon', 'src', 'control-plane', 'daemon.test.ts');
+    expect(
+      findFixedDrainViolations(readFileSync(daemonTest, 'utf8'), 'daemon.test.ts'),
+      'daemon.test.ts still has an unmarked fixed-budget settleRealAsync in a real-PG resume describe',
     ).toEqual([]);
   });
 });
