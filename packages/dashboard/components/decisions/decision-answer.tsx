@@ -28,6 +28,7 @@
  */
 
 import { useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -130,18 +131,40 @@ export function DecisionAnswerDialog({
               No answer choices are available for this decision.
             </p>
           ) : (
-            options.map((option) => (
-              <Button
-                key={option.id}
-                type="button"
-                variant="outline"
-                className="w-full justify-start"
-                disabled={pending}
-                onClick={() => onAnswer(decision.decision_id, option.id)}
-              >
-                <AnswerOptionLabel field={option.label} />
-              </Button>
-            ))
+            options.map((option) => {
+              // RUNG-2 pre-fill: the option matching `recommended_option` is rendered
+              // as PRIMARY with a "Recommended" badge and its `detail` reason beneath —
+              // a one-action confirm. This is purely presentational: `onAnswer` still
+              // fires ONLY on an explicit click (no auto-submit).
+              const isRecommended =
+                decision.recommended_option != null &&
+                option.id === decision.recommended_option;
+              return (
+                <div key={option.id} className="flex flex-col gap-1">
+                  <Button
+                    type="button"
+                    variant={isRecommended ? 'default' : 'outline'}
+                    className="w-full justify-start"
+                    disabled={pending}
+                    onClick={() => onAnswer(decision.decision_id, option.id)}
+                  >
+                    <span className="flex w-full items-center justify-between gap-2">
+                      <AnswerOptionLabel field={option.label} />
+                      {isRecommended && (
+                        <Badge variant="secondary" className="shrink-0">
+                          Recommended
+                        </Badge>
+                      )}
+                    </span>
+                  </Button>
+                  {isRecommended && option.detail !== undefined && (
+                    <div className="px-1 text-xs text-muted-foreground">
+                      <AnswerOptionLabel field={option.detail} />
+                    </div>
+                  )}
+                </div>
+              );
+            })
           )}
         </div>
 

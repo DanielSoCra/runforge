@@ -64,6 +64,14 @@ export interface RankedListItem {
    * and the answer dialog treats a missing/empty list as "no choices to offer".
    */
   options?: ListOption[];
+  /**
+   * The rung-2 pre-fill: the recommended option's `id` (`approve`/`reject`), or
+   * null/absent when there is no recommendation (PR1 look). The daemon wire shape
+   * (`RankedListItem.recommended_option`, decision-index read model) carries it; the
+   * answer dialog highlights the matching option + shows its `detail` reason.
+   * Optional so pre-answer-flow fixtures stay valid; the proxy passes it through.
+   */
+  recommended_option?: string | null;
   score: number;
   why_ranked: string;
 }

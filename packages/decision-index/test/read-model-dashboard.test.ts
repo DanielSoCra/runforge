@@ -25,10 +25,12 @@ interface ReqOverrides {
   question?: string;
   context?: string;
   reversibility?: string;
+  /** `null` explicitly omits recommended_option; a string overrides it (default "yes"). */
+  recommendedOption?: string | null;
 }
 
 function rawRequest(id: string, o: ReqOverrides = {}): unknown {
-  return {
+  const base: Record<string, unknown> = {
     decision_id: id,
     protocol_version: PROTOCOL_VERSION,
     source_url: `https://example.test/issues/${id}`,
@@ -42,7 +44,6 @@ function rawRequest(id: string, o: ReqOverrides = {}): unknown {
     question: o.question ?? "Proceed?",
     context: o.context ?? "ctx",
     options: [{ id: "yes", label: "Yes" }, { id: "no", label: "No" }],
-    recommended_option: "yes",
     consequence_of_no_answer: "paused",
     reversibility: o.reversibility ?? "reversible",
     expires_at: o.expires_at ?? "2026-06-01T00:00:00.000Z",
@@ -50,6 +51,12 @@ function rawRequest(id: string, o: ReqOverrides = {}): unknown {
     resume_mode: o.resume_mode ?? "mid_run",
     idempotency_key: `idem-${id}`,
   };
+  // `null` explicitly omits recommended_option (schema field is optional); a string
+  // overrides; default "yes" (backward-compatible with the prior fixed value).
+  if (o.recommendedOption !== null) {
+    base.recommended_option = o.recommendedOption ?? "yes";
+  }
+  return base;
 }
 
 /** Seed a legacy protected:// row by mutating the admitted decisions row directly. */
@@ -242,5 +249,24 @@ describe("ReadModel dashboard surface (listRanked / detail) — slice 4", () => 
 
   it("detail returns undefined for an unknown id", async () => {
     expect(await reader.detail("nope")).toBeUndefined();
+  });
+
+  describe("recommendedOptionOf (cheap scalar accessor)", () => {
+    it("returns the stored recommended_option column value", async () => {
+      const id = await notify("01HRMDASH0000000000000REC");
+      // rawRequest seeds recommended_option: "yes".
+      expect(await reader.recommendedOptionOf(id)).toBe("yes");
+    });
+
+    it("returns null when the column is null (no recommended_option)", async () => {
+      const id = await notify("01HRMDASH0000000000000NUL", {
+        recommendedOption: null,
+      });
+      expect(await reader.recommendedOptionOf(id)).toBeNull();
+    });
+
+    it("returns null for a missing row", async () => {
+      expect(await reader.recommendedOptionOf("01HRMDASH00000MISSING000000")).toBeNull();
+    });
   });
 });

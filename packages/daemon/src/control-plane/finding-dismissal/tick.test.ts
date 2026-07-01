@@ -11,6 +11,7 @@ import { FakeFindingLedger } from './__fixtures__/fake-ledger.js';
 import { runFindingDismissalTick } from './tick.js';
 import { buildFindingDismissalDecisionId } from './build-request.js';
 import type { ConsumerLearning } from './apply-consumer.js';
+import type { EmitLearning } from './emit.js';
 
 const OWNER = 'acme';
 const REPO = 'widgets';
@@ -60,10 +61,22 @@ function makeTickOctokit(opts: TickOctokitOpts): {
   return { octokit, listForRepoCalls: () => listForRepoCalls, labels };
 }
 
-const learningSink = (sink: string[]): ConsumerLearning => ({
+/**
+ * The real OperatorLearningService carries BOTH the consumer (observe) and emit
+ * (getPreference) surfaces; the tick dep now requires both. `getPreference` defaults
+ * to a 'surface' (no pre-fill) preference unless a `pref` is supplied.
+ */
+const learningSink = (
+  sink: string[],
+  pref: { rung: 'surface' | 'pre-fill' | 'propose-ask-less'; mostFrequentChoice?: string; confidence: number } = {
+    rung: 'surface',
+    confidence: 0.9,
+  },
+): ConsumerLearning & EmitLearning => ({
   observeDecisionAnswer: async (input) => {
     sink.push(`${input.decisionClass}:${input.chosenOption}`);
   },
+  getPreference: async () => pref,
 });
 
 describe('runFindingDismissalTick — consumer runs regardless of allowlist (IMPORTANT-2)', () => {
@@ -156,5 +169,35 @@ describe('runFindingDismissalTick — review-finding list pagination (MINOR)', (
     // The page-2 finding was reached and surfaced (its decision is in the ledger).
     const id = buildFindingDismissalDecisionId(OWNER, REPO, 200, 'correctness', 1);
     expect(await ledger.statusOf(id)).toBe('notified');
+  });
+});
+
+describe('runFindingDismissalTick — rung-2 pre-fill threaded to the emit (PR2)', () => {
+  it('emits a NEW finding with recommended_option from the learned preference', async () => {
+    const ledger = new FakeFindingLedger();
+    const observed: string[] = [];
+    const { octokit } = makeTickOctokit({
+      findingsByPage: { 1: [{ number: 5, labels: ['review-finding', 'correctness', 'P1'] }] },
+    });
+
+    await runFindingDismissalTick({
+      ledger,
+      octokit,
+      // learned pre-fill: reject at the pre-fill rung → the emit must pre-fill it.
+      operatorLearning: learningSink(observed, {
+        rung: 'pre-fill',
+        mostFrequentChoice: 'reject',
+        confidence: 0.8,
+      }),
+      owner: OWNER,
+      repo: REPO,
+      allowlist: ['correctness'],
+    });
+
+    const id = buildFindingDismissalDecisionId(OWNER, REPO, 5, 'correctness', 1);
+    const row = ledger.rows.get(id);
+    expect(row?.status).toBe('notified');
+    // The pre-fill hint rode through emit → build-request → raise into the stored row.
+    expect(row?.recommendedOption).toBe('reject');
   });
 });

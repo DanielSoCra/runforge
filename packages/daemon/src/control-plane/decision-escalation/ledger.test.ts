@@ -242,6 +242,22 @@ describe.skipIf(!REAL_PG)('DecisionLedger (real IndexWriter over real Postgres)'
     expect((await t.writer.reader.get(r.decision_id))?.status).toBe('detected');
   });
 
+  describe('recommendedOptionOf()', () => {
+    it('returns the stored recommended_option that was raised (the SHOWN value)', async () => {
+      const r = await t.ledger.raise(makeRequest({ recommended_option: 'approve' }));
+      expect(await t.ledger.recommendedOptionOf(r.decision_id)).toBe('approve');
+    });
+
+    it('returns null when the decision was raised without a recommended_option', async () => {
+      const r = await t.ledger.raise(makeRequest());
+      expect(await t.ledger.recommendedOptionOf(r.decision_id)).toBeNull();
+    });
+
+    it('returns null for a missing row', async () => {
+      expect(await t.ledger.recommendedOptionOf('issue-nope:l2-gate:1')).toBeNull();
+    });
+  });
+
   describe('statusOf()', () => {
     it('returns undefined for a missing row', async () => {
       expect(await t.ledger.statusOf('issue-999:l2-gate:1')).toBeUndefined();

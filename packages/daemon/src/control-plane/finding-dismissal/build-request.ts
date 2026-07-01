@@ -46,6 +46,13 @@ export const KEEP_OPTION = { id: 'approve', label: 'Keep the finding' } as const
 export const DISMISS_OPTION = { id: 'reject', label: 'Dismiss the finding' } as const;
 
 /**
+ * The valid on-menu answer option ids. Narrowing `recommendedOption` to this union
+ * (not raw `string`) closes the builder-API type hole (codex): a direct caller can
+ * only ever pre-fill a real option — never a bogus/off-menu `recommended_option`.
+ */
+export type FindingAnswerOptionId = typeof KEEP_OPTION.id | typeof DISMISS_OPTION.id;
+
+/**
  * findingRunRef — the synthetic, REPO-SCOPED run ref + id stem for a finding:
  * `finding-<owner>/<repo>#<issue>`. A finding has no real run; this never
  * collides with a real `issue-<n>` run ref, and the `<owner>/<repo>` namespace
@@ -144,6 +151,15 @@ export interface BuildFindingDismissalRequestArgs {
   expiresAt?: string;
   /** Injectable clock for deterministic tests (ISO 8601). */
   now?: string;
+  /**
+   * PR2 rung-2 pre-fill: the learned recommended option id (`approve`/`reject`).
+   * When present, the request carries `recommended_option` AND the matching option
+   * gets `recommendedReason` on its `detail`. Absent → the PR1 (rung-1) shape,
+   * byte-identical to before (no `recommended_option`, no option `detail`).
+   */
+  recommendedOption?: FindingAnswerOptionId;
+  /** The structured, allowlisted reason shown on the recommended option's `detail`. */
+  recommendedReason?: string;
 }
 
 /**
@@ -151,18 +167,22 @@ export interface BuildFindingDismissalRequestArgs {
  * DecisionRequest and validate it through `DecisionRequestSchema.parse` (which
  * defaults `protocol_version` and normalizes the object).
  *
- * `recommended_option` is INTENTIONALLY UNSET — PR1 is rung-1 only (surface /
- * re-rank). Pre-fill (PR2) is the only thing that sets it.
+ * `recommended_option` is set ONLY when the caller passes a rung-2 `recommendedOption`
+ * (PR2 pre-fill); the matching option then carries the structured `recommendedReason`
+ * on its `detail`. With no pre-fill the output is byte-identical to the PR1 (rung-1)
+ * shape — no `recommended_option`, no option `detail`. Guarded categories never
+ * reach here with a pre-fill (the emit's rung gate excludes them).
  *
  * SECURITY: `context`/`question` carry ONLY structured, known-safe text — never
  * finding free-text (titles/bodies can carry arbitrary content rendered verbatim
- * by downstream sinks). The decision detail links back to the issue via
- * `source_url`.
+ * by downstream sinks). The `recommendedReason` is likewise a structured, allowlisted
+ * string composed by the caller (never finding free-text). The decision detail links
+ * back to the issue via `source_url`.
  */
 export function buildFindingDismissalRequest(
   args: BuildFindingDismissalRequestArgs,
 ): DecisionRequest {
-  const { issueNumber, category, owner, repo, riskClass, epoch } = args;
+  const { issueNumber, category, owner, repo, riskClass, epoch, recommendedOption, recommendedReason } = args;
   const decisionId = buildFindingDismissalDecisionId(owner, repo, issueNumber, category, epoch);
   const deployment = `${owner}/${repo}`;
   const nowIso = args.now ?? new Date().toISOString();
@@ -174,6 +194,15 @@ export function buildFindingDismissalRequest(
     `Finding category: ${category}; severity risk class: ${riskClass}.`,
     `Keep retains the finding on the autonomous triage path; dismiss closes it out.`,
   ].join(' ');
+
+  // PR2 rung-2 pre-fill: attach the structured reason to the RECOMMENDED option's
+  // `detail`. With no pre-fill each option stays `{id,label}` — byte-identical to
+  // PR1 (the conditional key spread never adds an undefined `detail`).
+  const options = [KEEP_OPTION, DISMISS_OPTION].map((o) =>
+    recommendedOption !== undefined && recommendedReason !== undefined && o.id === recommendedOption
+      ? { id: o.id, label: o.label, detail: recommendedReason }
+      : { id: o.id, label: o.label },
+  );
 
   const request = {
     decision_id: decisionId,
@@ -189,9 +218,15 @@ export function buildFindingDismissalRequest(
     risk_class: riskClass,
     question: `Keep or dismiss review finding #${issueNumber} (${category})?`,
     context,
-    options: [KEEP_OPTION, DISMISS_OPTION],
-    // recommended_option UNSET — rung-1 only (PR1). PR2 sets it from the learned
-    // preference (guarded categories never).
+    options,
+    // recommended_option is set ONLY for a rung-2 pre-fill (PR2), and ONLY together with
+    // its reason (`recommendedReason` on the option `detail`) — both-or-neither, so a
+    // pre-fill is never shown without the reason the rung-2 contract requires (a typed
+    // caller passing only one is treated as no pre-fill). Guarded categories never reach
+    // here with one (the emit rung gate excludes them). Absent → omitted (PR1 shape).
+    ...(recommendedOption !== undefined && recommendedReason !== undefined
+      ? { recommended_option: recommendedOption }
+      : {}),
     consequence_of_no_answer:
       'The finding stays open and surfaced until the Operator keeps or dismisses it.',
     reversibility: 'reversible' as const,

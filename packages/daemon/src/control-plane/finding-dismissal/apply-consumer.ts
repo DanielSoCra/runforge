@@ -51,6 +51,12 @@ import { findingDismissalClass, verdictLabelFor } from './labels.js';
 export interface ConsumerLedger {
   pending(): Promise<Array<{ decision_id: string; status: string; source_url: string }>>;
   statusOf(decisionId: string): Promise<string | undefined>;
+  /**
+   * The STORED recommended_option that was raised and shown for this decision (the
+   * rung-2 pre-fill hint), or null. Read to record an HONEST `matchedRecommendation`
+   * from the value the Operator actually saw — never a re-derive.
+   */
+  recommendedOptionOf(decisionId: string): Promise<string | null>;
   answer(
     decisionId: string,
     chosenOption: string,
@@ -95,6 +101,12 @@ export interface ConsumerLearning {
     context: string;
     sourceDecisionId: string;
     chosenOption: string;
+    /**
+     * The recommended_option that was SHOWN on the decision (the rung-2 pre-fill),
+     * if any. `observeDecisionAnswer` sets `matchedRecommendation` from it — so the
+     * consumer passes the STORED value, keeping the record honest.
+     */
+    recommendedOption?: string;
   }): Promise<void>;
 }
 
@@ -245,12 +257,31 @@ async function processFindingRow(
   //
   // 1) verdict labels (`kept`/`dismissed`) + a single (marker-deduped) audit comment.
   await applyVerdict(octokit, owner, repo, issueNumber, decisionId, answer.choice, comments);
+  // Read the STORED recommended_option (the rung-2 pre-fill the Operator saw) — a pure
+  // read, so it does not disturb the durable-first chain. `matchedRecommendation` is
+  // computed from THIS shown value (never a re-derive), and is undefined-safe when
+  // the decision had no pre-fill (null → undefined → matched=false).
+  //
+  // FAIL-OPEN (codex): this advisory read sits AFTER the verdict is already written but
+  // BEFORE observe/answer/advance. An unguarded throw here would abort the row via the
+  // caller's catch with the verdict applied yet the row never terminalized — stranding
+  // the answered finding in `pending` forever. Degrade a read failure to "no recorded
+  // recommendation" and press on: the observation + answer + terminalization still run.
+  let shownRec: string | null = null;
+  try {
+    shownRec = await ledger.recommendedOptionOf(decisionId);
+  } catch (e) {
+    console.warn(
+      `[finding-dismissal] consumer: recommendedOptionOf failed for ${decisionId} (observing with no recommendation, continuing): ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
   // 2) the learned observation (deduped by sourceDecisionId — a replay never inflates).
   await operatorLearning.observeDecisionAnswer({
     decisionClass: findingDismissalClass(category),
     context: `${owner}/${repo}`,
     sourceDecisionId: decisionId,
     chosenOption: answer.choice,
+    recommendedOption: shownRec ?? undefined,
   });
   // 3) NOW record the answer in the ledger (answered-once: a replay is a no-op).
   await ledger.answer(decisionId, answer.rawChosenOption, 'operator');

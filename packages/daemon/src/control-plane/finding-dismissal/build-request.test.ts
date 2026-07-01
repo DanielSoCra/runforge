@@ -113,12 +113,86 @@ describe('buildFindingDismissalRequest', () => {
     expect(p0.risk_class).toBe('P0');
   });
 
-  it('leaves recommended_option UNSET (rung-1 only — no pre-fill in PR1)', () => {
+  it('leaves recommended_option UNSET when no pre-fill is passed (rung-1 shape)', () => {
     expect(built.recommended_option).toBeUndefined();
   });
 
   it('does not leak free-text into context/question (structured only)', () => {
     expect(built.context).not.toContain('\n');
     expect(built.question).toContain('#42');
+  });
+});
+
+describe('buildFindingDismissalRequest — rung-2 pre-fill (PR2)', () => {
+  const REASON = 'Recommended: dismiss — learned from your consistent prior decisions in this category (confidence 82%).';
+
+  it('sets recommended_option and attaches the reason as detail on the RECOMMENDED (reject) option', () => {
+    const built = buildFindingDismissalRequest({
+      issueNumber: 42,
+      category: 'correctness',
+      owner: 'acme',
+      repo: 'widgets',
+      riskClass: 'P1',
+      epoch: 1,
+      now: FIXED_NOW,
+      recommendedOption: 'reject',
+      recommendedReason: REASON,
+    });
+    // the schema is the gate — it must still parse.
+    expect(() => DecisionRequestSchema.parse(built)).not.toThrow();
+    expect(built.recommended_option).toBe('reject');
+    // the reason rides ONLY the recommended option's detail; the other stays plain.
+    const reject = built.options.find((o) => o.id === 'reject')!;
+    const approve = built.options.find((o) => o.id === 'approve')!;
+    expect(reject.detail).toBe(REASON);
+    expect(approve.detail).toBeUndefined();
+    // ids unchanged.
+    expect(built.options.map((o) => o.id)).toEqual(['approve', 'reject']);
+  });
+
+  it('attaches the reason to the approve option when approve is recommended', () => {
+    const built = buildFindingDismissalRequest({
+      issueNumber: 7,
+      category: 'performance',
+      owner: 'acme',
+      repo: 'widgets',
+      riskClass: 'P2',
+      epoch: 1,
+      now: FIXED_NOW,
+      recommendedOption: 'approve',
+      recommendedReason: 'Recommended: keep — reason.',
+    });
+    expect(built.recommended_option).toBe('approve');
+    expect(built.options.find((o) => o.id === 'approve')!.detail).toBe('Recommended: keep — reason.');
+    expect(built.options.find((o) => o.id === 'reject')!.detail).toBeUndefined();
+  });
+
+  it('BYTE-IDENTICAL to the PR1 (no-pre-fill) output when recommendedOption is absent', () => {
+    const withoutArgs = buildFindingDismissalRequest({
+      issueNumber: 42,
+      category: 'correctness',
+      owner: 'acme',
+      repo: 'widgets',
+      riskClass: 'P1',
+      epoch: 1,
+      now: FIXED_NOW,
+    });
+    // Passing undefined pre-fill fields must be indistinguishable from omitting them.
+    const withUndefined = buildFindingDismissalRequest({
+      issueNumber: 42,
+      category: 'correctness',
+      owner: 'acme',
+      repo: 'widgets',
+      riskClass: 'P1',
+      epoch: 1,
+      now: FIXED_NOW,
+      recommendedOption: undefined,
+      recommendedReason: undefined,
+    });
+    expect(withUndefined).toEqual(withoutArgs);
+    expect(withoutArgs.recommended_option).toBeUndefined();
+    expect(withoutArgs.options.every((o) => o.detail === undefined)).toBe(true);
+    // stable serialization — no stray keys.
+    expect(JSON.stringify(withUndefined)).toBe(JSON.stringify(withoutArgs));
   });
 });

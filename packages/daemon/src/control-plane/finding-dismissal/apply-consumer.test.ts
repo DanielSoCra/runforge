@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import type { CommentLike } from '../decision-escalation/resume-consumer.js';
 import { buildDecisionResponseComment } from '../decision-escalation/answer-publisher.js';
 import { OperatorLearningService } from '../../operator-learning/index.js';
+import { readObservations } from '../../operator-learning/observation-log.js';
 import { FakeFindingLedger } from './__fixtures__/fake-ledger.js';
 import {
   runFindingDismissalConsumer,
@@ -412,5 +413,172 @@ describe('runFindingDismissalConsumer — crash-before-terminalize replay (real 
     expect(pref.evidenceSummary.totalObservations).toBe(1);
     expect(pref.evidenceSummary.distinctSources).toBe(1);
     expect(pref.mostFrequentChoice).toBe('reject');
+  });
+});
+
+describe('runFindingDismissalConsumer — rung-2 matchedRecommendation (PR2)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'finding-dismissal-rec-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * Read the single decision_answer observation the real learning service recorded.
+   * (`audit()` only returns reset/revert events, not decision_answer, so we read the
+   * durable JSONL log directly — the same file the production preference engine reads.)
+   */
+  async function soleObservation(cat: ReviewCategory) {
+    const all = await readObservations(join(dir, 'observations.jsonl'));
+    const answers = all.filter(
+      (o) =>
+        o.kind === 'decision_answer' &&
+        o.decisionClass === `finding_dismissal:${cat}` &&
+        o.context === `${OWNER}/${REPO}`,
+    );
+    expect(answers).toHaveLength(1);
+    return answers[0] as Extract<(typeof answers)[number], { kind: 'decision_answer' }>;
+  }
+
+  async function makeRealLearning(): Promise<OperatorLearningService> {
+    const learning = new OperatorLearningService({
+      logPath: join(dir, 'observations.jsonl'),
+      proposalDir: join(dir, 'proposals'),
+    });
+    await learning.init();
+    return learning;
+  }
+
+  it('records matchedRecommendation=TRUE when the chosen option EQUALS the shown recommendation', async () => {
+    const id = fid(42, 'correctness');
+    const ledger = new FakeFindingLedger();
+    // The row was raised WITH a rung-2 pre-fill of `reject`, and the Operator chose reject.
+    ledger.seed({
+      decision_id: id,
+      status: 'notified',
+      source_url: SRC(42),
+      options: ['approve', 'reject'],
+      recommendedOption: 'reject',
+    });
+    const { octokit } = makeOctokit({ 42: { state: 'open', comments: [operatorAnswer(id, 'reject')] } });
+    const learning = await makeRealLearning();
+
+    await runFindingDismissalConsumer({ ledger, octokit, operatorLearning: learning, owner: OWNER, repo: REPO });
+
+    const obs = await soleObservation('correctness');
+    expect(obs.chosenOption).toBe('reject');
+    expect(obs.recommendedOption).toBe('reject');
+    expect(obs.matchedRecommendation).toBe(true);
+    // Still asks: the row was really answered + terminalized (no auto-resolve).
+    expect(await ledger.statusOf(id)).toBe('resumed');
+  });
+
+  it('records matchedRecommendation=FALSE when the Operator OVERRIDES the shown recommendation', async () => {
+    const id = fid(7, 'performance');
+    const ledger = new FakeFindingLedger();
+    ledger.seed({
+      decision_id: id,
+      status: 'notified',
+      source_url: SRC(7),
+      options: ['approve', 'reject'],
+      recommendedOption: 'reject', // shown reject…
+    });
+    const { octokit } = makeOctokit({ 7: { state: 'open', comments: [operatorAnswer(id, 'approve')] } }); // …chose approve
+    const learning = await makeRealLearning();
+
+    await runFindingDismissalConsumer({ ledger, octokit, operatorLearning: learning, owner: OWNER, repo: REPO });
+
+    const obs = await soleObservation('performance');
+    expect(obs.chosenOption).toBe('approve');
+    expect(obs.recommendedOption).toBe('reject');
+    expect(obs.matchedRecommendation).toBe(false);
+  });
+
+  it('undefined-safe: NO pre-fill shown → recommendedOption unset, matchedRecommendation=false', async () => {
+    const id = fid(9, 'correctness');
+    const ledger = new FakeFindingLedger();
+    // No recommendedOption on the seeded row (PR1-shape decision).
+    ledger.seed({ decision_id: id, status: 'notified', source_url: SRC(9), options: ['approve', 'reject'] });
+    const { octokit } = makeOctokit({ 9: { state: 'open', comments: [operatorAnswer(id, 'reject')] } });
+    const learning = await makeRealLearning();
+
+    await runFindingDismissalConsumer({ ledger, octokit, operatorLearning: learning, owner: OWNER, repo: REPO });
+
+    const obs = await soleObservation('correctness');
+    expect(obs.chosenOption).toBe('reject');
+    expect(obs.recommendedOption).toBeUndefined();
+    expect(obs.matchedRecommendation).toBe(false);
+  });
+
+  it('FAIL-OPEN: recommendedOptionOf THROWS → still observes (no recommendation), answers, and terminalizes (finding never stranded)', async () => {
+    const id = fid(11, 'correctness');
+    const ledger = new FakeFindingLedger();
+    // A pre-fill WAS shown on the row…
+    ledger.seed({
+      decision_id: id,
+      status: 'notified',
+      source_url: SRC(11),
+      options: ['approve', 'reject'],
+      recommendedOption: 'reject',
+    });
+    // …but the advisory read blows up. codex: this read sits AFTER the verdict is
+    // written but BEFORE observe/answer/advance — an unguarded throw would strand
+    // the answered finding in `pending` forever. It must degrade, not abort.
+    ledger.recommendedOptionOf = async () => {
+      throw new Error('recommended_option read blew up');
+    };
+    const { octokit, labels } = makeOctokit({ 11: { state: 'open', comments: [operatorAnswer(id, 'reject')] } });
+    const learning = await makeRealLearning();
+
+    const applied = await runFindingDismissalConsumer({
+      ledger,
+      octokit,
+      operatorLearning: learning,
+      owner: OWNER,
+      repo: REPO,
+    });
+
+    // The verdict is applied AND the row is terminalized — NOT stuck in pending.
+    expect(applied).toBe(1);
+    expect(labels.get(11)).toEqual(new Set(['dismissed']));
+    expect(await ledger.statusOf(id)).toBe('resumed');
+    // The observation is still recorded — degraded to NO recommendation (fail-open).
+    const obs = await soleObservation('correctness');
+    expect(obs.chosenOption).toBe('reject');
+    expect(obs.recommendedOption).toBeUndefined();
+    expect(obs.matchedRecommendation).toBe(false);
+  });
+
+  it('reads recommendedOptionOf as a PURE read (durable-first order preserved: verdict → observe → answer → advance)', async () => {
+    const events: string[] = [];
+    const id = fid(42, 'correctness');
+    const ledger = new FakeFindingLedger(events);
+    ledger.seed({
+      decision_id: id,
+      status: 'notified',
+      source_url: SRC(42),
+      options: ['approve', 'reject'],
+      recommendedOption: 'reject',
+    });
+    const { octokit } = makeOctokit({ 42: { state: 'open', comments: [operatorAnswer(id, 'reject')] } }, events);
+
+    await runFindingDismissalConsumer({
+      ledger,
+      octokit,
+      operatorLearning: recordingLearning(events),
+      owner: OWNER,
+      repo: REPO,
+    });
+
+    // The recommendedOptionOf read emits no event; the durable-first order is intact.
+    expect(events).toEqual([
+      'addLabels:42:dismissed',
+      'createComment:42',
+      `observe:${id}:reject:finding_dismissal:correctness`,
+      `answer:${id}:reject`,
+      `advanceToResumed:${id}`,
+    ]);
   });
 });

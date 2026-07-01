@@ -56,6 +56,33 @@ const protectedAnswerable: RankedListItem = {
   why_ranked: 'P0 risk, PHI involved',
 };
 
+/**
+ * A decision carrying a rung-2 pre-fill: `recommended_option` points at `reject`,
+ * and that option carries the structured reason on its `detail`. The dialog must
+ * highlight the recommended option (primary + "Recommended" badge) and show its
+ * reason — a one-action confirm — WITHOUT auto-submitting.
+ */
+const RECOMMENDED_REASON =
+  'Recommended: dismiss — learned from your consistent prior decisions in this category (confidence 82%).';
+const prefilled: RankedListItem = {
+  decision_id: 'dec-answer-3',
+  status: 'notified',
+  risk_class: 'P2',
+  created_at: '2026-06-30T09:00:00.000Z',
+  question: { kind: 'text', value: 'Keep or dismiss review finding #42 (correctness)?' },
+  recommended_option: 'reject',
+  options: [
+    { id: 'approve', label: { kind: 'text', value: 'Keep the finding' } },
+    {
+      id: 'reject',
+      label: { kind: 'text', value: 'Dismiss the finding' },
+      detail: { kind: 'text', value: RECOMMENDED_REASON },
+    },
+  ],
+  score: 70,
+  why_ranked: 'P2 risk',
+};
+
 /** Open the answer dialog by clicking its trigger control (the "Answer" affordance). */
 function openDialog() {
   fireEvent.click(screen.getByRole('button', { name: /answer/i }));
@@ -139,6 +166,48 @@ describe('DecisionAnswerDialog (pure presentational)', () => {
     expect(
       screen.getByText(/no longer answerable/i),
     ).toBeInTheDocument();
+  });
+
+  describe('rung-2 pre-fill highlight', () => {
+    it('renders the RECOMMENDED option as primary (variant="default") with a "Recommended" badge + reason', async () => {
+      render(<DecisionAnswerDialog decision={prefilled} onAnswer={() => {}} />);
+      openDialog();
+      await screen.findByRole('dialog');
+
+      const rejectBtn = screen.getByRole('button', { name: /dismiss the finding/i });
+      const approveBtn = screen.getByRole('button', { name: /keep the finding/i });
+      // the recommended option is primary; the other stays outline.
+      expect(rejectBtn).toHaveAttribute('data-variant', 'default');
+      expect(approveBtn).toHaveAttribute('data-variant', 'outline');
+      // a "Recommended" badge marks it.
+      expect(screen.getByText(/^recommended$/i)).toBeInTheDocument();
+      // the reason (option detail) is shown beneath it.
+      expect(screen.getByText(RECOMMENDED_REASON)).toBeInTheDocument();
+    });
+
+    it('does NOT auto-submit — onAnswer fires only on an explicit click', async () => {
+      const onAnswer = vi.fn();
+      render(<DecisionAnswerDialog decision={prefilled} onAnswer={onAnswer} />);
+      openDialog();
+      await screen.findByRole('dialog');
+
+      // The recommendation is highlighted, but nothing was submitted on open.
+      expect(onAnswer).not.toHaveBeenCalled();
+
+      // A click on the recommended option is what confirms it.
+      fireEvent.click(screen.getByRole('button', { name: /dismiss the finding/i }));
+      expect(onAnswer).toHaveBeenCalledWith('dec-answer-3', 'reject');
+    });
+
+    it('recommended_option ABSENT/null → all options plain (PR1 look, no badge)', async () => {
+      render(<DecisionAnswerDialog decision={answerable} onAnswer={() => {}} />);
+      openDialog();
+      await screen.findByRole('dialog');
+
+      expect(screen.getByRole('button', { name: /approve/i })).toHaveAttribute('data-variant', 'outline');
+      expect(screen.getByRole('button', { name: /reject/i })).toHaveAttribute('data-variant', 'outline');
+      expect(screen.queryByText(/^recommended$/i)).not.toBeInTheDocument();
+    });
   });
 
   describe('redaction', () => {

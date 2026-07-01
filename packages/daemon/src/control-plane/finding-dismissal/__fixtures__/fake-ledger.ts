@@ -19,6 +19,8 @@ export interface FakeLedgerRow {
   source_url: string;
   options: string[];
   answeredOption?: string;
+  /** The STORED recommended_option (the rung-2 pre-fill hint the Operator saw), if any. */
+  recommendedOption?: string;
 }
 
 /** A DecisionView-shaped subset (what the consumer reads off `pending()`). */
@@ -64,13 +66,20 @@ export class FakeFindingLedger {
     this.log(`raise:${decision_id}`);
     const existing = this.rows.get(decision_id);
     if (existing) return { decision_id, outcome: 'unchanged' };
+    const rec = extract(rawRequest, 'recommended_option');
     this.rows.set(decision_id, {
       decision_id,
       status: 'detected',
       source_url: extract(rawRequest, 'source_url'),
       options: extractOptionIds(rawRequest),
+      ...(rec !== '' ? { recommendedOption: rec } : {}),
     });
     return { decision_id, outcome: 'admitted' };
+  }
+
+  /** The STORED recommended_option that was raised/shown (the F1 honest value), or null. */
+  async recommendedOptionOf(decisionId: string): Promise<string | null> {
+    return this.rows.get(decisionId)?.recommendedOption ?? null;
   }
 
   async notify(decisionId: string): Promise<{ applied: boolean; status: string }> {

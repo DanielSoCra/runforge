@@ -169,6 +169,24 @@ export class ReadModel {
       }));
   }
 
+  /**
+   * recommendedOptionOf — the stored `recommended_option` for a decision, or
+   * `null` when the row is missing OR the column is null. A cheap SINGLE-COLUMN
+   * select: it deliberately does NOT go through `detail()` (which parses
+   * `options_json` + `answer_schema_json`), so a consumer reading the SHOWN
+   * pre-fill hint pays no JSON-parse cost. The value is exactly what was raised
+   * and displayed — never a re-derive — so `matchedRecommendation` is honest.
+   */
+  async recommendedOptionOf(decisionId: string): Promise<string | null> {
+    const r = (
+      await this.db
+        .select({ recommended_option: decisions.recommended_option })
+        .from(decisions)
+        .where(eq(decisions.decision_id, decisionId))
+    )[0];
+    return r?.recommended_option ?? null;
+  }
+
   async hasResponse(decisionId: string): Promise<boolean> {
     return (
       (

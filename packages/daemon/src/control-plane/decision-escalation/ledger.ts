@@ -175,6 +175,18 @@ export class DecisionLedger {
     return (await this.writer.reader.get(decisionId))?.status;
   }
 
+  /**
+   * recommendedOptionOf — the STORED `recommended_option` that was raised and
+   * shown for a decision (or `null` if missing / unset). Delegates to the read
+   * model's cheap single-column scalar accessor (NOT `detail()`, which would
+   * pay the options/answer-schema JSON parse). The finding-dismissal consumer
+   * reads this to record an HONEST `matchedRecommendation` from the value the
+   * Operator actually saw — never a re-derive that could drift.
+   */
+  async recommendedOptionOf(decisionId: string): Promise<string | null> {
+    return this.writer.reader.recommendedOptionOf(decisionId);
+  }
+
   /** reconcile — boot-time/periodic crash recovery; completes in-flight effects. */
   reconcile(): ReturnType<IndexWriter['reconcile']> {
     return this.writer.reconcile();

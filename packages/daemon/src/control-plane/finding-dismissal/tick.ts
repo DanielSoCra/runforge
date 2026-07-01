@@ -24,6 +24,7 @@ import {
 import {
   scanAndEmitFindingDismissals,
   type EmitLedger,
+  type EmitLearning,
   type EmitPublisher,
 } from './emit.js';
 import {
@@ -42,7 +43,12 @@ export interface FindingDismissalTickDeps {
   ledger: EmitLedger & ConsumerLedger;
   /** A per-repo Octokit (resolved with the repo's token, like resumeParkedRuns). */
   octokit: Octokit;
-  operatorLearning: ConsumerLearning;
+  /**
+   * The real OperatorLearningService carries BOTH surfaces: the emit side reads the
+   * learned preference for the rung-2 pre-fill (`getPreference`), and the consumer
+   * side observes answers (`observeDecisionAnswer`).
+   */
+  operatorLearning: ConsumerLearning & EmitLearning;
   owner: string;
   repo: string;
   /** The configured review-category allowlist (`config.operatorReviewCategories`). */
@@ -102,6 +108,7 @@ export async function runFindingDismissalTick(
         },
         allowlist,
         ledger,
+        operatorLearning,
         publisher,
         octokit: octokit as unknown as PublisherOctokit,
         owner,
