@@ -106,6 +106,7 @@ describe('emitFindingDismissalDecision (raise → publish → notify)', () => {
       issueNumber: 42,
       category: 'correctness',
       riskClass: 'P1',
+      labels: ['review-finding', 'correctness', 'P2'],
     });
 
     const id = buildFindingDismissalDecisionId('acme', 'widgets',42, 'correctness', FINDING_DISMISSAL_EMIT_EPOCH);
@@ -129,6 +130,7 @@ describe('emitFindingDismissalDecision (raise → publish → notify)', () => {
       issueNumber: 42,
       category: 'correctness',
       riskClass: 'P1',
+      labels: ['review-finding', 'correctness', 'P2'],
     });
     const id = buildFindingDismissalDecisionId('acme', 'widgets',42, 'correctness', FINDING_DISMISSAL_EMIT_EPOCH);
     expect(result.emitted).toBe(false);
@@ -153,6 +155,7 @@ describe('emitFindingDismissalDecision (raise → publish → notify)', () => {
       issueNumber: 42,
       category: 'correctness',
       riskClass: 'P1',
+      labels: ['review-finding', 'correctness', 'P2'],
     });
     expect(result).toEqual({ emitted: false, decisionId: id, reason: 'already:notified' });
     expect(events).toEqual([]); // NO second raise / publish / notify
@@ -174,6 +177,7 @@ describe('emitFindingDismissalDecision (raise → publish → notify)', () => {
       issueNumber: 42,
       category: 'correctness',
       riskClass: 'P1',
+      labels: ['review-finding', 'correctness', 'P2'],
     });
     expect(result.emitted).toBe(true);
     expect(events).toEqual([`raise:${id}`, 'publish:42', `notify:${id}`]); // re-publish + notify
@@ -236,6 +240,10 @@ describe('emitFindingDismissalDecision — rung-2 pre-fill (PR2)', () => {
   async function emitWith(
     learning: EmitLearning,
     category: 'correctness' | 'security' | 'performance' = 'correctness',
+    // Default to a ROUTINE, non-protected label set so the PR2 pre-fill assertions
+    // still hold under the PR3-pre protection gate. NEW protected-finding tests below
+    // override this to prove the gate suppresses the pre-fill.
+    labels: readonly string[] = ['review-finding', category, 'P2'],
   ): Promise<{ raised: Record<string, unknown> | undefined; emitted: boolean; events: string[] }> {
     const events: string[] = [];
     const { ledger, lastRaised } = capturingLedger(events);
@@ -249,6 +257,7 @@ describe('emitFindingDismissalDecision — rung-2 pre-fill (PR2)', () => {
       issueNumber: 42,
       category,
       riskClass: 'P1',
+      labels,
     });
     return { raised: lastRaised(), emitted: result.emitted, events };
   }
@@ -390,6 +399,71 @@ describe('emitFindingDismissalDecision — rung-2 pre-fill (PR2)', () => {
     // the finding was emitted (not swallowed by the scan's per-finding catch).
     expect(results.filter((r) => r.emitted)).toHaveLength(1);
   });
+
+  // ── PR3-pre: pre-fill protection gate (closes the live PR2 gap) ──────────────
+  // Even with a strong EARNED pre-fill preference, a PROTECTED / uncertain-severity
+  // finding must NEVER receive a pre-filled dismiss recommendation. The finding is
+  // still raised + notified (never dropped) — just with no recommended_option.
+  describe('pre-fill protection gate (isProtectedFinding → no pre-fill)', () => {
+    // A learning surface that WOULD earn a 'reject' pre-fill on a routine finding.
+    const earnedReject = fakeLearning({ rung: 'pre-fill', mostFrequentChoice: 'reject', confidence: 0.9 });
+
+    it('P0 severity → still emitted, but NO pre-fill', async () => {
+      const { raised, emitted } = await emitWith(earnedReject, 'correctness', [
+        'review-finding',
+        'correctness',
+        'P0',
+      ]);
+      expect(emitted).toBe(true);
+      expect(raised?.recommended_option).toBeUndefined();
+    });
+
+    it('MISSING severity → no pre-fill (uncertain, fail-closed)', async () => {
+      const { raised, emitted } = await emitWith(earnedReject, 'correctness', ['review-finding', 'correctness']);
+      expect(emitted).toBe(true);
+      expect(raised?.recommended_option).toBeUndefined();
+    });
+
+    it('MULTIPLE severity labels → no pre-fill (ambiguous)', async () => {
+      const { raised } = await emitWith(earnedReject, 'correctness', [
+        'review-finding',
+        'correctness',
+        'P1',
+        'P2',
+      ]);
+      expect(raised?.recommended_option).toBeUndefined();
+    });
+
+    it('needs-discussion (human-route) → no pre-fill', async () => {
+      const { raised } = await emitWith(earnedReject, 'correctness', [
+        'review-finding',
+        'correctness',
+        'needs-discussion',
+        'P2',
+      ]);
+      expect(raised?.recommended_option).toBeUndefined();
+    });
+
+    it('a compliance protection label → no pre-fill', async () => {
+      const { raised } = await emitWith(earnedReject, 'correctness', [
+        'review-finding',
+        'correctness',
+        'P2',
+        'compliance',
+      ]);
+      expect(raised?.recommended_option).toBeUndefined();
+    });
+
+    it('a guarded category (security) → no pre-fill', async () => {
+      const { raised } = await emitWith(earnedReject, 'security', ['review-finding', 'security', 'P2']);
+      expect(raised?.recommended_option).toBeUndefined();
+    });
+
+    it('CONTROL: the SAME earned preference DOES pre-fill a routine, non-protected finding', async () => {
+      const { raised } = await emitWith(earnedReject, 'correctness', ['review-finding', 'correctness', 'P2']);
+      expect(raised?.recommended_option).toBe('reject');
+    });
+  });
 });
 
 describe('emitFindingDismissalDecision — detected-retry pre-fill hydration (PR2, no drift)', () => {
@@ -422,6 +496,7 @@ describe('emitFindingDismissalDecision — detected-retry pre-fill hydration (PR
       issueNumber,
       category: 'correctness',
       riskClass: 'P1',
+      labels: ['review-finding', 'correctness', 'P2'],
     });
     expect(result.emitted).toBe(true);
     return lastRaised();
@@ -478,6 +553,7 @@ describe('emitFindingDismissalDecision — detected-retry pre-fill hydration (PR
       issueNumber: 44,
       category: 'correctness',
       riskClass: 'P1',
+      labels: ['review-finding', 'correctness', 'P2'],
     });
     expect(result.emitted).toBe(false);
     expect(result.reason).toContain('hydrate');
@@ -515,6 +591,7 @@ describe('emitFindingDismissalDecision — detected-retry pre-fill hydration (PR
       issueNumber: 45,
       category: 'correctness',
       riskClass: 'P1',
+      labels: ['review-finding', 'correctness', 'P2'],
     });
     // lost the race → not emitted, and crucially NO block published (no divergence with the
     // stored 'approve' row). The winner / a later detected-retry surfaces the canonical block.

@@ -27,6 +27,7 @@ import {
   hasHumanRoute,
   parseSeverityRiskClass,
   findingDismissalClass,
+  isProtectedFinding,
 } from './labels.js';
 import {
   buildFindingDismissalRequest,
@@ -122,6 +123,13 @@ function buildRecommendedReason(option: FindingAnswerOptionId, confidencePct?: n
  * valid on-menu option id. Guarded categories (e.g. `finding_dismissal:security`)
  * are auto-capped at `surface` by the preference engine → excluded by the rung gate.
  *
+ * PROTECTION GATE (PR3-pre, codex R2 CRIT-3 — closes the live PR2 gap): FIRST, if
+ * the finding is PROTECTED (`isProtectedFinding(labels)` — a guarded category, a
+ * human-route/protection label, OR an uncertain/critical severity), return NO
+ * pre-fill unconditionally. A P0/compliance/sensitive finding must never receive a
+ * pre-filled dismiss recommendation, regardless of how strong the learned pattern
+ * is. This is fail-CLOSED and takes precedence over the fail-open learning read.
+ *
  * ANY error (a learning read failure) is caught, logged, and treated as NO pre-fill —
  * the emit must never drop a decision because the best-effort hint failed (L1
  * operator-learning: learning never suppresses a decision). Returns an empty object
@@ -133,7 +141,12 @@ async function computeFindingPrefill(
   owner: string,
   repo: string,
   issueNumber: number,
+  labels: readonly string[],
 ): Promise<{ recommendedOption?: FindingAnswerOptionId; recommendedReason?: string }> {
+  // PR3-pre protection gate: a protected/uncertain-severity finding is NEVER
+  // pre-filled — the Operator decides it explicitly. Checked before the learning
+  // read so no strong pattern can override it.
+  if (isProtectedFinding(labels)) return {};
   try {
     const pref = await operatorLearning.getPreference(findingDismissalClass(category), `${owner}/${repo}`);
     const choice = pref.mostFrequentChoice;
@@ -187,9 +200,10 @@ async function resolveEmitPrefill(
   owner: string,
   repo: string,
   issueNumber: number,
+  labels: readonly string[],
 ): Promise<{ prefill: EmitPrefill } | { hydrateFailed: true }> {
   if (status === undefined) {
-    return { prefill: await computeFindingPrefill(operatorLearning, category, owner, repo, issueNumber) };
+    return { prefill: await computeFindingPrefill(operatorLearning, category, owner, repo, issueNumber, labels) };
   }
   // `detected` retry: mirror the stored row exactly (no recompute → no drift).
   let stored: string | null;
@@ -232,6 +246,13 @@ export interface EmitFindingDismissalArgs {
   issueNumber: number;
   category: ReviewCategory;
   riskClass: ReturnType<typeof parseSeverityRiskClass>;
+  /**
+   * The finding's raw issue labels — threaded into the pre-fill protection gate
+   * (`isProtectedFinding`). A protected/uncertain-severity finding gets NO pre-fill
+   * (PR3-pre, closes the PR2 gap). Distinct from `riskClass` (which fills the request
+   * and fail-OPEN defaults to P2); the gate reads severity fail-CLOSED from these.
+   */
+  labels: readonly string[];
   /** Defaults to FINDING_DISMISSAL_EMIT_EPOCH. */
   epoch?: number;
   /** Input-boundary sanitizer (defaults to identity). Mirrors the gate emit. */
@@ -291,6 +312,7 @@ export async function emitFindingDismissalDecision(
     owner,
     repo,
     issueNumber,
+    args.labels,
   );
   if ('hydrateFailed' in prefillResult) {
     // A `detected` retry whose stored pre-fill read threw: do NOT publish a synthesized
@@ -386,6 +408,7 @@ export async function scanAndEmitFindingDismissals(
         issueNumber: finding.issueNumber,
         category,
         riskClass: parseSeverityRiskClass(finding.labels),
+        labels: finding.labels,
         sanitize: args.sanitize,
         now: args.now,
       });

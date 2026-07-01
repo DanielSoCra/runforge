@@ -195,7 +195,21 @@ export class OperatorLearningService {
     return listAskLessProposals(this.config.proposalDir);
   }
 
+  /**
+   * approveAskLessProposal — APPROVE-ONCE / CAS (codex CRIT-4). Liveness is
+   * `approvedAt > lastResetAt`, so blindly re-stamping `approvedAt: Date.now()` on
+   * every call would let a REPLAY of an old approval — issued AFTER a
+   * `preference_reset`/revert — resurrect a stale ask-less authorization. The fix:
+   * only a `pending` proposal transitions to `approved` (stamping `approvedAt` once);
+   * an already-approved proposal is returned UNCHANGED (its original `approvedAt`
+   * preserved), so a replay past a reset can never make it live again.
+   */
   async approveAskLessProposal(proposalId: string): Promise<AskLessProposal | undefined> {
+    const existing = (await listAskLessProposals(this.config.proposalDir)).find((p) => p.id === proposalId);
+    if (existing === undefined) return undefined;
+    // Idempotent / non-resurrecting: anything not `pending` (already approved, or
+    // rejected) is returned as-is — never re-stamped with a fresh approvedAt.
+    if (existing.status !== 'pending') return existing;
     return updateAskLessProposal(proposalId, this.config.proposalDir, {
       status: 'approved',
       approvedAt: Date.now(),

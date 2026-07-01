@@ -467,6 +467,42 @@ describe('OperatorLearningService', () => {
       await service.approveAskLessProposal(second!.id);
       expect((await service.getPreference('low-risk-dep', 'deployment-a')).rung).toBe('propose-ask-less');
     });
+
+    it('approve-once: approving twice preserves the ORIGINAL approvedAt (no re-stamp)', async () => {
+      const { service } = await makeService();
+      await seedApprovals(service, 'low-risk-dep', 'deployment-a', 8, 'd');
+      const proposal = await service.maybeProposeAskLess('low-risk-dep', 'deployment-a');
+      const first = await service.approveAskLessProposal(proposal!.id);
+      expect(first?.status).toBe('approved');
+      const firstApprovedAt = first!.approvedAt;
+      expect(firstApprovedAt).toBeDefined();
+
+      await sleep(5);
+      // A replayed approval must NOT bump approvedAt (that is the resurrection window).
+      const second = await service.approveAskLessProposal(proposal!.id);
+      expect(second?.status).toBe('approved');
+      expect(second?.approvedAt).toBe(firstApprovedAt);
+    });
+
+    it('a STALE approval replayed after a reset does NOT resurrect propose-ask-less (approve-once/CAS)', async () => {
+      const { service } = await makeService();
+      await seedApprovals(service, 'low-risk-dep', 'deployment-a', 8, 'd');
+      const proposal = await service.maybeProposeAskLess('low-risk-dep', 'deployment-a');
+      await service.approveAskLessProposal(proposal!.id);
+      expect((await service.getPreference('low-risk-dep', 'deployment-a')).rung).toBe('propose-ask-less');
+
+      // Operator resets; fresh evidence re-crosses the ask-less thresholds.
+      await service.reset('low-risk-dep', 'deployment-a');
+      await sleep(5);
+      await seedApprovals(service, 'low-risk-dep', 'deployment-a', 8, 'r');
+
+      // Replaying the OLD approval (buggy code would re-stamp approvedAt=now > lastResetAt
+      // → live again). Approve-once preserves the stale approvedAt < lastResetAt, so the
+      // rung stays cautious — the stale authorization cannot resurrect.
+      await service.approveAskLessProposal(proposal!.id);
+      const pref = await service.getPreference('low-risk-dep', 'deployment-a');
+      expect(pref.rung).not.toBe('propose-ask-less');
+    });
   });
 
   describe('sensitive observations', () => {

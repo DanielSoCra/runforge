@@ -3,7 +3,7 @@ id: FUNC-AC-OPERATOR-LEARNING
 type: functional
 domain: auto-claude
 status: approved
-version: 1
+version: 2
 layer: 1
 ---
 
@@ -83,6 +83,14 @@ This capability is the behavioral-learning loop: it observes the Operator's deci
 - And only after the Operator approves does the threshold change take effect
 - And the platform never jumps directly to deciding a class autonomously — every widening of autonomy passes through an Operator decision, one rung at a time
 
+**Scenario: Fourth rung — acting on the Operator's behalf only within a bound he explicitly grants**
+- Given a non-guarded decision-class the platform already asks less about, and the Operator's answer to it has stayed consistent
+- When the Learning Function judges it could handle routine instances of that class on the Operator's behalf
+- Then it does not begin acting on its own; it raises a separate decision request that plainly states it would apply the Operator's usual answer automatically to routine instances, names the kinds of instances it will never act on, and names how to switch it back off
+- And only after the Operator approves that specific request does the platform begin applying the learned answer automatically, and only to routine instances of that non-guarded class
+- And it never acts automatically on an instance that is safety-critical, concerns sensitive data, a compliance gate, specification content, or a production release; that carries an unresolved flag for discussion; or that is unlike the instances the preference was learned from — each of these still reaches the Operator
+- And every automatic action is recorded as the platform's own action, with the reason and the approval behind it, is never counted as new evidence of the Operator's behavior, and can be switched back off — after which the class returns to being asked
+
 **Scenario: A guarded decision-class never advances past the first rung**
 - Given a decision-class concerns a safety-critical change, sensitive data, a compliance gate, specification content, or a production release
 - When the Operator answers it consistently the same way
@@ -141,6 +149,7 @@ This capability is the behavioral-learning loop: it observes the Operator's deci
 - The platform measurably asks the Operator less over time about non-guarded decision-classes it has learned, while the count of guarded decisions reaching him is unchanged.
 - What the Operator consistently treats as most important surfaces first, both in the global inbox and at the moment he pulls work in context, and every placement can be explained.
 - No decision-class advances toward autonomy except one rung at a time, with the move to ask less always authorized by an explicit Operator decision.
+- When the Operator has explicitly authorized it for a non-guarded class, the platform handles routine instances of that class automatically — applying his learned answer, recording each action visibly, and still escalating every novel, guarded, safety-critical, sensitive, compliance, specification-content, production-release, or flagged instance — and he can switch that authorization back off at any time, after which the class returns to being asked.
 - No guarded decision-class — safety-critical, sensitive-data, compliance, specification-content, or production-release — is ever pre-filled as auto-confirmable, proposed for less asking, or decided without the Operator.
 - A genuinely novel or guarded decision always reaches the Operator regardless of learned ranking; learning never hides or drops an item.
 - The Operator can ask why any adjustment exists and get the evidence and rung behind it; he can reset any learned bias and have it honored immediately.
@@ -149,12 +158,12 @@ This capability is the behavioral-learning loop: it observes the Operator's deci
 ## Constraints
 
 - The platform never autonomously decides a safety-critical, sensitive-data, compliance, specification-content, or production-release question, no matter how confidently it has learned the Operator's behavior — these always reach the Operator. This guardrail overrides every learned preference.
-- Widening how much the platform may act on a learned preference is graduated and never a binary jump to autonomous decision: surface differently → pre-fill a recommendation the Operator still confirms → propose a change to how often a class is asked, which only the Operator may approve.
-- Confidence is raised only from a consistent, repeated pattern across varied occurrences — never from a single decision — and is lowered by any contradicting choice.
+- Widening how much the platform may act on a learned preference is graduated and never a binary jump to autonomous decision: surface differently → pre-fill a recommendation the Operator still confirms → propose a change to how often a class is asked, which only the Operator may approve → and, only for a non-guarded class and only after a further explicit Operator approval, apply the Operator's learned answer automatically to routine instances of that class, within the guards it may never cross.
+- Confidence is raised only from a consistent, repeated pattern of the Operator's own decisions across varied occurrences — never from a single decision, and never from the platform's own automatic actions — and is lowered by any contradicting choice.
 - Every learned adjustment — to ranking, to pre-filling, or to how often a class is asked — must be explainable to the Operator on demand and recorded so it is auditable after the fact.
 - The Operator can reset any learned preference at any time; a reset returns that decision-class to its pre-learning behavior immediately and is always available.
 - A learned bias that proves wrong must be reversible wherever it took effect, falling back to the prior, more cautious behavior; the platform never learns its way into a state it cannot back out of. For a bias that took effect across deployments, this revert is fleet-wide, realized by FUNC-AC-FLEET's demote-on-red rollback.
 - Learned preferences are held per decision-class and per context — never as a single hidden global ranking — and remain visible rather than silently computed.
 - The Learning Function only observes behavior and adjusts how things are surfaced and asked; it never authors or edits specification content, never merges, never deploys, and never alters a pipeline phase.
 - Confidential or sensitive content observed in the Operator's behavior is never folded into a shared preference, a ranking explanation, or an audit entry, and follows the same confidentiality rules as the rest of the platform.
-- Learning never suppresses, hides, or drops a decision from reaching the Operator; it changes order and emphasis only, and a novel or guarded decision always surfaces.
+- Learning never silently suppresses, hides, or drops a decision; it changes order and emphasis only — except that, for a non-guarded class the Operator has explicitly authorized the platform to handle automatically, the platform may apply his learned answer and must record that action visibly rather than acting silently. Even then, a novel, guarded, safety-critical, sensitive, compliance, specification-content, production-release, or flagged instance always still reaches the Operator.
