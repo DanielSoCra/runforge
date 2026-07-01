@@ -275,6 +275,15 @@ FUNC-AC-SPEND-OBSERVABILITY:
 
 ARCH-AC-SPEND-OBSERVABILITY:
   parent: FUNC-AC-SPEND-OBSERVABILITY
+  children: [STACK-AC-SPEND-OBSERVABILITY]
+  status: draft
+
+STACK-AC-SPEND-OBSERVABILITY:
+  parent: ARCH-AC-SPEND-OBSERVABILITY
+  code_paths:
+    - packages/daemon/src/control-plane/spend/**
+  test_paths:
+    - packages/daemon/src/control-plane/spend/**/*.test.ts
   status: draft
 
 # Operator Surface Decision API — L2/L3 authored 2026-06-18 (the backend
