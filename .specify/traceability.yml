@@ -264,13 +264,17 @@ FUNC-AC-OPERATOR-SURFACE:
   related: [FUNC-AC-DASHBOARD, FUNC-AC-FLEET, FUNC-AC-DECISION-ESCALATION]
   status: approved
 
-# Cross-provider agent spend observability (authored 2026-06-18). L1 pending
-# Operator approval (PR); L2/L3 deferred to implementation. Reference
-# implementation: the standalone "Ledger" dashboard (~/code/agent-spend-dashboard,
+# Cross-provider agent spend observability (authored 2026-06-18). L1 Operator-approved
+# (issue #753, l1-approved); L2 ARCH-AC-SPEND-OBSERVABILITY drafted; L3/build deferred.
+# Reference implementation: the standalone "Ledger" dashboard (~/code/agent-spend-dashboard,
 # local-only). Tracked by an implementation issue on GitHub.
 FUNC-AC-SPEND-OBSERVABILITY:
-  children: []
+  children: [ARCH-AC-SPEND-OBSERVABILITY]
   related: [FUNC-AC-DASHBOARD, FUNC-AC-DATA-PLATFORM, FUNC-AC-SAFETY, FUNC-AC-FLEET, FUNC-AC-RUNTIME-ADAPTERS]
+  status: draft
+
+ARCH-AC-SPEND-OBSERVABILITY:
+  parent: FUNC-AC-SPEND-OBSERVABILITY
   status: draft
 
 # Operator Surface Decision API — L2/L3 authored 2026-06-18 (the backend
