@@ -254,6 +254,8 @@ export const ConfigSchema = z.object({
     })
     .default({ staging: 'staging', production: 'main' }),
   webhooks: z.array(z.string().url()).default([]),
+  /** Optional dashboard base URL for decision-raised alert deep links. */
+  dashboardBaseUrl: z.string().url().optional(),
   validation: z
     .object({
       gate1Commands: z

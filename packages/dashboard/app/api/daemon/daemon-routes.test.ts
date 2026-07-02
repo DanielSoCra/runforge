@@ -27,6 +27,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   vi.resetModules();
+  vi.unstubAllEnvs();
   vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
   authMocks.requireDashboardAdmin.mockReset();
   authMocks.requireDashboardUser.mockReset();
@@ -52,6 +53,7 @@ function authError(message: string, status: 401 | 403) {
 const adminRoutes = [
   { name: 'pause', path: './pause/route.js', daemonPath: '/pause' },
   { name: 'resume', path: './resume/route.js', daemonPath: '/resume' },
+  { name: 'halt', path: './halt/route.js', daemonPath: '/halt' },
   {
     name: 'repos-reload',
     path: './repos-reload/route.js',
@@ -147,6 +149,60 @@ describe.each(adminRoutes)('POST /api/daemon/$name', ({ path, daemonPath }) => {
     expect(res.status).toBe(502);
     const body = await res.json();
     expect(body.error).toMatch(/non-JSON/);
+  });
+});
+
+describe('POST /api/daemon/halt', () => {
+  it('forwards Authorization: Bearer from AUTO_CLAUDE_CONTROL_TOKEN when configured', async () => {
+    vi.stubEnv('AUTO_CLAUDE_CONTROL_TOKEN', 'dashboard-secret');
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ halted: true, parked: 2, terminated: 1, escalated: 0 }), {
+        status: 200,
+      }),
+    );
+    const { POST } = await import('./halt/route.js');
+
+    const res = await POST();
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      halted: true,
+      parked: 2,
+      terminated: 1,
+      escalated: 0,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:9800/halt',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'X-Requested-By': 'dashboard',
+          Authorization: 'Bearer dashboard-secret',
+        }),
+      }),
+    );
+  });
+
+  it('omits Authorization when AUTO_CLAUDE_CONTROL_TOKEN is unset', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ halted: true }), { status: 200 }),
+    );
+    const { POST } = await import('./halt/route.js');
+
+    await POST();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:9800/halt',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'X-Requested-By': 'dashboard',
+        }),
+      }),
+    );
+    const init = fetchMock.mock.calls.at(-1)?.[1] as RequestInit | undefined;
+    const headers = init?.headers as Record<string, string> | undefined;
+    expect(headers?.Authorization).toBeUndefined();
   });
 });
 

@@ -465,9 +465,9 @@ export async function startDaemon(
   if (alertChannelDegraded) {
     console.warn(
       `[daemon] WARNING: governed deployment "${config.deployment!.id}" has NO configured ` +
-        `alert channel (webhooks is empty). Auto-pause / escalation / crash alerts will NOT ` +
-        `reach the Operator — the daemon will report /health degraded:true. Configure at ` +
-        `least one webhook (and an external /health monitor) for unattended operation.`,
+        `alert channel (webhooks is empty). Auto-pause / escalation / crash / decision-raised ` +
+        `alerts will NOT reach the Operator — the daemon will report /health degraded:true. ` +
+        `Configure at least one webhook (and an external /health monitor) for unattended operation.`,
     );
   }
 
@@ -1828,6 +1828,8 @@ export async function startDaemon(
               owner,
               repo: name,
               allowlist: findingAllowlist,
+              dashboardBaseUrl: config.dashboardBaseUrl,
+              alert: notifyOperator,
             });
           } catch (e) {
             console.error('[daemon] finding-dismissal tick error:', e);
@@ -2383,6 +2385,8 @@ export async function startDaemon(
                 onDetectSettled,
                 // P0.5 pause gate at integrate-entry.
                 () => paused,
+                // P3.3 decision-raised operator alert.
+                notifyOperator,
               );
       const table = getPipeline(run.variant);
 
@@ -3204,6 +3208,8 @@ export async function startDaemon(
                 undefined,
                 // P0.5 pause gate at integrate-entry.
                 () => paused,
+                // P3.3 decision-raised operator alert.
+                notifyOperator,
               );
       const table = getPipeline(run.variant);
 
@@ -3672,6 +3678,8 @@ async function processWorkRequest(
             onDetectSettled,
             // P0.5 pause gate at integrate-entry.
             isPaused,
+            // Single-issue CLI path has no decision index => no decision-raised alert.
+            undefined,
           );
   const table = getPipeline(variant);
 

@@ -1,9 +1,12 @@
 import { getLatestBriefing } from '@/actions/briefing';
 import { BriefingCard, type Briefing } from '@/components/briefing/briefing-card';
+import { BriefingRealtime } from '@/components/briefing/briefing-realtime';
 import {
   DecisionInbox,
   type RankedListItem,
 } from '@/components/decisions/decision-inbox';
+import { DaemonControls } from '@/components/steering/daemon-controls';
+import { isDashboardAdmin } from '@/lib/auth/require-session';
 import { daemonFetch } from '@/lib/daemon-fetch';
 
 export const dynamic = 'force-dynamic';
@@ -48,7 +51,7 @@ async function readDecisionInbox(): Promise<{
 }
 
 export default async function SteeringPage() {
-  const [rawBriefing, inbox] = await Promise.all([
+  const [rawBriefing, inbox, isAdmin] = await Promise.all([
     // FAIL-SAFE: the briefing is DB-backed; a store hiccup must NOT take down the
     // decision inbox (the most important thing on the calm pane, per
     // FUNC-AC-OPERATOR-SURFACE). Degrade the briefing to null on error — exactly as
@@ -61,6 +64,13 @@ export default async function SteeringPage() {
       return null;
     }),
     readDecisionInbox(),
+    isDashboardAdmin().catch((err) => {
+      console.error(
+        '[steering] admin check failed:',
+        err instanceof Error ? err.message : err,
+      );
+      return false;
+    }),
   ]);
 
   // Cast Json fields to typed arrays for BriefingCard — mirrors the briefing
@@ -83,6 +93,11 @@ export default async function SteeringPage() {
           Decisions awaiting you and the latest briefing.
         </p>
       </div>
+      {/* Periodic refresh keeps the calm pane current without an answer-triggered
+          refresh, which would race the resume loop (decision-answer.tsx:250-257). */}
+      <BriefingRealtime />
+      {/* Emergency daemon controls: admin-only, confirm-gated halt. */}
+      <DaemonControls isAdmin={isAdmin} />
       {/* The calm operator pane: briefing + decisions, nothing else
           (FUNC-AC-OPERATOR-SURFACE: "decisions and the briefing"). */}
       <BriefingCard briefing={briefing} />

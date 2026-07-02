@@ -12,6 +12,10 @@ vi.mock('@/lib/daemon-fetch', () => ({
   DaemonConfigError: class DaemonConfigError extends Error {},
 }));
 
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
+
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SteeringPage from './page';

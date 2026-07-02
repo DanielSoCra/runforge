@@ -305,6 +305,9 @@ STACK-AC-OPERATOR-SURFACE-API:
   code_paths:
     - packages/daemon/src/control-plane/decision-api.ts
     - packages/daemon/src/control-plane/decision-escalation/answer-publisher.ts
+    - packages/daemon/src/control-plane/notify.ts
+    - packages/daemon/src/control-plane/decision-alert.ts
+    - packages/daemon/src/config.ts
     # Finding-dismissal decision flow (PR1): a parallel issue-level decision path
     # reusing the decision-index ledger + /decisions/pending + binary transport.
     # deriveLearningKey (decision-api.ts) parses the strict finding id.
@@ -318,6 +321,8 @@ STACK-AC-OPERATOR-SURFACE-API:
     - packages/daemon/src/control-plane/decision-api-answer.test.ts
     - packages/daemon/src/control-plane/decision-api-reveal.test.ts
     - packages/daemon/src/control-plane/decision-escalation/answer-publisher.test.ts
+    - packages/daemon/src/control-plane/p3-decision-alert.gate.test.ts
+    - packages/daemon/src/control-plane/p3-real-daemon-seam.gate.test.ts
     - packages/daemon/src/control-plane/finding-dismissal/labels.test.ts
     - packages/daemon/src/control-plane/finding-dismissal/build-request.test.ts
     - packages/daemon/src/control-plane/finding-dismissal/emit.test.ts
@@ -332,27 +337,34 @@ STACK-AC-OPERATOR-SURFACE-API:
 # /api/decisions/answer → daemon POST /decisions/:id/answer (percent-encoded id),
 # and the decision-answer affordance (pure shadcn Dialog + fetch wrapper) on the
 # inbox rows; redaction holds inside the dialog (option labels are ListFields).
-# The per-run drill-down detail remains a deferred follow-up.
+# P3 operator-surface slice adds live steering refresh, decision-raised operator
+# alerts, and an admin-only daemon halt control.
 STACK-AC-OPERATOR-SURFACE-CLIENT:
   parent: ARCH-AC-OPERATOR-SURFACE
   related: [STACK-AC-OPERATOR-SURFACE-API, ARCH-AC-DASHBOARD]
   code_paths:
     - packages/dashboard/app/api/decisions/pending/route.ts
     - packages/dashboard/app/api/decisions/answer/route.ts
+    - packages/dashboard/app/api/daemon/halt/route.ts
     - packages/dashboard/components/decisions/decision-inbox.tsx
     - packages/dashboard/components/decisions/decision-answer.tsx
     - packages/dashboard/components/decisions/decision-detail.tsx
+    - packages/dashboard/components/steering/daemon-controls.tsx
     - packages/dashboard/app/(dashboard)/steering/page.tsx
     - packages/dashboard/app/api/decisions/[id]/route.ts
     - packages/dashboard/app/api/decisions/[id]/reveal/route.ts
     - packages/dashboard/playwright.config.ts
-    - packages/dashboard/e2e/mock-daemon.mjs
+    - packages/dashboard/e2e/real-daemon.mjs
   test_paths:
     - packages/dashboard/components/decisions/decision-inbox.test.tsx
     - packages/dashboard/components/decisions/decision-answer.test.tsx
     - packages/dashboard/components/decisions/decision-detail.test.tsx
     - packages/dashboard/app/api/decisions/pending/route.test.ts
     - packages/dashboard/app/api/decisions/answer/route.test.ts
+    - packages/dashboard/app/api/daemon/daemon-routes.test.ts
+    - packages/dashboard/app/api/daemon/p3-halt-proxy.gate.test.ts
+    - packages/dashboard/components/steering/p3-live-inbox.gate.test.tsx
+    - packages/dashboard/components/steering/p3-stale-stub-cleanup.gate.test.ts
     - packages/dashboard/app/api/decisions/[id]/route.test.ts
     - packages/dashboard/app/api/decisions/[id]/reveal/route.test.ts
     - packages/dashboard/app/(dashboard)/steering/page.test.tsx

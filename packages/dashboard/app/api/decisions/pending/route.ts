@@ -13,9 +13,6 @@
  *
  * SCOPE (7b): the READ inbox list only. The `GET /decisions/:id` detail proxy and
  * the operator ANSWER route are deferred follow-ups.
- *
- * STUB: not implemented — Kimi implements per the work-order. The body throws so
- * the RED route test fails for the right reason while the dashboard typechecks.
  */
 import { NextResponse, type NextRequest } from 'next/server';
 import {

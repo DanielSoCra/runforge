@@ -1,23 +1,32 @@
 import { defineConfig, configDefaults } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { pathToFileURL } from 'node:url';
+
+const fileUrlPlugin = () => ({
+  name: 'file-url-for-test-files',
+  enforce: 'pre' as const,
+  transform(code: string, id: string) {
+    // Vitest v4 serves modules over http, so import.meta.url is not a file URL.
+    // Some gate tests construct file URLs from import.meta.url to read source
+    // files; restore the real filesystem URL for those test modules.
+    if (!id.includes('.test.')) return;
+    if (!code.includes('import.meta.url')) return;
+    const fileUrl = JSON.stringify(pathToFileURL(id).href);
+    return {
+      code: code.replace(/\bimport\.meta\.url\b/g, fileUrl),
+      map: null,
+    };
+  },
+});
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), fileUrlPlugin()],
   test: {
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
-    // Playwright e2e specs (e2e/**) run via `pnpm e2e` (playwright), NOT vitest —
-    // they import @playwright/test and must not be collected by the unit runner.
     exclude: [...configDefaults.exclude, 'e2e/**'],
-    // RC-3 (CI flake): 13 dashboard tests re-import Next.js route handlers via
-    // vi.resetModules() + dynamic import(). On the shared self-hosted runner those
-    // cold esbuild transforms are CPU-starved past the 5s default and time out under
-    // concurrent CI load — the same failure mode fixed for the daemon in #770. Mirror
-    // its contention floor here. Enforced repo-wide by the RC-3 guard in
-    // packages/daemon/src/test-hygiene.test.ts (any package using resetModules()+import()
-    // must keep testTimeout/hookTimeout >= 20s). A genuine hang still fails at 30s.
     testTimeout: 30_000,
     hookTimeout: 30_000,
   },

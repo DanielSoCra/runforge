@@ -56,13 +56,13 @@ import { buildL2GateRequest } from './decision-escalation/build-request.js';
 import { GitHubBlockPublisher } from './decision-escalation/github-block-notifier.js';
 import type { DeploymentRegistry } from './deployment-registry/registry.js';
 import type { ComplianceReviewer } from './deployment-registry/types.js';
-import {
-  buildMergeDecisionRequest,
+import { buildMergeDecisionRequest,
   computeTouchedPaths,
   decideMerge,
   evaluateComplianceForced,
   observeVerifierStatus,
 } from './merge-decision/index.js';
+import { alertOnNotifyApplied, type DecisionRaisedAlert } from './decision-alert.js';
 import type { DecisionOption, DecisionRequest } from '@auto-claude/decision-protocol';
 import { SanitizationPipeline } from '@auto-claude/sanitization';
 import { assignLane, gateSetVerdict, resolveForMode } from './lane-engine/index.js';
@@ -183,6 +183,8 @@ export function createPhaseHandlers(
   // park the run instead of merging. Resumes via the existing integrate arm of
   // resumeParkedRuns after /resume.
   isPaused?: () => boolean,
+  // P3.3 operator alert: fired once when a decision-raise notify transition applies.
+  alert?: DecisionRaisedAlert,
 ): PhaseHandlerMap {
   const repo = repoName;
   // Lazily constructed only when the decision index is enabled — a disabled
@@ -885,7 +887,16 @@ export function createPhaseHandlers(
             issueNumber: workRequest.issueNumber,
           });
           if (published.posted) {
-            await ledger.notify(decision_id);
+            await alertOnNotifyApplied(
+              () => ledger.notify(decision_id),
+              alert,
+              {
+                issueNumber: workRequest.issueNumber,
+                decisionId: decision_id,
+                title: sanitized.question,
+                dashboardBaseUrl: config.dashboardBaseUrl,
+              },
+            );
             run.decisionBlockPublished = true;
           } else {
             console.warn(
@@ -2271,8 +2282,18 @@ export function createPhaseHandlers(
             issueNumber: workRequest.issueNumber,
           });
           if (published.posted) {
-            await withGovernedDecisionMarking(decisionManager, deploymentId, () =>
-              ledger.notify(decision_id),
+            await alertOnNotifyApplied(
+              () =>
+                withGovernedDecisionMarking(decisionManager, deploymentId, () =>
+                  ledger.notify(decision_id),
+                ),
+              alert,
+              {
+                issueNumber: workRequest.issueNumber,
+                decisionId: decision_id,
+                title: sanitized.question,
+                dashboardBaseUrl: config.dashboardBaseUrl,
+              },
             );
             run.mergeDecisionBlockPublished = true;
             // A successful raise + notify is a successful governed decision-index

@@ -18,9 +18,6 @@
  *
  * SCOPE (7b): the READ inbox list only. The per-decision drill-down detail and
  * the operator ANSWER flow are deferred follow-ups.
- *
- * STUB: not implemented — Kimi implements per the work-order. The body throws so
- * the RED component test fails for the right reason while the dashboard typechecks.
  */
 
 /**

@@ -27,12 +27,9 @@ import {
   type EmitLearning,
   type EmitPublisher,
 } from './emit.js';
-import {
-  runFindingDismissalConsumer,
-  type ConsumerLedger,
-  type ConsumerOctokit,
-  type ConsumerLearning,
-} from './apply-consumer.js';
+import { runFindingDismissalConsumer } from './apply-consumer.js';
+import type { ConsumerLedger, ConsumerOctokit, ConsumerLearning } from './apply-consumer.js';
+import type { DecisionRaisedAlert } from '../decision-alert.js';
 
 /** GitHub issue page size + a defensive page cap for the review-finding list. */
 const FINDINGS_PER_PAGE = 100;
@@ -55,6 +52,10 @@ export interface FindingDismissalTickDeps {
   allowlist: readonly string[];
   /** Input-boundary sanitizer (mirrors the gate emit); defaults to identity. */
   sanitize?: (request: DecisionRequest) => Promise<DecisionRequest>;
+  /** Optional dashboard base URL for the decision-raised alert deep link. */
+  dashboardBaseUrl?: string;
+  /** Optional operator alert callback for the decision-raised event. */
+  alert?: DecisionRaisedAlert;
 }
 
 function labelName(label: { name?: string } | string): string {
@@ -70,7 +71,17 @@ function labelName(label: { name?: string } | string): string {
 export async function runFindingDismissalTick(
   deps: FindingDismissalTickDeps,
 ): Promise<void> {
-  const { ledger, octokit, operatorLearning, owner, repo, allowlist, sanitize } = deps;
+  const {
+    ledger,
+    octokit,
+    operatorLearning,
+    owner,
+    repo,
+    allowlist,
+    sanitize,
+    dashboardBaseUrl,
+    alert,
+  } = deps;
 
   // EMIT (opt-in): list open review-finding issues and surface the eligible ones.
   // Skipped entirely when the allowlist is empty — no GitHub list call at all.
@@ -114,6 +125,8 @@ export async function runFindingDismissalTick(
         owner,
         repo,
         sanitize,
+        dashboardBaseUrl,
+        alert,
       });
     } catch (e) {
       console.warn(

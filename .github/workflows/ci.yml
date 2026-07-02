@@ -16,7 +16,7 @@ concurrency:
 jobs:
   ci:
     runs-on: self-hosted
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -88,6 +88,12 @@ jobs:
           # (not skipped). Points at the docker Postgres started above.
           AUTO_CLAUDE_TEST_DATABASE_URL: ${{ env.PG_URL }}
           AUTO_CLAUDE_DATABASE_URL: ${{ env.PG_URL }}
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @auto-claude/dashboard exec playwright install chromium
+
+      - name: Dashboard E2E (desktop)
+        run: pnpm --filter @auto-claude/dashboard e2e --project=desktop
 
       - name: Build
         run: pnpm build

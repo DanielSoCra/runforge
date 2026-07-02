@@ -34,6 +34,7 @@ import {
   buildFindingDismissalDecisionId,
   type FindingAnswerOptionId,
 } from './build-request.js';
+import { alertOnNotifyApplied, type DecisionRaisedAlert } from '../decision-alert.js';
 
 /**
  * The fixed emit epoch (PR1). A finding gets ONE decision per (issue, category);
@@ -258,6 +259,10 @@ export interface EmitFindingDismissalArgs {
   /** Input-boundary sanitizer (defaults to identity). Mirrors the gate emit. */
   sanitize?: (request: DecisionRequest) => Promise<DecisionRequest>;
   now?: string;
+  /** Optional dashboard base URL for the decision-raised alert deep link. */
+  dashboardBaseUrl?: string;
+  /** Optional operator alert callback for the decision-raised event. */
+  alert?: DecisionRaisedAlert;
 }
 
 export interface EmitResult {
@@ -274,6 +279,7 @@ export interface EmitResult {
  */
 export async function emitFindingDismissalDecision(
   args: EmitFindingDismissalArgs,
+  positionalAlert?: DecisionRaisedAlert,
 ): Promise<EmitResult> {
   const {
     ledger,
@@ -285,7 +291,10 @@ export async function emitFindingDismissalDecision(
     issueNumber,
     category,
     riskClass,
+    alert,
+    dashboardBaseUrl,
   } = args;
+  const effectiveAlert = positionalAlert ?? alert;
   const epoch = args.epoch ?? FINDING_DISMISSAL_EMIT_EPOCH;
   const sanitize = args.sanitize ?? (async (r: DecisionRequest) => r);
   const decisionId = buildFindingDismissalDecisionId(owner, repo, issueNumber, category, epoch);
@@ -358,7 +367,16 @@ export async function emitFindingDismissalDecision(
   if (!published.posted) {
     return { emitted: false, decisionId: raised.decision_id, reason: `publish:${published.reason ?? 'unknown'}` };
   }
-  const notified = await ledger.notify(raised.decision_id);
+  const notified = await alertOnNotifyApplied(
+    () => ledger.notify(raised.decision_id),
+    effectiveAlert,
+    {
+      issueNumber,
+      decisionId: raised.decision_id,
+      title: sanitized.question,
+      dashboardBaseUrl,
+    },
+  );
   return { emitted: true, decisionId: raised.decision_id, reason: `notified:${notified.status}` };
 }
 
@@ -381,6 +399,10 @@ export interface ScanAndEmitArgs {
   repo: string;
   sanitize?: (request: DecisionRequest) => Promise<DecisionRequest>;
   now?: string;
+  /** Optional dashboard base URL for the decision-raised alert deep link. */
+  dashboardBaseUrl?: string;
+  /** Optional operator alert callback for the decision-raised event. */
+  alert?: DecisionRaisedAlert;
 }
 
 /**
@@ -411,6 +433,8 @@ export async function scanAndEmitFindingDismissals(
         labels: finding.labels,
         sanitize: args.sanitize,
         now: args.now,
+        dashboardBaseUrl: args.dashboardBaseUrl,
+        alert: args.alert,
       });
       results.push(result);
     } catch (e) {

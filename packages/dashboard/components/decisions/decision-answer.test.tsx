@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { readFile } from 'node:fs/promises';
 import {
   DecisionAnswerDialog,
   DecisionAnswer,
@@ -306,5 +307,19 @@ describe('DecisionAnswer (client wrapper — fetch-backed)', () => {
 
     expect(container.textContent).not.toContain(protectedOptionSecret);
     expect(container.textContent).not.toContain('protected://');
+  });
+});
+
+describe('DecisionAnswer static guard', () => {
+  it('contains no answer-triggered router.refresh() or useRouter import (race-safe)', async () => {
+    const source = await readFile(
+      'components/decisions/decision-answer.tsx',
+      'utf8',
+    );
+    // Strip line comments so the documented race note (router.refresh() in a comment)
+    // does not trip the guard; any real code invocation would remain.
+    const codeOnly = source.replace(/\/\/.*$/gm, '');
+    expect(codeOnly).not.toContain('router.refresh()');
+    expect(source).not.toContain('useRouter');
   });
 });

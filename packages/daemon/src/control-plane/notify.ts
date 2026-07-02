@@ -3,10 +3,15 @@ import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 
 export interface NotificationPayload {
+  /** Event kind; 'decision-raised' is the P3 operator alert (others: health events). */
   event: string;
   issueNumber: number;
   phase?: string;
   message: string;
+  /** Decision-raised alert: the decision id (no decision body). */
+  decisionId?: string;
+  /** Decision-raised alert: deep link to the steering surface. */
+  url?: string;
 }
 
 export interface NotificationResult {
