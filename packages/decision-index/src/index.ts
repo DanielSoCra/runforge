@@ -38,6 +38,7 @@ export {
   type DetailView,
   type ListFilters,
   type ListRankedArgs,
+  type EscalationCountBucket,
 } from "./read-model.js";
 
 export {

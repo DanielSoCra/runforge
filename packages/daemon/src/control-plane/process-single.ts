@@ -12,6 +12,11 @@ import { runPipeline } from './pipeline.js';
 import { getPipeline, getStartPhase } from './fsm.js';
 import { selectVariant } from './variants.js';
 import { notify } from './notify.js';
+import {
+  checkDeploymentBudget,
+  recordDeploymentSpend,
+  createDeploymentSpendAccumulator,
+} from './deployment-budget.js';
 import type { RunState, DetectedWorkType } from '../types.js';
 import { ok, err, type Result } from '../lib/result.js';
 import { createPhaseLabelMirror } from './phase-labels.js';
@@ -91,6 +96,8 @@ export async function processSingleIssue(issueNumber: number, configPath: string
   const stateMgr = new StateManager(stateDir);
   await stateMgr.initialize();
 
+  const spendAccumulator = await createDeploymentSpendAccumulator(stateDir);
+
   const costTracker = new CostTracker({ dailyBudget: config.dailyBudget, perRunBudget: config.perRunBudget });
   const runtime = new SessionRuntime(config, costTracker);
   const repoRoot = process.cwd();
@@ -145,6 +152,36 @@ export async function processSingleIssue(issueNumber: number, configPath: string
   await stateMgr.saveRunState(run);
 
   console.log(`[process] Running pipeline for #${issueNumber}: ${request.title}`);
+
+  // P4.4 deployment-level budget hard-abort: the CLI path has no decision index,
+  // so a real escalation cannot be raised; log the escalation and abort instead.
+  const budgetCheck = await checkDeploymentBudget(run, {
+    accumulator: spendAccumulator,
+    registry: deploymentRegistry,
+    ledger: {
+      raise: async (request) => {
+        console.warn(
+          '[process] Deployment budget escalation (CLI has no decision index):',
+          request,
+        );
+        return {
+          decision_id: String(request.decision_id ?? 'deployment-budget-cli'),
+          outcome: 'admitted',
+        };
+      },
+    },
+  });
+  if (!budgetCheck.proceed) {
+    run.phase = 'stuck';
+    run.updatedAt = new Date().toISOString();
+    await stateMgr.saveRunState(run);
+    return err(
+      new Error(
+        `[process] Deployment ${run.deploymentId ?? 'unknown'} budget check failed: ${budgetCheck.reason ?? 'budget exceeded or missing'}`,
+      ),
+    );
+  }
+
   // The single-issue CLI path does not wire the decision index (no ledger / protected store),
   // so it cannot supply the store a withholding sanitizer needs. Build the pipeline WITHOUT a
   // store: an unconfigured deployment gets the identity pipeline; a deployment that activates
@@ -190,6 +227,10 @@ export async function processSingleIssue(issueNumber: number, configPath: string
   );
   const table = getPipeline(variant);
   const result = await runPipeline(run, table, handlers, stateMgr, costTracker, undefined, undefined, phaseLabelMirror);
+
+  // P4.4 record actual deployment spend on completion.
+  await recordDeploymentSpend(run, { accumulator: spendAccumulator });
+
   console.log(`[process] Result: ${result.outcome}${result.error ? ` — ${result.error}` : ''}`);
 
   if (result.outcome === 'stuck') {

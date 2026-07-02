@@ -91,6 +91,16 @@ import { runPipeline } from './pipeline.js';
 import { createPhaseLabelMirror } from './phase-labels.js';
 import { getPipeline, getStartPhase } from './fsm.js';
 import { selectVariant } from './variants.js';
+import {
+  getEscalationMetrics,
+} from './escalation-metrics.js';
+import {
+  checkDeploymentBudget,
+  recordDeploymentSpend,
+  createDeploymentSpendAccumulator,
+  buildDeploymentBudgetDecisionRequest,
+  type DeploymentBudgetDeps,
+} from './deployment-budget.js';
 import { notify, type NotificationPayload } from './notify.js';
 import {
   createWatchdog,
@@ -367,6 +377,9 @@ export async function startDaemon(
   const stateMgr = new StateManager(stateDir);
   await stateMgr.initialize();
 
+  // P4.4 deployment-level spend accumulator (durable per-deployment spend store).
+  const deploymentSpendAccumulator = await createDeploymentSpendAccumulator(stateDir);
+
   // 2b. Decision-escalation index (optional, flag-gated). Constructed + init'd
   // here; injected into every phase-handler build site + resumeParkedRuns. When
   // the flag is off, init() is a no-op (no native import) and ledger() throws —
@@ -452,6 +465,55 @@ export async function startDaemon(
       );
     }
   }
+
+  // P4.4 shared deployment-budget dependencies. The ledger is resolved lazily
+  // because a disabled index has no ledger; a configured deployment requires an
+  // available index (A1 boot guard above), so the lazy resolution is safe in
+  // practice. The no-op ledger is only reachable when no deployment is configured,
+  // in which case checkDeploymentBudget returns proceed:true before touching it.
+  //
+  // The wrapper transforms the budget module's escalation payload (which keeps the
+  // `deploymentId` field the gate expects) into a real DecisionRequest before the
+  // live ledger ingests it, so production gets a readable decision instead of a
+  // quarantined blob.
+  const deploymentBudgetDeps = (): DeploymentBudgetDeps => {
+    const baseLedger = decisionManager.isAvailable()
+      ? decisionManager.ledger()
+      : ({ raise: async () => ({ decision_id: '', outcome: 'admitted' as const }) });
+    return {
+      accumulator: deploymentSpendAccumulator,
+      registry: deploymentRegistry,
+      ledger: {
+        raise: async (request: Record<string, unknown>) => {
+          if (!decisionManager.isAvailable()) {
+            return baseLedger.raise(request);
+          }
+          const issueNumber =
+            typeof request.issueNumber === 'number' ? request.issueNumber : undefined;
+          const deploymentId =
+            typeof request.deploymentId === 'string' ? request.deploymentId : undefined;
+          if (issueNumber === undefined || deploymentId === undefined) {
+            return baseLedger.raise(request);
+          }
+          const decisionRequest = buildDeploymentBudgetDecisionRequest({
+            issueNumber,
+            deploymentId,
+            totalSpend:
+              typeof request.totalSpend === 'number' ? request.totalSpend : undefined,
+            projectedSpend:
+              typeof request.projectedSpend === 'number'
+                ? request.projectedSpend
+                : undefined,
+            budget: typeof request.budget === 'number' ? request.budget : undefined,
+            owner: typeof request.owner === 'string' ? request.owner : undefined,
+            repo: typeof request.repo === 'string' ? request.repo : undefined,
+            runId: typeof request.run_id === 'string' ? request.run_id : undefined,
+          });
+          return baseLedger.raise(decisionRequest);
+        },
+      },
+    };
+  };
 
   // B2 (first-use safety net, Codex CRITICAL 1): a GOVERNED deployment with no
   // configured alert channel boots with a LOUD warning and is reported
@@ -1625,6 +1687,7 @@ export async function startDaemon(
             releaseDetectGateOnce,
             () => halting,
             () => paused,
+            deploymentBudgetDeps,
           )
             .then((outcome) =>
               handleRunOutcome(outcome, request.issueNumber, owner, name),
@@ -1704,6 +1767,7 @@ export async function startDaemon(
                 releaseBugDetectGateOnce,
                 () => halting,
                 () => paused,
+                deploymentBudgetDeps,
               )
                 .then((outcome) =>
                   handleRunOutcome(
@@ -1786,6 +1850,7 @@ export async function startDaemon(
                 releaseFpDetectGateOnce,
                 () => halting,
                 () => paused,
+                deploymentBudgetDeps,
               )
                 .then((outcome) =>
                   handleRunOutcome(outcome, fpRequest.issueNumber, owner, name),
@@ -2250,6 +2315,13 @@ export async function startDaemon(
           lane,
         );
       },
+      // P4.1 escalation-rate metric: weekly per-deployment raised/answered/auto-merge
+      // trend. Degrades to auto-merge-only when the decision index is unavailable.
+      getEscalationMetrics: (query) =>
+        getEscalationMetrics(
+          { decisionManager, stateDir },
+          query,
+        ),
     },
     daemonHost,
   );
@@ -2390,6 +2462,33 @@ export async function startDaemon(
               );
       const table = getPipeline(run.variant);
 
+      // P4.4 deployment-level budget hard-abort: enforce the declared spend cap
+      // BEFORE admitting a crash-resumed run to runPipeline.
+      const budgetCheck = await checkDeploymentBudget(run, deploymentBudgetDeps());
+      if (!budgetCheck.proceed) {
+        console.warn(
+          `[daemon] Crash-resumed run #${run.issueNumber} hard-aborted: deployment ${run.deploymentId} budget exceeded`,
+        );
+        // I1/I4: finalize the run so it is not re-attempted every poll cycle, and
+        // release the detect gate this resume acquired.
+        releaseDetectGateOnce();
+        run.phase = 'stuck';
+        run.updatedAt = new Date().toISOString();
+        await stateMgr.saveRunState(run);
+        void runWriter?.upsertRun(run.id, {
+          outcome: toDbOutcome('stuck'),
+          completed_at: new Date().toISOString(),
+          total_cost: run.cost,
+        });
+        await releaseClaim(notifyOctokit, runOwner, runRepoName, run.issueNumber);
+        finishActiveRun();
+        activeIssues.delete(run.issueNumber);
+        if (repoManager != null && resumeRepoId !== '') {
+          repoManager.notifyRunEnd(resumeRepoId);
+        }
+        return;
+      }
+
       const resumeDetector = createWorkDetector(
         new Octokit({ auth: resumeToken }),
         runOwner,
@@ -2410,6 +2509,9 @@ export async function startDaemon(
           console.log(
             `[daemon] Resumed run #${run.issueNumber} finished: ${result.outcome}`,
           );
+
+          // P4.4 record actual deployment spend on completion.
+          await recordDeploymentSpend(run, deploymentBudgetDeps());
 
           void runWriter?.upsertRun(run.id, {
             outcome: toDbOutcome(result.outcome),
@@ -3213,6 +3315,29 @@ export async function startDaemon(
               );
       const table = getPipeline(run.variant);
 
+      // P4.4 deployment-level budget hard-abort: enforce the declared spend cap
+      // BEFORE admitting a parked-resumed run to runPipeline.
+      const budgetCheck = await checkDeploymentBudget(run, deploymentBudgetDeps());
+      if (!budgetCheck.proceed) {
+        console.warn(
+          `[daemon] Parked-resumed run #${run.issueNumber} hard-aborted: deployment ${run.deploymentId} budget exceeded`,
+        );
+        // I1: finalize the run so it is not re-attempted every poll cycle.
+        run.phase = 'stuck';
+        run.updatedAt = new Date().toISOString();
+        await stateMgr.saveRunState(run);
+        void runWriter?.upsertRun(run.id, {
+          outcome: toDbOutcome('stuck'),
+          completed_at: new Date().toISOString(),
+          total_cost: run.cost,
+        });
+        await releaseClaim(runOctokit, runOwner, runRepoName, run.issueNumber);
+        finishActiveRun();
+        activeIssues.delete(run.issueNumber);
+        if (repoManager != null && resumeRepoId !== '') repoManager.notifyRunEnd(resumeRepoId);
+        return;
+      }
+
       runPipeline(
         run,
         table,
@@ -3228,6 +3353,10 @@ export async function startDaemon(
           console.log(
             `[daemon] Parked run #${run.issueNumber} finished: ${result.outcome}`,
           );
+
+          // P4.4 record actual deployment spend on completion.
+          await recordDeploymentSpend(run, deploymentBudgetDeps());
+
           void runWriter?.upsertRun(run.id, {
             outcome: toDbOutcome(result.outcome),
             completed_at: new Date().toISOString(),
@@ -3542,6 +3671,7 @@ async function processWorkRequest(
   // P0.5 pause gate: read the daemon-scoped paused flag inside createPhaseHandlers
   // so integrate-entry parks instead of merging while paused.
   isPaused?: () => boolean,
+  deploymentBudgetDeps?: () => DeploymentBudgetDeps,
 ): Promise<string> {
   const today = new Date().toISOString().split('T')[0];
   if (today !== dailyRunState.resetDate) {
@@ -3683,6 +3813,31 @@ async function processWorkRequest(
           );
   const table = getPipeline(variant);
 
+  // P4.4 deployment-level budget hard-abort: enforce the declared spend cap
+  // BEFORE admitting the run to runPipeline.
+  if (deploymentBudgetDeps !== undefined) {
+    const budgetCheck = await checkDeploymentBudget(run, deploymentBudgetDeps());
+    if (!budgetCheck.proceed) {
+      console.warn(
+        `[daemon] Pipeline for #${request.issueNumber} hard-aborted: deployment ${run.deploymentId} budget exceeded`,
+      );
+      // I1: finalize the run so the in-progress DB row and issue claim do not
+      // become orphaned; return 'stuck' so the caller's handleRunOutcome treats
+      // this as a terminal failure rather than an unrecognized outcome.
+      run.phase = 'stuck';
+      run.updatedAt = new Date().toISOString();
+      await stateMgr.saveRunState(run);
+      void runWriter?.upsertRun(run.id, {
+        outcome: toDbOutcome('stuck'),
+        completed_at: new Date().toISOString(),
+        total_cost: run.cost,
+        active_plugins: repoConfig?.activePlugins.map((p) => p.id) ?? [],
+      });
+      await releaseClaim(notifyOctokit, owner, repoName, request.issueNumber);
+      return 'stuck';
+    }
+  }
+
   console.log(
     `[daemon] Pipeline start for #${request.issueNumber}: ${request.title}`,
   );
@@ -3700,6 +3855,11 @@ async function processWorkRequest(
   console.log(
     `[daemon] Pipeline done for #${request.issueNumber}: ${result.outcome}${result.error !== undefined && result.error !== '' ? ` — ${result.error}` : ''}`,
   );
+
+  // P4.4 record actual deployment spend on completion.
+  if (deploymentBudgetDeps !== undefined) {
+    await recordDeploymentSpend(run, deploymentBudgetDeps());
+  }
 
   void runWriter?.upsertRun(run.id, {
     outcome: toDbOutcome(result.outcome),

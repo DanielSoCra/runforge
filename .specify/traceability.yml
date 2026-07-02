@@ -191,6 +191,7 @@ STACK-AC-DECISION-ESCALATION-STORE:
     - packages/decision-protocol/**/*.test.ts
     - packages/decision-index/**/*.test.ts
     - packages/sanitizer-redaction/**/*.test.ts
+    - packages/decision-index/test/read-model-escalation.test.ts
   status: approved
 
 STACK-AC-DECISION-ESCALATION-EMITTER:
@@ -346,6 +347,7 @@ STACK-AC-OPERATOR-SURFACE-CLIENT:
     - packages/dashboard/app/api/decisions/pending/route.ts
     - packages/dashboard/app/api/decisions/answer/route.ts
     - packages/dashboard/app/api/daemon/halt/route.ts
+    - packages/dashboard/app/api/metrics/escalation/route.ts
     - packages/dashboard/components/decisions/decision-inbox.tsx
     - packages/dashboard/components/decisions/decision-answer.tsx
     - packages/dashboard/components/decisions/decision-detail.tsx
@@ -613,6 +615,8 @@ STACK-AC-CONTROL-PLANE:
   code_paths:
     - packages/daemon/src/control-plane/
     - packages/daemon/src/control-plane/daemon.ts
+    - packages/daemon/src/control-plane/escalation-metrics.ts
+    - packages/daemon/src/control-plane/deployment-budget.ts
     - packages/daemon/src/control-plane/operator-retry.ts
     - packages/daemon/src/control-plane/remote-control.ts
     - packages/daemon/src/control-plane/classifier.ts
@@ -626,6 +630,9 @@ STACK-AC-CONTROL-PLANE:
     - packages/daemon/src/control-plane/phase0-single-trunk.gate.test.ts
     - packages/daemon/src/control-plane/phase0-halt.gate.test.ts
     - packages/daemon/src/control-plane/phase0-pause-integrate.gate.test.ts
+    - packages/daemon/src/control-plane/p4-escalation-trend.gate.test.ts
+    - packages/daemon/src/control-plane/p4-deployment-budget.gate.test.ts
+    - packages/daemon/src/control-plane/p4-metrics-endpoint.gate.test.ts
   status: draft
 
 STACK-AC-COMPLIANCE-GATE-TS:
@@ -909,12 +916,14 @@ STACK-AC-DEPLOYMENT-REGISTRY:
     - packages/daemon/src/control-plane/deployment-registry/types.ts
     - packages/daemon/src/control-plane/deployment-registry/registry.ts
     - packages/daemon/src/control-plane/deployment-registry/index.ts
+    - packages/daemon/src/control-plane/deployment-budget.ts
   test_paths:
     - packages/daemon/src/control-plane/deployment-registry/schema.test.ts
     - packages/daemon/src/control-plane/deployment-registry/registry.test.ts
     - packages/daemon/src/control-plane/deployment-registry/autonomy.test.ts
     - packages/daemon/src/control-plane/deployment-registry/regressions.test.ts
     - packages/daemon/src/control-plane/deployment-registry/gate-set-config.test.ts
+    - packages/daemon/src/control-plane/p4-deployment-budget.gate.test.ts
   status: draft
 
 STACK-AC-STEERING:
@@ -1078,6 +1087,9 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/app/(dashboard)/issues/page.tsx
     - packages/dashboard/app/(dashboard)/releases/page.tsx
     - packages/dashboard/app/(dashboard)/releases/page.test.tsx
+    - packages/dashboard/app/(dashboard)/metrics/page.tsx
+    - packages/dashboard/components/metrics/escalation-trend-chart.tsx
+    - packages/dashboard/app/api/metrics/escalation/route.ts
     - packages/dashboard/app/api/daemon/release/route.ts
     - packages/dashboard/components/issues-board.tsx
     - packages/dashboard/components/release-approval-panel.tsx
@@ -1109,6 +1121,7 @@ STACK-AC-DASHBOARD:
     - packages/dashboard/lib/daemon-fetch.test.ts
     - packages/dashboard/app/(dashboard)/runs/[id]/page.test.tsx
     - packages/dashboard/dockerfile.test.ts
+    - packages/dashboard/components/metrics/p4-escalation-chart.gate.test.tsx
   status: draft
 
 STACK-AC-HANDOFF-RUNTIME:

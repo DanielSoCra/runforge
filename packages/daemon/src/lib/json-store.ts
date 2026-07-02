@@ -1,15 +1,18 @@
 // src/lib/json-store.ts
-import { writeFile, rename, readFile, appendFile } from 'fs/promises';
+import { writeFile, rename, readFile, appendFile, mkdir } from 'fs/promises';
+import { dirname } from 'path';
 import { ok, err, type Result } from './result.js';
 
 export async function writeJsonSafe<T>(path: string, data: T): Promise<void> {
   const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  await mkdir(dirname(path), { recursive: true });
   await writeFile(tmp, JSON.stringify(data, null, 2));
   await rename(tmp, path);
 }
 
 export async function writeTextSafe(path: string, content: string): Promise<void> {
   const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  await mkdir(dirname(path), { recursive: true });
   await writeFile(tmp, content);
   await rename(tmp, path);
 }

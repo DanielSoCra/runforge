@@ -55,6 +55,7 @@ export interface ControlHandlers {
     id: string,
     grant: { riskClass: RiskClass; target: AutonomyLevel; lane?: string; operator: string },
   ) => WideningOutcome;
+  getEscalationMetrics?: (query: URLSearchParams) => Promise<HandlerResult<unknown>>;
   stateDir?: string;
 }
 
@@ -267,6 +268,18 @@ export function createControlServer(
         }
       } else {
         json(res, 501, { error: 'decision index not configured' });
+      }
+    } else if (method === 'GET' && url.pathname === '/metrics/escalation') {
+      if (handlers.getEscalationMetrics) {
+        try {
+          const result = await handlers.getEscalationMetrics(url.searchParams);
+          json(res, result.status, result.body);
+        } catch (e: unknown) {
+          console.error('[control-plane] GET /metrics/escalation failed:', e);
+          json(res, 503, { error: 'escalation metrics unavailable' });
+        }
+      } else {
+        json(res, 501, { error: 'escalation metrics not configured' });
       }
     } else if (method === 'GET' && url.pathname.startsWith('/decisions/')) {
       if (handlers.getDecisionDetail) {

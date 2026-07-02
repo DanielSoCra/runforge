@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, and, gte, sql } from "drizzle-orm";
 import type { ItemStatus, Reversibility } from "@auto-claude/decision-protocol";
 import type { Db } from "./db.js";
 import { decisions, auditLog, decisionResponses, protectedRefs } from "./schema.js";
@@ -125,6 +125,12 @@ export interface ListRankedArgs {
   includeSuppressed?: boolean;
 }
 
+export interface EscalationCountBucket {
+  weekStart: string;
+  deployment: string;
+  count: number;
+}
+
 const PROTECTED_PREFIX = "protected://";
 
 /** Read-only projection over the index. Non-writer callers get only this. */
@@ -196,6 +202,59 @@ export class ReadModel {
           .where(eq(decisionResponses.decision_id, decisionId))
       ).length > 0
     );
+  }
+
+  /**
+   * Count decisions raised per (ISO-week-start, deployment) since `since`.
+   * Optional `deploymentId` filter. Weeks are Monday-aligned.
+   */
+  async countCreatedSince(
+    deploymentId: string | undefined,
+    since: string | Date,
+  ): Promise<EscalationCountBucket[]> {
+    const sinceIso = typeof since === "string" ? since : since.toISOString();
+    const conditions = [gte(decisions.created_at, sinceIso)];
+    if (deploymentId !== undefined) {
+      conditions.push(eq(decisions.deployment, deploymentId));
+    }
+    const rows = await this.db
+      .select({
+        weekStart: sql<string>`date_trunc('week', ${decisions.created_at}::timestamp)::date::text`,
+        deployment: decisions.deployment,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(decisions)
+      .where(and(...conditions))
+      .groupBy(sql`date_trunc('week', ${decisions.created_at}::timestamp)::date`, decisions.deployment)
+      .orderBy(sql`date_trunc('week', ${decisions.created_at}::timestamp)::date`, decisions.deployment);
+    return rows;
+  }
+
+  /**
+   * Count decisions answered per (ISO-week-start, deployment) since `since`.
+   * Optional `deploymentId` filter. Weeks are Monday-aligned.
+   */
+  async countAnsweredSince(
+    deploymentId: string | undefined,
+    since: string | Date,
+  ): Promise<EscalationCountBucket[]> {
+    const sinceIso = typeof since === "string" ? since : since.toISOString();
+    const conditions = [gte(decisionResponses.answered_at, sinceIso)];
+    if (deploymentId !== undefined) {
+      conditions.push(eq(decisions.deployment, deploymentId));
+    }
+    const rows = await this.db
+      .select({
+        weekStart: sql<string>`date_trunc('week', ${decisionResponses.answered_at}::timestamp)::date::text`,
+        deployment: decisions.deployment,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(decisionResponses)
+      .innerJoin(decisions, eq(decisionResponses.decision_id, decisions.decision_id))
+      .where(and(...conditions))
+      .groupBy(sql`date_trunc('week', ${decisionResponses.answered_at}::timestamp)::date`, decisions.deployment)
+      .orderBy(sql`date_trunc('week', ${decisionResponses.answered_at}::timestamp)::date`, decisions.deployment);
+    return rows;
   }
 
   async list(): Promise<DecisionView[]> {

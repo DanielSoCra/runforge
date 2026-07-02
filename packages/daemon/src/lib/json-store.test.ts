@@ -50,8 +50,15 @@ describe('json-store', () => {
     expect(entries).toEqual([{ id: 1 }, { id: 2 }]);
   });
 
-  it('writeTextSafe writes raw text atomically', async () => {
-    const path = join(dir, 'raw.txt');
+  it('writeJsonSafe creates missing nested parent directories', async () => {
+    const path = join(dir, 'deeply', 'nested', 'data.json');
+    await writeJsonSafe(path, { a: 1 });
+    const result = await readJsonSafe<{ a: number }>(path);
+    expect(result).toEqual({ ok: true, value: { a: 1 } });
+  });
+
+  it('writeTextSafe creates missing nested parent directories', async () => {
+    const path = join(dir, 'deeply', 'nested', 'raw.txt');
     await writeTextSafe(path, 'hello world');
     const { readFile } = await import('fs/promises');
     const content = await readFile(path, 'utf-8');

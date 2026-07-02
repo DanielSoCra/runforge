@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, GitFork, Activity, CircleDot, DollarSign, Users, Settings, Terminal, Zap, LogOut, Newspaper, Rocket, Inbox } from 'lucide-react';
+import { LayoutDashboard, GitFork, Activity, CircleDot, DollarSign, Users, Settings, Terminal, Zap, LogOut, Newspaper, Rocket, Inbox, BarChart3 } from 'lucide-react';
 import { signOut } from '@/actions/auth';
 
 const nav = [
@@ -11,6 +11,7 @@ const nav = [
   // awaiting the operator + the daily briefing — placed prominently for steering.
   { href: '/steering', label: 'Steering', icon: Inbox },
   { href: '/briefing', label: 'Briefing', icon: Newspaper },
+  { href: '/metrics', label: 'Metrics', icon: BarChart3 },
   { href: '/runs', label: 'Runs', icon: Activity },
   { href: '/issues', label: 'Issues', icon: CircleDot },
   { href: '/repos', label: 'Repositories', icon: GitFork },

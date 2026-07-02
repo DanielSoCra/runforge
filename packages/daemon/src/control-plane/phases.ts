@@ -32,6 +32,7 @@ import { classify as runClassify } from './classifier.js';
 import { SessionError } from '../session-runtime/session-error.js';
 import { runHoldout } from '../validation/holdout.js';
 import { integrateToStaging } from './integration.js';
+import { appendAutoMergeEvent } from './escalation-metrics.js';
 import { runDeploy } from '../validation/deploy.js';
 import { runPostDeployTests } from '../validation/post-deploy-test.js';
 import { reconcileWorkspace, ensureRepoFresh } from './workspace.js';
@@ -2202,6 +2203,15 @@ export function createPhaseHandlers(
           console.log(
             `[integrate] Successfully merged to ${config.branches.staging}`,
           );
+        }
+        // P4.1 escalation metric: append an auto-merge event ONLY for true
+        // auto-merge outcomes (operator-approved overrides must NOT count).
+        if (decision.kind === 'auto-merge' && deploymentId !== undefined) {
+          void appendAutoMergeEvent(stateDir, {
+            ts: new Date().toISOString(),
+            deploymentId,
+            issueNumber: workRequest.issueNumber,
+          });
         }
         // NOTE: a successful Git MERGE does NOT clear the runtime-degraded marker.
         // The marker tracks decision-index TRANSPORT health, not merge success —
