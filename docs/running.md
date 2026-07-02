@@ -260,6 +260,32 @@ lands. A governed deployment should also configure at least one `webhook` (else
 it boots `degraded:true` with a loud warning and auto-pause/escalation/crash
 alerts are logged locally instead of delivered).
 
+### Emergency stop: halt, pause, drain, and SIGUSR2
+
+The daemon provides several ways to stop or slow work. They differ in urgency and what happens to runs already in progress:
+
+| Control | Effect on new work | Effect on in-progress runs | How to resume |
+|---------|-------------------|---------------------------|---------------|
+| `POST /pause` | Stops claiming new issues. | Active runs continue to completion. | `POST /resume` |
+| `POST /halt` | Stops claiming new issues (same as pause). | Parks each in-flight run at its current phase, then SIGTERM→SIGKILL terminates worker processes with a 5 s grace period. The halt interlock stays latched until `/resume`; any run that settles after the 15 s bounded wait still parks instead of advancing. | `POST /resume` re-admits halt-parked runs at `pausedAtPhase`. |
+| `POST /drain` | Stops claiming new issues. | Lets active runs finish, then the daemon exits. | Restart the daemon. |
+| `SIGUSR2` | Stops claiming new issues. | Active runs finish; daemon exits when idle. | Restart the daemon. |
+
+Use `/pause` when you want the daemon to stop picking up work but let current runs finish normally. Use `/halt` for an emergency stop: it parks runs immediately so they can resume later, kills workers that do not terminate gracefully within 5 seconds, and remains latched so late-settling runs cannot advance past the park. `/resume` clears the halt latch as well as the pause.
+
+```bash
+# Emergency halt (requires X-Requested-By; Bearer token if AUTO_CLAUDE_CONTROL_TOKEN is set)
+curl -fsS -X POST localhost:3847/halt \
+  -H 'X-Requested-By: operator' \
+  -H 'Authorization: Bearer <token>'
+
+# Pause / resume
+curl -fsS -X POST localhost:3847/pause -H 'X-Requested-By: operator'
+curl -fsS -X POST localhost:3847/resume -H 'X-Requested-By: operator'
+```
+
+A paused daemon also gates integrate entry: a run that reaches the `integrate` phase while paused is parked at `pausedAtPhase: 'integrate'` instead of merging, then resumes through the normal integrate arm after `/resume`.
+
 ### Operator commands
 
 The daemon exposes a control API on `localhost:3847`:

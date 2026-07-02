@@ -138,11 +138,6 @@
       "count": 3
     }
   },
-  "src/control-plane/pipeline.ts": {
-    "@typescript-eslint/strict-boolean-expressions": {
-      "count": 5
-    }
-  },
   "src/control-plane/plugin-registry.ts": {
     "@typescript-eslint/strict-boolean-expressions": {
       "count": 1
@@ -186,11 +181,6 @@
   "src/control-plane/runtime-source.ts": {
     "@typescript-eslint/strict-boolean-expressions": {
       "count": 1
-    }
-  },
-  "src/control-plane/server.ts": {
-    "@typescript-eslint/strict-boolean-expressions": {
-      "count": 2
     }
   },
   "src/control-plane/state.test.ts": {

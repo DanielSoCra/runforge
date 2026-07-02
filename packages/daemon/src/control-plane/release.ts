@@ -26,6 +26,13 @@ export type ReleaseProposalResult =
       totalCost: 0;
       title: string;
       body: string;
+    }
+  | {
+      status: 'single-trunk-not-applicable';
+      issueCount: number;
+      totalCost: number;
+      title: string;
+      body: string;
     };
 
 export async function aggregateReleaseNotes(
@@ -81,6 +88,16 @@ export async function createReleaseProposal(
       status: 'no-completed-work',
       issueCount: 0,
       totalCost: 0,
+      title: notes.title,
+      body: notes.body,
+    };
+  }
+
+  if (stagingBranch === productionBranch) {
+    return {
+      status: 'single-trunk-not-applicable',
+      issueCount: notes.issueCount,
+      totalCost: notes.totalCost,
       title: notes.title,
       body: notes.body,
     };

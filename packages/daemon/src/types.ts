@@ -418,6 +418,7 @@ export interface RunState {
   handoffNotes?: Record<string, string>;
   workerClaimId?: string;
   pausedAtPhase?: Phase;
+  parkedBy?: 'halt';
   l2GateNotified?: boolean;
   l2MergeBlockedNotified?: boolean;
   l2Feedback?: string;

@@ -2,9 +2,26 @@
 import { minimatch } from 'minimatch';
 import type { ContainmentPolicy } from './containment-hooks.js';
 
+export type AuditSeverity = 'advisory' | 'fatal';
+
+export interface AuditViolation {
+  severity: AuditSeverity;
+  message: string;
+  redactedMatch: string;
+}
+
 export interface AuditResult {
   clean: boolean;
-  violations: string[];
+  violations: AuditViolation[];
+}
+
+/**
+ * Redact a sensitive match for audit records: first 8 characters + total length.
+ * The audit record must never itself become the leak.
+ */
+function redactMatch(match: string): string {
+  const prefix = match.slice(0, 8);
+  return `${prefix} (${match.length})`;
 }
 
 /**
@@ -14,18 +31,26 @@ export interface AuditResult {
  * This catches violations that bypassed the five preventive layers.
  */
 export function auditSessionOutput(output: string, policy: ContainmentPolicy): AuditResult {
-  const violations: string[] = [];
+  const violations: AuditViolation[] = [];
 
   // 1. Path reference scanning removed — preventive containment hooks (layers 1–5)
   // already block writes to blocked paths during the session. Scanning output text
   // for path-like strings caused false positives when sessions legitimately *discuss*
   // daemon internals (e.g., Tech Lead planning sessions).
 
-  // 2. Check for evidence of blocked command execution
+  // 2. Check for evidence of blocked command execution (advisory per #489).
   const commandViolations = detectBlockedCommandEvidence(output, policy.blockedCommands);
-  for (const msg of commandViolations) {
-    if (!violations.includes(msg)) {
-      violations.push(msg);
+  for (const violation of commandViolations) {
+    if (!violations.some((v) => v.message === violation.message)) {
+      violations.push(violation);
+    }
+  }
+
+  // 3. Fatal credential-leak floor on high-precision patterns only.
+  const credentialViolations = detectCredentialLeaks(output);
+  for (const violation of credentialViolations) {
+    if (!violations.some((v) => v.message === violation.message)) {
+      violations.push(violation);
     }
   }
 
@@ -40,12 +65,17 @@ export function auditSessionOutput(output: string, policy: ContainmentPolicy): A
  * lines starting with `$ cmd`, `> cmd`, or bare `cmd` at line start.
  * This is a detective check — false positives are acceptable because
  * this layer only fires after a session already completed.
+ *
+ * Issue #489 acceptance criteria 5–6: this layer is intentionally advisory-only.
  */
-function detectBlockedCommandEvidence(output: string, blockedCommands: string[]): string[] {
-  const violations: string[] = [];
+function detectBlockedCommandEvidence(
+  output: string,
+  blockedCommands: string[],
+): AuditViolation[] {
+  const violations: AuditViolation[] = [];
 
   // Pre-compile regexes outside the line loop to avoid O(lines * commands) allocations
-  const compiledPatterns = blockedCommands.map(blocked => {
+  const compiledPatterns = blockedCommands.map((blocked) => {
     const cmd = blocked.trimEnd();
     const cmdEscaped = cmd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // Match command at line start, after shell prompts ($ or >), or after pipe/semicolon
@@ -64,9 +94,47 @@ function detectBlockedCommandEvidence(output: string, blockedCommands: string[])
     for (const { cmd, re } of compiledPatterns) {
       if (re.test(trimmed)) {
         const msg = `Blocked command evidence: '${cmd}' found in output`;
-        if (!violations.includes(msg)) {
-          violations.push(msg);
+        if (!violations.some((v) => v.message === msg)) {
+          violations.push({
+            severity: 'advisory',
+            message: msg,
+            redactedMatch: cmd,
+          });
         }
+      }
+    }
+  }
+
+  return violations;
+}
+
+/**
+ * High-precision credential patterns (fatal floor). Generic high-entropy assignment
+ * detection is intentionally excluded from the fatal set to avoid false-positive
+ * bricks on legitimate sessions.
+ */
+const CREDENTIAL_PATTERNS: Array<{ name: string; regex: RegExp }> = [
+  { name: 'Anthropic API key', regex: /sk-ant-[A-Za-z0-9_-]{10,}/g },
+  { name: 'GitHub token', regex: /gh[pousr]_[A-Za-z0-9]{20,}/g },
+  { name: 'GitHub PAT', regex: /github_pat_[A-Za-z0-9_]{20,}/g },
+  { name: 'AWS access key ID', regex: /AKIA[0-9A-Z]{16}/g },
+  { name: 'private key block', regex: /-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----/g },
+];
+
+function detectCredentialLeaks(output: string): AuditViolation[] {
+  const violations: AuditViolation[] = [];
+
+  for (const { name, regex } of CREDENTIAL_PATTERNS) {
+    const matches = output.match(regex) ?? [];
+    for (const match of matches) {
+      const msg = `Credential leak detected: ${name}`;
+      const redacted = redactMatch(match);
+      if (!violations.some((v) => v.message === msg && v.redactedMatch === redacted)) {
+        violations.push({
+          severity: 'fatal',
+          message: msg,
+          redactedMatch: redacted,
+        });
       }
     }
   }

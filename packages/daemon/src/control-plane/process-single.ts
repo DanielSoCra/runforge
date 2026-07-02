@@ -184,6 +184,9 @@ export async function processSingleIssue(issueNumber: number, configPath: string
     undefined,
     deploymentRegistry,
     sanitizationPipeline,
+    undefined,
+    // Single-issue CLI path has no pause semantics.
+    () => false,
   );
   const table = getPipeline(variant);
   const result = await runPipeline(run, table, handlers, stateMgr, costTracker, undefined, undefined, phaseLabelMirror);

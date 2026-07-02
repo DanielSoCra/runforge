@@ -11,7 +11,7 @@
   "perRunBudget": 2,
   "adapter": "cli",
   "branches": {
-    "staging": "dev",
+    "staging": "main",
     "production": "main"
   },
   "webhooks": [],

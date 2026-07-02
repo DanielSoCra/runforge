@@ -103,7 +103,7 @@ describe('createWebsitePhaseHandlers', () => {
   });
 
   describe('non-checkpoint phase (auto mode)', () => {
-    it('returns success and removes checkpoint-paused label', async () => {
+    it('fails closed and removes checkpoint-paused label', async () => {
       mockShouldCheckpoint.mockReturnValue(false);
       const handlers = createWebsitePhaseHandlers(
         makeConfig(),
@@ -115,7 +115,7 @@ describe('createWebsitePhaseHandlers', () => {
         null,
       );
       const result = await handlers.brand!(makeRun());
-      expect(result).toBe('success');
+      expect(result).toBe('failure');
       // Should attempt to clean up checkpoint-paused label
       expect(octokit.issues.removeLabel).toHaveBeenCalledWith(
         expect.objectContaining({ name: 'checkpoint-paused' }),

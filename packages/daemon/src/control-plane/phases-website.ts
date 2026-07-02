@@ -85,7 +85,11 @@ export function createWebsitePhaseHandlers(
       // selectVariant() returns 'website' on every poll — including resume runs.
 
       if (!shouldCheckpoint(currentPhase, config.checkpoints)) {
-        return 'success';
+        console.error(
+          `[website] phase ${currentPhase} has no real implementation — failing closed (stub); see Plan 2`,
+          { issue: issueNumber, phase: currentPhase },
+        );
+        return 'failure';
       }
 
       // Checkpoint: post comment, save start_from (= next phase), label issue

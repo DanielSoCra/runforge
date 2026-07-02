@@ -30,3 +30,10 @@ Universal rules for any AI agent working in this repository.
 9. **L3 contains patterns, not implementations.** L3 specs include named patterns, library choices, and short examples (3-5 lines). Never complete implementations.
 
 10. **Specs are never deleted.** Deprecate specs by adding `deprecated_by` and `deprecation_reason` to their frontmatter. Never remove a spec file.
+
+## Sparring delegated-implementer conventions
+- Implementation tasks arrive as a committed work-order under `docs/superpowers/handoffs/`. Read it first.
+- Acceptance tests under the work-order's `acceptance_tests` are an immovable gate — make them pass, never edit them.
+- Build with TDD; run the work-order `verify_command` before opening a PR.
+- Hand results back via the PR + the result file at the work-order's `result_path`. Never message another agent directly.
+- Fix tasks arrive as the work-order's `findings_path`; the same `do_not_modify` gate applies; re-run `verify_command` and update the result file.

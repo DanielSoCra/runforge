@@ -179,6 +179,10 @@ export function createPhaseHandlers(
   // post-detect concurrency and letting the next FIFO-queued detect proceed
   // without false contention. Omitted for website / non-detect entrants.
   onDetectSettled?: () => void,
+  // P0.5 pause gate: if the daemon is paused when a run reaches integrate-entry,
+  // park the run instead of merging. Resumes via the existing integrate arm of
+  // resumeParkedRuns after /resume.
+  isPaused?: () => boolean,
 ): PhaseHandlerMap {
   const repo = repoName;
   // Lazily constructed only when the decision index is enabled — a disabled
@@ -1942,6 +1946,14 @@ export function createPhaseHandlers(
     },
 
     integrate: async (run: RunState): Promise<PhaseEvent> => {
+      // P0.5 pause gate: an already-admitted run must not proceed through the
+      // irreversible integrate merge while the daemon is paused. Park it at
+      // integrate-entry; /resume re-admits via the existing integrate arm.
+      if (isPaused?.() === true) {
+        run.pausedAtPhase = 'integrate';
+        return 'success';
+      }
+
       console.log(
         `[integrate] Merging ${featureBranch} into ${config.branches.staging}`,
       );

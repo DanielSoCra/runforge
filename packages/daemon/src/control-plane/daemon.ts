@@ -18,7 +18,10 @@ import {
   type ProviderAdmissionBinding,
 } from '../session-runtime/providers/startup-admission.js';
 import { smokeTest, type SmokeProof } from '../session-runtime/providers/smoke-test.js';
-import { killAllManagedProcessGroups } from '../session-runtime/managed-processes.js';
+import {
+  killAllManagedProcessGroups,
+  terminateAllManagedProcessGroups,
+} from '../session-runtime/managed-processes.js';
 import { ImplementationCoordinator } from '../implementation/coordinator.js';
 import { StateManager } from './state.js';
 import { createControlServer } from './server.js';
@@ -1238,6 +1241,12 @@ export async function startDaemon(
   // cautious safety interpretation downstream. The initial pause (if any) is the
   // runtime-source preflight.
   let pauseReason: PauseReason | null = paused ? 'runtime-source' : null;
+  // P0.5 operator-halt state: true while /halt is actively waiting for in-flight
+  // runs to park. Guards runPipeline so killed-worker failures self-looping the
+  // FSM park instead of retrying/advancing. Once set, it stays latched until
+  // /resume clears it; the bounded wait only measures response latency, it does
+  // not weaken the interlock.
+  let halting = false;
   // B5 watchdog detection state (null = no stall) — surfaced on /status and
   // mapped to /health 503.
   let watchdogStall: WatchdogStall | null = null;
@@ -1614,6 +1623,8 @@ export async function startDaemon(
             deploymentRegistry,
             protectedStore,
             releaseDetectGateOnce,
+            () => halting,
+            () => paused,
           )
             .then((outcome) =>
               handleRunOutcome(outcome, request.issueNumber, owner, name),
@@ -1691,6 +1702,8 @@ export async function startDaemon(
                 deploymentRegistry,
                 protectedStore,
                 releaseBugDetectGateOnce,
+                () => halting,
+                () => paused,
               )
                 .then((outcome) =>
                   handleRunOutcome(
@@ -1771,6 +1784,8 @@ export async function startDaemon(
                 deploymentRegistry,
                 protectedStore,
                 releaseFpDetectGateOnce,
+                () => halting,
+                () => paused,
               )
                 .then((outcome) =>
                   handleRunOutcome(outcome, fpRequest.issueNumber, owner, name),
@@ -1921,11 +1936,72 @@ export async function startDaemon(
         paused = true;
         pauseReason = 'manual';
       },
+      halt: async () => {
+        // P0.5 operator emergency halt. Set paused + halting, terminate workers
+        // with SIGTERM→SIGKILL escalation, then wait (bounded) for in-flight
+        // runPipeline loops to park themselves via the halt interlock. Both
+        // `paused` and `halting` stay latched until a successful /resume.
+        paused = true;
+        pauseReason = 'halt';
+        if (halting) {
+          // Idempotent: already halting, just report current parked state.
+          const parkedRuns = await stateMgr.findParkedRuns();
+          return {
+            halted: true,
+            parked: parkedRuns
+              .filter((r) => r.parkedBy === 'halt')
+              .map((r) => r.issueNumber),
+            terminated: 0,
+            escalated: 0,
+          };
+        }
+        halting = true;
+
+        let terminated = 0;
+        let escalated = 0;
+        try {
+          const termination = await terminateAllManagedProcessGroups({
+            graceMs: 5000,
+          });
+          terminated = termination.terminated;
+          escalated = termination.escalated;
+        } catch (e) {
+          console.error('[daemon] /halt worker termination failed:', e);
+        }
+
+        // Bounded wait for in-flight runs to park. The interlock parks on the
+        // next handler return/catch; killing the worker forces that return.
+        // `halting` stays latched so a late-settling run still parks instead of
+        // resuming normal routing. Only /resume clears it.
+        const haltStart = Date.now();
+        const haltTimeoutMs = 15_000;
+        while (activeRuns > 0 && Date.now() - haltStart < haltTimeoutMs) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        if (activeRuns > 0) {
+          console.warn(
+            `[daemon] /halt: ${activeRuns} active run(s) did not settle within ${haltTimeoutMs}ms — they remain active and will still park when they settle`,
+          );
+        }
+
+        const parkedRuns = await stateMgr.findParkedRuns();
+        return {
+          halted: true,
+          parked: parkedRuns
+            .filter((r) => r.parkedBy === 'halt')
+            .map((r) => r.issueNumber),
+          terminated,
+          escalated,
+        };
+      },
       resume: async () => {
         const sourceReady = await refreshRuntimeSourceForWork('resume');
         if (!sourceReady.ok) return sourceReady;
         paused = false;
         pauseReason = null;
+        // A successful resume also clears an active halt interlock so new work
+        // does not immediately re-park.
+        halting = false;
         // A successful resume clears any watchdog stall — the operator has
         // (re)assessed; the held slot, if any, is the operator's restart concern.
         watchdogStall = null;
@@ -2305,6 +2381,8 @@ export async function startDaemon(
                 // gap #6: EARLY release when the resumed detect settles (omitted for
                 // website / post-detect resumes).
                 onDetectSettled,
+                // P0.5 pause gate at integrate-entry.
+                () => paused,
               );
       const table = getPipeline(run.variant);
 
@@ -2322,6 +2400,7 @@ export async function startDaemon(
         undefined,
         runWriter ?? undefined,
         phaseLabelMirror,
+        () => halting,
       )
         .then(async (result) => {
           console.log(
@@ -2465,6 +2544,52 @@ export async function startDaemon(
     // Limit to 1 resume per cycle to avoid thundering-herd
     for (const run of parkedRuns.slice(0, 1)) {
       if (activeIssues.has(run.issueNumber)) continue; // already running
+
+      // HALT arm (precedence over decision-parked branches): a run parked by
+      // /halt re-enters at its pausedAtPhase once the daemon is unpaused. Clear
+      // BOTH parkedBy and pausedAtPhase before re-entry/persist so a later
+      // legitimate decision park is not mistaken for a halt park.
+      if (run.parkedBy === 'halt') {
+        const runOwner = run.repoOwner ?? config.repo?.owner;
+        const runRepoName = run.repoName ?? config.repo?.name;
+        if (
+          runOwner === undefined ||
+          runOwner === '' ||
+          runRepoName === undefined ||
+          runRepoName === ''
+        ) {
+          console.warn(
+            `[daemon] resumeParkedRuns: skipping halt-parked run #${run.issueNumber} — missing repo info`,
+          );
+          continue;
+        }
+        const resumeRepoId = repoManager?.getRepoId(runOwner, runRepoName) ?? '';
+        const resumeToken =
+          repoManager && resumeRepoId
+            ? await repoManager.resolveTokenForRepo(resumeRepoId)
+            : process.env.GITHUB_TOKEN;
+        const runOctokit = new Octokit({ auth: resumeToken });
+        const phaseLabelMirror = createPhaseLabelMirror(
+          runOctokit,
+          runOwner,
+          runRepoName,
+        );
+
+        run.phase = run.pausedAtPhase ?? run.phase;
+        run.pausedAtPhase = undefined;
+        run.parkedBy = undefined;
+        await stateMgr.saveRunState(run);
+        await reenterPipeline(
+          run,
+          runOwner,
+          runRepoName,
+          resumeRepoId,
+          runOctokit,
+          phaseLabelMirror,
+        );
+        continue;
+      }
+
       const runOwner = run.repoOwner ?? config.repo?.owner;
       const runRepoName = run.repoName ?? config.repo?.name;
       if (
@@ -3074,6 +3199,11 @@ export async function startDaemon(
                 undefined,
                 deploymentRegistry,
                 sanitizationPipeline,
+                // gap #6: EARLY release when the resumed detect settles (omitted for
+                // website / post-detect resumes).
+                undefined,
+                // P0.5 pause gate at integrate-entry.
+                () => paused,
               );
       const table = getPipeline(run.variant);
 
@@ -3086,6 +3216,7 @@ export async function startDaemon(
         undefined,
         runWriter ?? undefined,
         phaseLabelMirror,
+        () => halting,
       )
         .then(async (result) => {
           console.log(
@@ -3400,6 +3531,11 @@ async function processWorkRequest(
   // setup-throw backstop (a throw in the pre-detect setup below rejects the
   // returned promise, so the caller's `.finally` still frees the gate).
   onDetectSettled?: () => void,
+  // P0.5 halt interlock: read the daemon-scoped halting flag inside runPipeline.
+  isHalting?: () => boolean,
+  // P0.5 pause gate: read the daemon-scoped paused flag inside createPhaseHandlers
+  // so integrate-entry parks instead of merging while paused.
+  isPaused?: () => boolean,
 ): Promise<string> {
   const today = new Date().toISOString().split('T')[0];
   if (today !== dailyRunState.resetDate) {
@@ -3534,6 +3670,8 @@ async function processWorkRequest(
             // gap #6: EARLY detect-gate release. Website branch omits it (starts at
             // 'init', never gated).
             onDetectSettled,
+            // P0.5 pause gate at integrate-entry.
+            isPaused,
           );
   const table = getPipeline(variant);
 
@@ -3549,6 +3687,7 @@ async function processWorkRequest(
     undefined,
     runWriter ?? undefined,
     phaseLabelMirror,
+    isHalting,
   );
   console.log(
     `[daemon] Pipeline done for #${request.issueNumber}: ${result.outcome}${result.error !== undefined && result.error !== '' ? ` — ${result.error}` : ''}`,

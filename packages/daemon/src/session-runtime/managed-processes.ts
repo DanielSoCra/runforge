@@ -94,6 +94,74 @@ export function killAllManagedProcessGroups(
   return killed;
 }
 
+/**
+ * Escalating termination: SIGTERM every registered process group, wait `graceMs`
+ * (default 5000ms), then SIGKILL any survivors, and ONLY THEN clear the registry.
+ * Returns the count of processes that exited gracefully after SIGTERM and the
+ * count that required SIGKILL escalation.
+ *
+ * Idempotent: a second call on an already-empty registry resolves immediately
+ * with `{ terminated: 0, escalated: 0 }`. The registry is never cleared before
+ * the escalation pass — that would orphan survivors.
+ */
+export async function terminateAllManagedProcessGroups(
+  opts: { graceMs?: number } = {},
+): Promise<{ terminated: number; escalated: number }> {
+  const graceMs = opts.graceMs ?? 5000;
+  const targets = [...active];
+
+  if (targets.length === 0) {
+    return { terminated: 0, escalated: 0 };
+  }
+
+  // Phase 1: SIGTERM sweep.
+  for (const child of targets) {
+    killProcessGroup(child, 'SIGTERM');
+  }
+
+  // Phase 2: wait for graceful exits up to graceMs.
+  let terminated = 0;
+  const pending = new Set(targets);
+  const start = Date.now();
+  while (pending.size > 0 && Date.now() - start < graceMs) {
+    for (const child of [...pending]) {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        terminated += 1;
+        pending.delete(child);
+      }
+    }
+    if (pending.size > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  // Phase 3: SIGKILL survivors.
+  for (const child of pending) {
+    killProcessGroup(child, 'SIGKILL');
+  }
+
+  // Phase 4: brief bounded wait for SIGKILL to take effect.
+  let escalated = 0;
+  const killStart = Date.now();
+  while (pending.size > 0 && Date.now() - killStart < 2000) {
+    for (const child of [...pending]) {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        escalated += 1;
+        pending.delete(child);
+      }
+    }
+    if (pending.size > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  // Phase 5: clear registry only after escalation — never before, and only the
+  // swept targets. A child registered during the grace/kill window must remain
+  // tracked so a subsequent /halt or force-kill can still reach it.
+  for (const child of targets) active.delete(child);
+  return { terminated, escalated };
+}
+
 /** Test-only: reset registry between cases. */
 export function __clearManagedProcessesForTests(): void {
   active.clear();

@@ -48,6 +48,37 @@ describe('createReleaseProposal', () => {
     expect(octokit.pulls.create).not.toHaveBeenCalled();
   });
 
+  it('returns single-trunk-not-applicable without creating a PR when branches match', async () => {
+    await appendResult(makeRecord(519, { totalCost: 1.25 }), stateDir);
+    const octokit = {
+      pulls: {
+        create: vi.fn().mockResolvedValue({
+          data: {
+            number: 42,
+            html_url: 'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/pull/42',
+          },
+        }),
+      },
+    };
+
+    const result = await createReleaseProposal(
+      octokit as never,
+      'DANIELSOCRAHANDLEZZ',
+      'auto-claude',
+      'main',
+      'main',
+      stateDir,
+    );
+
+    expect(result).toMatchObject({
+      status: 'single-trunk-not-applicable',
+      issueCount: 1,
+      totalCost: 1.25,
+      title: 'Release: 1 issue',
+    });
+    expect(octokit.pulls.create).not.toHaveBeenCalled();
+  });
+
   it('creates a staging-to-production PR with aggregated release notes', async () => {
     await appendResult(makeRecord(519, { totalCost: 1.25 }), stateDir);
     const octokit = {
@@ -65,7 +96,7 @@ describe('createReleaseProposal', () => {
       octokit as never,
       'DANIELSOCRAHANDLEZZ',
       'auto-claude',
-      'dev',
+      'release-staging',
       'main',
       stateDir,
     );
@@ -80,7 +111,7 @@ describe('createReleaseProposal', () => {
     expect(octokit.pulls.create).toHaveBeenCalledWith(expect.objectContaining({
       owner: 'DANIELSOCRAHANDLEZZ',
       repo: 'auto-claude',
-      head: 'dev',
+      head: 'release-staging',
       base: 'main',
       title: 'Release: 1 issue',
       body: expect.stringContaining('#519:'),

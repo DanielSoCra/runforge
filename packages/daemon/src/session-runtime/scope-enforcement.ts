@@ -169,7 +169,12 @@ function commandPathTokens(command) {
     .filter((token) => token.includes('/') || token.includes('.'));
 }
 
+function formatReason(hit) {
+  return 'scope-violation: ' + hit.violationType + ' ' + hit.path;
+}
+
 let raw = '';
+process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => { raw += chunk; });
 process.stdin.on('end', () => {
   try {
@@ -183,8 +188,8 @@ process.stdin.on('end', () => {
       for (const path of paths) {
         const hit = checkWrite(path);
         if (hit) {
-          console.log(JSON.stringify({ block: true, reason: 'scope-violation: ' + JSON.stringify(hit) }));
-          return;
+          process.stderr.write(formatReason(hit) + '\\n');
+          process.exit(2);
         }
       }
     }
@@ -193,15 +198,15 @@ process.stdin.on('end', () => {
       for (const path of commandWritePaths(command)) {
         const hit = checkWrite(path);
         if (hit) {
-          console.log(JSON.stringify({ block: true, reason: 'scope-violation: ' + JSON.stringify(hit) }));
-          return;
+          process.stderr.write(formatReason(hit) + '\\n');
+          process.exit(2);
         }
       }
       for (const path of commandPathTokens(command)) {
         const normalized = normalizePath(path);
         if (matchesAny(normalized, scope.denyPaths)) {
-          console.log(JSON.stringify({ block: true, reason: 'scope-violation: ' + JSON.stringify(violation(normalized, 'access-to-denied')) }));
-          return;
+          process.stderr.write(formatReason(violation(normalized, 'access-to-denied')) + '\\n');
+          process.exit(2);
         }
       }
     }
@@ -209,14 +214,18 @@ process.stdin.on('end', () => {
       for (const path of paths) {
         const normalized = normalizePath(path);
         if (matchesAny(normalized, scope.denyPaths)) {
-          console.log(JSON.stringify({ block: true, reason: 'scope-violation: ' + JSON.stringify(violation(normalized, 'access-to-denied')) }));
-          return;
+          process.stderr.write(formatReason(violation(normalized, 'access-to-denied')) + '\\n');
+          process.exit(2);
         }
       }
     }
-    console.log(JSON.stringify({ block: false }));
+    process.exit(0);
   } catch (error) {
-    console.log(JSON.stringify({ block: false }));
+    // Fail closed on unparseable hook input — mirroring generate-containment-script.ts.
+    // We cannot determine whether the tool is write-capable without parsing, so we
+    // deny unconditionally rather than risk allowing a blocked write.
+    process.stderr.write('scope hook: failed to parse input: ' + error.message + '\\n');
+    process.exit(2);
   }
 });
 `;

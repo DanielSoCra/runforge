@@ -610,6 +610,10 @@ STACK-AC-CONTROL-PLANE:
     - packages/daemon/src/control-plane/operator-retry.test.ts
     - packages/daemon/src/control-plane/remote-control.test.ts
     - packages/daemon/src/control-plane/classifier.test.ts
+    - packages/daemon/src/control-plane/phase0-website-fail-closed.gate.test.ts
+    - packages/daemon/src/control-plane/phase0-single-trunk.gate.test.ts
+    - packages/daemon/src/control-plane/phase0-halt.gate.test.ts
+    - packages/daemon/src/control-plane/phase0-pause-integrate.gate.test.ts
   status: draft
 
 STACK-AC-COMPLIANCE-GATE-TS:
@@ -1434,6 +1438,9 @@ STACK-AC-CONTAINMENT:
     - packages/daemon/src/session-runtime/scope-enforcement.test.ts
     - packages/daemon/src/session-runtime/session-error.test.ts
     - packages/daemon/src/session-runtime/runtime.test.ts
+    - packages/daemon/src/session-runtime/phase0-scope-hook.gate.test.ts
+    - packages/daemon/src/session-runtime/phase0-credential-floor.gate.test.ts
+    - packages/daemon/src/session-runtime/phase0-terminate-escalation.gate.test.ts
     - packages/daemon/src/session-runtime/adapters/cli.test.ts
   status: draft
 

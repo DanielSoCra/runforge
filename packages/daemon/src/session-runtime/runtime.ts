@@ -618,24 +618,34 @@ export class SessionRuntime {
         }
       }
 
-      // 9. Post-session audit — containment layer 6 (detective, advisory).
+      // 9. Post-session audit — containment layer 6 (detective).
       // Output-text scanning has high false-positive risk: model prose mentioning
       // command names (git, bash, python3) trips the regex even when no command
       // was executed. Preventive containment via Bash hooks (containment-hooks.ts)
       // is still terminal — that layer audits real tool invocations.
-      // Issue #489 acceptance criteria 5–6.
       //
-      // NOTE: this downgrade assumes auditSessionOutput only produces blocked-
-      // command evidence violations (path-reference scanning was already removed
-      // — see audit.ts comments). If new violation classes are added that
-      // genuinely warrant terminal handling, split the result by violation
-      // class here rather than blanket-downgrading everything.
+      // Issue #489 acceptance criteria 5–6: blocked-command evidence stays advisory
+      // (console.warn + auditWarnings), intentionally preserved. Credential-leak
+      // matches are fatal and fail the session via the same terminal path as a
+      // scope-audit hard-fail.
       const audit = auditSessionOutput(result.value.output, DEFAULT_POLICY);
       if (!audit.clean) {
-        console.warn(
-          `[audit] Post-session output mentions blocked commands (advisory, not terminal): ${audit.violations.join('; ')}`,
-        );
-        result.value.auditWarnings = audit.violations;
+        const fatal = audit.violations.filter((v) => v.severity === 'fatal');
+        const advisory = audit.violations.filter((v) => v.severity === 'advisory');
+
+        if (fatal.length > 0) {
+          const details = fatal
+            .map((v) => `${v.message} (redacted: ${v.redactedMatch})`)
+            .join('; ');
+          return err(SessionError.containmentBreached(details, result.value.cost));
+        }
+
+        if (advisory.length > 0) {
+          console.warn(
+            `[audit] Post-session output mentions blocked commands (advisory, not terminal): ${advisory.map((v) => v.message).join('; ')}`,
+          );
+          result.value.auditWarnings = advisory.map((v) => v.message);
+        }
       }
 
       // 10. Attach plugin gates to result for downstream validation (ARCH-AC-PLUGINS Flow 4 step 3)

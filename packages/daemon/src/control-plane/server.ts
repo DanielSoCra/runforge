@@ -21,6 +21,11 @@ export interface ControlHandlers {
   drain: () => void;
   cancelDrain: () => void;
   /**
+   * Operator-triggered emergency halt: pause + park in-flight runs + kill workers.
+   * Returns `{ halted, parked, terminated, escalated }`. Idempotent.
+   */
+  halt?: () => Promise<{ halted: boolean; parked: number[]; terminated: number; escalated: number }>;
+  /**
    * Operator-triggered from-scratch retry of a `stuck` work request. Async +
    * status-carrying (mirrors `answerDecision`): the route emits `result.status`
    * / `result.body` directly (200 re-admitted, 404 not-stuck, 409 blocked /
@@ -66,7 +71,7 @@ export function createControlServer(
     // Browsers enforce CORS preflight for requests with custom headers,
     // and since this server sets no Access-Control-Allow-* headers,
     // cross-origin POSTs from malicious pages are blocked.
-    if (method === 'POST' && !req.headers['x-requested-by']) {
+    if (method === 'POST' && req.headers['x-requested-by'] === undefined) {
       json(res, 403, { error: 'Missing X-Requested-By header' });
       return;
     }
@@ -115,6 +120,37 @@ export function createControlServer(
     } else if (method === 'POST' && url.pathname === '/pause') {
       handlers.pause();
       json(res, 200, { paused: true });
+    } else if (method === 'POST' && url.pathname === '/halt') {
+      // P0.5 emergency halt. When AUTO_CLAUDE_CONTROL_TOKEN is set, require a
+      // valid Bearer token in addition to the CSRF header. Halting is the safe
+      // direction, so the token being UNSET does not block the emergency stop
+      // locally — but production deployments should always configure it.
+      const controlToken = process.env.AUTO_CLAUDE_CONTROL_TOKEN;
+      if (controlToken !== undefined && controlToken !== '') {
+        const authHeader = Array.isArray(req.headers.authorization)
+          ? req.headers.authorization[0]
+          : req.headers.authorization;
+        if (authHeader === undefined) {
+          json(res, 401, { error: 'Authorization header required' });
+          return;
+        }
+        const parts = authHeader.split(' ');
+        if (parts[0]?.toLowerCase() !== 'bearer' || parts[1] !== controlToken) {
+          json(res, 403, { error: 'Invalid control token' });
+          return;
+        }
+      }
+      if (handlers.halt) {
+        try {
+          const result = await handlers.halt();
+          json(res, 200, result);
+        } catch (e: unknown) {
+          console.error('[control-plane] POST /halt failed:', e);
+          json(res, 500, { error: 'halt failed' });
+        }
+      } else {
+        json(res, 501, { error: 'halt not configured' });
+      }
     } else if (method === 'POST' && url.pathname === '/resume') {
       Promise.resolve(handlers.resume()).then((result) => {
         if (isResult(result) && !result.ok) {
@@ -190,7 +226,7 @@ export function createControlServer(
           if (oversize) { json(res, 413, { error: 'body too large' }); return; }
           try {
             const parsed = JSON.parse(body) as { submittedBy?: string; description?: string };
-            if (!parsed.description || typeof parsed.description !== 'string') {
+            if (parsed.description === undefined || typeof parsed.description !== 'string') {
               json(res, 400, { error: 'description is required' });
               return;
             }

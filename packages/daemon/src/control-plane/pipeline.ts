@@ -47,6 +47,31 @@ const DEFAULT_MAX_ATTEMPTS: Record<string, number> = {
 };
 
 /**
+ * Halt interlock: if the operator has triggered /halt, park the run at the
+ * interrupted phase instead of allowing retry/advance/failure routing. The
+ * registry is cleared only after escalation; here we just persist the park
+ * shape and exit the loop so the run can resume via resumeParkedRuns.
+ */
+async function parkOnHalt(
+  run: RunState,
+  interruptedPhase: Phase,
+  stateMgr: StateManager,
+  runWriter?: RunWriter,
+  phaseLabelMirror?: PhaseLabelMirror,
+): Promise<PipelineResult> {
+  run.phase = 'paused';
+  run.pausedAtPhase = interruptedPhase;
+  run.parkedBy = 'halt';
+  phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);
+  await stateMgr.saveRunState(run);
+  void runWriter?.upsertRun(run.id, {
+    current_phase: 'paused',
+    phases: buildPhaseRecords(run),
+  });
+  return { outcome: 'parked', run };
+}
+
+/**
  * Build a diagnostic FailureRecord for a phase that routed to `stuck` via a
  * non-`failure`/non-`containment-breach` event (today: `escalated`).
  *
@@ -102,6 +127,7 @@ export async function runPipeline(
   config?: Partial<PipelineConfig>,
   runWriter?: RunWriter,
   phaseLabelMirror?: PhaseLabelMirror,
+  isHalting?: () => boolean,
 ): Promise<PipelineResult> {
   const maxAttempts = { ...DEFAULT_MAX_ATTEMPTS, ...config?.maxAttempts };
   const retryCounts: Record<string, number> = {};
@@ -128,6 +154,17 @@ export async function runPipeline(
     }
   }
   if (missingHandlers.length > 0) {
+    // Halt interlock: a missing handler pre-flight is still a "save site" that
+    // must park, not go stuck, when /halt is active.
+    if (isHalting?.() === true) {
+      return parkOnHalt(
+        run,
+        run.phase,
+        stateMgr,
+        runWriter,
+        phaseLabelMirror,
+      );
+    }
     const msg = `Missing handlers for phases: ${missingHandlers.join(', ')} in variant`;
     console.error(`[pipeline] ${msg}`);
     run.phase = 'stuck';
@@ -142,18 +179,46 @@ export async function runPipeline(
 
   mirrorCurrentPhase();
 
+  let firstLoop = true;
+
   while (true) {
     // Check for terminal states
     if (isTerminal(run.phase)) {
       const outcome = run.phase === 'stuck' ? 'stuck' : 'paused';
-      return outcome === 'stuck' && lastError
+      return outcome === 'stuck' && lastError !== undefined
         ? { outcome, run, error: lastError }
         : { outcome, run };
     }
 
+    // Halt interlock: after the first iteration, park at the current phase
+    // before any handler (re-)executes. This closes the inter-phase window
+    // where /halt fires while state is being persisted between phases; the
+    // first iteration is intentionally allowed to run once so existing
+    // post-handler/budget/missing-handler parks still fire in the right order.
+    if (!firstLoop && isHalting?.() === true) {
+      return parkOnHalt(
+        run,
+        run.phase,
+        stateMgr,
+        runWriter,
+        phaseLabelMirror,
+      );
+    }
+    firstLoop = false;
+
     // Check budget before each phase
     const budget = costTracker.checkBudget(run.issueNumber, run.perRunBudget);
     if (!budget.available) {
+      // Halt interlock: budget stop is a pre-handler save site — park if halting.
+      if (isHalting?.() === true) {
+        return parkOnHalt(
+          run,
+          run.phase,
+          stateMgr,
+          runWriter,
+          phaseLabelMirror,
+        );
+      }
       // Per-run budget exceeded → stuck (prevents one issue consuming entire daily budget)
       // Daily budget exceeded → paused (resumes on daily reset)
       const isPerRun = budget.reason === 'per-run-budget-exceeded';
@@ -181,6 +246,17 @@ export async function runPipeline(
       const event: PhaseEvent = 'success';
       const currentPhase = run.phase;
       if (workflow) markWorkflowNodeRunning(run, workflow, currentPhase);
+
+      // Halt interlock: do not auto-advance/save during a halt.
+      if (isHalting?.() === true) {
+        return parkOnHalt(
+          run,
+          currentPhase,
+          stateMgr,
+          runWriter,
+          phaseLabelMirror,
+        );
+      }
 
       // Check for completion before advancing (prevents infinite loop on report)
       if (isComplete(currentPhase, event)) {
@@ -243,6 +319,18 @@ export async function runPipeline(
       console.error(`[pipeline] Phase ${run.phase} threw:`, err);
     }
 
+    // Halt interlock: park immediately after a handler settles, before any
+    // retry / global-failure / advance routing can re-spawn or progress.
+    if (isHalting?.() === true) {
+      return parkOnHalt(
+        run,
+        executingPhase,
+        stateMgr,
+        runWriter,
+        phaseLabelMirror,
+      );
+    }
+
     // Sync run.cost from costTracker after every phase — costTracker is the
     // single source of truth (updated by runtime.spawnSession for ALL session
     // types: diagnose, implement, review).
@@ -290,7 +378,7 @@ export async function runPipeline(
         recordFailureHistory(
           run,
           globalStuckRecord,
-          globalStuckRecord.humanActionRequired
+          globalStuckRecord.humanActionRequired === true
             ? 'human-required'
             : 'terminal-stuck',
         );
@@ -303,7 +391,7 @@ export async function runPipeline(
         phases: buildPhaseRecords(run),
       });
       const globalOutcome = globalNext === 'stuck' ? 'stuck' : 'paused';
-      return globalOutcome === 'stuck' && lastError
+      return globalOutcome === 'stuck' && lastError !== undefined
         ? { outcome: globalOutcome, run, error: lastError }
         : { outcome: globalOutcome, run };
     }
@@ -325,7 +413,7 @@ export async function runPipeline(
     // Circular fix detection: hash the error and check for repeated failures.
     // Runs before advancePhase so circular detection takes precedence over retry exhaustion.
     // Only applies to thrown exceptions (currentError set); returned 'failure' events have no error to hash.
-    if (event === 'failure' && currentError) {
+    if (event === 'failure' && currentError !== undefined) {
       const errHash = hashError(currentError);
       run.errorHashes = recordErrorHash(errHash, run.errorHashes);
       if (isCircularError(errHash, run.errorHashes)) {
@@ -420,7 +508,7 @@ export async function runPipeline(
       recordFailureHistory(
         run,
         stuckRecord,
-        stuckRecord.humanActionRequired ? 'human-required' : 'terminal-stuck',
+        stuckRecord.humanActionRequired === true ? 'human-required' : 'terminal-stuck',
       );
       lastError = stuckRecord.message;
       phaseLabelMirror?.clearPhaseLabels(run.issueNumber, run);

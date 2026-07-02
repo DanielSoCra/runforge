@@ -16,12 +16,13 @@
 
 export type PauseReason =
   | 'manual'
+  | 'halt'
   | 'budget'
   | 'stuck'
   | 'tick-error'
   | 'runtime-source';
 
-/** A SAFETY pause (→ 503). Manual pause is intentional and maps to 200-degraded. */
+/** A SAFETY pause (→ 503). Manual pause and operator halt are intentional and map to 200-degraded. */
 const SAFETY_PAUSE_REASONS: ReadonlySet<PauseReason> = new Set<PauseReason>([
   'budget',
   'stuck',
@@ -96,8 +97,8 @@ export function evaluateHealth(s: HealthSignals): HealthResult {
   }
 
   // --- 200 degraded: observable but intentional/transient ---
-  if (s.paused && s.pauseReason === 'manual') {
-    return degraded('manual-pause');
+  if (s.paused && (s.pauseReason === 'manual' || s.pauseReason === 'halt')) {
+    return degraded(`${s.pauseReason}-pause`);
   }
   if (s.draining) {
     return degraded('draining');
