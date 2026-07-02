@@ -7,10 +7,15 @@ version: 1
 layer: 3
 stack: {stack}
 references: ARCH-{PARENT-ID}
+# While status is draft (spec authored ahead of code), code_paths/test_paths
+# MUST be glob patterns (e.g. `packages/{pkg}/src/{feature}/**`), not literal
+# file paths — infra/traceability-paths.test.ts fails the build if a literal
+# path doesn't exist on disk yet. Narrow to exact file paths only once the
+# implementation lands and status flips to something other than draft.
 code_paths:
-  - {path/to/source/file}
+  - {path/to/feature/dir}/**
 test_paths:
-  - {path/to/test/file}
+  - {path/to/feature/dir}/**/*.test.ts
 ---
 
 # {STACK_PREFIX}-{DOMAIN-KEY} — {Title}
