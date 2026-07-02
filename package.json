@@ -12,6 +12,7 @@
     "test:dashboard": "pnpm --filter @auto-claude/dashboard test",
     "test:scripts": "node --test \"scripts/**/*.test.mjs\"",
     "check:workflows": "node scripts/check-ci-workflows.mjs",
+    "check:traceability": "node scripts/check-traceability-paths.mjs",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck"
   },

@@ -1,1 +1,1 @@
-pnpm typecheck && pnpm check:workflows
+pnpm typecheck && pnpm check:workflows && pnpm check:traceability
