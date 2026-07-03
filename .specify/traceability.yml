@@ -122,7 +122,7 @@ FUNC-AC-AGENT-DISCIPLINE:
 
 FUNC-AC-CONTROLLED-ARTIFACT-DELIVERY:
   children: [ARCH-AC-CONTROLLED-ARTIFACT-DELIVERY]
-  status: draft
+  status: approved
 
 FUNC-AC-RECOVERABLE-FAILURE-ROUTING:
   children: [ARCH-AC-RECOVERABLE-FAILURE-ROUTING]
@@ -1641,7 +1641,7 @@ STACK-AC-OPERATOR-AUTH:
 # (production release + its L1 content are the Operator's gate per L0).
 FUNC-AC-RELEASE:
   children: [ARCH-AC-RELEASE]
-  status: draft
+  status: approved
 
 ARCH-AC-RELEASE:
   parent: FUNC-AC-RELEASE

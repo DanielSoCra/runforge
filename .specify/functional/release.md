@@ -2,14 +2,14 @@
 id: FUNC-AC-RELEASE
 type: functional
 domain: auto-claude
-status: draft
+status: approved
 version: 2
 layer: 1
 ---
 
 # FUNC-AC-RELEASE — Operator-Approved Production Release
 
-> **Awaiting Operator approval — Decision D2 of the first-production-deployment program plan.** This version extends the spec from the platform's self-release to target-deployment release lanes. Its new content is drafted by the spec-guardian process and is **not yet Operator-approved**; it is held for the Operator's specification-content gate (Gate #1).
+> **Operator-approved 2026-07-03 (Decision D2 of the first-production-deployment program plan).** This v2 content was ratified via the Operator specification-content gate. L2/L3 remain draft until the Phase-9 live proof.
 >
 > **Spec history (v2, 2026-07-02):** v1 (approved) governed the release of the platform's own running instance only. v2 generalizes release to **every deployment**: a release proposal aggregates a deployment's accepted-but-unreleased work; it **always** raises the Operator's reserved production-release decision and never earns autonomy, no matter how much merge autonomy the deployment has accrued; and on the Operator's approval it carries out that deployment's **declared production-release path** — which may range from the platform performing the whole promotion itself, to marking the approved release and triggering the deployment's automated production update, to only recording the approved release for a human procedure to complete. Every proposal and every execution is appended to an auditable per-deployment release ledger. All v1 guarantees — preview before change, approval-only, fail-safe on a failed release, and a durable record — are carried forward unchanged. Extending the content re-opens the Operator's specification-content gate, so status returns to `draft` pending his approval.
 

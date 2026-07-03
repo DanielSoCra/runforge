@@ -2,14 +2,14 @@
 id: FUNC-AC-CONTROLLED-ARTIFACT-DELIVERY
 type: functional
 domain: auto-claude
-status: draft
+status: approved
 version: 2
 layer: 1
 ---
 
 # FUNC-AC-CONTROLLED-ARTIFACT-DELIVERY — Controlled Artifact Delivery
 
-> **Awaiting Operator approval — Decision D2 of the first-production-deployment program plan.** This version extends the spec from specification-artifact delivery to code-change delivery. Its new content is drafted by the spec-guardian process and is **not yet Operator-approved**; it is held for the Operator's specification-content gate (Gate #1).
+> **Operator-approved 2026-07-03 (Decision D2 of the first-production-deployment program plan).** This v2 content was ratified via the Operator specification-content gate. L2/L3 remain draft until the Phase-9 live proof.
 >
 > **Spec history (v2, 2026-07-02):** v1 governed the controlled delivery of the artifacts the platform produces — chiefly generated specification documents — ensuring one autonomous session cannot decide its own delivery identity, target, or proposal lifecycle. v2 extends the same controlled-delivery discipline to the platform's most consequential artifact, a **code change** bound for a deployment's live line of work: a code change always arrives as a review proposal against the deployment's single trunk, joins that trunk only through the deployment's own controlled, checked path once the merge decision has cleared it, takes its landing target from the deployment's declared profile, and — because a change that looked sound can still break the trunk — is watched after it lands so that a change which turns the trunk red is met with an automatic reversal rather than left standing. A deployment that has declared no delivery profile may still deliver by a direct, ungoverned join, but that path is always recorded as ungoverned so it is never mistaken for the controlled lane. Every v1 spec-artifact guarantee is carried forward unchanged. Extending the content re-opens the Operator's specification-content gate, so status returns to `draft` pending his approval.
 
