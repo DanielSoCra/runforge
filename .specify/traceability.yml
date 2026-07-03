@@ -1668,7 +1668,29 @@ ARCH-AC-RELEASE:
 STACK-AC-RELEASE:
   parent: ARCH-AC-RELEASE
   code_paths:
+    # Platform-performs reference implementation (the platform's own deployment).
     - scripts/release.sh
+    # Per-deployment release lane (TS orchestration): proposal → ledger-manager →
+    # 3-shape executor → resolve-consumer, over the append-only Release Ledger.
+    - packages/daemon/src/control-plane/release/types.ts
+    - packages/daemon/src/control-plane/release/proposal.ts
+    - packages/daemon/src/control-plane/release/build-request.ts
+    - packages/daemon/src/control-plane/release/executor.ts
+    - packages/daemon/src/control-plane/release/release-ledger-manager.ts
+    - packages/daemon/src/control-plane/release/resolve-consumer.ts
+    - packages/release-ledger/src/index.ts
+    - packages/release-ledger/src/db.ts
+    - packages/release-ledger/src/ledger.ts
+    - packages/release-ledger/src/migrate.ts
+    - packages/release-ledger/src/schema.ts
   test_paths:
     - scripts/test-release-dry-run.sh
+    - packages/daemon/src/control-plane/p5-release-lane.gate.test.ts
+    - packages/daemon/src/control-plane/p5-release-ledger.gate.test.ts
+    - packages/daemon/src/control-plane/release/proposal.test.ts
+    - packages/daemon/src/control-plane/release/build-request.test.ts
+    - packages/daemon/src/control-plane/release/executor.concurrency.test.ts
+    - packages/release-ledger/test/store.test.ts
+    - packages/release-ledger/test/ledger.test.ts
+    - packages/release-ledger/test/marker.test.ts
   status: draft

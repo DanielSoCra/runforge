@@ -41,7 +41,7 @@ function baseProfile(): Record<string, unknown> {
     complianceReviewers: [],
     honestAutomation: { automatable: [], strained: [], irreduciblyHuman: [] },
     budget: 5000,
-    landing: { landsOn: 'main', productionReleasePath: 'tag-and-deploy' },
+    landing: { landsOn: 'main', productionReleasePath: { kind: 'trigger-automated', trigger: 'tag-and-deploy' } },
     capabilityBindings: [],
   };
 }

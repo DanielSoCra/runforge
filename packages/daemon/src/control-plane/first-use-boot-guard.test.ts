@@ -545,7 +545,7 @@ function makeDeploymentProfile(overrides?: Record<string, unknown>): Record<stri
       irreduciblyHuman: ['triage'],
     },
     budget: 5000,
-    landing: { landsOn: 'main', productionReleasePath: 'tag-and-deploy' },
+    landing: { landsOn: 'main', productionReleasePath: { kind: 'trigger-automated', trigger: 'tag-and-deploy' } },
     capabilityBindings: [],
     ...overrides,
   };

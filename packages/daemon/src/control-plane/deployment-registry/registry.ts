@@ -29,6 +29,7 @@ import type {
   DeclaredDatum,
   DeclaredDataResult,
   DeploymentProfile,
+  OwnedRepository,
   AutonomyState,
   WideningRecord,
 } from './types.js';
@@ -250,6 +251,21 @@ export class DeploymentRegistry {
       return false;
     }
     return profile.repositories.some((r) => r.owner === owner && r.name === repo);
+  }
+
+  /**
+   * The repositories the deployment `id`'s profile OWNS (verbatim from the frozen
+   * profile). The release lane reads this to resolve the deployment's release target
+   * from the SAME authority that serves its `landing` declared data, keeping the two
+   * consistent. Read-only; an unknown id yields `[]` (never throws — mirrors
+   * `ownsRepo`'s throw-free contract).
+   */
+  repositoriesOf(id: string): OwnedRepository[] {
+    const profile = this.profiles.get(id);
+    if (profile === undefined) {
+      return [];
+    }
+    return profile.repositories.map((r) => ({ owner: r.owner, name: r.name }));
   }
 
   /**

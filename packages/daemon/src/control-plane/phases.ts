@@ -73,8 +73,9 @@ import { buildMergeDecisionRequest,
   observeVerifierStatus,
 } from './merge-decision/index.js';
 import { alertOnNotifyApplied, type DecisionRaisedAlert } from './decision-alert.js';
-import type { DecisionOption, DecisionRequest } from '@auto-claude/decision-protocol';
+import type { DecisionRequest } from '@auto-claude/decision-protocol';
 import { SanitizationPipeline } from '@auto-claude/sanitization';
+import { applyDecisionSanitization } from './decision-escalation/sanitize-request.js';
 import {
   assignLane,
   evaluateVerifierGate,
@@ -316,27 +317,7 @@ export function createPhaseHandlers(
   async function sanitizeDecisionRequest(
     request: DecisionRequest,
   ): Promise<DecisionRequest> {
-    if (pipeline.isEmpty) {
-      return request;
-    }
-    const content: Record<string, unknown> = {
-      question: request.question,
-      context: request.context,
-      consequence_of_no_answer: request.consequence_of_no_answer,
-      options: request.options,
-    };
-    const result = await pipeline.run({
-      content,
-      deploymentRef: request.deployment,
-      subjectRef: request.decision_id,
-    });
-    return {
-      ...request,
-      question: result.content.question as string,
-      context: result.content.context as string,
-      consequence_of_no_answer: result.content.consequence_of_no_answer as string,
-      options: result.content.options as DecisionOption[],
-    };
+    return applyDecisionSanitization(pipeline, request);
   }
 
   // ---------------------------------------------------------------------------

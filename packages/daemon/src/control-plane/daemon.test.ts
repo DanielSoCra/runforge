@@ -4963,7 +4963,7 @@ describe('daemon', () => {
         complianceReviewers: [],
         honestAutomation: { automatable: [], strained: [], irreduciblyHuman: [] },
         budget: 1000,
-        landing: { landsOn: 'main', productionReleasePath: 'tag-and-deploy' },
+        landing: { landsOn: 'main', productionReleasePath: { kind: 'trigger-automated', trigger: 'tag-and-deploy' } },
         capabilityBindings: [],
       });
 
@@ -5177,7 +5177,7 @@ describe('daemon', () => {
         complianceReviewers: [],
         honestAutomation: { automatable: [], strained: [], irreduciblyHuman: [] },
         budget: 1000,
-        landing: { landsOn: 'main', productionReleasePath: 'tag-and-deploy' },
+        landing: { landsOn: 'main', productionReleasePath: { kind: 'trigger-automated', trigger: 'tag-and-deploy' } },
         capabilityBindings: [],
       });
 

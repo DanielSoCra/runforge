@@ -92,10 +92,16 @@ const HonestAutomationMapSchema = z
   })
   .strict();
 
+export const DeclaredReleasePathSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('platform-performs') }).strict(),
+  z.object({ kind: z.literal('trigger-automated'), trigger: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal('record-only'), procedure: z.string().min(1) }).strict(),
+]);
+
 const LandingTargetSchema = z
   .object({
     landsOn: z.string().min(1),
-    productionReleasePath: z.string().min(1),
+    productionReleasePath: DeclaredReleasePathSchema,
     /**
      * OPTIONAL explicit required-check names for the controlled code-change
      * merge path. Absent or empty for a governed deployment fails closed.

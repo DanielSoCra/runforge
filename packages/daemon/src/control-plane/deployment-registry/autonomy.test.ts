@@ -40,7 +40,7 @@ function makeProfile(over: { repositories?: { owner: string; name: string }[] } 
     complianceReviewers: [{ reviewer: 'clinical-lead', condition: 'touches patient-data' }],
     honestAutomation: { automatable: ['docs'], strained: [], irreduciblyHuman: ['triage'] },
     budget: 5000,
-    landing: { landsOn: 'main', productionReleasePath: 'tag-and-deploy' },
+    landing: { landsOn: 'main', productionReleasePath: { kind: 'trigger-automated', trigger: 'tag-and-deploy' } },
     capabilityBindings: [{ capability: 'classifier', version: '1.2.0' }],
   };
 }

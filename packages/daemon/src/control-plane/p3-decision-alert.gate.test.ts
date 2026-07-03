@@ -267,7 +267,7 @@ function makeRegistry(): DeploymentRegistry {
         return {
           kind: 'found',
           which: 'landing',
-          value: { landsOn: 'main', productionReleasePath: 'tag-and-deploy', requiredChecks: ['ci'] },
+          value: { landsOn: 'main', productionReleasePath: { kind: 'trigger-automated', trigger: 'tag-and-deploy' }, requiredChecks: ['ci'] },
         };
       }
       return { kind: 'not-found', deploymentId };

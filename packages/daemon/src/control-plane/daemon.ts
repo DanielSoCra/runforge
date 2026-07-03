@@ -35,7 +35,18 @@ import {
   readStartupRetryOptions,
   type StartupRetryOptions,
 } from './startup-retry.js';
-import { createReleaseProposal } from './release.js';
+import { ReleaseLedgerManager } from './release/release-ledger-manager.js';
+import {
+  createReleaseLane,
+  type PromotionPort,
+  type ReleaseLane,
+} from './release/executor.js';
+import { resolveAnsweredReleases } from './release/resolve-consumer.js';
+import type { CoveredCommit, TrunkReader } from './release/types.js';
+import { applyDecisionSanitization } from './decision-escalation/sanitize-request.js';
+import { GitHubBlockPublisher } from './decision-escalation/github-block-notifier.js';
+import { validateHealthCheckUrl, validateHealthCheckResolvedIP } from '../validation/deploy.js';
+import { runCommand } from '../lib/process.js';
 import { RepoManager } from './repo-manager.js';
 import {
   createWorkDetector,
@@ -876,6 +887,226 @@ export async function startDaemon(
     gotchaStore,
     knowledgeStore,
   );
+
+  // 3a-2. Per-deployment RELEASE LANE (STACK-AC-RELEASE). Gated on a configured
+  // (governed) deployment WITH the decision index enabled via REAL config (the same
+  // `AUTO_CLAUDE_DECISION_INDEX_ENABLED` flag the decision index reads) — NOT the
+  // manager's `isEnabled()`, which a test can force true via an injected fake without
+  // a real Postgres; gating on the manager would make governed-boot tests open a live
+  // DB and hang. In production the A1 boot guard already refuses a configured
+  // deployment whose index is unavailable, so when this flag is set the approval
+  // transport + shared Postgres are guaranteed present. The Release Ledger still fails
+  // CLOSED on its own: a throwing opener sets `#broken` (init never throws),
+  // `isAvailable()` returns false, and we simply do NOT construct the lane — the three
+  // release handlers are omitted (routes 404) and the sweep is skipped. When no
+  // deployment is configured this is a byte-identical no-op for local runs.
+  const decisionIndexEnvEnabled = ((): boolean => {
+    const raw = process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED;
+    if (raw === undefined) return false;
+    const v = raw.trim().toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes';
+  })();
+  const releaseLaneEnabled =
+    config.deployment !== undefined && decisionIndexEnvEnabled;
+  const releaseLedgerManager = new ReleaseLedgerManager({
+    enabled: releaseLaneEnabled,
+    databaseUrl: process.env.AUTO_CLAUDE_DATABASE_URL,
+    opener: undefined,
+  });
+  await releaseLedgerManager.init();
+
+  let releaseLane: ReleaseLane | undefined;
+  if (releaseLedgerManager.isAvailable()) {
+    // One octokit for the whole lane: trunk reads, decision publish, answer reads.
+    const releaseOctokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+
+    // The deployment's release target repositories — read from the registry (the
+    // SAME authority that serves the `landing` declared data the proposal reads),
+    // falling back to the seed `config.repo` when the registry has none.
+    const repositoriesFor = (
+      deployment: string,
+    ): { owner: string; name: string }[] => {
+      const declared = deploymentRegistry.repositoriesOf(deployment);
+      if (declared.length > 0) {
+        return declared.map((r) => ({ owner: r.owner, name: r.name }));
+      }
+      return config.repo
+        ? [{ owner: config.repo.owner, name: config.repo.name }]
+        : [];
+    };
+
+    // TrunkReader — octokit adapter over the deployment's landing branch. getBranch
+    // gives the trunk head; compareSince/listRecent give the covered commits, each
+    // carrying the `#123` issue refs parsed from its message (subject = first line).
+    const toCoveredCommit = (c: {
+      sha: string;
+      commit?: { message?: string | null } | null;
+    }): CoveredCommit => {
+      const message = c.commit?.message ?? '';
+      const subject = message.split('\n', 1)[0] ?? '';
+      const issueNumbers = [
+        ...new Set(
+          [...message.matchAll(/#(\d+)/g)]
+            .map((m) => Number(m[1]))
+            .filter((n) => Number.isInteger(n) && n > 0),
+        ),
+      ];
+      return { sha: c.sha, subject, issueNumbers };
+    };
+    const trunkReader: TrunkReader = {
+      async getTrunkHead(owner, repo, branch) {
+        const res = await releaseOctokit.repos.getBranch({ owner, repo, branch });
+        return { sha: res.data.commit.sha };
+      },
+      async compareSince(owner, repo, base, head) {
+        const res = await releaseOctokit.repos.compareCommits({
+          owner,
+          repo,
+          base,
+          head,
+        });
+        return { commits: (res.data.commits ?? []).map(toCoveredCommit) };
+      },
+      async listRecent(owner, repo, head) {
+        const res = await releaseOctokit.repos.listCommits({
+          owner,
+          repo,
+          sha: head,
+          per_page: 100,
+        });
+        return { commits: (res.data ?? []).map(toCoveredCommit) };
+      },
+    };
+
+    // PromotionPort — the declared shapes' REAL side effects, each reached ONLY after
+    // a verified Operator approval (executor's resolveReleaseInner, answer==='approve'):
+    // this is never auto-promotion. BOUNDARY (P5, mirrors P2's Phase-9 carve-out): the
+    // LIVE release drill is Operator-gated and OUT of this code unit — `scripts/release.sh`
+    // self-restarts the daemon (`launchctl kickstart -k`), so it must not run in-process
+    // during normal operation. The real invocation is wired but requires the explicit
+    // Operator drill gate (AUTO_CLAUDE_RELEASE_DRILL=1); without it every prod-mutating
+    // shape fails CLOSED (throw → the executor records execution `failed` + marks the
+    // deployment degraded, never a half-release). The gate suite proves the lane against
+    // a FAKE PromotionPort; this real port is proven live only under the Operator gate.
+    const RELEASE_DRILL_ENV = 'AUTO_CLAUDE_RELEASE_DRILL';
+    const assertReleaseDrillEnabled = (op: string): void => {
+      if (process.env[RELEASE_DRILL_ENV] !== '1') {
+        throw new Error(
+          `${op}: the LIVE release drill is Operator-gated and disabled — set ` +
+            `${RELEASE_DRILL_ENV}=1 under Operator supervision to perform the real ` +
+            `production side effect (fail-closed; nothing released).`,
+        );
+      }
+    };
+    // Treat a trigger-automated `trigger` as an untrusted URL/target and apply the
+    // deploy path's SSRF + DNS-rebinding guards BEFORE any dispatch (plan Deferred #3).
+    const validateTriggerTarget = async (trigger: string): Promise<void> => {
+      const urlError = validateHealthCheckUrl(trigger);
+      if (urlError !== null) {
+        throw new Error(
+          `trigger-automated target rejected (${urlError}): ${trigger}`,
+        );
+      }
+      const ipError = await validateHealthCheckResolvedIP(trigger);
+      if (ipError !== null) {
+        throw new Error(
+          `trigger-automated target rejected (${ipError}): ${trigger}`,
+        );
+      }
+    };
+    const promotion: PromotionPort = {
+      async promote() {
+        // platform-performs — the platform's OWN deployment via `scripts/release.sh`
+        // (param-less by design; a non-platform promote-target is a deferred additive
+        // shape). Only reached post-approval; the LIVE OS side effect is drill-gated.
+        assertReleaseDrillEnabled('platform-performs promote');
+        const res = await runCommand('bash', ['scripts/release.sh', '--confirm'], {
+          cwd: repoRoot,
+        });
+        if (!res.ok) throw res.error;
+      },
+      async rollback() {
+        // Fail-safe rollback. For the platform-performs shape `scripts/release.sh`
+        // owns its OWN internal rollback (release.sh:62-71: checkout prior release-*
+        // tag + restart), so there is no distinct external rollback mechanism to wire
+        // here. Drill-gated like promote: with the drill OFF (the default) this throws
+        // → the executor records `failed` with `rollbackFailed:true` + marks degraded
+        // (the safe, pessimistic outcome); under the gate it is a verification no-op
+        // because release.sh already performed the rollback on its restart failure.
+        assertReleaseDrillEnabled('platform-performs rollback');
+      },
+      async fireTrigger({ trigger }) {
+        // trigger-automated — the SSRF/DNS guard is REQUIRED now; the concrete
+        // dispatch transport (workflow_dispatch / webhook / shell) is a deferred P5
+        // follow-up. A guard rejection throws (→ execution failed, nothing
+        // dispatched); a valid target still throws until the transport lands, so a
+        // release is never silently marked `triggered-awaiting`.
+        await validateTriggerTarget(trigger);
+        throw new Error(
+          `trigger-automated dispatch transport is a deferred P5 follow-up ` +
+            `(target validated: ${trigger}) — no live transport is wired yet.`,
+        );
+      },
+    };
+
+    // issueNumberFor — the deployment's release-decision GitHub issue. Read from
+    // config (AUTO_CLAUDE_RELEASE_DECISION_ISSUE). AUTO-create-on-first-propose is
+    // DEFERRED: the executor's injected `issueNumberFor` is SYNCHRONOUS (called
+    // inline in proposeRelease with no async seam to create-and-await an issue), and
+    // a boot-time auto-create was rejected to avoid an unconditional GitHub side
+    // effect on every governed daemon boot. When unconfigured this returns 0 → the
+    // publisher cannot post the release decision → proposeRelease fails CLOSED
+    // (`degraded`), never silently proceeding.
+    const issueNumberFor = (_deployment: string): number => {
+      const raw = process.env.AUTO_CLAUDE_RELEASE_DECISION_ISSUE;
+      const n = raw !== undefined && raw !== '' ? Number(raw) : Number.NaN;
+      return Number.isInteger(n) && n > 0 ? n : 0;
+    };
+
+    // readAnswer — the authoritative Operator answer, read from the release-decision
+    // issue's comments via `parseCockpitAnswer` (the SAME reader the merge-decision
+    // resume path uses). Returns undefined (→ pending) on any missing issue / fetch
+    // failure, so a release only executes on a recorded DecisionResponse.
+    const readAnswer = async (
+      deployment: string,
+      decisionId: string,
+      issueNumber: number,
+    ): Promise<'approve' | 'reject' | undefined> => {
+      if (issueNumber <= 0) return undefined;
+      const repo = repositoriesFor(deployment)[0];
+      if (!repo) return undefined;
+      let comments: Array<{ body?: string | null }> = [];
+      try {
+        const res = await releaseOctokit.issues.listComments({
+          owner: repo.owner,
+          repo: repo.name,
+          issue_number: issueNumber,
+          per_page: 100,
+        });
+        comments = res.data ?? [];
+      } catch (e) {
+        console.warn(
+          `[release] readAnswer: failed to fetch comments for #${issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        return undefined;
+      }
+      return parseCockpitAnswer(comments, decisionId)?.choice;
+    };
+
+    releaseLane = createReleaseLane({
+      registry: deploymentRegistry,
+      repositoriesFor,
+      ledger: releaseLedgerManager.ledger(),
+      trunkReader,
+      promotion,
+      decisionManager,
+      publisher: new GitHubBlockPublisher(),
+      sanitize: (req) => applyDecisionSanitization(sanitizationPipeline, req),
+      readAnswer,
+      octokit: releaseOctokit,
+      issueNumberFor,
+    });
+  }
 
   // 3b. Start Knowledge Sync schedule (opt-in; no-op when knowledgeSync.enabled is false)
   let knowledgeSyncPoller: ReturnType<typeof setInterval> | null = null;
@@ -1858,6 +2089,24 @@ export async function startDaemon(
           console.error('[daemon] resumeParkedRuns error:', e),
         );
 
+        // Release resolve sweep (STACK-AC-RELEASE) — a SIBLING of resumeParkedRuns:
+        // it enumerates OPEN releases from the Release Ledger (including crash-stranded
+        // decision-only / executed-not-terminalized / attempt-interrupted ones) and
+        // drives each to its next state via the lane's fail-closed, exactly-once
+        // resolveRelease. This is the wired Operator-approval → execution path; it is
+        // idempotent per tick and the actual LIVE promotion side effect stays
+        // Operator-gated inside the PromotionPort. Deployment-scoped (not repo-scoped):
+        // for a single-deployment daemon this runs once per tick; on a multi-repo
+        // daemon it re-sweeps the same open set, which resolveRelease makes harmless.
+        if (releaseLane && releaseLedgerManager.isAvailable()) {
+          await resolveAnsweredReleases({
+            lane: releaseLane,
+            reader: releaseLedgerManager.ledger().reader(),
+          }).catch((e) =>
+            console.error('[daemon] resolveAnsweredReleases error:', e),
+          );
+        }
+
         // Finding-dismissal decision flow (PR1) — a SIBLING scan beside
         // resumeParkedRuns (NOT inside it: a finding is an issue, not a parked
         // run). Gated on an available decision index. The tick gates EMIT on a
@@ -1905,6 +2154,7 @@ export async function startDaemon(
     if (!initResult.ok) {
       configReader?.stop();
       await decisionManager.close();
+      await releaseLedgerManager.close();
       await postgresClient?.sql.end();
       await remoteControl.stop();
       return initResult;
@@ -2120,16 +2370,21 @@ export async function startDaemon(
         await remoteControl.restart();
       },
       scanIssues: repoManager ? async () => repoManager!.scanNow() : undefined,
-      release: config.repo
-        ? async () =>
-            createReleaseProposal(
-              new Octokit({ auth: process.env.GITHUB_TOKEN }),
-              config.repo!.owner,
-              config.repo!.name,
-              config.branches.staging,
-              config.branches.production,
-              stateDir,
-            )
+      // Per-deployment release lane (STACK-AC-RELEASE). Present only when the lane is
+      // constructed (a governed deployment with an available Release Ledger); absent
+      // → the routes 404. `release` = propose (raise the always-raised, never-earned
+      // release decision); `previewRelease` = mutate-nothing preview; `recordCompletion`
+      // = the explicit report-back that resolves a handed-off release + advances the
+      // Last-Released Marker.
+      previewRelease: releaseLane
+        ? (deployment) => releaseLane!.previewRelease(deployment)
+        : undefined,
+      release: releaseLane
+        ? (deployment) => releaseLane!.proposeRelease(deployment)
+        : undefined,
+      recordCompletion: releaseLane
+        ? (deployment, releaseId, outcome) =>
+            releaseLane!.recordCompletion(deployment, releaseId, outcome)
         : undefined,
       submitIdea: async (submittedBy, description) => {
         const idea = await poAgent.submitIdea(submittedBy, description);
@@ -2315,6 +2570,7 @@ export async function startDaemon(
     repoManager?.stop();
     configReader?.stop();
     await decisionManager.close();
+    await releaseLedgerManager.close();
     await postgresClient?.sql.end();
     await remoteControl.stop();
     return serverResult;
@@ -3425,6 +3681,7 @@ export async function startDaemon(
     repoManager?.stop();
     configReader?.stop();
     await decisionManager.close();
+    await releaseLedgerManager.close();
     await postgresClient?.sql.end();
     await remoteControl.stop();
     await new Promise<void>((resolve) => server.close(() => resolve()));

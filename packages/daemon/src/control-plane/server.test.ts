@@ -280,28 +280,42 @@ describe('ControlServer', () => {
     expect(res.status).toBe(501);
   });
 
-  it('POST /release calls release handler and returns release proposal details', async () => {
+  it('POST /release passes the deployment to the release handler and returns the propose result', async () => {
     const release = vi.fn().mockResolvedValue({
-      status: 'success',
-      prNumber: 12,
-      prUrl: 'https://github.com/example/repo/pull/12',
-      issueCount: 2,
-      totalCost: 3.5,
+      kind: 'raised',
+      decisionId: 'release:acme/widgets:abc12345',
     });
     const { server, port } = await startServer({
       release,
     });
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/release`, { method: 'POST', headers: { 'X-Requested-By': 'test' } });
+      const res = await fetch(`http://127.0.0.1:${port}/release`, {
+        method: 'POST',
+        headers: { 'X-Requested-By': 'test', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deployment: 'acme/widgets' }),
+      });
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({
-        status: 'success',
-        prNumber: 12,
-        prUrl: 'https://github.com/example/repo/pull/12',
-        issueCount: 2,
-        totalCost: 3.5,
+        kind: 'raised',
+        decisionId: 'release:acme/widgets:abc12345',
       });
-      expect(release).toHaveBeenCalledOnce();
+      expect(release).toHaveBeenCalledWith('acme/widgets');
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it('POST /release returns 400 when the deployment is missing from the body', async () => {
+    const release = vi.fn();
+    const { server, port } = await startServer({ release });
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/release`, {
+        method: 'POST',
+        headers: { 'X-Requested-By': 'test', 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(400);
+      expect(release).not.toHaveBeenCalled();
     } finally {
       await closeServer(server);
     }
@@ -622,7 +636,7 @@ describe('ControlServer', () => {
         complianceReviewers: [],
         honestAutomation: { automatable: [], strained: [], irreduciblyHuman: [] },
         budget: 5000,
-        landing: { landsOn: 'main', productionReleasePath: 'tag-and-deploy' },
+        landing: { landsOn: 'main', productionReleasePath: { kind: 'trigger-automated', trigger: 'tag-and-deploy' } },
         capabilityBindings: [],
       };
     }

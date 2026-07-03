@@ -1,0 +1,120 @@
+{
+  "id": "d294f688-cbc2-4bab-98fe-e06350dc3a21",
+  "prevId": "687e446b-77f5-4fd1-abf2-dfbec7926ae6",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "release_ledger.release_events": {
+      "name": "release_events",
+      "schema": "release_ledger",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "release_events_id_seq",
+            "schema": "release_ledger",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "release_id": {
+          "name": "release_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "deployment": {
+          "name": "deployment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event": {
+          "name": "event",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_revision": {
+          "name": "target_revision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "detail_json": {
+          "name": "detail_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "at": {
+          "name": "at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "release_events_one_proposal_per_release": {
+          "name": "release_events_one_proposal_per_release",
+          "columns": [
+            {
+              "expression": "release_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"release_ledger\".\"release_events\".\"event\" = 'proposal'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "release_events_one_attempt_per_release": {
+          "name": "release_events_one_attempt_per_release",
+          "columns": [
+            {
+              "expression": "release_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"release_ledger\".\"release_events\".\"event\" = 'attempt'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {
+    "release_ledger": "release_ledger"
+  },
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

@@ -2,7 +2,8 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { ok, err, type Result } from '../lib/result.js';
 import { getDashboardHtml } from './dashboard.js';
 import { readResults } from './results.js';
-import type { ReleaseProposalResult } from './release.js';
+import type { ProposeResult } from './release/executor.js';
+import type { PreviewResult } from './release/types.js';
 import type { ListRankedArgs, ListFilters, RankedListItem, DetailView } from '@auto-claude/decision-index';
 import type { HandlerResult, ErrorBody, AnswerBody, RevealBody } from './decision-api.js';
 import type { RiskClass, AutonomyLevel, WideningOutcome } from './deployment-registry/types.js';
@@ -35,7 +36,13 @@ export interface ControlHandlers {
   reloadRepos?: () => Promise<{ active: number }>;
   restartRemoteControl?: () => void | Promise<void>;
   scanIssues?: () => Promise<{ scanned: number }>;
-  release?: () => Promise<ReleaseProposalResult>;
+  previewRelease?: (deployment: string) => Promise<PreviewResult>;
+  release?: (deployment: string) => Promise<ProposeResult>;
+  recordCompletion?: (
+    deployment: string,
+    releaseId: string,
+    outcome: 'released' | 'failed',
+  ) => Promise<'applied' | 'already-terminal'>;
   submitIdea?: (submittedBy: string, description: string) => Promise<{ id: string }>;
   startInteractivePoSession?: () => Promise<HandlerResult<unknown>>;
   listPendingDecisions?: (
@@ -204,11 +211,62 @@ export function createControlServer(
       }
     } else if (method === 'POST' && url.pathname === '/release') {
       if (handlers.release) {
-        handlers.release().then((result) => {
-          json(res, 200, result);
-        }).catch((e: unknown) => {
-          console.error('[control-plane] POST /release failed:', e);
-          json(res, 500, { error: 'release failed' });
+        readJsonBody(req, res, 10240, (parsed) => {
+          const deployment = (parsed as { deployment?: string }).deployment;
+          if (typeof deployment !== 'string' || deployment === '') {
+            json(res, 400, { error: 'deployment is required' });
+            return;
+          }
+          handlers.release!(deployment).then((result) => {
+            json(res, 200, result);
+          }).catch((e: unknown) => {
+            console.error('[control-plane] POST /release failed:', e);
+            json(res, 500, { error: 'release failed' });
+          });
+        });
+      } else {
+        json(res, 501, { error: 'not configured' });
+      }
+    } else if (method === 'POST' && url.pathname === '/release/preview') {
+      if (handlers.previewRelease) {
+        readJsonBody(req, res, 10240, (parsed) => {
+          const deployment = (parsed as { deployment?: string }).deployment;
+          if (typeof deployment !== 'string' || deployment === '') {
+            json(res, 400, { error: 'deployment is required' });
+            return;
+          }
+          handlers.previewRelease!(deployment).then((result) => {
+            json(res, 200, result);
+          }).catch((e: unknown) => {
+            console.error('[control-plane] POST /release/preview failed:', e);
+            json(res, 500, { error: 'preview failed' });
+          });
+        });
+      } else {
+        json(res, 501, { error: 'not configured' });
+      }
+    } else if (method === 'POST' && url.pathname === '/release/completion') {
+      if (handlers.recordCompletion) {
+        readJsonBody(req, res, 10240, (parsed) => {
+          const { deployment, releaseId, outcome } = parsed as {
+            deployment?: string;
+            releaseId?: string;
+            outcome?: 'released' | 'failed';
+          };
+          if (
+            typeof deployment !== 'string' || deployment === '' ||
+            typeof releaseId !== 'string' || releaseId === '' ||
+            (outcome !== 'released' && outcome !== 'failed')
+          ) {
+            json(res, 400, { error: 'deployment, releaseId, and outcome (released|failed) are required' });
+            return;
+          }
+          handlers.recordCompletion!(deployment, releaseId, outcome).then((result) => {
+            json(res, 200, { result });
+          }).catch((e: unknown) => {
+            console.error('[control-plane] POST /release/completion failed:', e);
+            json(res, 500, { error: 'completion failed' });
+          });
         });
       } else {
         json(res, 501, { error: 'not configured' });
@@ -610,4 +668,39 @@ function parseListRankedArgs(searchParams: URLSearchParams): ListRankedArgs {
 function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
+}
+
+type JsonBodyCallback = (parsed: Record<string, unknown>) => void;
+
+function readJsonBody(
+  req: IncomingMessage,
+  res: ServerResponse,
+  maxBytes: number,
+  onEnd: JsonBodyCallback,
+): void {
+  let body = '';
+  let oversize = false;
+  req.on('data', (chunk: Buffer) => {
+    body += chunk.toString();
+    if (body.length > maxBytes) oversize = true;
+  });
+  req.on('error', () => {
+    json(res, 400, { error: 'request error' });
+  });
+  req.on('end', () => {
+    if (oversize) {
+      json(res, 413, { error: 'body too large' });
+      return;
+    }
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        json(res, 400, { error: 'invalid JSON body' });
+        return;
+      }
+      onEnd(parsed as Record<string, unknown>);
+    } catch {
+      json(res, 400, { error: 'invalid JSON body' });
+    }
+  });
 }

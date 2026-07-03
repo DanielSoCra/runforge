@@ -156,7 +156,7 @@ function makeProfile() {
     complianceReviewers: [],
     honestAutomation: { automatable: [], strained: [], irreduciblyHuman: [] },
     budget: 1000,
-    landing: { landsOn: 'main', productionReleasePath: 'tag-and-deploy', requiredChecks: ['ci'] },
+    landing: { landsOn: 'main', productionReleasePath: { kind: 'trigger-automated', trigger: 'tag-and-deploy' }, requiredChecks: ['ci'] },
     capabilityBindings: [],
   };
 }

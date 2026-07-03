@@ -20,6 +20,7 @@
     "@auto-claude/db": "workspace:*",
     "@auto-claude/decision-index": "workspace:*",
     "@auto-claude/decision-protocol": "workspace:*",
+    "@auto-claude/release-ledger": "workspace:*",
     "@auto-claude/sanitization": "workspace:*",
     "@auto-claude/sanitizer-redaction": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.27.1",

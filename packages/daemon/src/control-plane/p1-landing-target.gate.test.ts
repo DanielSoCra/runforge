@@ -61,7 +61,7 @@ describe('G1 resolveLandingTarget', () => {
     const resolve = await loadResolveLandingTarget();
     const registry = makeRegistry({
       kind: 'found',
-      value: { landsOn: 'main', productionReleasePath: 'release-sh' },
+      value: { landsOn: 'main', productionReleasePath: { kind: 'platform-performs' } },
     });
 
     const result = resolve({ registry, deploymentId: 'auto-claude', fallbackStaging: 'staging' });

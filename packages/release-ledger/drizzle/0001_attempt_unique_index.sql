@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "release_events_one_attempt_per_release" ON "release_ledger"."release_events" USING btree ("release_id") WHERE "release_ledger"."release_events"."event" = 'attempt';

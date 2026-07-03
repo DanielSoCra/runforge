@@ -60,10 +60,16 @@ export interface HonestAutomationMap {
   irreduciblyHuman: string[];
 }
 
+/** How a deployment's production release is carried out (one of three declared shapes). */
+export type DeclaredReleasePath =
+  | { kind: 'platform-performs' }
+  | { kind: 'trigger-automated'; trigger: string }
+  | { kind: 'record-only'; procedure: string };
+
 /** Where changes may land first, and the declared path to production release. */
 export interface LandingTarget {
   landsOn: string;
-  productionReleasePath: string;
+  productionReleasePath: DeclaredReleasePath;
   /**
    * OPTIONAL explicit list of required check names the daemon polls before a
    * controlled code-change merge. Absent or empty for a governed deployment is

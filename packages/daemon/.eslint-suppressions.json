@@ -92,6 +92,11 @@
       "count": 5
     }
   },
+  "src/control-plane/p5-release-lane.gate.test.ts": {
+    "@typescript-eslint/strict-boolean-expressions": {
+      "count": 1
+    }
+  },
   "src/control-plane/phase-labels.test.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 5
