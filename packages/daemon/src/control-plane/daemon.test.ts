@@ -3745,6 +3745,88 @@ describe('daemon', () => {
       expect(mockRunPipeline).toHaveBeenCalled();
     });
 
+    it('processes a parked run only ONCE under concurrent resume scans, then releases the in-flight guard (#714 item 1)', async () => {
+      // TWO enabled repos -> two repo pollers -> two CONCURRENT resumeParkedRuns
+      // scans per tick over the SAME (daemon-global) parked-run state. Without
+      // the in-flight guard both scans pass the activeIssues check (it is only
+      // set late, inside reenterPipeline, after many awaits) and both drive the
+      // merge/resume: one wins, the loser hits `405 Merge already in progress`
+      // and logs a spurious "finished: parked".
+      mockRepoSource.listEnabledRepos.mockResolvedValue(
+        ok([
+          {
+            id: 'repo-id',
+            owner: 'test-owner',
+            name: 'test-repo',
+            poll_interval_ms: null,
+            connection_id: null,
+          },
+          {
+            id: 'repo-id-2',
+            owner: 'test-owner',
+            name: 'test-repo-2',
+            poll_interval_ms: null,
+            connection_id: null,
+          },
+        ]),
+      );
+      // Fresh parked copy per scan so both concurrent scans genuinely see the run.
+      mockStateMgr.findParkedRuns.mockImplementation(async () => [
+        makeParkedRun(),
+      ]);
+      // The FIRST label fetch for the parked issue hangs on a deferred, so that
+      // scan is provably mid-flight when the sibling scan reaches the same run.
+      // Every LATER fetch resolves approved immediately — an unguarded sibling
+      // would therefore sail straight through to runPipeline while the first
+      // scan is still blocked.
+      let releaseFirstLabelFetch!: (v: unknown) => void;
+      const gatedLabelFetch = new Promise((resolve) => {
+        releaseFirstLabelFetch = resolve;
+      });
+      const approvedIssue = {
+        data: { labels: [{ name: 'l2-approved' }], state: 'open' },
+      };
+      let parkedIssueGets = 0;
+      mockOctokit.issues.get.mockImplementation(
+        async (args: { issue_number: number }) => {
+          if (args.issue_number === 100 && ++parkedIssueGets === 1) {
+            return gatedLabelFetch;
+          }
+          return approvedIssue;
+        },
+      );
+      mockRunPipeline.mockResolvedValue({ outcome: 'complete' });
+
+      const { startDaemon } = await loadDaemon();
+      await startDaemon('config.json');
+
+      // One tick: both pollers scan. One scan blocks on the gated label fetch;
+      // the sibling must SKIP (guard) instead of resuming the same run in
+      // parallel.
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+      // Unguarded, the sibling scan would ALREADY have resumed the run here.
+      expect(mockRunPipeline).not.toHaveBeenCalled();
+      expect(console.log).toHaveBeenCalledWith(
+        expect.stringContaining('resume already in flight'),
+      );
+
+      // Unblock the first scan -> exactly ONE resume happens.
+      releaseFirstLabelFetch(approvedIssue);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockRunPipeline).toHaveBeenCalledTimes(1);
+
+      // Guard RELEASE (try/finally): a later sequential scan must process the
+      // (still-parked) run again — the in-flight set must not leak entries.
+      // Hand the run to exactly ONE of the two scans of the next tick so the
+      // expected resume count stays deterministic.
+      mockStateMgr.findParkedRuns.mockImplementation(async () => []);
+      mockStateMgr.findParkedRuns.mockResolvedValueOnce([makeParkedRun()]);
+      await vi.advanceTimersByTimeAsync(30000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mockRunPipeline).toHaveBeenCalledTimes(2);
+    });
+
     describe.skipIf(!REAL_PG)('decision-index enabled mode (real writer over real Postgres)', () => {
       const serializer = makeSchemaSerializer();
       let dir: string;

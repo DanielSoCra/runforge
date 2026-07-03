@@ -1630,6 +1630,16 @@ export async function startDaemon(
   let interactiveSessionLaunching = false;
   const activeIssues = new Set<number>(); // Persists across poll cycles — prevents duplicate runs
 
+  // #714 item 1 — resumeParkedRuns re-entrancy guard. Concurrent scans (one per
+  // repo poller tick) can both pass the activeIssues check for the SAME parked
+  // run (activeIssues is only set late, inside reenterPipeline, after many
+  // awaits): one wins the auto-merge, the loser hits `405 Merge already in
+  // progress` and logs a spurious "finished: parked". Daemon-instance-scoped,
+  // issue-keyed; entries are added synchronously before the first await of a
+  // run's resume processing and removed in a finally so a thrown handler never
+  // leaks a permanently-locked run.
+  const parkedResumesInFlight = new Set<number>();
+
   // gap #6 — detect dispatch serialization. Daemon-scoped, repo-keyed registry of
   // repos with a detect phase currently in flight (entry phase === 'detect').
   // A run is gated BEFORE it is claimed/committed (so an already-claimed in-progress
@@ -2938,12 +2948,62 @@ export async function startDaemon(
     // Limit to 1 resume per cycle to avoid thundering-herd
     for (const run of parkedRuns.slice(0, 1)) {
       if (activeIssues.has(run.issueNumber)) continue; // already running
+      // #714 item 1: in-flight guard — a concurrent scan is already resuming
+      // this run; skip quietly instead of double-driving the merge/resume.
+      if (parkedResumesInFlight.has(run.issueNumber)) {
+        console.log(
+          `[daemon] resumeParkedRuns: skipping #${run.issueNumber} — resume already in flight (concurrent scan)`,
+        );
+        continue;
+      }
+      parkedResumesInFlight.add(run.issueNumber);
+      try {
 
-      // HALT arm (precedence over decision-parked branches): a run parked by
-      // /halt re-enters at its pausedAtPhase once the daemon is unpaused. Clear
-      // BOTH parkedBy and pausedAtPhase before re-entry/persist so a later
-      // legitimate decision park is not mistaken for a halt park.
-      if (run.parkedBy === 'halt') {
+        // HALT arm (precedence over decision-parked branches): a run parked by
+        // /halt re-enters at its pausedAtPhase once the daemon is unpaused. Clear
+        // BOTH parkedBy and pausedAtPhase before re-entry/persist so a later
+        // legitimate decision park is not mistaken for a halt park.
+        if (run.parkedBy === 'halt') {
+          const runOwner = run.repoOwner ?? config.repo?.owner;
+          const runRepoName = run.repoName ?? config.repo?.name;
+          if (
+            runOwner === undefined ||
+            runOwner === '' ||
+            runRepoName === undefined ||
+            runRepoName === ''
+          ) {
+            console.warn(
+              `[daemon] resumeParkedRuns: skipping halt-parked run #${run.issueNumber} — missing repo info`,
+            );
+            continue;
+          }
+          const resumeRepoId = repoManager?.getRepoId(runOwner, runRepoName) ?? '';
+          const resumeToken =
+            repoManager && resumeRepoId
+              ? await repoManager.resolveTokenForRepo(resumeRepoId)
+              : process.env.GITHUB_TOKEN;
+          const runOctokit = new Octokit({ auth: resumeToken });
+          const phaseLabelMirror = createPhaseLabelMirror(
+            runOctokit,
+            runOwner,
+            runRepoName,
+          );
+
+          run.phase = run.pausedAtPhase ?? run.phase;
+          run.pausedAtPhase = undefined;
+          run.parkedBy = undefined;
+          await stateMgr.saveRunState(run);
+          await reenterPipeline(
+            run,
+            runOwner,
+            runRepoName,
+            resumeRepoId,
+            runOctokit,
+            phaseLabelMirror,
+          );
+          continue;
+        }
+
         const runOwner = run.repoOwner ?? config.repo?.owner;
         const runRepoName = run.repoName ?? config.repo?.name;
         if (
@@ -2953,10 +3013,21 @@ export async function startDaemon(
           runRepoName === ''
         ) {
           console.warn(
-            `[daemon] resumeParkedRuns: skipping halt-parked run #${run.issueNumber} — missing repo info`,
+            `[daemon] resumeParkedRuns: skipping run #${run.issueNumber} — missing repo info`,
           );
           continue;
         }
+        if (run.pausedAtPhase === 'l2-gate') {
+          // Keep the l2-gate branch as the primary path; integrate handled below.
+        } else if (run.pausedAtPhase === 'integrate') {
+          await resumeIntegrateParkedRun(run, runOwner, runRepoName);
+          continue;
+        } else {
+          // Only l2-gate and integrate parking are handled here.
+          continue;
+        }
+
+        // Resolve token and Octokit once for all operations on this run
         const resumeRepoId = repoManager?.getRepoId(runOwner, runRepoName) ?? '';
         const resumeToken =
           repoManager && resumeRepoId
@@ -2969,361 +3040,315 @@ export async function startDaemon(
           runRepoName,
         );
 
-        run.phase = run.pausedAtPhase ?? run.phase;
-        run.pausedAtPhase = undefined;
-        run.parkedBy = undefined;
-        await stateMgr.saveRunState(run);
-        await reenterPipeline(
-          run,
-          runOwner,
-          runRepoName,
-          resumeRepoId,
-          runOctokit,
-          phaseLabelMirror,
-        );
-        continue;
-      }
-
-      const runOwner = run.repoOwner ?? config.repo?.owner;
-      const runRepoName = run.repoName ?? config.repo?.name;
-      if (
-        runOwner === undefined ||
-        runOwner === '' ||
-        runRepoName === undefined ||
-        runRepoName === ''
-      ) {
-        console.warn(
-          `[daemon] resumeParkedRuns: skipping run #${run.issueNumber} — missing repo info`,
-        );
-        continue;
-      }
-      if (run.pausedAtPhase === 'l2-gate') {
-        // Keep the l2-gate branch as the primary path; integrate handled below.
-      } else if (run.pausedAtPhase === 'integrate') {
-        await resumeIntegrateParkedRun(run, runOwner, runRepoName);
-        continue;
-      } else {
-        // Only l2-gate and integrate parking are handled here.
-        continue;
-      }
-
-      // Resolve token and Octokit once for all operations on this run
-      const resumeRepoId = repoManager?.getRepoId(runOwner, runRepoName) ?? '';
-      const resumeToken =
-        repoManager && resumeRepoId
-          ? await repoManager.resolveTokenForRepo(resumeRepoId)
-          : process.env.GITHUB_TOKEN;
-      const runOctokit = new Octokit({ auth: resumeToken });
-      const phaseLabelMirror = createPhaseLabelMirror(
-        runOctokit,
-        runOwner,
-        runRepoName,
-      );
-
-      // Fetch current labels + state from GitHub
-      let issueLabels: string[];
-      let issueState: string;
-      try {
-        const { data: issue } = await runOctokit.issues.get({
-          owner: runOwner,
-          repo: runRepoName,
-          issue_number: run.issueNumber,
-        });
-        issueLabels = (issue.labels ?? []).map((l) =>
-          typeof l === 'string' ? l : (l.name ?? ''),
-        );
-        issueState = issue.state ?? 'open';
-      } catch (e) {
-        console.warn(
-          `[daemon] resumeParkedRuns: failed to fetch labels for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
-        );
-        continue;
-      }
-
-      // Decision id for this park cycle (epoch defaults to 1 for runs parked
-      // before decisionEpoch existed). Shared by the moot-supersede and the
-      // answer/resume paths below.
-      const decisionId = decisionIdFor(
-        `issue-${run.issueNumber}`,
-        'l2-gate',
-        run.decisionEpoch ?? 1,
-      );
-
-      // Moot decision: the issue this parked run was awaiting was CLOSED
-      // out-of-band — its l2-gate decision can never be answered. Supersede the
-      // ledger row (guarded: missing/terminal rows are skipped, fail-safe) so it
-      // leaves the pending set, and skip the resume. We do NOT clear the parked
-      // run state here (that closed-issue cleanup lives elsewhere); we only
-      // settle the dangling decision.
-      if (issueState === 'closed' && decisionManager.isEnabled()) {
+        // Fetch current labels + state from GitHub
+        let issueLabels: string[];
+        let issueState: string;
         try {
-          await supersedeIfMoot(decisionManager.ledger(), decisionId);
-        } catch (e) {
-          console.warn(
-            `[daemon] resumeParkedRuns: supersede-on-moot for closed #${run.issueNumber} failed (continuing): ${e instanceof Error ? e.message : String(e)}`,
-          );
-        }
-        continue;
-      }
-
-      // RECOGNITION PRECEDENCE:
-      //   1. Legacy operator labels (`l2-approved`/`l2-rejected`) — works flag-ON
-      //      or OFF; unchanged path. Checked FIRST so a re-park after a cockpit
-      //      approve (which synthesizes `l2-approved`) re-enters via THIS path —
-      //      the merge-block re-park is therefore handled idempotently, and the
-      //      `resumed`-status guard below never strands such a run.
-      //   2. flag-ON cockpit answer — only when NO legacy label is present: the
-      //      AUTHORITATIVE signal is a `**DecisionResponse**` comment whose JSON
-      //      decision_id matches THIS run's deterministic id (epoch-keyed). The
-      //      `answered`/`ready` labels + `pm-cockpit:requeue:` markers are discovery
-      //      hints only — never the approve/reject choice, never required. A
-      //      half-written answer (label flipped, comment absent / wrong-epoch) does
-      //      NOT resume. SLICE 2 closes the loop here.
-      let hasApproved = issueLabels.includes('l2-approved');
-      let hasRejected = issueLabels.includes('l2-rejected');
-      // Cockpit approve synthesizes the `l2-approved` label the l2-gate handler
-      // needs (the cockpit posts a DecisionResponse, NOT the label), so the existing
-      // handler can advance past the gate. Cockpit `ready` is cleaned up on resume.
-      let synthesizeApprovedLabel = false;
-      // Raw DecisionResponse comment body — surfaced for reject-feedback capture.
-      let cockpitFeedbackBody: string | undefined;
-
-      if (!hasApproved && !hasRejected && decisionManager.isEnabled()) {
-        // IDEMPOTENCY GUARD (codex spar §5): if this decision was already driven to
-        // terminal `resumed`, we already consumed this cockpit answer on a prior
-        // tick — do NOT re-consume / re-requeue. This only gates the cockpit branch;
-        // a re-park lands on the synthesized `l2-approved` legacy path above, so a
-        // legitimate merge-block re-park is never stranded. FAIL-CLOSED: a ledger()
-        // throw here stays parked this tick.
-        let alreadyResumed = false;
-        try {
-          alreadyResumed =
-            (await decisionManager.ledger().statusOf(decisionId)) === 'resumed';
-        } catch (e) {
-          console.warn(
-            `[daemon] resumeParkedRuns: statusOf failed for #${run.issueNumber} (failing closed, staying parked): ${e instanceof Error ? e.message : String(e)}`,
-          );
-          continue;
-        }
-        if (alreadyResumed) continue;
-
-        let comments: Array<{ body?: string | null }> = [];
-        try {
-          const res = await runOctokit.issues.listComments({
+          const { data: issue } = await runOctokit.issues.get({
             owner: runOwner,
             repo: runRepoName,
             issue_number: run.issueNumber,
-            per_page: 100,
           });
-          comments = res.data ?? [];
+          issueLabels = (issue.labels ?? []).map((l) =>
+            typeof l === 'string' ? l : (l.name ?? ''),
+          );
+          issueState = issue.state ?? 'open';
         } catch (e) {
           console.warn(
-            `[daemon] resumeParkedRuns: failed to fetch comments for cockpit answer on #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+            `[daemon] resumeParkedRuns: failed to fetch labels for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
           );
           continue;
         }
-        const answer = parseCockpitAnswer(comments, decisionId);
-        if (!answer) continue; // no authoritative DecisionResponse yet — stay parked
-        if (answer.choice === 'approve') {
-          hasApproved = true;
-          synthesizeApprovedLabel = true;
-        } else {
-          hasRejected = true;
-          cockpitFeedbackBody = answer.feedbackBody;
-        }
-        console.log(
-          `[daemon] resumeParkedRuns: cockpit answer (${answer.choice}) recognized for #${run.issueNumber} via DecisionResponse`,
+
+        // Decision id for this park cycle (epoch defaults to 1 for runs parked
+        // before decisionEpoch existed). Shared by the moot-supersede and the
+        // answer/resume paths below.
+        const decisionId = decisionIdFor(
+          `issue-${run.issueNumber}`,
+          'l2-gate',
+          run.decisionEpoch ?? 1,
         );
-      }
 
-      if (!hasApproved && !hasRejected) continue; // still waiting
-
-      console.log(
-        `[daemon] resumeParkedRuns: resuming #${run.issueNumber} (${hasApproved ? 'l2-approved' : 'l2-rejected'})`,
-      );
-
-      // `decisionId` (computed above) records the operator's answer and later
-      // drives the ledger to `resumed`.
-      // Approved takes precedence if (somehow) both labels are present.
-      const rejectedResume = !hasApproved && hasRejected;
-      const choice = hasApproved ? 'approve' : 'reject';
-
-      // FIX 2 (flag-OFF blocker): the rejected-resume routing change (extra
-      // listComments() call, l2Feedback capture, phase='l2-design', and clearing
-      // the l2Gate/l2MergeBlocked notification flags) is the NEW flag-ON behavior.
-      // origin/main resumes BOTH approved and rejected runs to phase='l2-gate'
-      // with no extra GitHub call and no notification-flag change. Gate the whole
-      // routing change behind isEnabled() so a flag-OFF daemon behaves EXACTLY
-      // like origin/main. The logic itself is correct for flag-ON — only gated.
-      const routeRejectedToL2Design = rejectedResume && decisionManager.isEnabled();
-
-      // CRASH-SAFE ORDERING (1/2): record the operator's answer in the ledger
-      // BEFORE mutating run state. answer() is answered-once (`.applied:false`
-      // on replay — fine). FAIL-CLOSED: if the index is enabled but ledger()
-      // throws (broken), skip this run this tick (stay parked) rather than
-      // advancing on unconfirmed state.
-      if (decisionManager.isEnabled()) {
-        try {
-          // answer() is async (real Postgres writer) — AWAIT it so the row is
-          // durably `answered_pending_source_write` before advanceToResumed runs;
-          // a fire-and-forget call races the advance, which then no-ops on the
-          // not-yet-answered row and strands it. await also routes an async
-          // rejection into this fail-closed catch.
-          await decisionManager.ledger().answer(decisionId, choice, 'operator');
-        } catch (e) {
-          console.warn(
-            `[daemon] resumeParkedRuns: decision-index answer failed for #${run.issueNumber} (failing closed, staying parked): ${e instanceof Error ? e.message : String(e)}`,
-          );
+        // Moot decision: the issue this parked run was awaiting was CLOSED
+        // out-of-band — its l2-gate decision can never be answered. Supersede the
+        // ledger row (guarded: missing/terminal rows are skipped, fail-safe) so it
+        // leaves the pending set, and skip the resume. We do NOT clear the parked
+        // run state here (that closed-issue cleanup lives elsewhere); we only
+        // settle the dangling decision.
+        if (issueState === 'closed' && decisionManager.isEnabled()) {
+          try {
+            await supersedeIfMoot(decisionManager.ledger(), decisionId);
+          } catch (e) {
+            console.warn(
+              `[daemon] resumeParkedRuns: supersede-on-moot for closed #${run.issueNumber} failed (continuing): ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
           continue;
         }
-      }
 
-      // Behavioral learning: record the operator's l2-gate decision (fire-and-forget).
-      operatorLearning.observeDecisionAnswer({
-        decisionClass: 'l2_gate',
-        context: `${runOwner}/${runRepoName}`,
-        sourceDecisionId: decisionId,
-        chosenOption: choice,
-      }).catch((e) =>
-        console.warn(
-          `[daemon] resumeParkedRuns: operator-learning observation failed for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
-        ),
-      );
+        // RECOGNITION PRECEDENCE:
+        //   1. Legacy operator labels (`l2-approved`/`l2-rejected`) — works flag-ON
+        //      or OFF; unchanged path. Checked FIRST so a re-park after a cockpit
+        //      approve (which synthesizes `l2-approved`) re-enters via THIS path —
+        //      the merge-block re-park is therefore handled idempotently, and the
+        //      `resumed`-status guard below never strands such a run.
+        //   2. flag-ON cockpit answer — only when NO legacy label is present: the
+        //      AUTHORITATIVE signal is a `**DecisionResponse**` comment whose JSON
+        //      decision_id matches THIS run's deterministic id (epoch-keyed). The
+        //      `answered`/`ready` labels + `pm-cockpit:requeue:` markers are discovery
+        //      hints only — never the approve/reject choice, never required. A
+        //      half-written answer (label flipped, comment absent / wrong-epoch) does
+        //      NOT resume. SLICE 2 closes the loop here.
+        let hasApproved = issueLabels.includes('l2-approved');
+        let hasRejected = issueLabels.includes('l2-rejected');
+        // Cockpit approve synthesizes the `l2-approved` label the l2-gate handler
+        // needs (the cockpit posts a DecisionResponse, NOT the label), so the existing
+        // handler can advance past the gate. Cockpit `ready` is cleaned up on resume.
+        let synthesizeApprovedLabel = false;
+        // Raw DecisionResponse comment body — surfaced for reject-feedback capture.
+        let cockpitFeedbackBody: string | undefined;
 
-      // For a rejected resume (FLAG ON ONLY), capture the rejection feedback and
-      // route the run BACK to l2-design directly (fix for the pre-existing
-      // dropped-feedback bug: we strip l2-rejected here, so the l2-gate handler
-      // would never see it and never capture feedback / route to l2-design).
-      // Approved resumes re-enter l2-gate unchanged. Flag OFF: skip entirely so
-      // there is no extra listComments() call and feedback is left untouched
-      // (matches origin/main).
-      if (routeRejectedToL2Design) {
-        // Sanitize identically to the l2-gate handler: strip {{placeholder}}
-        // template patterns (prompt-injection defense) and cap length.
-        const MAX_FEEDBACK_LENGTH = 4000;
-        const captureFeedback = (raw: string): void => {
-          run.l2Feedback = raw
-            .replace(/\{\{[\w-]+\}\}/g, '')
-            .slice(0, MAX_FEEDBACK_LENGTH);
-        };
-        if (cockpitFeedbackBody != null && cockpitFeedbackBody !== '') {
-          // Cockpit reject: the authoritative DecisionResponse comment IS the
-          // feedback (already fetched during recognition — no extra round-trip).
-          captureFeedback(cockpitFeedbackBody);
-        } else {
-          // Legacy operator l2-rejected label: scan for the rejection comment.
+        if (!hasApproved && !hasRejected && decisionManager.isEnabled()) {
+          // IDEMPOTENCY GUARD (codex spar §5): if this decision was already driven to
+          // terminal `resumed`, we already consumed this cockpit answer on a prior
+          // tick — do NOT re-consume / re-requeue. This only gates the cockpit branch;
+          // a re-park lands on the synthesized `l2-approved` legacy path above, so a
+          // legitimate merge-block re-park is never stranded. FAIL-CLOSED: a ledger()
+          // throw here stays parked this tick.
+          let alreadyResumed = false;
           try {
-            const comments = await runOctokit.issues.listComments({
+            alreadyResumed =
+              (await decisionManager.ledger().statusOf(decisionId)) === 'resumed';
+          } catch (e) {
+            console.warn(
+              `[daemon] resumeParkedRuns: statusOf failed for #${run.issueNumber} (failing closed, staying parked): ${e instanceof Error ? e.message : String(e)}`,
+            );
+            continue;
+          }
+          if (alreadyResumed) continue;
+
+          let comments: Array<{ body?: string | null }> = [];
+          try {
+            const res = await runOctokit.issues.listComments({
               owner: runOwner,
               repo: runRepoName,
               issue_number: run.issueNumber,
-              per_page: 20,
+              per_page: 100,
             });
-            const rejectionComment = [...(comments.data ?? [])]
-              .reverse()
-              .find(
-                (c) =>
-                  c.body != null &&
-                  (c.body.includes('REJECTED') ||
-                    c.body.includes('l2-rejected')),
-              );
-            if (rejectionComment?.body != null && rejectionComment.body !== '') {
-              captureFeedback(rejectionComment.body);
-            }
+            comments = res.data ?? [];
           } catch (e) {
             console.warn(
-              `[daemon] resumeParkedRuns: failed to fetch rejection comment for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+              `[daemon] resumeParkedRuns: failed to fetch comments for cockpit answer on #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+            );
+            continue;
+          }
+          const answer = parseCockpitAnswer(comments, decisionId);
+          if (!answer) continue; // no authoritative DecisionResponse yet — stay parked
+          if (answer.choice === 'approve') {
+            hasApproved = true;
+            synthesizeApprovedLabel = true;
+          } else {
+            hasRejected = true;
+            cockpitFeedbackBody = answer.feedbackBody;
+          }
+          console.log(
+            `[daemon] resumeParkedRuns: cockpit answer (${answer.choice}) recognized for #${run.issueNumber} via DecisionResponse`,
+          );
+        }
+
+        if (!hasApproved && !hasRejected) continue; // still waiting
+
+        console.log(
+          `[daemon] resumeParkedRuns: resuming #${run.issueNumber} (${hasApproved ? 'l2-approved' : 'l2-rejected'})`,
+        );
+
+        // `decisionId` (computed above) records the operator's answer and later
+        // drives the ledger to `resumed`.
+        // Approved takes precedence if (somehow) both labels are present.
+        const rejectedResume = !hasApproved && hasRejected;
+        const choice = hasApproved ? 'approve' : 'reject';
+
+        // FIX 2 (flag-OFF blocker): the rejected-resume routing change (extra
+        // listComments() call, l2Feedback capture, phase='l2-design', and clearing
+        // the l2Gate/l2MergeBlocked notification flags) is the NEW flag-ON behavior.
+        // origin/main resumes BOTH approved and rejected runs to phase='l2-gate'
+        // with no extra GitHub call and no notification-flag change. Gate the whole
+        // routing change behind isEnabled() so a flag-OFF daemon behaves EXACTLY
+        // like origin/main. The logic itself is correct for flag-ON — only gated.
+        const routeRejectedToL2Design = rejectedResume && decisionManager.isEnabled();
+
+        // CRASH-SAFE ORDERING (1/2): record the operator's answer in the ledger
+        // BEFORE mutating run state. answer() is answered-once (`.applied:false`
+        // on replay — fine). FAIL-CLOSED: if the index is enabled but ledger()
+        // throws (broken), skip this run this tick (stay parked) rather than
+        // advancing on unconfirmed state.
+        if (decisionManager.isEnabled()) {
+          try {
+            // answer() is async (real Postgres writer) — AWAIT it so the row is
+            // durably `answered_pending_source_write` before advanceToResumed runs;
+            // a fire-and-forget call races the advance, which then no-ops on the
+            // not-yet-answered row and strands it. await also routes an async
+            // rejection into this fail-closed catch.
+            await decisionManager.ledger().answer(decisionId, choice, 'operator');
+          } catch (e) {
+            console.warn(
+              `[daemon] resumeParkedRuns: decision-index answer failed for #${run.issueNumber} (failing closed, staying parked): ${e instanceof Error ? e.message : String(e)}`,
+            );
+            continue;
+          }
+        }
+
+        // Behavioral learning: record the operator's l2-gate decision (fire-and-forget).
+        operatorLearning.observeDecisionAnswer({
+          decisionClass: 'l2_gate',
+          context: `${runOwner}/${runRepoName}`,
+          sourceDecisionId: decisionId,
+          chosenOption: choice,
+        }).catch((e) =>
+          console.warn(
+            `[daemon] resumeParkedRuns: operator-learning observation failed for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+          ),
+        );
+
+        // For a rejected resume (FLAG ON ONLY), capture the rejection feedback and
+        // route the run BACK to l2-design directly (fix for the pre-existing
+        // dropped-feedback bug: we strip l2-rejected here, so the l2-gate handler
+        // would never see it and never capture feedback / route to l2-design).
+        // Approved resumes re-enter l2-gate unchanged. Flag OFF: skip entirely so
+        // there is no extra listComments() call and feedback is left untouched
+        // (matches origin/main).
+        if (routeRejectedToL2Design) {
+          // Sanitize identically to the l2-gate handler: strip {{placeholder}}
+          // template patterns (prompt-injection defense) and cap length.
+          const MAX_FEEDBACK_LENGTH = 4000;
+          const captureFeedback = (raw: string): void => {
+            run.l2Feedback = raw
+              .replace(/\{\{[\w-]+\}\}/g, '')
+              .slice(0, MAX_FEEDBACK_LENGTH);
+          };
+          if (cockpitFeedbackBody != null && cockpitFeedbackBody !== '') {
+            // Cockpit reject: the authoritative DecisionResponse comment IS the
+            // feedback (already fetched during recognition — no extra round-trip).
+            captureFeedback(cockpitFeedbackBody);
+          } else {
+            // Legacy operator l2-rejected label: scan for the rejection comment.
+            try {
+              const comments = await runOctokit.issues.listComments({
+                owner: runOwner,
+                repo: runRepoName,
+                issue_number: run.issueNumber,
+                per_page: 20,
+              });
+              const rejectionComment = [...(comments.data ?? [])]
+                .reverse()
+                .find(
+                  (c) =>
+                    c.body != null &&
+                    (c.body.includes('REJECTED') ||
+                      c.body.includes('l2-rejected')),
+                );
+              if (rejectionComment?.body != null && rejectionComment.body !== '') {
+                captureFeedback(rejectionComment.body);
+              }
+            } catch (e) {
+              console.warn(
+                `[daemon] resumeParkedRuns: failed to fetch rejection comment for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+              );
+            }
+          }
+        }
+
+        // Reset run state. FLAG ON + rejected -> route straight to l2-design
+        // (feedback already captured above) so the rework cycle runs; mirror the
+        // l2-gate rejection branch's notification resets so the next park
+        // re-notifies and re-emits a fresh decision. Otherwise (approved, OR flag
+        // OFF for either label) re-enter l2-gate unchanged — identical to
+        // origin/main: no phase divergence, notification flags untouched.
+        if (routeRejectedToL2Design) {
+          run.phase = 'l2-design';
+          run.l2GateNotified = false;
+          run.l2MergeBlockedNotified = undefined;
+        } else {
+          run.phase = 'l2-gate';
+        }
+        run.pausedAtPhase = undefined;
+
+        // SYNTHESIZE the l2-approved label for a cockpit approve (flag-ON only). The
+        // cockpit posts a DecisionResponse, NOT the label, but the l2-gate handler
+        // advances ONLY when it re-reads `l2-approved` on the issue — otherwise it
+        // re-parks. Adding it BEFORE the durable save makes a post-save restart
+        // re-enter via the legacy `l2-approved` path (idempotent: the answer replays).
+        // A crash after save but before this add leaves the run un-parked at l2-gate
+        // without the label; the handler then re-parks and the still-present cockpit
+        // answer is re-recognized — recoverable, not stuck.
+        if (synthesizeApprovedLabel) {
+          try {
+            await runOctokit.issues.addLabels({
+              owner: runOwner,
+              repo: runRepoName,
+              issue_number: run.issueNumber,
+              labels: ['l2-approved'],
+            });
+          } catch (e) {
+            console.warn(
+              `[daemon] resumeParkedRuns: failed to synthesize l2-approved label for #${run.issueNumber} (continuing; handler may re-park): ${e instanceof Error ? e.message : String(e)}`,
             );
           }
         }
-      }
 
-      // Reset run state. FLAG ON + rejected -> route straight to l2-design
-      // (feedback already captured above) so the rework cycle runs; mirror the
-      // l2-gate rejection branch's notification resets so the next park
-      // re-notifies and re-emits a fresh decision. Otherwise (approved, OR flag
-      // OFF for either label) re-enter l2-gate unchanged — identical to
-      // origin/main: no phase divergence, notification flags untouched.
-      if (routeRejectedToL2Design) {
-        run.phase = 'l2-design';
-        run.l2GateNotified = false;
-        run.l2MergeBlockedNotified = undefined;
-      } else {
-        run.phase = 'l2-gate';
-      }
-      run.pausedAtPhase = undefined;
+        // DURABLE COMMIT: persist the requeue BEFORE the (irreversible, remote)
+        // gate-label removal. If we removed labels first and crashed before this
+        // save, the run would restart still parked but with the trigger label gone
+        // -> stuck forever, feedback lost. Save-first makes restart re-resume
+        // idempotently (answer is answered-once; the requeue replays).
+        await stateMgr.saveRunState(run);
 
-      // SYNTHESIZE the l2-approved label for a cockpit approve (flag-ON only). The
-      // cockpit posts a DecisionResponse, NOT the label, but the l2-gate handler
-      // advances ONLY when it re-reads `l2-approved` on the issue — otherwise it
-      // re-parks. Adding it BEFORE the durable save makes a post-save restart
-      // re-enter via the legacy `l2-approved` path (idempotent: the answer replays).
-      // A crash after save but before this add leaves the run un-parked at l2-gate
-      // without the label; the handler then re-parks and the still-present cockpit
-      // answer is re-recognized — recoverable, not stuck.
-      if (synthesizeApprovedLabel) {
-        try {
-          await runOctokit.issues.addLabels({
-            owner: runOwner,
-            repo: runRepoName,
-            issue_number: run.issueNumber,
-            labels: ['l2-approved'],
-          });
-        } catch (e) {
-          console.warn(
-            `[daemon] resumeParkedRuns: failed to synthesize l2-approved label for #${run.issueNumber} (continuing; handler may re-park): ${e instanceof Error ? e.message : String(e)}`,
-          );
+        // Remove gate labels (best-effort) AFTER the durable save — awaiting,
+        // rejected, AND the cockpit's `ready` requeue label must be cleared so the
+        // l2-gate handler does not immediately re-trigger on resume AND the new-work
+        // poll never re-claims this issue once it un-parks (the cockpit's `ready`
+        // aliases the daemon's NEW-work label — codex spar §3 cleanup rule). We KEEP
+        // the `answered` label + all comments/markers as audit + cockpit idempotency
+        // evidence. `ready` is only stripped when the index is enabled (flag-OFF must
+        // not touch a label it never reads, keeping that path byte-identical).
+        const labelsToRemove = ['awaiting-l2-review', 'l2-rejected'];
+        if (decisionManager.isEnabled()) labelsToRemove.push(REQUEUE_LABEL);
+        for (const label of labelsToRemove) {
+          try {
+            await runOctokit.issues.removeLabel({
+              owner: runOwner,
+              repo: runRepoName,
+              issue_number: run.issueNumber,
+              name: label,
+            });
+          } catch {
+            /* label may not exist — ignore */
+          }
         }
-      }
 
-      // DURABLE COMMIT: persist the requeue BEFORE the (irreversible, remote)
-      // gate-label removal. If we removed labels first and crashed before this
-      // save, the run would restart still parked but with the trigger label gone
-      // -> stuck forever, feedback lost. Save-first makes restart re-resume
-      // idempotently (answer is answered-once; the requeue replays).
-      await stateMgr.saveRunState(run);
-
-      // Remove gate labels (best-effort) AFTER the durable save — awaiting,
-      // rejected, AND the cockpit's `ready` requeue label must be cleared so the
-      // l2-gate handler does not immediately re-trigger on resume AND the new-work
-      // poll never re-claims this issue once it un-parks (the cockpit's `ready`
-      // aliases the daemon's NEW-work label — codex spar §3 cleanup rule). We KEEP
-      // the `answered` label + all comments/markers as audit + cockpit idempotency
-      // evidence. `ready` is only stripped when the index is enabled (flag-OFF must
-      // not touch a label it never reads, keeping that path byte-identical).
-      const labelsToRemove = ['awaiting-l2-review', 'l2-rejected'];
-      if (decisionManager.isEnabled()) labelsToRemove.push(REQUEUE_LABEL);
-      for (const label of labelsToRemove) {
-        try {
-          await runOctokit.issues.removeLabel({
-            owner: runOwner,
-            repo: runRepoName,
-            issue_number: run.issueNumber,
-            name: label,
-          });
-        } catch {
-          /* label may not exist — ignore */
+        // CRASH-SAFE ORDERING (2/2): only AFTER the run-state requeue is committed
+        // do we drive the ledger to terminal `resumed` via the real effect chain
+        // (write_response -> requeue -> resumed). Never direct-apply resume_ack.
+        // FAIL-CLOSED: a ledger() throw here logs but does not roll back the already
+        // -committed requeue (the run is correctly advancing); boot reconcile will
+        // complete any in-flight effect.
+        if (decisionManager.isEnabled()) {
+          try {
+            await decisionManager.ledger().advanceToResumed(decisionId, 'requeue');
+          } catch (e) {
+            console.warn(
+              `[daemon] resumeParkedRuns: decision-index advanceToResumed failed for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
         }
-      }
 
-      // CRASH-SAFE ORDERING (2/2): only AFTER the run-state requeue is committed
-      // do we drive the ledger to terminal `resumed` via the real effect chain
-      // (write_response -> requeue -> resumed). Never direct-apply resume_ack.
-      // FAIL-CLOSED: a ledger() throw here logs but does not roll back the already
-      // -committed requeue (the run is correctly advancing); boot reconcile will
-      // complete any in-flight effect.
-      if (decisionManager.isEnabled()) {
-        try {
-          await decisionManager.ledger().advanceToResumed(decisionId, 'requeue');
-        } catch (e) {
-          console.warn(
-            `[daemon] resumeParkedRuns: decision-index advanceToResumed failed for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
-          );
-        }
+        // Re-enter pipeline
+        await reenterPipeline(run, runOwner, runRepoName, resumeRepoId, runOctokit, phaseLabelMirror);
+      } finally {
+        // Always release (even on throw/continue) so a failed resume attempt
+        // never leaves the run permanently locked out of future scans.
+        parkedResumesInFlight.delete(run.issueNumber);
       }
-
-      // Re-enter pipeline
-      await reenterPipeline(run, runOwner, runRepoName, resumeRepoId, runOctokit, phaseLabelMirror);
     }
 
     async function resumeIntegrateParkedRun(
