@@ -618,6 +618,58 @@ async function settleRealUntil<T>(
   return last;
 }
 
+/**
+ * Drive NEW poll ticks (re-arming the faked poll interval) until `predicate(read())`
+ * holds. This is the deliberate opposite of `settleRealUntil`, which waits on a durable
+ * effect WITHOUT advancing fake timers: here each iteration BOTH advances the faked
+ * `setInterval` by one poll period AND drains real async between fires.
+ *
+ * Why a single `advanceTimersByTimeAsync` is not enough: `RepoManager.startPoll`
+ * (repo-manager.ts) guards re-entrancy with `if (entry.pollInProgress) return false`.
+ * A poll tick's `onPoll` runs on REAL async (postgres-js, the resume chain's
+ * fire-and-forget re-enter, the trailing finding-dismissal scan), so it is still
+ * in-flight — `pollInProgress === true` — when `advanceTimersByTimeAsync` returns. A
+ * fake-timer interval fire that lands in that window is SWALLOWED by the guard and lost,
+ * and `settleRealUntil` (which never re-advances timers) would then wait forever for a
+ * second tick that never fires. Re-firing on real time until the effect appears makes
+ * the second tick land deterministically regardless of how long the first poll drains.
+ *
+ * Use ONLY where repeated ticks are intended (e.g. idempotency-under-replay): each extra
+ * tick just re-runs the daemon's own idempotency guards, so re-firing cannot itself
+ * cause a duplicate effect.
+ *
+ * Two caller constraints:
+ *  - `setTimeout` must be REAL (these suites fake only `setInterval`/`Date`); the inter-
+ *    fire sleep below relies on it. Under a full `vi.useFakeTimers()` it would hang.
+ *  - This returns as soon as `predicate` holds, which is typically an EARLY in-poll signal
+ *    (e.g. the idempotency guard's status read). A caller asserting the ABSENCE of a
+ *    *later* same-poll effect (e.g. a re-entry a broken guard would perform after that
+ *    read) must first drain the poll to completion — the returned point is the guard
+ *    re-executing, not the poll finishing.
+ */
+async function advancePollsUntil<T>(
+  read: () => Promise<T> | T,
+  predicate: (v: T) => boolean,
+  opts: { label: string; pollPeriodMs: number; timeoutMs?: number; intervalMs?: number },
+): Promise<T> {
+  const timeoutMs = opts.timeoutMs ?? 8_000;
+  const intervalMs = opts.intervalMs ?? 15;
+  const deadline = performance.now() + timeoutMs;
+  await vi.advanceTimersByTimeAsync(opts.pollPeriodMs);
+  let last = await read();
+  while (!predicate(last)) {
+    if (performance.now() >= deadline) {
+      throw new Error(
+        `advancePollsUntil: '${opts.label}' not satisfied within ${timeoutMs}ms; last=${JSON.stringify(last)}`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+    await vi.advanceTimersByTimeAsync(opts.pollPeriodMs);
+    last = await read();
+  }
+  return last;
+}
+
 /** A run was re-entered into the pipeline (the LAST effect of a successful resume). */
 function reenteredPipeline(issueNumber: number): boolean {
   return mockRunPipeline.mock.calls.some(
@@ -4235,13 +4287,14 @@ describe('daemon', () => {
         });
         const seen = statusSpy.mock.calls.length;
 
-        // Tick 2: the SAME answer is seen again. Wait until the second poll has actually
-        // re-executed its statusOf idempotency guard (daemon.ts:2544, cockpit branch),
-        // then assert it did NOT re-enter.
-        await vi.advanceTimersByTimeAsync(30000);
-        await vi.advanceTimersByTimeAsync(0);
-        await settleRealUntil(() => statusSpy.mock.calls.length, (n) => n > seen, {
+        // Tick 2: the SAME answer is seen again. Keep re-firing the poll interval until a
+        // FRESH poll actually re-executes the statusOf idempotency guard (daemon.ts, cockpit
+        // branch). A single advanceTimersByTimeAsync is not enough: tick 1's poll is still
+        // draining on real async, so RepoManager.startPoll's `pollInProgress` re-entrancy
+        // guard swallows an interval fire that lands mid-poll (see advancePollsUntil).
+        await advancePollsUntil(() => statusSpy.mock.calls.length, (n) => n > seen, {
           label: 'double-delivery tick2 second-poll guard re-read',
+          pollPeriodMs: 30000,
         });
 
         // EXACTLY ONE re-entry: the new-work poll never claimed #100, and the run
