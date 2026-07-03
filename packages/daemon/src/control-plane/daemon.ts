@@ -63,6 +63,7 @@ import type { ProtectedStore } from '@auto-claude/sanitizer-redaction';
 import { readDecisionIndexConfig } from './decision-escalation/config.js';
 import { decisionIdFor } from './decision-escalation/build-request.js';
 import { decisionIdFor as mergeDecisionIdFor } from './merge-decision/build-request.js';
+import { buildReversalDecisionId } from './revert-lane.js';
 import {
   bootReconcile,
   supersedeIfMoot,
@@ -166,8 +167,7 @@ import {
 } from '../coordination/coordinator.js';
 import { createWorkClaimer } from '../coordination/work-claimer.js';
 import { createBatchManager } from '../coordination/batch-manager.js';
-import { createMergeAgent } from '../coordination/merge-agent.js';
-import { createMergeQueue } from '../coordination/merge-queue.js';
+import type { MergeAgent } from '../coordination/merge-agent.js';
 import { statfs } from 'fs/promises';
 import { startHeartbeat } from './heartbeat.js';
 import { createKnowledgeSyncService } from '../knowledge-sync/sync-service.js';
@@ -1217,29 +1217,14 @@ export async function startDaemon(
   if (config.coordination.useCoordinator) {
     const workClaimer = createWorkClaimer(stateDir);
     const batchManager = createBatchManager(stateDir);
-    const mergeQueue = createMergeQueue(stateDir);
-    const mergeAgent = createMergeAgent(
-      {
-        queue: mergeQueue,
-        git: async (_args: string[], _cwd?: string) => ok('' as string),
-        resolveConflicts: async (_cwd, _cfg, _session) => ({
-          resolved: false,
-          needsHuman: true,
-        }),
-        validate: async (_issueNumber, _signal) => ok(undefined as void),
-        resolveSession: async (_files, _cwd) => ok(undefined as void),
-        integrationBranch: config.branches.staging,
-        mergeWorktreePath: join(stateDir, 'coordination', 'merge-worktree'),
-      },
-      {
-        pollIntervalMs: config.coordination.mergePollInterval,
-        maxPollIntervalMs: config.coordination.mergePollMaxInterval,
-        conflictFileThreshold: config.coordination.conflictFileThreshold,
-        conflictLineThreshold: config.coordination.conflictLineThreshold,
-        validationTimeoutMs: config.coordination.mergeValidationTimeout,
-        dependencyTimeoutMs: config.coordination.mergeDependencyTimeout,
-      },
-    );
+    // QUARANTINED (P1): merge-agent.ts is inert scaffolding behind
+    // useCoordinator (default false) with a no-op git stub. It is not the live
+    // revert net; the controlled revert lane lives in control-plane/revert-lane.ts.
+    const mergeAgent: MergeAgent = {
+      processEntry: async () => ok(undefined),
+      recoverStuckEntries: async () => {},
+      start: () => () => {},
+    };
 
     const coordinatorConfig: CoordinatorConfig = {
       tickIntervalMs: config.coordination.tickInterval,
@@ -3080,10 +3065,18 @@ export async function startDaemon(
       // the ledger already `resumed` and strand. Phase is baked into the builder.
       const mergeEpoch = run.mergeDecisionEpoch ?? 1;
       run.mergeDecisionEpoch = mergeEpoch;
-      const decisionId = mergeDecisionIdFor(`issue-${run.issueNumber}`, mergeEpoch);
+
+      const integrateArtifact = run.phaseArtifacts?.integrate;
+      const reversal = integrateArtifact?.reversal;
+      const isReversalPark =
+        integrateArtifact?.status === 'reversal-raised' && reversal !== undefined;
+      const decisionId = isReversalPark
+        ? (reversal.decisionId ??
+           buildReversalDecisionId(run, integrateArtifact.mergeSha ?? ''))
+        : mergeDecisionIdFor(`issue-${run.issueNumber}`, mergeEpoch);
 
       // Moot decision: the issue this parked run was awaiting was CLOSED
-      // out-of-band — its integrate decision can never be answered.
+      // out-of-band — its decision can never be answered.
       if (issueState === 'closed' && decisionManager.isEnabled()) {
         try {
           await supersedeIfMoot(decisionManager.ledger(), decisionId);
@@ -3144,7 +3137,7 @@ export async function startDaemon(
       if (!answer) return; // no authoritative DecisionResponse yet — stay parked
 
       console.log(
-        `[daemon] resumeParkedRuns: cockpit answer (${answer.choice}) recognized for #${run.issueNumber} via DecisionResponse (integrate)`,
+        `[daemon] resumeParkedRuns: cockpit answer (${answer.choice}) recognized for #${run.issueNumber} via DecisionResponse (${isReversalPark ? 'reversal' : 'integrate'})`,
       );
 
       // CRASH-SAFE ORDERING (1/2): record the operator's answer in the ledger

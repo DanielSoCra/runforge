@@ -96,6 +96,11 @@ const LandingTargetSchema = z
   .object({
     landsOn: z.string().min(1),
     productionReleasePath: z.string().min(1),
+    /**
+     * OPTIONAL explicit required-check names for the controlled code-change
+     * merge path. Absent or empty for a governed deployment fails closed.
+     */
+    requiredChecks: z.array(z.string().min(1)).optional(),
   })
   .strict();
 

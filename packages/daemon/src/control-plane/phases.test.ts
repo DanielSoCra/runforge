@@ -291,7 +291,15 @@ const mockOctokit = {
     removeLabel: vi.fn(async () => ({})),
   },
   pulls: {
+    create: vi.fn(async () => ({ data: { number: 101, html_url: 'https://github.example/pull/101', head: { ref: 'feature/42' }, base: { ref: 'staging' } } })),
+    list: vi.fn(async () => ({ data: [] })),
     merge: vi.fn(async () => ({ data: { merged: true } })),
+  },
+  checks: {
+    listForRef: vi.fn(async () => ({ data: { total_count: 0, check_runs: [] } })),
+  },
+  repos: {
+    getCombinedStatusForRef: vi.fn(async () => ({ data: { state: 'success', statuses: [] } })),
   },
 } as any;
 const mockRuntime = { spawnSession: vi.fn() } as any;

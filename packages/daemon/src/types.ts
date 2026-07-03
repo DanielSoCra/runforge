@@ -140,9 +140,27 @@ export type PhaseArtifactStatus =
   | 'proposed'
   | 'awaiting-review'
   | 'merged'
+  | 'joined'
+  | 'observed-healthy'
+  | 'observed-red'
+  | 'reversal-raised'
+  | 'reverted'
   | 'rejected'
   | 'superseded'
   | 'delivery-failed';
+
+export interface PostLandingObservation {
+  status: 'healthy' | 'red' | 'indeterminate';
+  summary: string;
+  observedAt: string;
+}
+
+export interface ReversalReference {
+  revertBranch: string;
+  revertPullRequestNumber: number;
+  revertPullRequestUrl: string;
+  decisionId: string;
+}
 
 export interface PhaseArtifact {
   issueNumber: number;
@@ -158,6 +176,9 @@ export interface PhaseArtifact {
   createdAt: string;
   updatedAt: string;
   mergeIdentifier?: string;
+  mergeSha?: string;
+  observation?: PostLandingObservation;
+  reversal?: ReversalReference;
 }
 
 export type RuntimeSourceAction = 'warn' | 'pause' | 'fail';

@@ -28,7 +28,7 @@ This architecture is the delivery contract for gated specification phases, for c
 
 **ArtifactStatus** is one of: prepared, proposed, awaiting-review, merged, joined, observed-healthy, observed-red, reversal-raised, reverted, rejected, superseded, or delivery-failed. `joined` marks a code change that has entered the trunk through the controlled path; `observed-healthy` / `observed-red` record the trunk's health after it landed; `reversal-raised` and `reverted` track the reversal lane.
 
-**LandingTarget** is read from the deployment's declared profile. It names the single trunk a code change lands on and the declared path to production release. Only the trunk name governs delivery in this architecture; the release path is consumed by the release architecture, not here. A deployment that declares no LandingTarget has no controlled lane and falls back to the ungoverned direct join.
+**LandingTarget** is read from the deployment's declared profile. It names the single trunk a code change lands on, the declared path to production release, and the explicit list of required checks the daemon polls before a controlled merge. Only the trunk name governs delivery in this architecture; the release path is consumed by the release architecture, not here. A deployment that declares no LandingTarget has no controlled lane and falls back to the ungoverned direct join.
 
 **MergeDecisionReference** links a code-change PhaseArtifact to the verdict the Merge Decision system returned for it — auto-merge, hold, or escalate — so the delivery record shows on whose judgement the change joined or why it parked.
 

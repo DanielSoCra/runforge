@@ -12,6 +12,11 @@ code_paths:
   - prompts/l3-generator.md
   - packages/daemon/src/control-plane/phases.ts
   - packages/daemon/src/control-plane/integration.ts
+  - packages/daemon/src/control-plane/landing-target.ts
+  - packages/daemon/src/control-plane/pr-delivery.ts
+  - packages/daemon/src/control-plane/await-checks.ts
+  - packages/daemon/src/control-plane/revert-lane.ts
+  - packages/daemon/src/control-plane/phase-artifact-status.ts
   - packages/daemon/src/control-plane/spec-pipeline/delivery.ts
   - packages/daemon/src/control-plane/spec-pipeline/park.ts
   - packages/daemon/src/control-plane/spec-pipeline/spec-chain.ts
@@ -19,6 +24,11 @@ code_paths:
 test_paths:
   - packages/daemon/src/control-plane/phases.test.ts
   - packages/daemon/src/control-plane/integration.test.ts
+  - packages/daemon/src/control-plane/p1-landing-target.gate.test.ts
+  - packages/daemon/src/control-plane/p1-pr-delivery.gate.test.ts
+  - packages/daemon/src/control-plane/p1-await-checks.gate.test.ts
+  - packages/daemon/src/control-plane/p1-revert-lane.gate.test.ts
+  - packages/daemon/src/control-plane/p1-idempotency-resume.gate.test.ts
   - packages/daemon/src/control-plane/spec-pipeline/delivery.test.ts
   - packages/daemon/src/control-plane/spec-pipeline/**/*.test.ts
 ---
@@ -41,7 +51,7 @@ test_paths:
 
 **Required-checks polling before merge.** Before calling `pulls.merge`, poll the PR head's combined check-runs/commit-status with a bounded timeout budget. Red or timeout routes to the escalate path (park + `DecisionRequest`); the daemon never calls `pulls.merge` to bypass a pending or red check.
 
-**Landing-target plumbing.** For a configured deployment, resolve the trunk from `registry.readDeclaredData(deploymentId, 'landing')` (`value` narrowed to `LandingTarget`, using `landsOn`), not `config.branches.staging`. The raw `config.branches.staging` read remains only on the profile-less legacy path.
+**Landing-target + required-checks plumbing.** For a configured deployment, resolve the trunk from `registry.readDeclaredData(deploymentId, 'landing')` (`value` narrowed to `LandingTarget`, using `landsOn`), not `config.branches.staging`. The deployment's `LandingTarget` also declares the explicit `requiredChecks: string[]` list the daemon polls before merging; absent or empty for a governed deployment fails closed. The raw `config.branches.staging` read remains only on the profile-less legacy path.
 
 **Post-landing observation + revert-PR lane.** After a controlled merge, re-poll the trunk's required checks for the merge commit. On red (or indeterminate — fail-closed), open a **revert PR** (`git revert --no-edit <mergeSha>` on a fresh branch → push → `octokit.pulls.create`) and raise a merge-style `DecisionRequest`. A revert may auto-merge only under the same verifier gate that governs any autonomous join.
 
@@ -59,6 +69,8 @@ test_paths:
 
 **Mirror the spec-artifact merge method.** Use the same `merge_method` shape as `mergeL2Proposal` (`'squash'`) so both delivery lanes behave identically; expose it as config only if a deployment needs a different method. Return a failure reason instead of throwing (as `mergeL2Proposal` does) so the caller can re-park gracefully when the PR is un-mergeable.
 
+**Explicit required-checks list per deployment.** Because the repo has no branch-protection API consumer, "required" is undefined until the deployment declares it. `LandingTarget.requiredChecks: string[]` is the source of truth; absent/empty for a governed deployment escalates rather than being treated as green.
+
 **Poll checks, do not subscribe to webhooks.** The daemon is a single long-running loop, not a webhook receiver. Wait on required checks by polling with a bounded budget and escalating on timeout — this composes with the existing per-claim loop and needs no inbound HTTP surface.
 
 **Quarantine the inert coordinator revert scaffolding.** `coordination/merge-agent.ts` holds a `useCoordinator`-gated (default `false`), stub-git-injected revert path that returns `ok('')` unconditionally. Remove it or clearly quarantine it so the live revert-PR lane is the only rollback path; do not extend the dead scaffolding.
@@ -67,7 +79,8 @@ test_paths:
 
 ```typescript
 // Open the code-change proposal against the deployment's declared trunk.
-const { landsOn } = registry.readDeclaredData(deploymentId, 'landing').value as LandingTarget;
+const landing = registry.readDeclaredData(deploymentId, 'landing').value as LandingTarget;
+const { landsOn, requiredChecks } = landing;
 const pr = await octokit.pulls.create({ owner, repo, head: featureBranch, base: landsOn, title, body });
 ```
 

@@ -56,6 +56,8 @@ vi.mock('./spec-pipeline/delivery.js', () => {
     deliverPhaseArtifact: vi.fn(),
     reconcilePhaseArtifact: vi.fn(),
     mergePhaseArtifact: vi.fn(),
+    buildProposalKey: vi.fn(({ owner, repo, issueNumber, phase, baseBranch }: Record<string, unknown>) =>
+      `${owner}/${repo}#${issueNumber}:${phase}:${baseBranch}`),
   };
 });
 vi.mock('./classifier.js', () => ({ classify: vi.fn() }));
@@ -134,7 +136,7 @@ function makeProfile(gateSets?: Record<string, { required: string[] }>) {
     complianceReviewers: [],
     honestAutomation: { automatable: [], strained: [], irreduciblyHuman: [] },
     budget: 1000,
-    landing: { landsOn: 'main', productionReleasePath: 'tag-and-deploy' },
+    landing: { landsOn: 'main', productionReleasePath: 'tag-and-deploy', requiredChecks: ['ci'] },
     capabilityBindings: [],
   };
   if (gateSets !== undefined) profile.gateSets = gateSets;
@@ -225,7 +227,26 @@ const mockOctokit = {
     createComment: vi.fn(async () => ({})),
     get: vi.fn(async () => ({ data: { labels: [] } })),
   },
-  pulls: { merge: vi.fn(async () => ({ data: { merged: true } })) },
+  pulls: {
+    list: vi.fn(async () => ({ data: [] })),
+    create: vi.fn(async () => ({
+      data: { number: 101, html_url: 'https://github.com/owner/repo/pull/101', head: { ref: 'feature/42' }, base: { ref: 'main' } },
+    })),
+    merge: vi.fn(async () => ({ data: { merged: true, sha: 'deadbeef' } })),
+  },
+  checks: {
+    listForRef: vi.fn(async () => ({
+      data: {
+        total_count: 1,
+        check_runs: [{ name: 'ci', status: 'completed', conclusion: 'success' }],
+      },
+    })),
+  },
+  repos: {
+    getCombinedStatusForRef: vi.fn(async () => ({
+      data: { state: 'success', statuses: [] },
+    })),
+  },
 } as unknown as Octokit;
 const mockRuntime = { spawnSession: vi.fn() } as unknown as SessionRuntime;
 
@@ -265,13 +286,17 @@ function makeDecisionDouble() {
   const raise = vi.fn().mockReturnValue({ decision_id: 'issue-42:integrate:1', outcome: 'admitted' });
   const notify = vi.fn().mockResolvedValue({ applied: true, status: 'notified' });
   const ensure = vi.fn().mockResolvedValue({ posted: true });
+  const markRuntimeDegraded = vi.fn();
+  const clearRuntimeDegraded = vi.fn();
   const manager = {
     isEnabled: () => true,
     isAvailable: () => true,
     ledger: () => ({ raise, notify }),
+    markRuntimeDegraded,
+    clearRuntimeDegraded,
   } as unknown as DecisionIndexManager;
   const publisher = { ensure } as unknown as GitHubBlockPublisher;
-  return { manager, publisher, raise, notify, ensure };
+  return { manager, publisher, raise, notify, ensure, markRuntimeDegraded, clearRuntimeDegraded };
 }
 
 describe('gate-set verdict live wiring — integrate handler', () => {
@@ -334,7 +359,14 @@ describe('gate-set verdict live wiring — integrate handler', () => {
     const result = await handlers.integrate!(run);
 
     expect(result).toBe('success');
-    expect(mockIntegrate).toHaveBeenCalledWith('feature/42', 'staging', expect.any(String));
+    // The merge happens via the PR lane against the declared trunk.
+    expect(mockOctokit.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({ base: 'main', head: 'feature/42' }),
+    );
+    expect(mockOctokit.pulls.merge).toHaveBeenCalledWith(
+      expect.objectContaining({ pull_number: 101, merge_method: 'squash' }),
+    );
+    expect(mockIntegrate).not.toHaveBeenCalled();
     expect(run.pausedAtPhase).toBeUndefined();
     expect(decision.raise).not.toHaveBeenCalled();
   });
@@ -353,7 +385,14 @@ describe('gate-set verdict live wiring — integrate handler', () => {
     const result = await handlers.integrate!(run);
 
     expect(result).toBe('success');
-    expect(mockIntegrate).toHaveBeenCalledWith('feature/42', 'staging', expect.any(String));
+    // The merge happens via the PR lane against the declared trunk.
+    expect(mockOctokit.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({ base: 'main', head: 'feature/42' }),
+    );
+    expect(mockOctokit.pulls.merge).toHaveBeenCalledWith(
+      expect.objectContaining({ pull_number: 101, merge_method: 'squash' }),
+    );
+    expect(mockIntegrate).not.toHaveBeenCalled();
     expect(run.pausedAtPhase).toBeUndefined();
     expect(decision.raise).not.toHaveBeenCalled();
   });

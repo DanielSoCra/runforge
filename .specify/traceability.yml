@@ -738,6 +738,11 @@ STACK-AC-CONTROLLED-ARTIFACT-DELIVERY:
     - prompts/l3-generator.md
     - packages/daemon/src/control-plane/phases.ts
     - packages/daemon/src/control-plane/integration.ts
+    - packages/daemon/src/control-plane/landing-target.ts
+    - packages/daemon/src/control-plane/pr-delivery.ts
+    - packages/daemon/src/control-plane/await-checks.ts
+    - packages/daemon/src/control-plane/revert-lane.ts
+    - packages/daemon/src/control-plane/phase-artifact-status.ts
     - packages/daemon/src/control-plane/spec-pipeline/delivery.ts
     - packages/daemon/src/control-plane/spec-pipeline/park.ts
     - packages/daemon/src/control-plane/spec-pipeline/spec-chain.ts
@@ -745,6 +750,12 @@ STACK-AC-CONTROLLED-ARTIFACT-DELIVERY:
   test_paths:
     - packages/daemon/src/control-plane/phases.test.ts
     - packages/daemon/src/control-plane/integration.test.ts
+    - packages/daemon/src/control-plane/p1-landing-target.gate.test.ts
+    - packages/daemon/src/control-plane/p1-pr-delivery.gate.test.ts
+    - packages/daemon/src/control-plane/p1-await-checks.gate.test.ts
+    - packages/daemon/src/control-plane/p1-revert-lane.gate.test.ts
+    - packages/daemon/src/control-plane/revert-lane.test.ts
+    - packages/daemon/src/control-plane/p1-idempotency-resume.gate.test.ts
     - packages/daemon/src/control-plane/spec-pipeline/delivery.test.ts
     - packages/daemon/src/control-plane/spec-pipeline/**/*.test.ts
   status: draft

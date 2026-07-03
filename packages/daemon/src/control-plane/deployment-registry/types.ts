@@ -64,6 +64,12 @@ export interface HonestAutomationMap {
 export interface LandingTarget {
   landsOn: string;
   productionReleasePath: string;
+  /**
+   * OPTIONAL explicit list of required check names the daemon polls before a
+   * controlled code-change merge. Absent or empty for a governed deployment is
+   * treated as fail-closed (escalate) — never as an implicit green.
+   */
+  requiredChecks?: string[];
 }
 
 /** For each shared capability, the identified version this deployment is bound to. */

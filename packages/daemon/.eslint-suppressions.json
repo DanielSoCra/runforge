@@ -123,9 +123,6 @@
     }
   },
   "src/control-plane/phases.ts": {
-    "@typescript-eslint/no-unused-vars": {
-      "count": 1
-    },
     "@typescript-eslint/strict-boolean-expressions": {
       "count": 10
     }

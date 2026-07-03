@@ -1,4 +1,13 @@
-// src/coordination/merge-agent.ts — Merge agent queue consumer with phase pipeline and crash recovery
+// ⚠️ QUARANTINED — NOT A LIVE REVERT NET.
+//
+// src/coordination/merge-agent.ts was an early coordinator-scoped merge-queue
+// consumer scaffold. It is gated behind `config.coordination.useCoordinator`
+// (default `false`) and its `git` dependency is a no-op stub. It is NOT the
+// controlled artifact-delivery revert path; that lives in
+// control-plane/revert-lane.ts. Do not extend this file. It remains only so
+// existing type signatures compile while the coordinator feature flag is off.
+//
+// Merge agent queue consumer with phase pipeline and crash recovery
 import type { Result } from '../lib/result.js';
 import { ok, err } from '../lib/result.js';
 import type { ConflictResolverConfig, ConflictResolution } from './conflict-resolver.js';

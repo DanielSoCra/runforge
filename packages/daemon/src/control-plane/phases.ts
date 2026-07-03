@@ -1,12 +1,12 @@
 // src/control-plane/phases.ts
 import type { PhaseHandlerMap } from './pipeline.js';
 import type { PhaseLabelMirror } from './phase-labels.js';
-import type { RunState, PhaseEvent, WorkRequest } from '../types.js';
+import type { RunState, PhaseEvent, WorkRequest, PhaseArtifact } from '../types.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';
 import type { ImplementationCoordinator } from '../implementation/coordinator.js';
 import type { RunWriter } from '../data/run-writer.js';
 import type { Config } from '../config.js';
-import { createGate1, selectGates, type Gate } from '../validation/gates.js';
+import { createGate1, selectGates } from '../validation/gates.js';
 import { createReviewerGate } from '../validation/reviewer-session.js';
 import { isRiskSensitive } from '../validation/risk-detection.js';
 import { runReview } from '../validation/review.js';
@@ -33,6 +33,15 @@ import { SessionError } from '../session-runtime/session-error.js';
 import { runHoldout } from '../validation/holdout.js';
 import { integrateToStaging } from './integration.js';
 import { appendAutoMergeEvent } from './escalation-metrics.js';
+import { resolveLandingTarget } from './landing-target.js';
+import { awaitRequiredChecks } from './await-checks.js';
+import { deliverCodeChangeViaPR } from './pr-delivery.js';
+import {
+  buildDegradedReversalEscalationRequest,
+  handlePostLandingObservation,
+  type TrunkObservation,
+} from './revert-lane.js';
+import { buildProposalKey } from './spec-pipeline/delivery.js';
 import { runDeploy } from '../validation/deploy.js';
 import { runPostDeployTests } from '../validation/post-deploy-test.js';
 import { reconcileWorkspace, ensureRepoFresh } from './workspace.js';
@@ -240,6 +249,83 @@ export function createPhaseHandlers(
       consequence_of_no_answer: result.content.consequence_of_no_answer as string,
       options: result.content.options as DecisionOption[],
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // P1 controlled code-change delivery helpers
+  // ---------------------------------------------------------------------------
+
+  function isLandingTarget(value: unknown): value is {
+    landsOn: string;
+    requiredChecks?: string[];
+  } {
+    return (
+      typeof value === 'object' &&
+      value !== null &&
+      'landsOn' in value &&
+      typeof (value as Record<string, unknown>).landsOn === 'string' &&
+      (value as Record<string, unknown>).landsOn !== ''
+    );
+  }
+
+  function readLandingTarget(
+    deploymentId: string,
+  ): { landsOn: string; requiredChecks: string[] } | undefined {
+    if (registry === undefined) return undefined;
+    const declared = registry.readDeclaredData(deploymentId, 'landing');
+    if (declared.kind !== 'found' || !isLandingTarget(declared.value)) {
+      return undefined;
+    }
+    return {
+      landsOn: declared.value.landsOn,
+      requiredChecks: declared.value.requiredChecks ?? [],
+    };
+  }
+
+  function getOrCreateIntegrateArtifact(
+    run: RunState,
+    landsOn: string,
+  ): PhaseArtifact {
+    const now = new Date().toISOString();
+    const existing = run.phaseArtifacts?.integrate;
+    if (existing !== undefined) {
+      return existing;
+    }
+    const artifact: PhaseArtifact = {
+      issueNumber: workRequest.issueNumber,
+      phase: 'integrate',
+      artifactKind: 'pull_request',
+      proposalKey: buildProposalKey({
+        owner,
+        repo,
+        issueNumber: workRequest.issueNumber,
+        phase: 'integrate',
+        baseBranch: landsOn,
+      }),
+      artifactPaths: [],
+      headBranch: featureBranch,
+      baseBranch: landsOn,
+      status: 'prepared',
+      createdAt: now,
+      updatedAt: now,
+    };
+    run.phaseArtifacts = { ...(run.phaseArtifacts ?? {}), integrate: artifact };
+    return artifact;
+  }
+
+  async function pushFeatureBranch({
+    featureBranch: branch,
+  }: {
+    owner: string;
+    repo: string;
+    featureBranch: string;
+    landsOn: string;
+  }): Promise<{ pushed: boolean; error?: string }> {
+    const result = await git(['push', 'origin', branch], mainRepoRoot);
+    if (!result.ok) {
+      return { pushed: false, error: result.error.message };
+    }
+    return { pushed: true };
   }
 
   /**
@@ -1966,10 +2052,6 @@ export function createPhaseHandlers(
         return 'success';
       }
 
-      console.log(
-        `[integrate] Merging ${featureBranch} into ${config.branches.staging}`,
-      );
-
       const deploymentId = run.deploymentId;
       const registryInputs =
         registry !== undefined && deploymentId !== undefined
@@ -1980,19 +2062,16 @@ export function createPhaseHandlers(
       // but the id resolves not-found — the profile was rejected at startup. The
       // operator OPTED INTO merge-decision policy for this deployment, so fail
       // CLOSED: hold the change for them rather than falling through to the legacy
-      // unconditional merge (which would auto-merge with NO decision/escalation).
+      // unconditional merge.
       if (registryInputs !== undefined && registryInputs.kind === 'not-found') {
         console.error(
-          `[integrate] deployment "${deploymentId ?? '?'}" is configured but not registered ` +
+          `[integrate] deployment \"${deploymentId ?? '?'}\" is configured but not registered ` +
             `(its profile was rejected at startup) — holding the merge. Fix the deployment profile.`,
         );
         return 'failure';
       }
 
-      // A configured deployment must OWN this run's repo. Without this guard the
-      // daemon would apply one deployment's lane/risk/autonomy profile to a repo it
-      // does not own. Found-but-not-owned → fail CLOSED (never apply a foreign
-      // profile, and never silently legacy-merge a repo a deployment wrongly claims).
+      // A configured deployment must OWN this run's repo.
       if (
         registry !== undefined &&
         deploymentId !== undefined &&
@@ -2007,9 +2086,11 @@ export function createPhaseHandlers(
         return 'failure';
       }
 
-      // Flag-OFF: NO deployment configured (no registry or no deployment id) →
-      // keep today's unconditional integrateToStaging byte-for-byte.
+      // Flag-OFF: NO deployment configured → legacy ungoverned direct merge.
       if (registryInputs === undefined || deploymentId === undefined) {
+        console.log(
+          `[integrate] ungoverned delivery — no deployment profile; using config.branches.staging`,
+        );
         const result = await integrateToStaging(
           featureBranch,
           config.branches.staging,
@@ -2042,6 +2123,224 @@ export function createPhaseHandlers(
         return 'success';
       }
 
+      // Flag-ON: resolve the deployment's declared landing target.
+      const landingResolution = resolveLandingTarget({
+        registry,
+        deploymentId,
+        fallbackStaging: config.branches.staging,
+      });
+      if (landingResolution.kind === 'escalate') {
+        console.error(`[integrate] ${landingResolution.reason}`);
+        return 'failure';
+      }
+      const landsOn = landingResolution.landsOn;
+      const landing = readLandingTarget(deploymentId);
+      const requiredChecks = landing?.requiredChecks ?? [];
+
+      // Governed deployments must declare which checks are required. Empty list
+      // is fail-closed (escalate), never a silent green.
+      if (requiredChecks.length === 0) {
+        console.error(
+          `[integrate] governed deployment "${deploymentId}" has no landing.requiredChecks — ` +
+            `cannot perform a controlled merge (failing closed).`,
+        );
+        return 'failure';
+      }
+
+      const observeTrunkForRevert = async ({
+        mergeSha,
+      }: {
+        repoRoot: string;
+        trunkBranch: string;
+        mergeSha: string;
+      }): Promise<TrunkObservation> => {
+        const result = await awaitRequiredChecks({
+          octokit,
+          owner,
+          repo: repoName,
+          ref: mergeSha,
+          requiredChecks,
+          budgetMs: 60_000,
+          pollMs: 5_000,
+        });
+        if (result.status === 'green') {
+          return { status: 'healthy', summary: 'trunk checks green after landing' };
+        }
+        if (result.status === 'red') {
+          return {
+            status: 'red',
+            summary: result.reason ?? 'trunk checks red after landing',
+          };
+        }
+        return {
+          status: 'indeterminate',
+          summary:
+            result.reason ??
+            'trunk checks did not resolve (timeout or no required checks)',
+        };
+      };
+
+      const integrateArtifact = getOrCreateIntegrateArtifact(run, landsOn);
+
+      // Operator-approved reversal: merge the revert PR, not the original.
+      if (
+        run.mergeDecisionApprovedEpoch === run.mergeDecisionEpoch &&
+        integrateArtifact.status === 'reversal-raised' &&
+        integrateArtifact.reversal !== undefined
+      ) {
+        try {
+          const mergeResult = await octokit.pulls.merge({
+            owner,
+            repo: repoName,
+            pull_number: integrateArtifact.reversal.revertPullRequestNumber,
+            merge_method: 'squash',
+          });
+          integrateArtifact.status = 'reverted';
+          integrateArtifact.mergeIdentifier = mergeResult.data.sha;
+          integrateArtifact.updatedAt = new Date().toISOString();
+          run.mergeDecisionApprovedEpoch = undefined;
+          console.log(
+            `[integrate] Revert PR #${integrateArtifact.reversal.revertPullRequestNumber} merged for #${workRequest.issueNumber}`,
+          );
+          return 'success';
+        } catch (error: unknown) {
+          console.error(
+            `[integrate] Failed to merge revert PR for #${workRequest.issueNumber}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return 'failure';
+        }
+      }
+
+      // A prior automated revert failed and was escalated. Do not re-enter
+      // delivery; the degraded decision is already raised (idempotent).
+      if (
+        integrateArtifact.status === 'observed-red' &&
+        integrateArtifact.mergeSha !== undefined
+      ) {
+        console.error(
+          `[integrate] Prior post-landing observation failed for #${workRequest.issueNumber} ` +
+            `and was escalated — failing closed rather than re-delivering.`,
+        );
+        return 'failure';
+      }
+
+      // Resume from an already-landed delivery (crash after API merge but before
+      // observation). Skip re-delivery and observe the persisted merge SHA.
+      if (
+        integrateArtifact.status === 'joined' &&
+        integrateArtifact.mergeSha !== undefined
+      ) {
+        return await runPostLandingObservation(
+          integrateArtifact.mergeSha,
+          integrateArtifact.pullRequestNumber,
+        );
+      }
+
+      async function runPostLandingObservation(
+        mergeSha: string,
+        prNumber: number | undefined,
+      ): Promise<PhaseEvent> {
+        try {
+          const observationResult = await handlePostLandingObservation({
+            repoRoot: mainRepoRoot,
+            owner,
+            repo: repoName,
+            deployment: deploymentId ?? 'unknown',
+            run,
+            trunkBranch: landsOn,
+            mergeSha,
+            featureHeadSha: featureBranch,
+            revertBranch: `revert/${workRequest.issueNumber}/${prNumber ?? 'x'}`,
+            observeTrunk: observeTrunkForRevert,
+            octokit,
+            raiseDecisionRequest: async (request) => {
+              if (decisionManager?.isAvailable() !== true) {
+                throw new Error(
+                  'decision index unavailable — cannot raise reversal decision',
+                );
+              }
+              const ledger = decisionManager.ledger();
+              const sanitized = await sanitizeDecisionRequest(
+                request as DecisionRequest,
+              );
+              await withGovernedDecisionMarking(decisionManager, deploymentId, () =>
+                ledger.raise(sanitized),
+              );
+            },
+            now: new Date().toISOString(),
+          });
+
+          if (observationResult.action === 'reversal-raised') {
+            integrateArtifact.status = 'reversal-raised';
+            integrateArtifact.observation = {
+              ...observationResult.observation,
+              observedAt: new Date().toISOString(),
+            };
+            integrateArtifact.reversal = {
+              revertBranch: `revert/${workRequest.issueNumber}/${prNumber ?? 'x'}`,
+              revertPullRequestNumber: observationResult.prNumber,
+              revertPullRequestUrl: observationResult.prUrl,
+              decisionId: observationResult.decisionId,
+            };
+            integrateArtifact.updatedAt = new Date().toISOString();
+            run.pausedAtPhase = 'integrate';
+            return 'success';
+          }
+
+          integrateArtifact.status = 'observed-healthy';
+          integrateArtifact.observation = {
+            ...observationResult.observation,
+            observedAt: new Date().toISOString(),
+          };
+          integrateArtifact.updatedAt = new Date().toISOString();
+          return 'success';
+        } catch (error: unknown) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          console.error(
+            `[integrate] Post-landing observation failed for #${workRequest.issueNumber}: ${errorMessage}`,
+          );
+
+          try {
+            if (decisionManager?.isAvailable() === true) {
+              const degraded = buildDegradedReversalEscalationRequest({
+                run,
+                deployment: deploymentId ?? 'unknown',
+                mergeSha,
+                error: errorMessage,
+                now: new Date().toISOString(),
+              });
+              const sanitized = await sanitizeDecisionRequest(degraded);
+              await withGovernedDecisionMarking(decisionManager, deploymentId, () =>
+                decisionManager.ledger().raise(sanitized),
+              );
+              console.error(
+                `[integrate] Raised degraded escalation for red trunk + failed auto-revert on #${workRequest.issueNumber}`,
+              );
+            } else {
+              markRuntimeDegradedIfGoverned(
+                decisionManager,
+                deploymentId,
+                `decision index unavailable for degraded reversal escalation on ${deploymentId ?? '?'}`,
+              );
+            }
+          } catch (escalationError: unknown) {
+            console.error(
+              `[integrate] Failed to raise degraded reversal escalation: ${escalationError instanceof Error ? escalationError.message : String(escalationError)}`,
+            );
+          }
+
+          integrateArtifact.status = 'observed-red';
+          integrateArtifact.observation = {
+            status: 'red',
+            summary: `Post-landing observation or automated revert failed: ${errorMessage}`,
+            observedAt: new Date().toISOString(),
+          };
+          integrateArtifact.updatedAt = new Date().toISOString();
+          return 'failure';
+        }
+      }
+
       // Flag-ON: gather live inputs and ask the pure decision core.
       const { laneSet, riskPathMap, defaultMinLevel, mode } = registryInputs.inputs;
       const verdict: ClassifierVerdict | null =
@@ -2058,7 +2357,7 @@ export function createPhaseHandlers(
       try {
         touchedPaths = await computeTouchedPaths(
           featureBranch,
-          config.branches.staging,
+          landsOn,
           mainRepoRoot,
         );
       } catch (e) {
@@ -2078,19 +2377,14 @@ export function createPhaseHandlers(
         probeOracle: createProbeOracle(mainRepoRoot),
       });
 
-      // Human-gated autonomy: default-deny unless the registry records widening for
-      // this (level) [level-wide grant] OR this (level, lane) [lane-scoped grant].
-      // Passing the assigned lane lets a deployment scope its grant per lane.
+      // Human-gated autonomy: default-deny unless the registry records widening.
       const autonomyWidened = (level: RiskLevel, lane: string): boolean => {
         if (deploymentId === undefined) return false;
         const readings = registry?.readAutonomyState(deploymentId, level, lane) ?? [];
         return readings.some((r) => r.level === 'widened');
       };
 
-      // Lane-specific gate-set verdict (XCUT P2#1): when the deployment declares
-      // gate-set definitions, look up the assigned lane's set and check whether
-      // every required gate was observed as passed. A declared-but-dangling
-      // reference fails closed; absent gateSets keeps the legacy inert path.
+      // Lane-specific gate-set verdict (XCUT P2#1).
       let validationPassed = true;
       if (registry !== undefined && deploymentId !== undefined) {
         const gateSetsDeclared = registry.readDeclaredData(
@@ -2112,36 +2406,11 @@ export function createPhaseHandlers(
         }
       }
 
-      // Compliance lens: force the change to the Operator when a touched path is
-      // governed by one of the deployment's compliance reviewers (condition read as
-      // a path glob). Composes with and OVERRIDES autonomy (FUNC-AC-MERGE-DECISION).
-      //
-      // FAIL-CLOSED (security, #779): a regulated change — the deployment declares
-      // complianceReviewers AND a touched path matches a reviewer condition — must
-      // NOT be auto-merged on the strength of the STATIC, deployment-scoped
-      // `complianceVerdicts` recorded on the frozen profile. Those verdicts are a
-      // property of the DEPLOYMENT, not of THIS change: a single historic `pass`
-      // would otherwise clear EVERY future change touching governed paths, with no
-      // review of the actual diff — defeating the gate (FUNC-AC-COMPLIANCE-GATE:
-      // "never auto-promote a regulated-sensitive change to autonomous merge").
-      // There is today no change-scoped / run-scoped verdict datum (RunState carries
-      // none), so we deliberately do NOT source verdicts here: the lens falls back
-      // to path-condition matching and any governed touched path forces escalation
-      // to the Operator. Change-scoped reviewer-dispatch that produces durable
-      // PER-CHANGE verdicts — the only source that could legitimately clear the
-      // force — is the documented REMAINDER of FUNC-AC-COMPLIANCE-GATE; until it
-      // lands, regulated changes fail closed (escalate). When that lands, thread the
-      // per-change verdict as the third arg of evaluateComplianceForced.
-      // (deploymentId/registry are defined here — the not-found / not-owned /
-      // flag-OFF cases returned earlier.)
+      // Compliance lens.
       let complianceForced = false;
       if (registry !== undefined && deploymentId !== undefined) {
         const declared = registry.readDeclaredData(deploymentId, 'complianceReviewers');
         if (declared.kind === 'found' && Array.isArray(declared.value)) {
-          // No verdicts argument on purpose: the static profile `complianceVerdicts`
-          // are deployment-scoped and must never clear a change-scoped gate. Absent a
-          // change-scoped verdict, evaluateComplianceForced fails closed via
-          // path-condition matching (any governed touched path → escalate).
           complianceForced = evaluateComplianceForced(
             declared.value as ComplianceReviewer[],
             touchedPaths,
@@ -2164,48 +2433,43 @@ export function createPhaseHandlers(
       });
       run.mergeDecision = decision;
 
-      if (
-        decision.kind === 'auto-merge' ||
-        (run.mergeDecisionEpoch !== undefined &&
-          run.mergeDecisionApprovedEpoch === run.mergeDecisionEpoch)
-      ) {
+      const isApprovedReEntry =
+        run.mergeDecisionEpoch !== undefined &&
+        run.mergeDecisionApprovedEpoch === run.mergeDecisionEpoch;
+      const shouldMerge =
+        decision.kind === 'auto-merge' || isApprovedReEntry;
+
+      if (shouldMerge) {
         run.pausedAtPhase = undefined;
-        const result = await integrateToStaging(
-          featureBranch,
-          config.branches.staging,
-          mainRepoRoot,
-        );
-        if (!result.ok) {
-          console.error(`[integrate] Error:`, result.error.message);
-          return 'failure';
-        }
-        if (!result.value.success) {
-          console.error(`[integrate] Failed:`, result.value.error);
-          return 'failure';
-        }
-        // After a successful operator-approved merge, clear the one-shot override
-        // so a later re-entry cannot re-consume it.
+      }
+
+      // Open/adopt the PR. For hold/escalate decisions we create the parked
+      // artifact but never merge here.
+      const deliveryResult = await deliverCodeChangeViaPR({
+        octokit,
+        owner,
+        repo: repoName,
+        featureBranch,
+        landsOn,
+        requiredChecks,
+        phaseArtifact: integrateArtifact,
+        awaitRequiredChecks: (args) =>
+          awaitRequiredChecks({ octokit, ...args }),
+        pushFeatureBranch,
+        trigger: isApprovedReEntry
+          ? { kind: 'operator-approved-epoch', detail: 'mergeDecisionApprovedEpoch re-entry' }
+          : { kind: 'auto-merge', detail: 'merge decision returned auto-merge' },
+        skipMerge: !shouldMerge,
+      });
+
+      if (deliveryResult.merged && deliveryResult.mergeSha !== undefined) {
+        // After a successful operator-approved merge, clear the one-shot override.
         if (run.mergeDecisionApprovedEpoch === run.mergeDecisionEpoch) {
           run.mergeDecisionApprovedEpoch = undefined;
         }
-        if (result.value.pushed === true) {
-          console.log(
-            `[integrate] Successfully merged ${featureBranch} → ${config.branches.staging} and pushed to origin`,
-          );
-        } else if (
-          result.value.pushError !== undefined &&
-          result.value.pushError !== ''
-        ) {
-          console.warn(
-            `[integrate] Merged locally but push failed (non-fatal): ${result.value.pushError}`,
-          );
-        } else {
-          console.log(
-            `[integrate] Successfully merged to ${config.branches.staging}`,
-          );
-        }
+
         // P4.1 escalation metric: append an auto-merge event ONLY for true
-        // auto-merge outcomes (operator-approved overrides must NOT count).
+        // auto-merge outcomes.
         if (decision.kind === 'auto-merge' && deploymentId !== undefined) {
           void appendAutoMergeEvent(stateDir, {
             ts: new Date().toISOString(),
@@ -2213,53 +2477,36 @@ export function createPhaseHandlers(
             issueNumber: workRequest.issueNumber,
           });
         }
-        // NOTE: a successful Git MERGE does NOT clear the runtime-degraded marker.
-        // The marker tracks decision-index TRANSPORT health, not merge success —
-        // clearing it here would erase a real index failure (e.g. a prior
-        // advanceToResumed() failure that left the run merge-armed but the
-        // transport still broken), and a governed auto-merge would clear it without
-        // ever touching the ledger. The marker is cleared ONLY by a successful
-        // governed decision-index op (a successful raise+notify in the publish
-        // block below, or a successful advanceToResumed in resume).
-        return 'success';
+
+        // Post-landing observation on the squash merge SHA.
+        return await runPostLandingObservation(
+          deliveryResult.mergeSha,
+          deliveryResult.prNumber,
+        );
       }
 
-      // escalate / hold → the change must reach the Operator. Without an AVAILABLE
-      // decision index there is no surface to escalate to, so parking would strand
-      // the run silently (no approve/reject path). A CONFIGURED deployment must
-      // therefore FAIL CLOSED here (held + visible as a failed run), never silently
-      // park and never fall through to a merge.
-      //
-      // isAvailable() (NOT isEnabled()) — spec §3.8 codex Critical: an enabled-but-
-      // broken index (Postgres unreachable) must ALSO fail VISIBLY here. Gating on
-      // isEnabled() would let a broken index fall through to the structured-surfacing
-      // block below, whose ledger() throws, get caught, and return 'success'
-      // (invisible park) — the exact gap-#2 invisible-stuck regression. isAvailable()
-      // routes both disabled AND broken to this visible 'failure' floor.
+      // PR was created/adopted but NOT merged (checks red/timeout, hold/escalate,
+      // or delivery error). Park and raise a DecisionRequest if possible.
       if (decisionManager?.isAvailable() !== true) {
         markRuntimeDegradedIfGoverned(
           decisionManager,
           deploymentId,
-          `decision index unavailable for governed deployment ${deploymentId ?? '?'}`
+          `decision index unavailable for governed deployment ${deploymentId ?? '?'}`,
         );
         console.error(
           `[integrate] Merge decision for #${workRequest.issueNumber} is ${decision.kind} but the ` +
             `decision index is unavailable (disabled or unreachable) — cannot surface it for approval; ` +
-            `holding (failing closed). Enable + reach the decision index to operate configured deployments.`,
+            `holding (failing closed).`,
         );
         return 'failure';
       }
 
-      // escalate / hold → park at integrate and emit a DecisionRequest.
       console.log(
         `[integrate] Merge decision for #${workRequest.issueNumber}: ${decision.kind} (${'reason' in decision ? decision.reason : 'awaiting-independent-review'}) — parking`,
       );
       const wasAlreadyParked = run.pausedAtPhase === 'integrate';
       run.pausedAtPhase = 'integrate';
 
-      // Fresh park: bump the merge-decision epoch so each review cycle gets a
-      // new deterministic decision id. Re-scans of an already-parked run keep
-      // the same epoch.
       if (!wasAlreadyParked) {
         run.mergeDecisionEpoch = (run.mergeDecisionEpoch ?? 0) + 1;
         run.mergeDecisionBlockPublished = false;
@@ -2306,9 +2553,6 @@ export function createPhaseHandlers(
               },
             );
             run.mergeDecisionBlockPublished = true;
-            // A successful raise + notify is a successful governed decision-index
-            // op: the approval TRANSPORT just proved it is reachable + writable, so
-            // clear any runtime-degraded marker a prior approval-path failure set.
             clearRuntimeDegradedIfGoverned(decisionManager, deploymentId);
           } else {
             console.warn(
@@ -2316,11 +2560,6 @@ export function createPhaseHandlers(
             );
           }
         } catch (e) {
-          // A raise()/notify() throw is a runtime decision-index failure for a
-          // governed deployment — withGovernedDecisionMarking already flipped the
-          // runtime-degraded marker before re-throwing into this catch. A publish
-          // (GitHub) failure is NOT an index-runtime fault, so it is not marked.
-          // Either way we fail closed: the run stays parked and will retry.
           console.warn(
             `[integrate] decision-index raise/publish/notify failed (failing closed, run stays parked): ${e instanceof Error ? e.message : String(e)}`,
           );

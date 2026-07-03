@@ -188,7 +188,24 @@ function makeOctokit(labels: string[] = ['ready']): Octokit {
       removeLabel: vi.fn(async () => ({})),
     },
     pulls: {
-      merge: vi.fn(async () => ({ data: { merged: true } })),
+      list: vi.fn(async () => ({ data: [] })),
+      create: vi.fn(async () => ({
+        data: { number: 101, html_url: 'https://github.com/owner/repo/pull/101', head: { ref: 'feature/42' }, base: { ref: 'main' } },
+      })),
+      merge: vi.fn(async () => ({ data: { merged: true, sha: 'deadbeef' } })),
+    },
+    checks: {
+      listForRef: vi.fn(async () => ({
+        data: {
+          total_count: 1,
+          check_runs: [{ name: 'ci', status: 'completed', conclusion: 'success' }],
+        },
+      })),
+    },
+    repos: {
+      getCombinedStatusForRef: vi.fn(async () => ({
+        data: { state: 'success', statuses: [] },
+      })),
     },
   } as unknown as Octokit;
 }
@@ -246,7 +263,16 @@ function makeRegistry(): DeploymentRegistry {
     }),
     ownsRepo: () => true,
     readAutonomyState: () => [],
-    readDeclaredData: () => ({ kind: 'not-found' }),
+    readDeclaredData: (deploymentId: string, which: string) => {
+      if (which === 'landing') {
+        return {
+          kind: 'found',
+          which: 'landing',
+          value: { landsOn: 'main', productionReleasePath: 'tag-and-deploy', requiredChecks: ['ci'] },
+        };
+      }
+      return { kind: 'not-found', deploymentId };
+    },
   } as unknown as DeploymentRegistry;
 }
 

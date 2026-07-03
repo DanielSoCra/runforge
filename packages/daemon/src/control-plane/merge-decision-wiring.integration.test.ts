@@ -65,6 +65,8 @@ vi.mock('./spec-pipeline/delivery.js', () => {
     deliverPhaseArtifact: vi.fn(),
     reconcilePhaseArtifact: vi.fn(),
     mergePhaseArtifact: vi.fn(),
+    buildProposalKey: vi.fn(({ owner, repo, issueNumber, phase, baseBranch }: Record<string, unknown>) =>
+      `${owner}/${repo}#${issueNumber}:${phase}:${baseBranch}`),
   };
 });
 vi.mock('./classifier.js', () => ({ classify: vi.fn() }));
@@ -154,7 +156,7 @@ function makeProfile() {
     complianceReviewers: [],
     honestAutomation: { automatable: [], strained: [], irreduciblyHuman: [] },
     budget: 1000,
-    landing: { landsOn: 'main', productionReleasePath: 'tag-and-deploy' },
+    landing: { landsOn: 'main', productionReleasePath: 'tag-and-deploy', requiredChecks: ['ci'] },
     capabilityBindings: [],
   };
 }
@@ -252,7 +254,26 @@ const mockOctokit = {
     createComment: vi.fn(async () => ({})),
     get: vi.fn(async () => ({ data: { labels: [] } })),
   },
-  pulls: { merge: vi.fn(async () => ({ data: { merged: true } })) },
+  pulls: {
+    list: vi.fn(async () => ({ data: [] })),
+    create: vi.fn(async () => ({
+      data: { number: 101, html_url: 'https://github.com/owner/repo/pull/101', head: { ref: 'feature/42' }, base: { ref: 'main' } },
+    })),
+    merge: vi.fn(async () => ({ data: { merged: true, sha: 'deadbeef' } })),
+  },
+  checks: {
+    listForRef: vi.fn(async () => ({
+      data: {
+        total_count: 1,
+        check_runs: [{ name: 'ci', status: 'completed', conclusion: 'success' }],
+      },
+    })),
+  },
+  repos: {
+    getCombinedStatusForRef: vi.fn(async () => ({
+      data: { state: 'success', statuses: [] },
+    })),
+  },
 } as any;
 const mockRuntime = { spawnSession: vi.fn() } as any;
 
@@ -376,8 +397,14 @@ describe('merge-decision live wiring — integrate handler', () => {
     const result = await handlers.integrate!(run);
 
     expect(result).toBe('success');
-    // The merge happens via the existing seam.
-    expect(mockIntegrate).toHaveBeenCalledWith('feature/42', 'staging', expect.any(String));
+    // The merge happens via the PR lane against the declared trunk.
+    expect(mockOctokit.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({ base: 'main', head: 'feature/42' }),
+    );
+    expect(mockOctokit.pulls.merge).toHaveBeenCalledWith(
+      expect.objectContaining({ pull_number: 101, merge_method: 'squash' }),
+    );
+    expect(mockIntegrate).not.toHaveBeenCalled();
     // No escalation: the run does not park, no DecisionRequest is raised.
     expect(run.pausedAtPhase).toBeUndefined();
     expect(decision.raise).not.toHaveBeenCalled();
@@ -585,8 +612,14 @@ describe('merge-decision live wiring — integrate handler', () => {
     const result = await handlers.integrate!(run);
 
     expect(result).toBe('success');
-    // The held merge executes via the existing seam — the operator approved it.
-    expect(mockIntegrate).toHaveBeenCalledWith('feature/42', 'staging', expect.any(String));
+    // The held merge executes via the PR lane against the declared trunk.
+    expect(mockOctokit.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({ base: 'main', head: 'feature/42' }),
+    );
+    expect(mockOctokit.pulls.merge).toHaveBeenCalledWith(
+      expect.objectContaining({ pull_number: 101, merge_method: 'squash' }),
+    );
+    expect(mockIntegrate).not.toHaveBeenCalled();
     // It MUST NOT re-park nor re-raise a DecisionRequest.
     expect(run.pausedAtPhase).toBeUndefined();
     expect(decision.raise).not.toHaveBeenCalled();
@@ -730,7 +763,9 @@ describe('merge-decision live wiring — integrate handler', () => {
     const result = await handlers.integrate!(run);
 
     expect(result).toBe('success');
-    expect(mockIntegrate).toHaveBeenCalled(); // the merge DID succeed
+    // The merge happened via the PR lane, not the legacy raw-merge seam.
+    expect(mockOctokit.pulls.merge).toHaveBeenCalled();
+    expect(mockIntegrate).not.toHaveBeenCalled();
     // ...but the runtime-degraded marker is STILL set (merge success ≠ index health).
     expect(manager.isRuntimeDegraded()).toBe(true);
     expect(manager.degradedClears).toBe(0);
