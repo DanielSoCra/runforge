@@ -3,7 +3,7 @@ id: STACK-AC-OPERATOR-LEARNING-TS
 type: stack-specific
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 3
 stack: typescript
 references: ARCH-AC-OPERATOR-LEARNING
@@ -45,6 +45,8 @@ test_paths:
 **Ranking score = base priority + learned boost, with explanation attached.** The learned boost is a small additive term derived from attention weight and rung. The explanation object carries `basePriority`, `attentionWeight`, `rung`, `confidence`, and `evidenceSummary` so the Steering Surface can render "why ranked here" without recomputing.
 
 **Ask-less proposals are stored as JSON files in `state/operator-learning-proposals/{id}.json`.** Each proposal records the decision class, context, proposed frequency threshold, evidence, status, and optional approval timestamp. On rejection, a `cooldownUntil` timestamp prevents immediate re-proposal.
+
+**The fourth rung (ARCH-AC-OPERATOR-LEARNING v2 act-autonomously authorization) is a proposal `kind`, never a fourth `RungSchema` value.** `RungSchema` stays exactly `['surface', 'pre-fill', 'propose-ask-less']` — its literal values are hard-coded in multiple consumers (the rung order array, the ranking boost map, the operator-surface rung allowlist, and the pre-fill gate), so widening the enum ripples unsafely. Instead, proposals carry a discriminating `kind` (`ask-less-often` | `act-autonomously`), each kind with its own independent liveness and approve-once compare-and-swap so a stale approval replayed after a reset or revert never resurrects. Autonomous application is exposed as a derived boolean per `(decisionClass, context)` — true only while the `act-autonomously` approval is live AND the currently derived preference still qualifies (still at the ask-less rung with the same learned answer) — never as stored mutable state.
 
 **Audit trail mirrors the observation log.** Reset and revert events are appended as observations with kinds `preference_reset` and `preference_revert`. The audit list is the filtered log of these event kinds plus rung transitions.
 
@@ -108,7 +110,9 @@ function advanceRung(preference: Preference, target: Rung, guarded: Set<string>)
 - Re-rank weights must decay. A mute from six months ago should not permanently suppress a class. Apply a recency window or exponential decay to attention weights.
 - Pull-time relevance must not hide guarded or novel items. The function returns the highest-scoring candidate, but callers must still surface all candidates somewhere if the selected one is not chosen.
 - Reset is per `(decisionClass, context)` pair. Resetting "approve low-risk dependency updates in deployment A" must not affect the same class in deployment B.
-- Ask-less proposals must be decision requests. Do not silently change surface frequency when the threshold is crossed; always raise a `DecisionRequest` and wait for an explicit Operator answer.
+- Ask-less proposals must be decision requests. Do not silently change surface frequency when the threshold is crossed; always raise a `DecisionRequest` and wait for an explicit Operator answer. The `act-autonomously` proposal is the same pattern with informed-consent copy: it must name what will be auto-applied, the instance kinds it will never act on, and the off-switch.
+- An autonomous action must never feed the evidence loop. Record it as a distinct action event kind excluded from evidence derivation, and never call the decision-answer observe path for it — otherwise the platform reinforces its own confidence (forbidden by FUNC-AC-OPERATOR-LEARNING v2).
+- The autonomous-application gate fails closed. Any read failure, missing authorization, no-longer-qualifying preference, protected or novel instance attribute, uncertain severity, or already-surfaced pending decision → ask the Operator instead of acting. Never default a missing attribute toward eligibility.
 - Sensitive observations: never include the `sensitive` payload in explanations or audit entries visible outside the authorized Operator view. The aggregate count may be reported, but not the content.
 - Fleet-wide revert: the Operator Learning Service records the revert locally and emits an event the Fleet subsystem consumes. Do not assume all deployments are reachable synchronously.
 - Spec-edit fingerprints should be structural, not textual. Avoid storing full diff content; store only the classification of the change (e.g., "added constraint", "removed step", "reordered section").
