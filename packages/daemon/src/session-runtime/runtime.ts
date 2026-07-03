@@ -704,6 +704,8 @@ export class SessionRuntime {
     runId?: string,
   ): Promise<Result<SessionResult>> {
     const result = await this.adapter.spawn(def, prompt, adapterOptions);
+    // The legacy (single-adapter) path always runs the native Claude CLI
+    // runtime — record that as the provider so spend attribution never guesses.
     this.recordResultCost(
       result,
       type,
@@ -711,6 +713,7 @@ export class SessionRuntime {
       costReservation,
       runWriter,
       runId,
+      'claude-cli',
     );
 
     if (
@@ -770,6 +773,7 @@ export class SessionRuntime {
         costReservation,
         runWriter,
         runId,
+        provider.name,
       );
 
       if (result.ok) {
@@ -802,6 +806,7 @@ export class SessionRuntime {
     costReservation: CostReservation,
     runWriter?: RunWriter,
     runId?: string,
+    provider?: string,
   ): void {
     const cost = result.ok
       ? result.value.cost
@@ -811,7 +816,15 @@ export class SessionRuntime {
     if (cost > 0) {
       this.costTracker.recordReservedCost(costReservation, cost);
       if (runWriter && runId) {
-        void runWriter.writeCostEvent(runId, type, cost);
+        // Spend attribution (STACK-AC-DATA-PLATFORM): provider is the runtime
+        // the session actually ran on; usageUnits only when the adapter
+        // reported token counts (failed sessions and estimate-only adapters
+        // stay unattributed on the usage dimension — never invented).
+        const usageUnits = result.ok ? result.value.usageUnits : undefined;
+        void runWriter.writeCostEvent(runId, type, cost, {
+          provider,
+          usageUnits,
+        });
       }
     }
   }

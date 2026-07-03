@@ -71,7 +71,15 @@ describe('schema parity foundation', () => {
       expect.arrayContaining(['status_line', 'signal_snapshot']),
     );
     expect(columnNames(costEvents)).toEqual(
-      expect.arrayContaining(['run_id', 'session_type', 'cost']),
+      expect.arrayContaining([
+        'run_id',
+        'session_type',
+        'cost',
+        // Spend attribution — project-owned drizzle migration 0002, not part
+        // of the 13 legacy supabase files (STACK-AC-DATA-PLATFORM gotcha).
+        'provider',
+        'usage_units',
+      ]),
     );
   });
 

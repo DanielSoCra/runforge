@@ -669,8 +669,43 @@ describe('SessionRuntime', () => {
         'my-run-id',
         'worker',
         expect.any(Number),
+        // Legacy single-adapter path always runs the native Claude CLI (#810)
+        expect.objectContaining({ provider: 'claude-cli' }),
       );
     }
+  });
+
+  it('attributes usage tokens to the cost event when the adapter reports them (#810)', async () => {
+    mockSpawn.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        output: '',
+        structuredData: {},
+        cost: 0.3,
+        usageUnits: 999,
+        pitfallMarkers: [],
+        exitStatus: 'completed',
+      },
+    });
+    const writeCostEvent = vi.fn().mockResolvedValue(undefined);
+    const runWriter = {
+      writeCostEvent,
+      upsertRun: vi.fn(),
+    } as unknown as import('../data/run-writer.js').RunWriter;
+
+    await runtime.spawnSession(
+      'worker',
+      { variables: WORKER_VARS, workspacePath: '/tmp' },
+      7,
+      undefined,
+      runWriter,
+      'run-7',
+    );
+
+    expect(writeCostEvent).toHaveBeenCalledWith('run-7', 'worker', 0.3, {
+      provider: 'claude-cli',
+      usageUnits: 999,
+    });
   });
 
   it('allocates one session cost across multiple issue numbers (#470)', async () => {
@@ -731,7 +766,11 @@ describe('SessionRuntime', () => {
       'run-123',
     );
 
-    expect(writeCostEvent).toHaveBeenCalledWith('run-123', 'worker', 1.5);
+    expect(writeCostEvent).toHaveBeenCalledWith('run-123', 'worker', 1.5, {
+      provider: 'claude-cli',
+      // Failed sessions carry no usage report — unattributed, never invented.
+      usageUnits: undefined,
+    });
     expect(costTracker.getDailyCost()).toBe(1.5);
   });
 

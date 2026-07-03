@@ -149,6 +149,56 @@ describe('CliAdapter', () => {
     }
   });
 
+  // Spend attribution (#810): token usage extracted from the CLI result's
+  // `usage` object, absent (not zero) when the runtime reports none.
+  it('parseOutput sums the usage token counters into usageUnits', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(
+      JSON.stringify({
+        result: 'ok',
+        total_cost_usd: 0.05,
+        usage: {
+          input_tokens: 100,
+          output_tokens: 50,
+          cache_creation_input_tokens: 10,
+          cache_read_input_tokens: 40,
+        },
+      }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.usageUnits).toBe(200);
+  });
+
+  it('parseOutput leaves usageUnits undefined when the CLI reports no usage', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(
+      JSON.stringify({ result: 'ok', total_cost_usd: 0.05 }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.usageUnits).toBeUndefined();
+  });
+
+  it('parseOutput ignores malformed usage counters instead of fabricating a total', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(
+      JSON.stringify({
+        result: 'ok',
+        usage: { input_tokens: 'many', output_tokens: -3 },
+      }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.usageUnits).toBeUndefined();
+  });
+
+  it('parseOutput sums partial usage objects from only the counters present', () => {
+    const adapter = new CliAdapter();
+    const parsed = adapter.parseOutput(
+      JSON.stringify({ result: 'ok', usage: { output_tokens: 7 } }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.usageUnits).toBe(7);
+  });
+
   // Regression tests for BUG-16: NaN/negative/Infinity cost_usd sanitized to 0
   it('parseOutput sanitizes NaN cost_usd to 0', () => {
     const adapter = new CliAdapter();

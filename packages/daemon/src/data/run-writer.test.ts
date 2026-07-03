@@ -98,6 +98,30 @@ describe('PostgresRunWriter', () => {
       'run-1',
       'implementation',
       1.5,
+      undefined,
+    );
+  });
+
+  it('passes spend attribution through to the CostEventStore (#810)', async () => {
+    const runs = {
+      insertRun: vi.fn(),
+      updateRun: vi.fn(),
+    };
+    const costs = {
+      recordCostEvent: vi.fn().mockResolvedValue({ ok: true, value: {} }),
+    };
+    const writer = new PostgresRunWriter(runs as never, costs as never);
+
+    await writer.writeCostEvent('run-1', 'worker', 1.5, {
+      provider: 'claude-cli',
+      usageUnits: 4321,
+    });
+
+    expect(costs.recordCostEvent).toHaveBeenCalledWith(
+      'run-1',
+      'implementation',
+      1.5,
+      { provider: 'claude-cli', usageUnits: 4321 },
     );
   });
 

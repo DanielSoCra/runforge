@@ -384,6 +384,12 @@ export const costEvents = pgTable(
       scale: 6,
       mode: 'number',
     }).notNull(),
+    // Spend attribution (STACK-AC-SPEND-OBSERVABILITY reads these; added by
+    // migration 0002). Nullable on purpose: NULL means "unattributed" — rows
+    // that predate attribution, or runtimes that cannot report usage, stay
+    // NULL and are surfaced as an explicit unattributed bucket, never invented.
+    provider: text('provider'),
+    usageUnits: bigint('usage_units', { mode: 'number' }),
     recordedAt: timestamp('recorded_at', { withTimezone: true })
       .notNull()
       .defaultNow(),

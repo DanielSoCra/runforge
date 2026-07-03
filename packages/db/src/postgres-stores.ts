@@ -1,6 +1,16 @@
 import { randomUUID } from 'node:crypto';
 
-import { and, count, desc, eq, gte, isNull, sql } from 'drizzle-orm';
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lt,
+  sql,
+} from 'drizzle-orm';
 
 import type { AutoClaudeDb } from './client.js';
 import {
@@ -28,7 +38,9 @@ import {
 } from './schema.js';
 import type {
   BriefingStore,
+  CostEventAttribution,
   CostEventStore,
+  CostEventWindow,
   CredentialMetadata,
   CredentialStore,
   GitHubConnectionStore,
@@ -129,6 +141,19 @@ export class PostgresRepoStore implements RepoStore {
       return row ? ok() : notFound(`repository ${repositoryId} was not found`);
     });
   }
+
+  async namesFor(projectIds: string[]) {
+    if (projectIds.length === 0) return ok([]);
+    return unavailableOnThrow(async () => {
+      const rows = await this.db
+        .select({ id: repos.id, owner: repos.owner, name: repos.name })
+        .from(repos)
+        .where(inArray(repos.id, projectIds));
+      return ok(
+        rows.map((row) => ({ id: row.id, name: `${row.owner}/${row.name}` })),
+      );
+    });
+  }
 }
 
 export class PostgresRunStore implements RunStore {
@@ -199,6 +224,21 @@ export class PostgresRunStore implements RunStore {
       return ok(rows.map((row) => row.id));
     });
   }
+
+  async attributionFor(runIds: string[]) {
+    if (runIds.length === 0) return ok([]);
+    return unavailableOnThrow(async () => {
+      const rows = await this.db
+        .select({
+          runId: runs.id,
+          projectId: runs.repoId,
+          completedAt: runs.completedAt,
+        })
+        .from(runs)
+        .where(inArray(runs.id, runIds));
+      return ok(rows);
+    });
+  }
 }
 
 export class PostgresCostEventStore implements CostEventStore {
@@ -208,6 +248,7 @@ export class PostgresCostEventStore implements CostEventStore {
     runId: string,
     sessionType: typeof costEvents.$inferInsert.sessionType,
     amount: number,
+    attribution?: CostEventAttribution,
   ) {
     return unavailableOnThrow(async () => {
       if (!(await runExists(this.db, runId))) {
@@ -216,9 +257,31 @@ export class PostgresCostEventStore implements CostEventStore {
 
       const [row] = await this.db
         .insert(costEvents)
-        .values({ runId, sessionType, cost: amount })
+        .values({
+          runId,
+          sessionType,
+          cost: amount,
+          provider: attribution?.provider ?? null,
+          usageUnits: attribution?.usageUnits ?? null,
+        })
         .returning();
       return row ? ok(row) : unavailable('cost event insert returned no row');
+    });
+  }
+
+  async listForWindow(window: CostEventWindow) {
+    return unavailableOnThrow(async () => {
+      const rows = await this.db
+        .select()
+        .from(costEvents)
+        .where(
+          and(
+            gte(costEvents.recordedAt, window.from),
+            lt(costEvents.recordedAt, window.to),
+          ),
+        )
+        .orderBy(costEvents.recordedAt);
+      return ok(rows);
     });
   }
 }

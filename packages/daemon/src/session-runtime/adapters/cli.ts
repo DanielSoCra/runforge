@@ -138,7 +138,7 @@ export class CliAdapter implements ProviderAdapter {
     return env;
   }
 
-  parseOutput(stdout: string): Result<{ output: string; cost: number; costEstimated: boolean; structuredData: unknown; continuationId?: string }> {
+  parseOutput(stdout: string): Result<{ output: string; cost: number; costEstimated: boolean; structuredData: unknown; continuationId?: string; usageUnits?: number }> {
     try {
       const json = JSON.parse(stdout) as Record<string, unknown>;
       const output = typeof json['result'] === 'string'
@@ -157,6 +157,7 @@ export class CliAdapter implements ProviderAdapter {
         structuredData: json,
         costEstimated: cost === 0,
         continuationId,
+        usageUnits: sumUsageTokens(json['usage']),
       });
     } catch {
       // Non-JSON output means the CLI crashed, was killed, or produced unexpected output.
@@ -472,6 +473,7 @@ export class CliAdapter implements ProviderAdapter {
             output: timedOutOutput,
             structuredData: null,
             cost: timedOutCost,
+            usageUnits: timedOutParsed.ok ? timedOutParsed.value.usageUnits : undefined,
             pitfallMarkers: this.extractPitfalls(timedOutOutput),
             exitStatus: 'timed-out' as ExitStatus,
             handoffNote: this.extractHandoff(timedOutOutput),
@@ -511,6 +513,7 @@ export class CliAdapter implements ProviderAdapter {
           structuredData: parsed.value.structuredData,
           cost: parsed.value.cost,
           costEstimated: parsed.value.costEstimated,
+          usageUnits: parsed.value.usageUnits,
           pitfallMarkers: this.extractPitfalls(parsed.value.output),
           exitStatus,
           handoffNote: this.extractHandoff(parsed.value.output),
@@ -656,6 +659,7 @@ export class CliAdapter implements ProviderAdapter {
             structuredData: null,
             cost: timedOutCost,
             costEstimated: timedOutCost === 0,
+            usageUnits: timedOutParsed.ok ? timedOutParsed.value.usageUnits : undefined,
             pitfallMarkers: this.extractPitfalls(timedOutOutput),
             exitStatus: 'timed-out' as ExitStatus,
             handoffNote: this.extractHandoff(timedOutOutput),
@@ -690,6 +694,7 @@ export class CliAdapter implements ProviderAdapter {
           structuredData: parsed.value.structuredData,
           cost: parsed.value.cost,
           costEstimated: parsed.value.costEstimated,
+          usageUnits: parsed.value.usageUnits,
           pitfallMarkers: this.extractPitfalls(parsed.value.output),
           exitStatus,
           handoffNote: this.extractHandoff(parsed.value.output),
@@ -793,4 +798,30 @@ export class CliAdapter implements ProviderAdapter {
     }
     return markers;
   }
+}
+
+/**
+ * Sum the token counters the Claude CLI reports in the result JSON's `usage`
+ * object (input, output, cache creation, cache read). Returns undefined when
+ * no counter is present so the cost event stays unattributed on the usage
+ * dimension rather than recording a fabricated zero.
+ */
+export function sumUsageTokens(usage: unknown): number | undefined {
+  if (usage === null || typeof usage !== 'object') return undefined;
+  const counters = [
+    'input_tokens',
+    'cache_creation_input_tokens',
+    'cache_read_input_tokens',
+    'output_tokens',
+  ];
+  let total = 0;
+  let found = false;
+  for (const key of counters) {
+    const value = (usage as Record<string, unknown>)[key];
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+      total += value;
+      found = true;
+    }
+  }
+  return found ? total : undefined;
 }

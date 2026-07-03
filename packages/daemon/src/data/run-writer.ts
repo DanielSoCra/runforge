@@ -1,4 +1,5 @@
 import type {
+  CostEventAttribution,
   CostEventStore,
   JsonValue,
   RunInsert,
@@ -54,6 +55,7 @@ export interface RunWriter {
     runId: string,
     sessionType: SessionType,
     cost: number,
+    attribution?: CostEventAttribution,
   ): Promise<void>;
 }
 
@@ -126,11 +128,13 @@ export class PostgresRunWriter implements RunWriter {
     runId: string,
     sessionType: SessionType,
     cost: number,
+    attribution?: CostEventAttribution,
   ): Promise<void> {
     const result = await this.costs.recordCostEvent(
       runId,
       toDbSessionType(sessionType),
       cost,
+      attribution,
     );
     if (!result.ok) {
       console.warn(

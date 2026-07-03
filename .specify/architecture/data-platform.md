@@ -3,7 +3,7 @@ id: ARCH-AC-DATA-PLATFORM
 type: architecture
 domain: auto-claude
 status: draft
-version: 1
+version: 2
 layer: 2
 references: FUNC-AC-DATA-PLATFORM
 ---
@@ -23,7 +23,7 @@ Entities (plain language):
 - **GlobalSettings** — one record of system-wide limits (concurrency, daily budget, default model).
 - **Repository** — a watched repository: owner, name, enabled flag, soft-deletion marker, budget and concurrency limits, polling cadence, staging and production branch names, a link to the GitHub connection that authorizes it, credential status plus credential error, and a health status both for its autonomous matrix and for its GitHub connection.
 - **Run** — one pipeline execution for a repository and issue: current phase, outcome (including a failed outcome), pipeline variant, total cost, fix attempts, the ordered phase records, the report, the active plugins, and started/completed/updated timestamps.
-- **CostEvent** — a single cost amount attributed to a Run and a session type.
+- **CostEvent** — a single cost amount attributed to a Run and a session type, optionally carrying the provider that incurred it (the model-provider the session ran on) and the usage quantity the runtime reported for the session. Both attribution values are optional: records written before attribution existed, and records from runtimes that cannot report a value, carry neither — consumers surface such records as unattributed and never invent a value for them.
 - **RepoPlugin** — activation and recommendation state linking a Repository to a plugin, including a per-repository plugin configuration document.
 - **PluginGlobalSettings** — configuration for a plugin shared across all repositories.
 - **ApiKey** — a per-repository stored credential identified by its kind (one of: source-control, model-provider, webhook-secret), kept in protected form, written by administrators but never returned to operators in readable form.
@@ -39,9 +39,9 @@ Identity, membership, and invitation records are **not** owned here; they are ow
 
 The Data Service exposes bounded Store contracts. Each operation states its inputs, its returned shape, and its failure outcomes. No caller depends on storage internals.
 
-- **RepoStore** — `listEnabledRepositories() → repositories`; `upsertRepository(repository) → repository`; `setCredentialStatus(repositoryId, status, error?) → ok | not-found`.
-- **RunStore** — `insertRun(run) → run`; `updateRun(runId, changes) → run | not-found`; `listRunsUpdatedSince(timestamp) → runs`; `countStuckRunsForIssue(repository identity, work request identifier) → count`; `markInProgressRunsStuck(completedAt) → affected run identifiers`.
-- **CostEventStore** — `recordCostEvent(runId, sessionType, amount) → ok | run-not-found`.
+- **RepoStore** — `listEnabledRepositories() → repositories`; `upsertRepository(repository) → repository`; `setCredentialStatus(repositoryId, status, error?) → ok | not-found`; `namesFor(projectIds) → display names for the requested projects` (read-only; requested identifiers with no matching record are simply absent from the result).
+- **RunStore** — `insertRun(run) → run`; `updateRun(runId, changes) → run | not-found`; `listRunsUpdatedSince(timestamp) → runs`; `countStuckRunsForIssue(repository identity, work request identifier) → count`; `markInProgressRunsStuck(completedAt) → affected run identifiers`; `attributionFor(runIds) → per-run project identity and completion time` (read-only; the join surface the spend projection uses to attribute cost records to projects).
+- **CostEventStore** — `recordCostEvent(runId, sessionType, amount, attribution?) → ok | run-not-found`, where the optional attribution names the provider that incurred the cost and the usage quantity the runtime reported (either may be absent); `listForWindow(window) → cost events recorded within the window` (read-only, ordered by recording time).
 - **CredentialStore** — `storeConnectionCredential(connection, plaintext) → connectionId`; `readConnectionCredential(connectionId) → plaintext (within boundary only) | denied`; `setConnectionStatus(connectionId, status) → ok`; `storeRepoCredential(repositoryId, kind, plaintext) → ok`; `readRepoCredential(repositoryId, kind) → plaintext (within boundary only) | denied`; `listRepoCredentialMetadata(repositoryId) → [{ kind, updatedAt }] | not-found` — returns no plaintext, covers the source-control, model-provider, and webhook-secret kinds, and is what callers use to show credential presence and gate repository enablement.
 - **PluginStore** — `listActivePlugins(repositoryId) → plugins`; `listRepositoryPlugins(repositoryId) → repoPlugin records (active, recommended, recommendation reason and time, activation time, configuration)`; `setPluginActivation(repositoryId, pluginId, active) → ok`; `readRepoPluginConfig(repositoryId, pluginId) → config`; `updateRepoPluginConfig(repositoryId, pluginId, config) → config | not-found`; `recordPluginRecommendation(repositoryId, pluginId, recommendation) → ok | not-found`; `readPluginGlobalSettings(pluginId) → settings`; `updatePluginGlobalSettings(pluginId, changes) → settings`.
 - **BriefingStore** — `readLatestBriefing() → briefing | not-found`; `appendBriefing(briefing) → ok`; `appendActivityEvents(events) → ok`; `listRunsForSignals(since) → runs`; `countNotificationChannels() → count`.

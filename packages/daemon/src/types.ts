@@ -296,6 +296,13 @@ export interface SessionResult {
   cost: number;
   /** True when `cost` is a conservative estimate rather than an exact provider-reported value. */
   costEstimated?: boolean;
+  /**
+   * Runtime-reported total token count for the session (sum of the token
+   * counters in the CLI result's `usage` object). Undefined when the runtime
+   * does not report usage (codex-cli, pi-cli) — the cost event then stays
+   * unattributed on the usage dimension.
+   */
+  usageUnits?: number;
   pitfallMarkers: PitfallMarker[];
   exitStatus: ExitStatus;
   handoffNote?: string;

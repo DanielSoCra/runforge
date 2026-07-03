@@ -15,6 +15,13 @@
       "when": 1779308765210,
       "tag": "0001_operator_auth_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783094851341,
+      "tag": "0002_cost_events_provider_usage",
+      "breakpoints": true
     }
   ]
 }
