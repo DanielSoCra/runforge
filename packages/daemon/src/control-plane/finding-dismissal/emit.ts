@@ -28,6 +28,7 @@ import {
   parseSeverityRiskClass,
   findingDismissalClass,
   isProtectedFinding,
+  isRoutineFinding,
 } from './labels.js';
 import {
   buildFindingDismissalRequest,
@@ -126,10 +127,13 @@ function buildRecommendedReason(option: FindingAnswerOptionId, confidencePct?: n
  *
  * PROTECTION GATE (PR3-pre, codex R2 CRIT-3 — closes the live PR2 gap): FIRST, if
  * the finding is PROTECTED (`isProtectedFinding(labels)` — a guarded category, a
- * human-route/protection label, OR an uncertain/critical severity), return NO
- * pre-fill unconditionally. A P0/compliance/sensitive finding must never receive a
- * pre-filled dismiss recommendation, regardless of how strong the learned pattern
- * is. This is fail-CLOSED and takes precedence over the fail-open learning read.
+ * human-route/protection label, OR an uncertain/critical severity) OR NOVEL
+ * (`!isRoutineFinding(labels)` — any label outside the routine vocabulary, #819),
+ * return NO pre-fill unconditionally. A P0/compliance/sensitive/novel finding must
+ * never receive a pre-filled dismiss recommendation, regardless of how strong the
+ * learned pattern is. This is fail-CLOSED and takes precedence over the fail-open
+ * learning read, and aligns rung-2 nudging with the L1 v2 fourth-rung guardrail
+ * (novel is never auto-acted on — here it is not even nudged).
  *
  * ANY error (a learning read failure) is caught, logged, and treated as NO pre-fill —
  * the emit must never drop a decision because the best-effort hint failed (L1
@@ -144,10 +148,11 @@ async function computeFindingPrefill(
   issueNumber: number,
   labels: readonly string[],
 ): Promise<{ recommendedOption?: FindingAnswerOptionId; recommendedReason?: string }> {
-  // PR3-pre protection gate: a protected/uncertain-severity finding is NEVER
-  // pre-filled — the Operator decides it explicitly. Checked before the learning
-  // read so no strong pattern can override it.
-  if (isProtectedFinding(labels)) return {};
+  // PR3-pre protection gate (+ #819 novelty gate): a protected/uncertain-severity
+  // OR novel (non-routine-vocabulary) finding is NEVER pre-filled — the Operator
+  // decides it explicitly. Checked before the learning read so no strong pattern
+  // can override it.
+  if (isProtectedFinding(labels) || !isRoutineFinding(labels)) return {};
   try {
     const pref = await operatorLearning.getPreference(findingDismissalClass(category), `${owner}/${repo}`);
     const choice = pref.mostFrequentChoice;
@@ -249,9 +254,10 @@ export interface EmitFindingDismissalArgs {
   riskClass: ReturnType<typeof parseSeverityRiskClass>;
   /**
    * The finding's raw issue labels — threaded into the pre-fill protection gate
-   * (`isProtectedFinding`). A protected/uncertain-severity finding gets NO pre-fill
-   * (PR3-pre, closes the PR2 gap). Distinct from `riskClass` (which fills the request
-   * and fail-OPEN defaults to P2); the gate reads severity fail-CLOSED from these.
+   * (`isProtectedFinding` + `isRoutineFinding`, #819). A protected/uncertain-severity
+   * OR novel (non-routine-vocabulary) finding gets NO pre-fill (PR3-pre, closes the
+   * PR2 gap). Distinct from `riskClass` (which fills the request and fail-OPEN
+   * defaults to P2); the gate reads severity fail-CLOSED from these.
    */
   labels: readonly string[];
   /** Defaults to FINDING_DISMISSAL_EMIT_EPOCH. */

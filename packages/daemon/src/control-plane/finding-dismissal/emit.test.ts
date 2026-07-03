@@ -402,9 +402,10 @@ describe('emitFindingDismissalDecision — rung-2 pre-fill (PR2)', () => {
 
   // ── PR3-pre: pre-fill protection gate (closes the live PR2 gap) ──────────────
   // Even with a strong EARNED pre-fill preference, a PROTECTED / uncertain-severity
-  // finding must NEVER receive a pre-filled dismiss recommendation. The finding is
-  // still raised + notified (never dropped) — just with no recommended_option.
-  describe('pre-fill protection gate (isProtectedFinding → no pre-fill)', () => {
+  // OR NOVEL (non-routine-vocabulary, #819) finding must NEVER receive a pre-filled
+  // dismiss recommendation. The finding is still raised + notified (never dropped) —
+  // just with no recommended_option.
+  describe('pre-fill protection gate (isProtectedFinding || !isRoutineFinding → no pre-fill)', () => {
     // A learning surface that WOULD earn a 'reject' pre-fill on a routine finding.
     const earnedReject = fakeLearning({ rung: 'pre-fill', mostFrequentChoice: 'reject', confidence: 0.9 });
 
@@ -457,6 +458,21 @@ describe('emitFindingDismissalDecision — rung-2 pre-fill (PR2)', () => {
     it('a guarded category (security) → no pre-fill', async () => {
       const { raised } = await emitWith(earnedReject, 'security', ['review-finding', 'security', 'P2']);
       expect(raised?.recommended_option).toBeUndefined();
+    });
+
+    it('NOVEL: an unrecognized label (outside the routine vocabulary) → still emitted, but NO pre-fill (#819)', async () => {
+      // `flaky-widget` is not protected — without the novelty gate the finding
+      // would have earned a 'reject' pre-fill. Novel → un-nudged (fail-closed).
+      const { raised, emitted } = await emitWith(earnedReject, 'correctness', [
+        'review-finding',
+        'correctness',
+        'P2',
+        'flaky-widget',
+      ]);
+      expect(emitted).toBe(true);
+      expect(raised?.recommended_option).toBeUndefined();
+      const options = raised?.options as Array<{ id: string; detail?: string }>;
+      expect(options.every((o) => o.detail === undefined)).toBe(true);
     });
 
     it('CONTROL: the SAME earned preference DOES pre-fill a routine, non-protected finding', async () => {
