@@ -23,7 +23,6 @@ export function buildRuntimeSourcePolicy(
     expectedRef,
     requireClean: config.runtimeSource.requireClean,
     requireExpectedRef: config.runtimeSource.requireExpectedRef,
-    allowSelfRepair: config.runtimeSource.allowSelfRepair,
     onUnhealthy: config.runtimeSource.onUnhealthy,
     ignoredDirtyPaths: config.runtimeSource.ignoredDirtyPaths,
   };

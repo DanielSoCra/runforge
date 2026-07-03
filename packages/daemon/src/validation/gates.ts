@@ -80,6 +80,7 @@ export function createGate1(commands: string[], opts?: Gate1Options): Gate {
     type: 'deterministic',
     async execute(cwd: string): Promise<GateResult> {
       const findings: ReviewFinding[] = [];
+      let baselineMode = false;
       // No commands configured → auto-detect the project's own test/typecheck/lint
       // scripts so the deterministic gate validates behaviour instead of passing
       // vacuously over an empty list. If none are detectable, say so out loud —
@@ -120,6 +121,7 @@ export function createGate1(commands: string[], opts?: Gate1Options): Gate {
             timeoutMs: 120_000,
           });
           if (!baseline.ok) {
+            baselineMode = true;
             console.log(
               `[gate1] '${cmd}' fails post-change AND on base — pre-existing, not blocking (${result.error.message.split('\n')[0]})`,
             );
@@ -136,7 +138,7 @@ export function createGate1(commands: string[], opts?: Gate1Options): Gate {
         });
         return { gate: 'deterministic', passed: false, findings };
       }
-      return { gate: 'deterministic', passed: true, findings };
+      return { gate: 'deterministic', passed: true, findings, baselineMode };
     },
   };
 }

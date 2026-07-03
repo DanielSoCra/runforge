@@ -196,7 +196,6 @@ export interface RuntimeSourcePolicy {
   expectedRef?: string;
   requireClean: boolean;
   requireExpectedRef: boolean;
-  allowSelfRepair: boolean;
   onUnhealthy: RuntimeSourceAction;
   ignoredDirtyPaths: string[];
 }
@@ -476,6 +475,8 @@ export interface RunState {
   passedGates?: string[];
   /** Counter for l3-compliance failure attempts (every failure path); capped to prevent infinite cross-phase loop. */
   l3ComplianceAttempts?: number;
+  /** True when gate-1 ran in baseline/degraded mode and skipped a pre-existing failure. */
+  gate1BaselineMode?: boolean;
   activePhaseLabel?: string;
   workspacePath?: string; // Persisted worktree path — survives daemon restarts
   nodeStates?: Record<string, WorkflowNodeRunState>;
@@ -598,6 +599,13 @@ export interface GateResult {
   passed: boolean;
   findings: ReviewFinding[];
   discoveredIssues?: DiscoveredIssue[];
+  /**
+   * True when the deterministic gate ran in baseline/degraded mode and skipped
+   * at least one pre-existing failure (a failure that also failed on the
+   * pristine base). This flag is surfaced on the run so a tainted baseline is
+   * not silently dropped.
+   */
+  baselineMode?: boolean;
 }
 
 // --- Bug Diagnosis ---

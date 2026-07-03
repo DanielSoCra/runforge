@@ -12,6 +12,10 @@ import {
   applySessionDecisionsToState,
   type InteractiveSessionDeps,
 } from './interactive-session-context.js';
+import {
+  __clearPromptCacheForTests,
+  __setPromptCacheForTests,
+} from '../../session-runtime/runtime.js';
 import { SharedPOStateStore } from './shared-po-state.js';
 import type { SharedPOState } from './interactive-schemas.js';
 
@@ -73,9 +77,12 @@ describe('startInteractivePOSession', () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'po-interactive-'));
     await mkdir(join(tmpDir, 'prompts'), { recursive: true });
     await writeFile(join(tmpDir, 'prompts', 'product-owner-interactive.md'), '# Interactive\n{{shared_po_state}}');
+    __clearPromptCacheForTests();
+    __setPromptCacheForTests('product-owner-interactive', '# Interactive\n{{shared_po_state}}');
   });
 
   afterEach(() => {
+    __clearPromptCacheForTests();
     rmSync(tmpDir, { recursive: true, force: true });
   });
 

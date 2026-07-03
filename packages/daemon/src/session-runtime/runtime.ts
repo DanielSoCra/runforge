@@ -1,5 +1,5 @@
 // src/session-runtime/runtime.ts
-import { readFile } from 'fs/promises';
+import { readFile, readdir } from 'fs/promises';
 import { join } from 'path';
 import type { Config } from '../config.js';
 import type {
@@ -92,7 +92,7 @@ const isTestEnv = (): boolean =>
   process.env['NODE_ENV'] === 'test' || process.env['VITEST'] === 'true';
 
 /**
- * Pre-warm the prompt cache by reading every registered prompt template now,
+ * Pre-warm the prompt cache by reading every prompt template now,
  * while the daemon's main repo HEAD is still on its known-good startup branch.
  * Without this, the *first* loadPromptTemplate call for each prompt could land
  * mid-pipeline (after a phase moved HEAD to a feature branch) and cache the
@@ -100,9 +100,18 @@ const isTestEnv = (): boolean =>
  */
 export async function preloadPromptCache(): Promise<number> {
   if (isTestEnv()) return 0;
+  const dir = promptsDir();
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return 0;
+  }
+
+  const promptFiles = entries.filter((f) => f.endsWith('.md'));
   let loaded = 0;
-  for (const name of Object.keys(PROMPT_CONTRACTS)) {
-    const filePath = join(promptsDir(), `${name}.md`);
+  for (const file of promptFiles) {
+    const filePath = join(dir, file);
     try {
       const content = await readFile(filePath, 'utf-8');
       promptCache.set(filePath, content);
@@ -117,6 +126,31 @@ export async function preloadPromptCache(): Promise<number> {
 /** Test-only: clear the cache between tests. */
 export function __clearPromptCacheForTests(): void {
   promptCache.clear();
+}
+
+/**
+ * Read a prompt template from the boot-frozen cache by its base name (e.g.
+ * `product-owner-interactive`). Returns `undefined` when the prompt was not
+ * frozen at boot. This is the self-hosting-safe way to access a prompt that
+ * would otherwise be live-read off the moving working tree.
+ */
+export function getFrozenPromptTemplate(name: string): string | undefined {
+  if (name.includes('/') || name.includes('\\') || name.includes('..')) {
+    return undefined;
+  }
+  return promptCache.get(join(promptsDir(), `${name}.md`));
+}
+
+/** Test-only: seed the cache between tests. */
+export function __setPromptCacheForTests(name: string, content: string): void {
+  if (
+    name.includes('/') ||
+    name.includes('\\') ||
+    name.includes('..')
+  ) {
+    return;
+  }
+  promptCache.set(join(promptsDir(), `${name}.md`), content);
 }
 
 /**

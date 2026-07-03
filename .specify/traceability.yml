@@ -817,6 +817,7 @@ STACK-AC-SESSION-RUNTIME:
     - packages/daemon/src/session-runtime/generate-containment-script.test.ts
     - packages/daemon/src/session-runtime/rate-limiter.test.ts
     - packages/daemon/src/session-runtime/audit.test.ts
+    - packages/daemon/src/session-runtime/p2-prompt-freeze.gate.test.ts
   status: draft
 
 STACK-AC-SESSION-PROVIDERS:
@@ -897,9 +898,11 @@ STACK-AC-VERIFIER-GATE:
     - packages/daemon/src/control-plane/lane-engine/verifier-gate/schema.ts
     - packages/daemon/src/control-plane/lane-engine/verifier-gate/evaluate.ts
     - packages/daemon/src/control-plane/lane-engine/verifier-gate/index.ts
+    - packages/daemon/src/control-plane/phases.ts
   test_paths:
     - packages/daemon/src/control-plane/lane-engine/verifier-gate/evaluate.test.ts
     - packages/daemon/src/control-plane/lane-engine/verifier-gate/schema.test.ts
+    - packages/daemon/src/control-plane/p2-execution-verifier-gate.gate.test.ts
   status: draft
 
 STACK-AC-WINDOW-SCHEDULER:
@@ -926,6 +929,7 @@ STACK-AC-DEPLOYMENT-REGISTRY:
   parent: ARCH-AC-DEPLOYMENT-REGISTRY
   children: []
   code_paths:
+    - auto-claude.config.json
     - packages/daemon/src/control-plane/deployment-registry/schema.ts
     - packages/daemon/src/control-plane/deployment-registry/types.ts
     - packages/daemon/src/control-plane/deployment-registry/registry.ts
@@ -938,6 +942,7 @@ STACK-AC-DEPLOYMENT-REGISTRY:
     - packages/daemon/src/control-plane/deployment-registry/regressions.test.ts
     - packages/daemon/src/control-plane/deployment-registry/gate-set-config.test.ts
     - packages/daemon/src/control-plane/p4-deployment-budget.gate.test.ts
+    - packages/daemon/src/control-plane/p2-deployment-profile.gate.test.ts
   status: draft
 
 STACK-AC-STEERING:

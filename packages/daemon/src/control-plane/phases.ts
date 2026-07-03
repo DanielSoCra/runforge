@@ -75,8 +75,19 @@ import { buildMergeDecisionRequest,
 import { alertOnNotifyApplied, type DecisionRaisedAlert } from './decision-alert.js';
 import type { DecisionOption, DecisionRequest } from '@auto-claude/decision-protocol';
 import { SanitizationPipeline } from '@auto-claude/sanitization';
-import { assignLane, gateSetVerdict, resolveForMode } from './lane-engine/index.js';
-import type { ClassifierVerdict, GateSetDefinitions, RiskLevel } from './lane-engine/types.js';
+import {
+  assignLane,
+  evaluateVerifierGate,
+  gateSetVerdict,
+  resolveForMode,
+} from './lane-engine/index.js';
+import type {
+  ClassifierVerdict,
+  GateSetDefinitions,
+  RiskLevel,
+} from './lane-engine/types.js';
+import type { VerifierInvocationRef } from './lane-engine/verifier-gate/types.js';
+import type { LaneEngineInputsResult } from './deployment-registry/types.js';
 import type { ClassificationComplexity } from '../types.js';
 
 // Serializes git operations on the shared repoRoot across concurrent pipeline runs.
@@ -152,6 +163,83 @@ export function createProbeOracle(repoRoot: string): (ref: { ref: string }) => b
 
     return false;
   };
+}
+
+/** Narrow registry surface the pre-implement verifier gate needs. */
+export interface PreImplementVerifierGateRegistry {
+  resolveLaneEngineInputs(deploymentId: string): LaneEngineInputsResult;
+}
+
+type AssistReason = Extract<
+  import('./lane-engine/verifier-gate/types.js').VerifierGateResult,
+  { kind: 'assist-and-escalate' }
+>['reason'];
+
+export type PreImplementVerifierGateDecision =
+  | { kind: 'proceeded'; governed: boolean; laneName?: string }
+  | { kind: 'refused'; governed: true; laneName: string; reason: AssistReason };
+
+export interface PreImplementVerifierGateEscalation {
+  deploymentId: string;
+  laneName: string;
+  reason: AssistReason;
+}
+
+/**
+ * Pre-implement verifier gate (FUNC-AC-VERIFIER-GATE step 4).
+ *
+ * For a governed deployment, resolve the lane the classifier would assign and
+ * verify the lane declares a runnable, falsifying oracle BEFORE any autonomous
+ * implementation is dispatched. Fail closed: no verifier / unusable verifier /
+ * non-falsifying verifier ⇒ refuse and escalate; do NOT call `implement`.
+ *
+ * For an ungoverned run (no deploymentId or no registry), the gate is inert and
+ * `implement` is called to preserve legacy behavior.
+ */
+export async function checkVerifierGateBeforeImplement(args: {
+  deploymentId?: string;
+  registry?: PreImplementVerifierGateRegistry;
+  classifierVerdict: ClassifierVerdict | null;
+  probeOracle: (invoke: VerifierInvocationRef) => boolean;
+  implement: () => Promise<unknown>;
+  escalate: (event: PreImplementVerifierGateEscalation) => Promise<void>;
+}): Promise<PreImplementVerifierGateDecision> {
+  const { deploymentId, registry, classifierVerdict, probeOracle, implement, escalate } = args;
+
+  // Ungoverned: preserve legacy behavior; do not probe.
+  if (deploymentId === undefined || registry === undefined) {
+    await implement();
+    return { kind: 'proceeded', governed: false };
+  }
+
+  const resolved = registry.resolveLaneEngineInputs(deploymentId);
+  if (resolved.kind !== 'found') {
+    const laneName = resolved.deploymentId;
+    await escalate({ deploymentId, laneName, reason: 'evaluation-indeterminate' });
+    return {
+      kind: 'refused',
+      governed: true,
+      laneName,
+      reason: 'evaluation-indeterminate',
+    };
+  }
+
+  const inputs = resolved.inputs;
+  const resolvedSet = resolveForMode(inputs.laneSet, inputs.mode);
+  const assignment = assignLane(resolvedSet, classifierVerdict);
+  const laneName = assignment.lane;
+  const assignedLane = resolvedSet.lanes.find((l) => l.name === laneName);
+
+  const status = observeVerifierStatus(assignedLane?.verifier, { probeOracle });
+  const verdict = evaluateVerifierGate(assignedLane?.verifier, status);
+
+  if (verdict.kind === 'verifier-gated') {
+    await implement();
+    return { kind: 'proceeded', governed: true, laneName };
+  }
+
+  await escalate({ deploymentId, laneName, reason: verdict.reason });
+  return { kind: 'refused', governed: true, laneName, reason: verdict.reason };
 }
 
 export function createPhaseHandlers(
@@ -1515,25 +1603,73 @@ export function createPhaseHandlers(
           ? [`[operator-send-back] ${sendBack}`, ...(run.reviewFindings ?? [])]
           : run.reviewFindings;
       run.mergeDecisionFeedback = undefined;
-      const result = await coordinator.implement(
-        workRequest,
-        featureBranch,
-        runWriter,
-        runId,
-        {
-          handoffNotes,
-          variant: run.variant,
-          diagnosisDetail: run.diagnosisDetail,
-          activePlugins,
-          complexity: run.classificationComplexity,
-          specContent,
-          baseBranch: config.branches.staging,
-          // #4: feed back findings from the prior review cycle so re-implement
-          // is not blind to what the reviewer flagged. #9: also carries the
-          // Operator's integrate send-back reason on its first post-reject pass.
-          reviewFindings: implementFindings,
+
+      // P2 pre-implement verifier gate: a governed deployment must declare a
+      // runnable, falsifying oracle before autonomous implementation is allowed.
+      const classifierVerdict: ClassifierVerdict | null =
+        run.classificationComplexity !== undefined
+          ? {
+              complexity: run.classificationComplexity,
+              changeKind: run.classifierChangeKind,
+              scope: run.classifierScope,
+            }
+          : null;
+
+      let implementResult:
+        | Awaited<ReturnType<typeof coordinator.implement>>
+        | undefined;
+      const guardResult = await checkVerifierGateBeforeImplement({
+        deploymentId: run.deploymentId,
+        registry,
+        classifierVerdict,
+        probeOracle: createProbeOracle(mainRepoRoot),
+        implement: async () => {
+          implementResult = await coordinator.implement(
+            workRequest,
+            featureBranch,
+            runWriter,
+            runId,
+            {
+              handoffNotes,
+              variant: run.variant,
+              diagnosisDetail: run.diagnosisDetail,
+              activePlugins,
+              complexity: run.classificationComplexity,
+              specContent,
+              baseBranch: config.branches.staging,
+              reviewFindings: implementFindings,
+            },
+          );
+          return implementResult;
         },
-      );
+        escalate: async (event) => {
+          console.warn(
+            `[implement] Verifier gate refused for deployment ${event.deploymentId}, lane ${event.laneName}: ${event.reason}`,
+          );
+          run.lastFailure = createFailureRecord({
+            kind: 'human-required',
+            phase: 'implement',
+            message: `Pre-implement verifier gate refused: lane '${event.laneName}' — ${event.reason}`,
+            severity: 'blocking',
+            retryable: false,
+            repairAction: 'request-human',
+            humanActionRequired: true,
+            maxAttempts: 1,
+          });
+        },
+      });
+
+      if (guardResult.kind === 'refused') {
+        return 'escalated';
+      }
+
+      const result = implementResult;
+      if (result === undefined) {
+        console.error(
+          `[implement] Verifier gate proceeded but implement result is missing`,
+        );
+        return 'failure';
+      }
       if (!result.ok) {
         console.error(`[implement] Error:`, result.error.message);
         return 'failure';
@@ -1858,6 +1994,14 @@ export function createPhaseHandlers(
       run.passedGates = result.gateResults
         .filter((g) => g.passed === true)
         .map((g) => g.gate);
+      // Surface gate-1 baseline/degraded mode so a skipped pre-existing failure
+      // is not silently dropped.
+      if (result.gateResults.some((g) => g.baselineMode === true)) {
+        run.gate1BaselineMode = true;
+        console.warn(
+          `[review] Gate-1 ran in baseline/degraded mode — one or more pre-existing failures were skipped; run marked tainted`,
+        );
+      }
       // #4: clear consumed findings once review passes so they don't bleed into
       // an unrelated later cycle.
       run.reviewFindings = undefined;

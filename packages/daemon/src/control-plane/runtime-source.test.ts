@@ -47,7 +47,6 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
       enabled: true,
       requireClean: true,
       requireExpectedRef: true,
-      allowSelfRepair: false,
       onUnhealthy: 'pause',
       ignoredDirtyPaths: ['state/'],
     },

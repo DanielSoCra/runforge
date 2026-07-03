@@ -307,6 +307,36 @@ The daemon polls the configured GitHub repo for issues and selects a pipeline va
 - **Bug fix** — issues labelled as bugs. Streamlined: detect, diagnose, implement, review, integrate, deploy, test, report.
 - **Codebase review** — not yet migrated to the daemon. Currently runs via `scripts/reviewer.sh`.
 
+### Self-hosting posture
+
+When the daemon governs its own repo (deployment #0), there is no external
+sandbox: HEAD can move under the running process. The following posture makes
+that safe:
+
+- **Validate at boot and every claim.** `runtimeSource.expectedRef` is pinned to
+  `origin/main`. `validateRuntimeSource` runs before prompt pre-warming and work
+  detection; an unhealthy runtime source pauses the daemon (configurable via
+  `onUnhealthy`) rather than proceeding against a dirty or stale checkout.
+- **Pause on unhealthy.** A runtime-source failure sets the daemon degraded and
+  stops new claims. The operator must reconcile the checkout before work resumes.
+- **Self-changes land only as PRs.** The running tree is never mutated in-place.
+  Implementation, review, and merge all happen in worktrees and feature branches.
+- **Operator-gated restart is the only self-update path.** Promotion of a new
+  auto-claude version is the restart: the operator runs the repository's
+  `release.sh` (the configured `landing.productionReleasePath`) and restarts the
+  daemon from the fresh checkout. The daemon does not rewrite its own source or
+  binary while running.
+- **Governed boot requires the decision index.** With a `deployment` block present,
+  the daemon refuses to boot unless the decision index is available
+  (`AUTO_CLAUDE_DECISION_INDEX_ENABLED=1` + a reachable `AUTO_CLAUDE_DATABASE_URL`).
+  This is fail-closed by design: a governed deployment that cannot surface
+  escalations to the Operator must not run silently ungoverned. Set both before
+  starting the self-hosting daemon, or boot will refuse — loudly — rather than
+  proceed.
+
+This replaces physical isolation with runtime-source hygiene, explicit pause
+semantics, and a human-in-the-loop promotion step.
+
 ## Stopping
 
 ```bash

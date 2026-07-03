@@ -21,7 +21,7 @@ const featureTransitions: TransitionTable = {
     failure: { next: 'stuck' },
   },
   decompose: { success: { next: 'implement' }, failure: { next: 'stuck' } },
-  implement: { success: { next: 'review' }, failure: { next: 'implement' } },
+  implement: { success: { next: 'review' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
   review: { success: { next: 'holdout' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
   holdout: { success: { next: 'integrate' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
   integrate: { success: { next: 'deploy' }, failure: { next: 'stuck' } },
@@ -38,7 +38,7 @@ const featureSimpleTransitions: TransitionTable = {
     'success:simple': { next: 'implement' },
     failure: { next: 'stuck' },
   },
-  implement: { success: { next: 'review' }, failure: { next: 'implement' } },
+  implement: { success: { next: 'review' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
   review: { success: { next: 'holdout' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
   holdout: { success: { next: 'integrate' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
   integrate: { success: { next: 'deploy' }, failure: { next: 'stuck' } },
@@ -50,7 +50,7 @@ const featureSimpleTransitions: TransitionTable = {
 // Bug: detect → implement → review → integrate → deploy → test → report (skips classify, decompose, holdout)
 const bugTransitions: TransitionTable = {
   detect: { success: { next: 'implement' }, failure: { next: 'stuck' } },
-  implement: { success: { next: 'review' }, failure: { next: 'implement' } },
+  implement: { success: { next: 'review' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
   review: { success: { next: 'integrate' }, failure: { next: 'implement' }, escalated: { next: 'stuck' } },
   integrate: { success: { next: 'deploy' }, failure: { next: 'stuck' } },
   deploy: { success: { next: 'test' }, failure: { next: 'stuck' } },

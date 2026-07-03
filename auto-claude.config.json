@@ -15,10 +15,58 @@
     "production": "main"
   },
   "webhooks": [],
+  "deployment": {
+    "id": "auto-claude",
+    "profile": {
+      "repositories": [{ "owner": "DANIELSOCRAHANDLEZZ", "name": "auto-claude" }],
+      "riskPathMap": [
+        { "paths": [".specify/**", ".github/**", "packages/daemon/src/control-plane/**", "packages/daemon/src/session-runtime/**"], "minLevel": "red" },
+        { "paths": ["packages/**"], "minLevel": "yellow" },
+        { "paths": ["docs/**", "**/*.md"], "minLevel": "green" }
+      ],
+      "defaultMinLevel": "yellow",
+      "laneSet": {
+        "declaredPhases": ["velocity"],
+        "mostCautiousLane": "standard",
+        "lanes": [
+          {
+            "name": "feature",
+            "qualify": { "complexity": ["simple", "standard"] },
+            "allowedPaths": ["packages/**", "docs/**", "**/*.md"],
+            "roleRouting": { "implement": "cheap-implementer" },
+            "gateSet": "gate1",
+            "mergePolicy": "auto",
+            "verifier": { "kind": "test-suite", "invoke": { "ref": "test" } }
+          },
+          {
+            "name": "standard",
+            "qualify": { "complexity": ["complex"] },
+            "allowedPaths": ["**"],
+            "roleRouting": { "implement": "cheap-implementer" },
+            "gateSet": "gate1",
+            "mergePolicy": "review-then-auto",
+            "verifier": { "kind": "test-suite", "invoke": { "ref": "test" } }
+          }
+        ]
+      },
+      "lifecycleMode": "velocity",
+      "complianceReviewers": [],
+      "honestAutomation": {
+        "automatable": ["feature", "docs", "test"],
+        "strained": ["product-direction"],
+        "irreduciblyHuman": ["l1-spec-authoring", "production-release"]
+      },
+      "budget": 5,
+      "landing": { "landsOn": "main", "productionReleasePath": "release-sh", "requiredChecks": ["ci"] },
+      "capabilityBindings": []
+    }
+  },
+  "runtimeSource": { "expectedRef": "origin/main" },
   "validation": {
     "gate1Commands": [
       "pnpm --filter @auto-claude/daemon run test"
     ],
-    "maxFixCycles": 4
+    "maxFixCycles": 4,
+    "baselinePreexistingFailures": true
   }
 }

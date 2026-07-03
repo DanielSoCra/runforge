@@ -418,7 +418,6 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
     enabled: true,
     requireClean: true,
     requireExpectedRef: true,
-    allowSelfRepair: false,
     onUnhealthy: 'pause',
     ignoredDirtyPaths: ['state/', 'workspaces/'],
   },
@@ -666,7 +665,6 @@ describe('first-use safety net (PR2 wiring)', () => {
       expectedRef: 'origin/staging',
       requireClean: true,
       requireExpectedRef: true,
-      allowSelfRepair: false,
       onUnhealthy: 'pause',
       ignoredDirtyPaths: ['state/'],
     });

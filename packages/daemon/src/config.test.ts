@@ -52,7 +52,6 @@ describe('ConfigSchema', () => {
         enabled: true,
         requireClean: true,
         requireExpectedRef: true,
-        allowSelfRepair: false,
         onUnhealthy: 'pause',
         ignoredDirtyPaths: ['state/', 'workspaces/', '.claude/scheduled_tasks.lock'],
       });
@@ -68,7 +67,6 @@ describe('ConfigSchema', () => {
         expectedRef: 'origin/dev',
         requireClean: false,
         requireExpectedRef: true,
-        allowSelfRepair: true,
         onUnhealthy: 'warn',
         ignoredDirtyPaths: ['state/', 'logs/'],
       },

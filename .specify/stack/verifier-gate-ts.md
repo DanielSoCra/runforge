@@ -13,9 +13,11 @@ code_paths:
   - packages/daemon/src/control-plane/lane-engine/verifier-gate/schema.ts
   - packages/daemon/src/control-plane/lane-engine/verifier-gate/evaluate.ts
   - packages/daemon/src/control-plane/lane-engine/verifier-gate/index.ts
+  - packages/daemon/src/control-plane/phases.ts
 test_paths:
   - packages/daemon/src/control-plane/lane-engine/verifier-gate/evaluate.test.ts
   - packages/daemon/src/control-plane/lane-engine/verifier-gate/schema.test.ts
+  - packages/daemon/src/control-plane/p2-execution-verifier-gate.gate.test.ts
 ---
 
 # STACK-AC-VERIFIER-GATE — Verifier Gate (TypeScript)
@@ -49,7 +51,14 @@ const VerifierDeclarationSchema = z.object({
 
 **The result type withholds only; it can never grant.** `evaluateVerifierGate` returns at most `'verifier-gated'`, which means "do not withhold — proceed to the other gates." There is no `'granted'`/`'auto-merge'` arm: granting passage is the lane-engine + compliance + earned-autonomy path's job, applied *after* a `'verifier-gated'` result. Earn-in and Operator-grant widening (STACK-AC-LANE-ENGINE's `evaluateEarnIn` / the merge-decision path) must gate their promotion on a `'verifier-gated'` result first — a verifier-less lane is structurally unreachable by promotion.
 
-**Plug-in point: a new sibling module under `control-plane/lane-engine/`.** The intended layout is a `verifier-gate/` sibling (e.g. `control-plane/lane-engine/verifier-gate/{types,schema,evaluate,index}.ts`) — pure module, no daemon imports — wired into the integrate-phase path *before* `eligibility.ts` runs. Final paths are deferred (frontmatter `code_paths: []`) until the implementation PR lands real files.
+**Realized layout: a pure sibling module under `control-plane/lane-engine/verifier-gate/`.** `verifier-gate/{types,schema,evaluate,index}.ts` is a pure module (no daemon imports); the control-plane wiring lives in `phases.ts`. `VerifierStatus` is produced by `observeVerifierStatus(declaration, { probeOracle })` (the probe is `createProbeOracle(repoRoot)`, which inspects **root** `package.json` scripts so a lane's `verifier.invoke.ref` must name a root script such as `test`).
+
+**Two consultation seams, one pure evaluator — pre-implement AND integrate.** `evaluateVerifierGate` is consulted at *both* autonomy-bearing points, not only at merge:
+
+1. **Pre-implement (execution seam)** — `checkVerifierGateBeforeImplement(args)` in `phases.ts`, called immediately before `coordinator.implement()`. For a **governed** run it resolves the assigned lane the same way integrate does (`registry.resolveLaneEngineInputs(deploymentId)` → `resolveForMode` → `assignLane`), then `observeVerifierStatus(lane.verifier, { probeOracle })` → `evaluateVerifierGate(lane.verifier, status)`. A non-`verifier-gated` verdict **fails closed**: it records a `human-required` failure and the phase handler returns `'escalated'` — `coordinator.implement()` is never called. An **ungoverned** run (no `deploymentId`/`registry`) proceeds legacy (implement is called, no probe), and a deployment that resolves `not-found` fails closed with `evaluation-indeterminate`. The result is a fail-closed union `{ kind:'proceeded'; governed } | { kind:'refused'; governed:true; laneName; reason }` — the guard owns no policy, it only sequences observe → evaluate → (refuse|proceed).
+2. **Integrate (merge seam)** — the pre-existing consultation inside the merge-decision path (`decideMerge`), unchanged.
+
+The `'escalated'` outcome routes `implement → stuck` in every FSM variant (mirroring how `review`/`holdout` already escalate), so a verifier-less governed run halts to the Operator at the earliest autonomy-bearing point rather than doing throwaway work that would only be refused at merge.
 
 ## Examples
 
@@ -80,6 +89,17 @@ if (gate.kind !== 'verifier-gated') return assistAndEscalate(gate.reason); // la
 const eligibility = evaluateMergeEligibility(input);  // tripwire/floor/policy still apply on top
 ```
 
+```typescript
+// Pre-implement seam (phases.ts): gate autonomous implementation dispatch.
+const decision = await checkVerifierGateBeforeImplement({
+  deploymentId: run.deploymentId, registry,          // ungoverned ⇒ inert, implement() runs
+  classifierVerdict, probeOracle: createProbeOracle(mainRepoRoot),
+  implement: async () => { implementResult = await coordinator.implement(/* … */); },
+  escalate: async (e) => { run.lastFailure = createFailureRecord({ kind: 'human-required', /* … */ }); },
+});
+if (decision.kind === 'refused') return 'escalated'; // → stuck; implement() was never called
+```
+
 ## Gotchas
 
 - The `default`/last branch must return assist-and-escalate, never `'verifier-gated'`. Order the guards so the *only* fallthrough to `'verifier-gated'` is the fully-checked happy path; a future added `VerifierStatus` field must not silently become a pass. Test the indeterminate and partial-status cases explicitly.
@@ -89,6 +109,7 @@ const eligibility = evaluateMergeEligibility(input);  // tripwire/floor/policy s
 - A verifier that *was* usable is not cached as usable. Re-evaluate `VerifierStatus` on every attempt — a verifier that goes unreachable mid-life must drop the lane to assist-and-escalate on the next evaluation (`reason: 'verifier-unusable'`), never coast on a prior pass.
 - There is no config toggle to add, ever. If a future pack field looks like it would "enable/disable the verifier gate," that is the non-configurability boundary being violated — the precondition is engine-owned, a sibling of the tripwire.
 - Record the `VerifierGateResult` (and its reason) to run state for audit, but recording is the caller's side-effect, not the pure function's; if recording fails, fail closed (treat as assist-and-escalate), do not proceed on an unrecorded precondition outcome.
+- The **pre-implement** and **integrate** seams must fail closed *symmetrically*: a governed lane with no runnable/falsifying verifier is refused at BOTH. Gate at pre-implement so a would-be-refused run never does throwaway autonomous work; never let the `implement()` callback run on any path other than a `'verifier-gated'` verdict, and keep the ungoverned path (no `deploymentId`/`registry`) byte-identical to legacy so introducing the guard is inert for every non-self-governed deployment.
 
 ## Concerns This Spec Does Not Cover
 

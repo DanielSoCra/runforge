@@ -3,9 +3,10 @@
 // Assemble interactive PO context, spawn multi-turn sessions, and manage records.
 
 import { randomUUID } from 'crypto';
-import { readFile, readdir } from 'fs/promises';
+import { readdir } from 'fs/promises';
 import { join } from 'path';
 import type { SessionRuntime } from '../../session-runtime/runtime.js';
+import { getFrozenPromptTemplate } from '../../session-runtime/runtime.js';
 import { ok, err, type Result } from '../../lib/result.js';
 import { writeJsonSafe } from '../../lib/json-store.js';
 import {
@@ -92,11 +93,14 @@ export async function startInteractivePOSession(
   const context = contextResult.value;
   const sessionId = randomUUID();
 
-  let template: string;
+  let template: string | undefined;
   try {
-    template = await readFile(join(deps.promptsDir, 'product-owner-interactive.md'), 'utf-8');
+    template = getFrozenPromptTemplate('product-owner-interactive');
   } catch (e) {
     return err(e instanceof Error ? e : new Error(String(e)));
+  }
+  if (template === undefined) {
+    return err(new Error('product-owner-interactive.md is not in the boot-frozen prompt cache'));
   }
 
   // Thread the assembled context into BOTH the spawn variables (the runtime

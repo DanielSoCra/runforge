@@ -85,7 +85,6 @@ const RuntimeSourceConfigSchema = z
     expectedRef: z.string().min(1).optional(),
     requireClean: z.boolean().default(true),
     requireExpectedRef: z.boolean().default(true),
-    allowSelfRepair: z.boolean().default(false),
     onUnhealthy: z.enum(['warn', 'pause', 'fail']).default('pause'),
     ignoredDirtyPaths: z
       .array(z.string().min(1))
@@ -95,7 +94,6 @@ const RuntimeSourceConfigSchema = z
     enabled: true,
     requireClean: true,
     requireExpectedRef: true,
-    allowSelfRepair: false,
     onUnhealthy: 'pause',
     ignoredDirtyPaths: ['state/', 'workspaces/', '.claude/scheduled_tasks.lock'],
   });

@@ -451,7 +451,6 @@ const makeConfig = (overrides?: Partial<Config>): Config => ({
     enabled: true,
     requireClean: true,
     requireExpectedRef: true,
-    allowSelfRepair: false,
     onUnhealthy: 'pause',
     ignoredDirtyPaths: [
       'state/',
@@ -810,7 +809,6 @@ describe('daemon', () => {
       expectedRef: 'origin/staging',
       requireClean: true,
       requireExpectedRef: true,
-      allowSelfRepair: false,
       onUnhealthy: 'pause',
       ignoredDirtyPaths: ['state/'],
     });
