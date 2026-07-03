@@ -14,7 +14,34 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # Container-free gate that enforces the RC-1 workflow guard server-side. It
+  # runs in its OWN job (not as a step inside `ci`) on purpose: GitHub Actions
+  # initializes a job's `services:`/`container:` BEFORE any of its steps run, so
+  # an in-`ci` step could never catch a bad container block added to the `ci` job
+  # itself — that job would fail opaquely at "Initialize containers" first. As a
+  # separate job that `ci` depends on, the guard fails fast with a clear message
+  # and blocks `ci` from even starting. Mirrors the local `.husky/pre-push` hook,
+  # which is bypassable (`--no-verify`, or a worktree without husky installed —
+  # e.g. autonomous pushes). Uses plain `node` (no install) so it stays seconds-fast.
+  #
+  # `main` is currently unprotected, so a failed `guard` fails the whole workflow
+  # run and the merge gate (which reads the run conclusion) blocks the merge. If
+  # required-status-check branch protection is ever added, also mark `guard` as a
+  # required check — otherwise a failed `guard` only SKIPS `ci` (via `needs`), and
+  # GitHub counts a skipped required check as passing.
+  guard:
+    runs-on: self-hosted
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check workflows
+        run: node scripts/check-ci-workflows.mjs
+
   ci:
+    needs: guard
     runs-on: self-hosted
     timeout-minutes: 25
     steps:
