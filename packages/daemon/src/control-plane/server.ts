@@ -8,6 +8,20 @@ import type { ListRankedArgs, ListFilters, RankedListItem, DetailView } from '@a
 import type { HandlerResult, ErrorBody, AnswerBody, RevealBody } from './decision-api.js';
 import type { RiskClass, AutonomyLevel, WideningOutcome } from './deployment-registry/types.js';
 
+/**
+ * The spend-observability read surface (STACK-AC-SPEND-OBSERVABILITY): thin
+ * `{ status, body }` handlers over the SpendReadModel + PricingReference,
+ * mounted read-only except the pricing set. Absent ⇒ routes answer 501.
+ */
+export interface SpendHandlers {
+  period: (params: URLSearchParams) => Promise<HandlerResult<unknown>>;
+  byProject: (params: URLSearchParams) => Promise<HandlerResult<unknown>>;
+  providerSplit: (params: URLSearchParams) => Promise<HandlerResult<unknown>>;
+  savings: (params: URLSearchParams) => Promise<HandlerResult<unknown>>;
+  readPricingReference: () => Promise<HandlerResult<unknown>>;
+  setPricingReference: (body: unknown) => Promise<HandlerResult<unknown>>;
+}
+
 export interface ControlHandlers {
   getStatus: () => unknown;
   /**
@@ -63,6 +77,8 @@ export interface ControlHandlers {
     grant: { riskClass: RiskClass; target: AutonomyLevel; lane?: string; operator: string },
   ) => WideningOutcome;
   getEscalationMetrics?: (query: URLSearchParams) => Promise<HandlerResult<unknown>>;
+  /** Spend-observability routes (STACK-AC-SPEND-OBSERVABILITY). */
+  spend?: SpendHandlers;
   stateDir?: string;
 }
 
@@ -75,11 +91,11 @@ export function createControlServer(
     const url = new URL(req.url ?? '/', `http://localhost:${port}`);
     const method = req.method ?? 'GET';
 
-    // CSRF protection: require a custom header on POST requests.
+    // CSRF protection: require a custom header on mutating (POST/PUT) requests.
     // Browsers enforce CORS preflight for requests with custom headers,
     // and since this server sets no Access-Control-Allow-* headers,
-    // cross-origin POSTs from malicious pages are blocked.
-    if (method === 'POST' && req.headers['x-requested-by'] === undefined) {
+    // cross-origin writes from malicious pages are blocked.
+    if ((method === 'POST' || method === 'PUT') && req.headers['x-requested-by'] === undefined) {
       json(res, 403, { error: 'Missing X-Requested-By header' });
       return;
     }
@@ -338,6 +354,74 @@ export function createControlServer(
         }
       } else {
         json(res, 501, { error: 'escalation metrics not configured' });
+      }
+    } else if (method === 'GET' && url.pathname.startsWith('/spend/')) {
+      // Spend-observability reads (STACK-AC-SPEND-OBSERVABILITY): one-line
+      // adapters piping the handler's { status, body } through json(...) —
+      // the decision-api wiring precedent. Period/malformed-query validation
+      // lives in the handlers; a throw here can only be unexpected → 503,
+      // never a crash (the spend surface degrades, other routes keep serving).
+      if (handlers.spend) {
+        const spend = handlers.spend;
+        const route =
+          url.pathname === '/spend/period'
+            ? () => spend.period(url.searchParams)
+            : url.pathname === '/spend/by-project'
+              ? () => spend.byProject(url.searchParams)
+              : url.pathname === '/spend/provider-split'
+                ? () => spend.providerSplit(url.searchParams)
+                : url.pathname === '/spend/savings'
+                  ? () => spend.savings(url.searchParams)
+                  : url.pathname === '/spend/pricing-reference'
+                    ? () => spend.readPricingReference()
+                    : null;
+        if (route === null) {
+          json(res, 404, { error: 'not found' });
+        } else {
+          try {
+            const result = await route();
+            json(res, result.status, result.body);
+          } catch (e: unknown) {
+            console.error(`[control-plane] GET ${url.pathname} failed:`, e);
+            json(res, 503, { error: 'spend records unavailable' });
+          }
+        }
+      } else {
+        json(res, 501, { error: 'spend observability not configured' });
+      }
+    } else if (method === 'PUT' && url.pathname === '/spend/pricing-reference') {
+      // The one WRITE on the spend surface: replace the Operator-owned
+      // PricingReference (estimates only — never a recorded actual). Body is
+      // read with the same 10KB cap as the decision answer route; the handler
+      // Zod-validates before persisting (400) so a bad shape never lands.
+      if (handlers.spend) {
+        const spend = handlers.spend;
+        const MAX_BODY = 10240; // 10KB
+        let rawBody = '';
+        let oversize = false;
+        req.on('data', (chunk: Buffer) => {
+          rawBody += chunk.toString();
+          if (rawBody.length > MAX_BODY) oversize = true;
+        });
+        req.on('error', () => { json(res, 400, { error: 'request error' }); });
+        req.on('end', () => {
+          if (oversize) { json(res, 413, { error: 'body too large' }); return; }
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(rawBody);
+          } catch {
+            json(res, 400, { error: 'invalid JSON body' });
+            return;
+          }
+          spend.setPricingReference(parsed).then((result) => {
+            json(res, result.status, result.body);
+          }).catch((e: unknown) => {
+            console.error('[control-plane] PUT /spend/pricing-reference failed:', e);
+            json(res, 503, { error: 'spend records unavailable' });
+          });
+        });
+      } else {
+        json(res, 501, { error: 'spend observability not configured' });
       }
     } else if (method === 'GET' && url.pathname.startsWith('/decisions/')) {
       if (handlers.getDecisionDetail) {

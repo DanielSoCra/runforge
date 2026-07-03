@@ -86,6 +86,16 @@ import {
   answerDecision,
   revealProtected,
 } from './decision-api.js';
+import {
+  listPeriodSpend,
+  spendByProject,
+  providerSplit,
+  savingsComparison,
+  readPricingReference,
+  setPricingReference,
+} from './spend/spend-api.js';
+import { SpendReadModel } from './spend/read-model.js';
+import { PricingReferenceStore } from './spend/pricing-reference.js';
 import { postDecisionResponse } from './decision-escalation/answer-publisher.js';
 import { runFindingDismissalTick } from './finding-dismissal/tick.js';
 import {
@@ -596,6 +606,13 @@ export async function startDaemon(
   let runHistory: RunHistoryReader | null = null;
   let runMaintenance: RunMaintenance | null = null;
   let postgresClient: ReturnType<typeof createDbClient> | null = null;
+  // Spend-observability read model (STACK-AC-SPEND-OBSERVABILITY): built over
+  // the NARROW readers of the same Postgres stores (read-only projection; the
+  // Operator-owned PricingReference lives in state/pricing-reference.json).
+  let spendReadModel: SpendReadModel | null = null;
+  const pricingReferenceStore = new PricingReferenceStore(
+    join(stateDir, 'pricing-reference.json'),
+  );
 
   try {
     postgresClient = createDbClient({ maxConnections: 8 });
@@ -612,6 +629,15 @@ export async function startDaemon(
     const history = new PostgresRunHistory(stores.runs);
     runHistory = history;
     runMaintenance = history;
+    spendReadModel = new SpendReadModel({
+      costEvents: stores.costs,
+      runs: stores.runs,
+      repos: stores.repos,
+      loadPricing: () => pricingReferenceStore.read(),
+      // Clock used ONLY to resolve named periods ("today"/"7d"/"30d") — the
+      // Currency Marker stays data-derived inside the read model.
+      now: () => new Date(),
+    });
   } catch (e) {
     await postgresClient?.sql.end();
     return err(e instanceof Error ? e : new Error(String(e)));
@@ -2162,6 +2188,21 @@ export async function startDaemon(
   }
 
   // 6. Start control server (daemonHost validated in Phase B, above)
+  // Spend routes: capture the read model in a const so the non-null narrowing
+  // survives into the route closures (a `let` would not narrow there).
+  const spendModel = spendReadModel;
+  const spendHandlers =
+    spendModel === null
+      ? undefined
+      : {
+          period: (params: URLSearchParams) => listPeriodSpend(spendModel, params),
+          byProject: (params: URLSearchParams) => spendByProject(spendModel, params),
+          providerSplit: (params: URLSearchParams) => providerSplit(spendModel, params),
+          savings: (params: URLSearchParams) => savingsComparison(spendModel, params),
+          readPricingReference: () => readPricingReference(pricingReferenceStore),
+          setPricingReference: (body: unknown) =>
+            setPricingReference(pricingReferenceStore, body),
+        };
   const { server, start } = createControlServer(
     config.controlPort,
     {
@@ -2562,6 +2603,12 @@ export async function startDaemon(
           { decisionManager, stateDir },
           query,
         ),
+      // Spend observability (STACK-AC-SPEND-OBSERVABILITY): read-only
+      // projection over the Postgres stores' narrow readers + the Operator's
+      // PricingReference. Handlers own validation (400) and the structural
+      // 503 fail-safe (SpendUnavailableError); the routes are one-line
+      // adapters — the decision-api wiring precedent.
+      spend: spendHandlers,
     },
     daemonHost,
   );

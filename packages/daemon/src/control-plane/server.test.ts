@@ -604,6 +604,113 @@ describe('ControlServer', () => {
     }
   });
 
+  describe('spend routes (STACK-AC-SPEND-OBSERVABILITY)', () => {
+    const spendResult = { status: 200, body: { totalMicros: '0' } };
+
+    function spendHandlers() {
+      const calls: { route: string; params?: string; body?: unknown }[] = [];
+      return {
+        calls,
+        spend: {
+          period: async (params: URLSearchParams) => {
+            calls.push({ route: 'period', params: params.toString() });
+            return spendResult;
+          },
+          byProject: async (params: URLSearchParams) => {
+            calls.push({ route: 'byProject', params: params.toString() });
+            return spendResult;
+          },
+          providerSplit: async (params: URLSearchParams) => {
+            calls.push({ route: 'providerSplit', params: params.toString() });
+            return spendResult;
+          },
+          savings: async (params: URLSearchParams) => {
+            calls.push({ route: 'savings', params: params.toString() });
+            return spendResult;
+          },
+          readPricingReference: async () => {
+            calls.push({ route: 'readPricingReference' });
+            return spendResult;
+          },
+          setPricingReference: async (body: unknown) => {
+            calls.push({ route: 'setPricingReference', body });
+            return { status: 200, body: body as Record<string, unknown> };
+          },
+        },
+      };
+    }
+
+    it.each([
+      ['/spend/period', 'period'],
+      ['/spend/by-project', 'byProject'],
+      ['/spend/provider-split', 'providerSplit'],
+      ['/spend/savings', 'savings'],
+      ['/spend/pricing-reference', 'readPricingReference'],
+    ])('GET %s pipes { status, body } through the wired handler', async (path, route) => {
+      const wired = spendHandlers();
+      const { port } = await startServer({ spend: wired.spend });
+      const res = await fetch(`http://127.0.0.1:${port}${path}?period=7d`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual(spendResult.body);
+      expect(wired.calls[0]?.route).toBe(route);
+    });
+
+    it('GET /spend/period forwards the query string to the handler', async () => {
+      const wired = spendHandlers();
+      const { port } = await startServer({ spend: wired.spend });
+      await fetch(`http://127.0.0.1:${port}/spend/period?period=today`);
+      expect(wired.calls[0]?.params).toBe('period=today');
+    });
+
+    it('GET /spend/unknown is 404; unwired spend is 501', async () => {
+      const wired = spendHandlers();
+      const { server, port } = await startServer({ spend: wired.spend });
+      const unknown = await fetch(`http://127.0.0.1:${port}/spend/unknown`);
+      expect(unknown.status).toBe(404);
+      await closeServer(server);
+
+      const { port: bare } = await startServer();
+      const res = await fetch(`http://127.0.0.1:${bare}/spend/period`);
+      expect(res.status).toBe(501);
+    });
+
+    it('PUT /spend/pricing-reference requires the X-Requested-By header (CSRF)', async () => {
+      const wired = spendHandlers();
+      const { port } = await startServer({ spend: wired.spend });
+      const res = await fetch(`http://127.0.0.1:${port}/spend/pricing-reference`, {
+        method: 'PUT',
+        body: JSON.stringify({ codex: { kind: 'metered' } }),
+      });
+      expect(res.status).toBe(403);
+      expect(wired.calls).toHaveLength(0);
+    });
+
+    it('PUT /spend/pricing-reference passes the parsed body to the handler', async () => {
+      const wired = spendHandlers();
+      const { port } = await startServer({ spend: wired.spend });
+      const reference = { codex: { kind: 'metered' } };
+      const res = await fetch(`http://127.0.0.1:${port}/spend/pricing-reference`, {
+        method: 'PUT',
+        headers: { 'X-Requested-By': 'test', 'Content-Type': 'application/json' },
+        body: JSON.stringify(reference),
+      });
+      expect(res.status).toBe(200);
+      expect(wired.calls[0]).toEqual({ route: 'setPricingReference', body: reference });
+    });
+
+    it('PUT /spend/pricing-reference with invalid JSON is 400 before the handler', async () => {
+      const wired = spendHandlers();
+      const { port } = await startServer({ spend: wired.spend });
+      const res = await fetch(`http://127.0.0.1:${port}/spend/pricing-reference`, {
+        method: 'PUT',
+        headers: { 'X-Requested-By': 'test' },
+        body: 'not json {',
+      });
+      expect(res.status).toBe(400);
+      expect(wired.calls).toHaveLength(0);
+    });
+  });
+
   describe('POST /deployments/:id/widen', () => {
     function makeProfile() {
       return {
