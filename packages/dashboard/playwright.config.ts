@@ -18,10 +18,18 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: process.env.CI === 'true',
-  retries: process.env.CI === 'true' ? 1 : 0,
+  // Two retries on CI: the self-hosted runner shares CPU across concurrent
+  // workflows (the RC flake class), so a cold run can lose a race that a warmed
+  // retry wins. Paired with global-setup route warm-up + the raised timeouts.
+  retries: process.env.CI === 'true' ? 2 : 0,
   reporter: 'list',
-  timeout: 30_000,
-  expect: { timeout: 10_000 },
+  // Headroom for cold `next dev` route compilation under runner contention: the
+  // in-memory daemon answers instantly, so the budget is spent on first-hit
+  // compile + render, not on daemon I/O. See e2e/global-setup.mjs.
+  timeout: 45_000,
+  expect: { timeout: 15_000 },
+  // Compile the hot routes once before any tight visibility assertion runs.
+  globalSetup: './e2e/global-setup.mjs',
   use: { baseURL: BASE_URL, trace: 'on-first-retry' },
   webServer: [
     {

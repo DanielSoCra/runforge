@@ -357,6 +357,7 @@ STACK-AC-OPERATOR-SURFACE-CLIENT:
     - packages/dashboard/app/api/decisions/[id]/reveal/route.ts
     - packages/dashboard/playwright.config.ts
     - packages/dashboard/e2e/real-daemon.mjs
+    - packages/dashboard/e2e/global-setup.mjs
   test_paths:
     - packages/dashboard/components/decisions/decision-inbox.test.tsx
     - packages/dashboard/components/decisions/decision-answer.test.tsx
