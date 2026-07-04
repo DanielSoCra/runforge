@@ -1758,12 +1758,16 @@ export function createPhaseHandlers(
       // Build diff for reviewer context.
       // Use explicit branch ref (not HEAD) so the diff is correct even when
       // a concurrent detect phase has checked out a different branch (#178).
+      // Three-dot (merge-base) diff so the reviewer sees ONLY the branch's own
+      // delta: with a two-dot diff, a staging branch that advanced after the
+      // feature branch was cut shows phantom "reversions" of unrelated merges,
+      // which the spec-compliance gate escalates on as false regressions (#847).
       // Truncate to 50 KB to avoid excessive prompt size that causes reviewer timeouts.
       const DIFF_MAX_BYTES = 50_000;
       let diff: string | undefined;
       try {
         const diffResult = await git(
-          ['diff', config.branches.staging + '..' + featureBranch],
+          ['diff', config.branches.staging + '...' + featureBranch],
           workspaceCwd,
         );
         if (diffResult.ok) {
@@ -1816,7 +1820,8 @@ export function createPhaseHandlers(
             [
               'diff',
               '--name-only',
-              config.branches.staging + '..' + featureBranch,
+              // Merge-base scoped for the same reason as the reviewer diff (#847).
+              config.branches.staging + '...' + featureBranch,
             ],
             workspaceCwd,
           );

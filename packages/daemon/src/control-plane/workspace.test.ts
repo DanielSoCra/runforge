@@ -162,7 +162,12 @@ describe('reconcileWorkspace', () => {
 /** Push a fresh commit to origin/<branch> from a throwaway clone (simulating an
  * operator/external push), leaving the test repo's local <branch> behind. Returns
  * the new origin SHA. */
-async function externalPush(repoRoot: string, branch: string): Promise<string> {
+async function externalPush(
+  repoRoot: string,
+  branch: string,
+  file = 'EXTERNAL.md',
+  content = 'pushed externally\n',
+): Promise<string> {
   const url = await git(['remote', 'get-url', 'origin'], repoRoot);
   if (!url.ok) throw new Error('no origin url');
   const ext = await mkdtemp(join(tmpdir(), 'workspace-ext-'));
@@ -171,7 +176,7 @@ async function externalPush(repoRoot: string, branch: string): Promise<string> {
     await git(['config', 'user.email', 'ext@test'], ext);
     await git(['config', 'user.name', 'ext'], ext);
     await git(['checkout', '-q', branch], ext);
-    await writeFile(join(ext, 'EXTERNAL.md'), 'pushed externally\n');
+    await writeFile(join(ext, file), content);
     await git(['add', '.'], ext);
     await git(['commit', '-q', '-m', 'external commit'], ext);
     await git(['push', '-q', 'origin', branch], ext);
@@ -244,5 +249,178 @@ describe('ensureRepoFresh', () => {
     await git(['checkout', '-q', '-b', 'orphan-local'], repo.repoRoot);
     const result = await ensureRepoFresh(repo.repoRoot, 'orphan-local');
     expect(result.ok).toBe(true); // fetch of a non-existent origin branch is tolerated
+  });
+
+  it('regression #847: accepts a remote-tracking base ref (origin/<branch>) and fetches the correct remote ref', async () => {
+    // Production passes runtimeSource.expectedRef ("origin/main") straight
+    // through. The old code ran `git fetch origin origin/main` — a malformed
+    // ref-spec that failed on every run and silently left the base stale.
+    const newSha = await externalPush(repo.repoRoot, 'dev');
+
+    const result = await ensureRepoFresh(repo.repoRoot, 'origin/dev');
+    expect(result.ok).toBe(true);
+
+    // The fetch only updates the remote-tracking ref when it was invoked with
+    // the correct ref-spec (`fetch origin dev`) — the malformed form errors out.
+    const tracking = await git(
+      ['rev-parse', 'refs/remotes/origin/dev'],
+      repo.repoRoot,
+    );
+    expect(tracking.ok && tracking.value.trim()).toBe(newSha);
+    // And the local base branch is fast-forwarded too.
+    const local = await git(['rev-parse', 'dev'], repo.repoRoot);
+    expect(local.ok && local.value.trim()).toBe(newSha);
+  });
+
+  it.each([['refs/heads/dev'], ['refs/remotes/origin/dev']])(
+    'regression #847 P2: accepts a fully-qualified base ref (%s) — config/runtime validation admit any resolvable ref',
+    async (qualifiedRef) => {
+      const newSha = await externalPush(repo.repoRoot, 'dev');
+      const result = await ensureRepoFresh(repo.repoRoot, qualifiedRef);
+      expect(result.ok).toBe(true);
+      // Same silent-no-op failure mode as origin/<branch>: only a correct
+      // `fetch origin dev` updates the tracking ref and fast-forwards.
+      const tracking = await git(
+        ['rev-parse', 'refs/remotes/origin/dev'],
+        repo.repoRoot,
+      );
+      expect(tracking.ok && tracking.value.trim()).toBe(newSha);
+      const local = await git(['rev-parse', 'dev'], repo.repoRoot);
+      expect(local.ok && local.value.trim()).toBe(newSha);
+    },
+  );
+});
+
+describe('reconcileWorkspace base refresh (#847)', () => {
+  let repo: Awaited<ReturnType<typeof makeRepo>>;
+  beforeEach(async () => { repo = await makeRepo(); });
+  afterEach(async () => { await repo.cleanup(); });
+
+  const opts = (workspaceDir: string, featureBranch: string) => ({
+    repoRoot: repo.repoRoot,
+    workspaceDir,
+    featureBranch,
+    stagingBranch: 'dev',
+    sourceRef: 'origin/dev',
+  });
+
+  async function commitInWorkspace(
+    workspaceDir: string,
+    file: string,
+    content: string,
+  ): Promise<void> {
+    await writeFile(join(workspaceDir, file), content);
+    await git(['add', '.'], workspaceDir);
+    await git(['commit', '-q', '-m', `delta: ${file}`], workspaceDir);
+  }
+
+  it('retried run with advanced base: rebases the reused branch onto the fresh base, preserving its delta', async () => {
+    const workspaceDir = join(repo.repoRoot, 'workspaces', 'issue-847');
+    const first = await reconcileWorkspace(opts(workspaceDir, 'feature/847'));
+    expect(first.ok).toBe(true);
+    // The failed attempt left its intended (committed) one-file edit behind.
+    await commitInWorkspace(workspaceDir, 'delta.txt', 'the intended change\n');
+
+    // main advances while the run is stuck; the retry re-runs detect:
+    // ensureRepoFresh → reconcileWorkspace on the SAME branch/workspace.
+    const baseSha = await externalPush(repo.repoRoot, 'dev');
+    await ensureRepoFresh(repo.repoRoot, 'origin/dev');
+
+    const second = await reconcileWorkspace(opts(workspaceDir, 'feature/847'));
+    expect(second.ok).toBe(true);
+
+    // Branch delta preserved…
+    expect(existsSync(join(workspaceDir, 'delta.txt'))).toBe(true);
+    // …and the base refreshed: the advanced base commit is now an ancestor.
+    expect(existsSync(join(workspaceDir, 'EXTERNAL.md'))).toBe(true);
+    const mergeBase = await git(
+      ['merge-base', 'feature/847', 'origin/dev'],
+      repo.repoRoot,
+    );
+    expect(mergeBase.ok && mergeBase.value.trim()).toBe(baseSha);
+  });
+
+  it('retried run with advanced base and no delta: fast-forwards the branch to the fresh base', async () => {
+    const workspaceDir = join(repo.repoRoot, 'workspaces', 'issue-847-ff');
+    await reconcileWorkspace(opts(workspaceDir, 'feature/847-ff'));
+
+    const baseSha = await externalPush(repo.repoRoot, 'dev');
+    await ensureRepoFresh(repo.repoRoot, 'origin/dev');
+
+    const second = await reconcileWorkspace(opts(workspaceDir, 'feature/847-ff'));
+    expect(second.ok).toBe(true);
+    const tip = await git(['rev-parse', 'feature/847-ff'], repo.repoRoot);
+    expect(tip.ok && tip.value.trim()).toBe(baseSha);
+  });
+
+  it('recreated workspace for an existing stale branch also gets its base refreshed', async () => {
+    const workspaceDir = join(repo.repoRoot, 'workspaces', 'issue-847-gone');
+    await reconcileWorkspace(opts(workspaceDir, 'feature/847-gone'));
+    await commitInWorkspace(workspaceDir, 'delta.txt', 'kept\n');
+    // Workspace dir vanished (cleanup) but the branch survived.
+    await git(['worktree', 'remove', '--force', workspaceDir], repo.repoRoot);
+
+    const baseSha = await externalPush(repo.repoRoot, 'dev');
+    await ensureRepoFresh(repo.repoRoot, 'origin/dev');
+
+    const second = await reconcileWorkspace(opts(workspaceDir, 'feature/847-gone'));
+    expect(second.ok).toBe(true);
+    expect(existsSync(join(workspaceDir, 'delta.txt'))).toBe(true);
+    const mergeBase = await git(
+      ['merge-base', 'feature/847-gone', 'origin/dev'],
+      repo.repoRoot,
+    );
+    expect(mergeBase.ok && mergeBase.value.trim()).toBe(baseSha);
+  });
+
+  it('fails closed on a rebase conflict, leaving the branch tip intact and no rebase in progress', async () => {
+    const workspaceDir = join(repo.repoRoot, 'workspaces', 'issue-847-conflict');
+    await reconcileWorkspace(opts(workspaceDir, 'feature/847-conflict'));
+    await commitInWorkspace(workspaceDir, 'README.md', 'branch version\n');
+    const tipBefore = await git(['rev-parse', 'feature/847-conflict'], repo.repoRoot);
+
+    await externalPush(repo.repoRoot, 'dev', 'README.md', 'external version\n');
+    await ensureRepoFresh(repo.repoRoot, 'origin/dev');
+
+    const second = await reconcileWorkspace(opts(workspaceDir, 'feature/847-conflict'));
+    expect(second.ok).toBe(false);
+    if (!second.ok) expect(second.error.message).toContain('failing closed');
+
+    // Branch untouched (delta preserved), rebase aborted cleanly.
+    const tipAfter = await git(['rev-parse', 'feature/847-conflict'], repo.repoRoot);
+    expect(tipAfter.ok && tipAfter.value.trim()).toBe(
+      tipBefore.ok && tipBefore.value.trim(),
+    );
+    const status = await git(['status', '--porcelain=v1'], workspaceDir);
+    expect(status.ok && status.value.trim()).toBe('');
+  });
+
+  it('fails closed when the base advanced but the worktree has uncommitted changes', async () => {
+    const workspaceDir = join(repo.repoRoot, 'workspaces', 'issue-847-dirty');
+    await reconcileWorkspace(opts(workspaceDir, 'feature/847-dirty'));
+    await writeFile(join(workspaceDir, 'wip.txt'), 'uncommitted\n');
+
+    await externalPush(repo.repoRoot, 'dev');
+    await ensureRepoFresh(repo.repoRoot, 'origin/dev');
+
+    const second = await reconcileWorkspace(opts(workspaceDir, 'feature/847-dirty'));
+    expect(second.ok).toBe(false);
+    if (!second.ok) expect(second.error.message).toContain('uncommitted');
+    // The dirty state is never destroyed.
+    expect(existsSync(join(workspaceDir, 'wip.txt'))).toBe(true);
+  });
+
+  it('is a no-op when the branch is already based on the current base', async () => {
+    const workspaceDir = join(repo.repoRoot, 'workspaces', 'issue-847-fresh');
+    await reconcileWorkspace(opts(workspaceDir, 'feature/847-fresh'));
+    await commitInWorkspace(workspaceDir, 'delta.txt', 'x\n');
+    const tipBefore = await git(['rev-parse', 'feature/847-fresh'], repo.repoRoot);
+
+    const second = await reconcileWorkspace(opts(workspaceDir, 'feature/847-fresh'));
+    expect(second.ok).toBe(true);
+    const tipAfter = await git(['rev-parse', 'feature/847-fresh'], repo.repoRoot);
+    expect(tipAfter.ok && tipAfter.value.trim()).toBe(
+      tipBefore.ok && tipBefore.value.trim(),
+    );
   });
 });

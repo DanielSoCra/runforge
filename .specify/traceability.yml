@@ -724,6 +724,7 @@ STACK-AC-AGENT-DISCIPLINE-REVIEW:
   children: []
   code_paths:
     - prompts/reviewer-quality.md
+    - prompts/reviewer-spec.md
     - packages/daemon/src/validation/review.ts
     - packages/daemon/src/validation/reviewer-session.ts
     - packages/daemon/src/validation/knowledge-injector.ts

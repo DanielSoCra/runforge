@@ -592,11 +592,17 @@ describe('createPhaseHandlers', () => {
     it('regression #489: returns success when workspace already exists, no git pull issued', async () => {
       // Pre-existing worktree on a branch with no upstream — the #484 sticking pattern.
       // reconcileWorkspace must NOT attempt 'git pull --ff-only' (which the old detect did).
+      // NB: since #847 reconcileWorkspace issues read-only base-drift probes
+      // (rev-parse/merge-base) on an existing workspace, so we assert on the
+      // absence of the mutating commands rather than "no git at all".
       mockExistsSync.mockReturnValue(true);
       const { handlers } = createHandlers();
       const result = await handlers.detect!(makeRun());
       expect(result).toBe('success');
-      expect(mockGit).not.toHaveBeenCalled(); // accepted as-is, no git operations
+      const invokedSubcommands = mockGit.mock.calls.map((c) => c[0]?.[0]);
+      expect(invokedSubcommands).not.toContain('pull'); // accepted as-is, never pulled
+      expect(invokedSubcommands).not.toContain('rebase'); // base not advanced → no rewrite
+      expect(invokedSubcommands).not.toContain('worktree'); // dir exists → no recreate
       expect(isDetectLocked()).toBe(false);
     });
   });
@@ -1225,10 +1231,12 @@ describe('createPhaseHandlers', () => {
       const { handlers } = createHandlers();
       await handlers.review!(makeRun());
 
-      // Must use staging..feature/42 (explicit ref), NOT staging..HEAD
-      // to avoid corruption when a concurrent detect phase checks out staging
+      // Must use staging...feature/42 (explicit ref), NOT staging...HEAD
+      // to avoid corruption when a concurrent detect phase checks out staging.
+      // Three-dot (merge-base) so an advanced staging can't inject phantom
+      // reversions into the review diff (#847).
       expect(mockGit).toHaveBeenCalledWith(
-        ['diff', 'staging..feature/42'],
+        ['diff', 'staging...feature/42'],
         expect.any(String),
       );
     });
