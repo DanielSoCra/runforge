@@ -62,3 +62,45 @@ describe('double-delivery multi-tick re-fire gate (immovable)', () => {
     );
   });
 });
+
+// Regression guard for the same re-entrancy hazard as DOUBLE-DELIVERY, but on the
+// crash-safe-ordering / answered-once resume-replay tests: their tick-2 waits also
+// re-arm a faked poll interval to observe a second answer() call, so a passive
+// settleRealUntil there is equally swallow-prone under load. Both labels must be
+// bound to advancePollsUntil, and test-hygiene must be able to detect a regression
+// back to a passive second-tick wait.
+describe('real-PG replay tick2 re-fire gate (immovable)', () => {
+  const expectLabelBoundToAdvancePollsUntil = (bodyStart: RegExp, label: string) => {
+    const body = daemonTest.split(bodyStart)[1]?.split(/\n {6}it\(/)[0] ?? '';
+    expect(body).not.toBe('');
+    const quotedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    expect(body).toMatch(
+      new RegExp(
+        `advancePollsUntil\\(\\s*\\(\\)\\s*=>\\s*answerSpy\\.mock\\.calls\\.length\\s*,\\s*\\(n\\)\\s*=>\\s*n\\s*>\\s*seen\\s*,\\s*\\{\\s*label:\\s*'${quotedLabel}'`,
+      ),
+    );
+    expect(body).not.toMatch(
+      new RegExp(
+        `settleRealUntil\\(\\s*\\(\\)\\s*=>\\s*answerSpy\\.mock\\.calls\\.length\\s*,\\s*\\(n\\)\\s*=>\\s*n\\s*>\\s*seen\\s*,\\s*\\{\\s*label:\\s*'${quotedLabel}'`,
+      ),
+    );
+  };
+
+  it("daemon.test.ts binds 'crash-safe ordering tick2 second-poll answer re-call' to advancePollsUntil", () => {
+    expectLabelBoundToAdvancePollsUntil(
+      /it\('records the answer BEFORE save/,
+      'crash-safe ordering tick2 second-poll answer re-call',
+    );
+  });
+
+  it("daemon.test.ts binds 'answered-once tick2 second-poll answer re-call' to advancePollsUntil", () => {
+    expectLabelBoundToAdvancePollsUntil(
+      /it\('records the answer once when/,
+      'answered-once tick2 second-poll answer re-call',
+    );
+  });
+
+  it('test-hygiene.test.ts exports findSecondTickPassiveWaitViolations', () => {
+    expect(hygiene).toMatch(/export function findSecondTickPassiveWaitViolations/);
+  });
+});

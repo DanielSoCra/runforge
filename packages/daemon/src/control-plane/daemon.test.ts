@@ -3912,10 +3912,17 @@ describe('daemon', () => {
           label: 'crash-safe ordering tick1 re-entry #100',
         });
         const seen = answerSpy.mock.calls.length;
-        await vi.advanceTimersByTimeAsync(30000);
-        await vi.advanceTimersByTimeAsync(0);
-        await settleRealUntil(() => answerSpy.mock.calls.length, (n) => n > seen, {
+        // Tick 2: the replayed answer; keep re-firing the poll interval until a
+        // FRESH poll actually re-executes the answer() idempotency guard. A single
+        // advanceTimersByTimeAsync is not enough: tick 1's poll is still draining
+        // on real async, so RepoManager.startPoll's `pollInProgress` re-entrancy
+        // guard swallows an interval fire that lands mid-poll, and #839's per-run
+        // guard can swallow a tick that lands while the run's resume is still in
+        // flight; advancePollsUntil re-fires until the answer re-call lands (see
+        // its doc-comment above in this file).
+        await advancePollsUntil(() => answerSpy.mock.calls.length, (n) => n > seen, {
           label: 'crash-safe ordering tick2 second-poll answer re-call',
+          pollPeriodMs: 30000,
         });
 
         // Answer recorded BEFORE the resume save committed (crash-safe ordering).
@@ -3972,11 +3979,17 @@ describe('daemon', () => {
           label: 'answered-once tick1 re-entry #100',
         });
         const seen = answerSpy.mock.calls.length;
-        // Tick 2: the replayed answer; wait until the second poll re-called answer().
-        await vi.advanceTimersByTimeAsync(30000);
-        await vi.advanceTimersByTimeAsync(0);
-        await settleRealUntil(() => answerSpy.mock.calls.length, (n) => n > seen, {
+        // Tick 2: the replayed answer; keep re-firing the poll interval until a
+        // FRESH poll actually re-executes the answer() idempotency guard. A single
+        // advanceTimersByTimeAsync is not enough: tick 1's poll is still draining
+        // on real async, so RepoManager.startPoll's `pollInProgress` re-entrancy
+        // guard swallows an interval fire that lands mid-poll, and #839's per-run
+        // guard can swallow a tick that lands while the run's resume is still in
+        // flight; advancePollsUntil re-fires until the answer re-call lands (see
+        // its doc-comment above in this file).
+        await advancePollsUntil(() => answerSpy.mock.calls.length, (n) => n > seen, {
           label: 'answered-once tick2 second-poll answer re-call',
+          pollPeriodMs: 30000,
         });
         // Then wait on the EXACT asserted terminal state — the row has left pending()
         // (terminal `resumed`) and STAYS out after the replay. This final wait is the

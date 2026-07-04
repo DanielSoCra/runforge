@@ -203,6 +203,150 @@ export function mentionsModuleReset(rawSrc: string): boolean {
   return /\bresetModules\s*\(/.test(stripComments(rawSrc));
 }
 
+// RC-5 (CI flake, 2026-07-03): the real-Postgres replay tests drive a second poll
+// tick to verify idempotency. A single `advanceTimersByTimeAsync(pollPeriod)` followed
+// by a passive `settleRealUntil()` hangs under load because the second interval fire
+// can be swallowed: `RepoManager.startPoll` guards re-entrancy with `pollInProgress`,
+// and #839 added a per-run in-flight guard to `resumeParkedRuns`. If tick2 lands while
+// tick1 is still draining, it is lost and never re-fired. The deterministic fix is
+// `advancePollsUntil()`, which re-arms the faked interval until the effect appears.
+//
+// This guard forbids a passive `settleRealUntil()` after a second-or-later non-zero
+// `vi.advanceTimersByTimeAsync()` fire inside any `it()` body within a
+// `describe.skipIf(!REAL_PG)` region. `advanceTimersByTimeAsync(0)` is treated as a
+// microtask flush belonging to the preceding fire and does NOT count as a new fire.
+// A `// second-tick-ok: <reason>` marker inside the `it()` body documents a legitimate
+// negative (e.g. a predicate satisfiable by tick1's effect alone).
+//
+// Region + calls are matched on the line-preserving sanitized copy; the marker is a
+// comment, so it is matched on the RAW lines (sanitizing erases it). Indices align
+// because the sanitizer preserves line count.
+export function findSecondTickPassiveWaitViolations(rawSrc: string, label: string): string[] {
+  const rawLines = rawSrc.split('\n');
+  const codeLines = blankStringsAndComments(rawSrc).split('\n');
+  const violations: string[] = [];
+  let inRealPg = false;
+  let regionDepth = 0;
+  let regionSawBody = false;
+
+  let itBodyDepth = 0;
+  let itAwaitingBrace = false;
+  let itStartLine = -1;
+  let itFireCount = 0;
+  let itDanger = false;
+  const pending: { line: number; msg: string }[] = [];
+
+  // A non-zero fire is any `vi.advanceTimersByTimeAsync(<arg>)` whose argument
+  // text is NOT exactly `0`. `advanceTimersByTimeAsync(0)` is a microtask flush
+  // and must not count as a poll fire. If the call argument spans lines, we do
+  // a bounded look-ahead across the next 5 sanitized lines for the closing
+  // paren; only the joined argument text exactly `0` is treated as a flush.
+  // Still-unclosed calls remain conservatively classified as fires — the
+  // `second-tick-ok:` marker remains the escape hatch.
+  const advanceTimersCall = /\bvi\s*\.\s*advanceTimersByTimeAsync\s*\(/;
+  const fullAdvanceTimersCall = /\bvi\s*\.\s*advanceTimersByTimeAsync\s*\(\s*([^)]*?)\s*\)/;
+  const MULTILINE_LOOKAHEAD = 5;
+  const advancePolls = /\badvancePollsUntil\s*\(/;
+  const settleReal = /\bsettleRealUntil\s*\(/;
+  const itStart = /(?<![\w.])it\s*\(/;
+
+  function extractArgText(line: string, idx: number): string | undefined {
+    const openMatch = advanceTimersCall.exec(line);
+    if (!openMatch) return undefined;
+    let afterOpen = line.slice(openMatch.index + openMatch[0].length);
+    if (afterOpen.includes(')')) {
+      const fullMatch = fullAdvanceTimersCall.exec(line);
+      return fullMatch ? fullMatch[1]!.trim() : undefined;
+    }
+    for (let offset = 1; offset <= MULTILINE_LOOKAHEAD; offset++) {
+      const nextLine = codeLines[idx + offset];
+      if (nextLine === undefined) break;
+      afterOpen += nextLine;
+      if (nextLine.includes(')')) {
+        const closeIdx = afterOpen.indexOf(')');
+        return afterOpen.slice(0, closeIdx).trim();
+      }
+    }
+    return undefined;
+  }
+
+  function isNonzeroFire(line: string, idx: number): boolean {
+    if (!advanceTimersCall.test(line)) return false;
+    const arg = extractArgText(line, idx);
+    return arg === undefined ? true : arg !== '0';
+  }
+
+  for (let i = 0; i < codeLines.length; i++) {
+    const code = codeLines[i] ?? '';
+
+    if (!inRealPg && /describe\s*\.\s*skipIf\s*\(\s*!\s*REAL_PG\s*\)/.test(code)) {
+      inRealPg = true;
+      regionDepth = 0;
+      regionSawBody = false;
+    }
+
+    if (inRealPg && itBodyDepth === 0 && !itAwaitingBrace && regionDepth > 0 && itStart.test(code)) {
+      itAwaitingBrace = true;
+      itStartLine = i;
+      itFireCount = 0;
+      itDanger = false;
+      pending.length = 0;
+    }
+
+    if (inRealPg) {
+      for (const ch of code) {
+        if (ch === '{') {
+          regionDepth++;
+          regionSawBody = true;
+          if (itAwaitingBrace) {
+            itBodyDepth = 1;
+            itAwaitingBrace = false;
+          } else if (itBodyDepth > 0) {
+            itBodyDepth++;
+          }
+        } else if (ch === '}') {
+          regionDepth--;
+          if (itBodyDepth > 0) {
+            itBodyDepth--;
+            if (itBodyDepth === 0) {
+              const bodyRaw = rawLines.slice(itStartLine, i + 1).join('\n');
+              if (!/second-tick-ok:/.test(bodyRaw)) {
+                violations.push(...pending.map((p) => p.msg));
+              }
+              pending.length = 0;
+              itFireCount = 0;
+              itDanger = false;
+              itStartLine = -1;
+            }
+          }
+        }
+      }
+    }
+
+    if (inRealPg && itBodyDepth > 0) {
+      if (isNonzeroFire(code, i)) {
+        itFireCount++;
+        if (itFireCount >= 2) {
+          itDanger = true;
+        }
+      } else if (advancePolls.test(code)) {
+        itDanger = false;
+      } else if (settleReal.test(code) && itDanger) {
+        pending.push({
+          line: i,
+          msg: `${label}:${i + 1}: settleRealUntil() after a second-or-later poll tick inside a real-PG it() — a passive wait loses a swallowed tick2 under load (RepoManager.pollInProgress or #839 per-run guard). Use advancePollsUntil() to re-fire the interval, or add a \`// second-tick-ok: <reason>\` marker inside this it().`,
+        });
+      }
+    }
+
+    if (inRealPg && regionSawBody && regionDepth <= 0) {
+      inRealPg = false;
+    }
+  }
+
+  return violations;
+}
+
 // The package a monorepo test file belongs to = the first path segment under
 // packages/. Each package keeps its vitest.config.ts at its own root.
 function packageNameOf(absTestFile: string): string {
@@ -439,5 +583,163 @@ describe('test hygiene: no concurrent-load flake anti-patterns in any package te
       findFixedDrainViolations(readFileSync(daemonTest, 'utf8'), 'daemon.test.ts'),
       'daemon.test.ts still has an unmarked fixed-budget settleRealAsync in a real-PG resume describe',
     ).toEqual([]);
+  });
+
+  it('RC-5: forbids passive second-tick waits in real-PG it() bodies (repo-wide + synthetic + real file)', () => {
+    // Old flaky shape: two non-zero fires and then a passive settleRealUntil.
+    const bad = [
+      "describe.skipIf(!REAL_PG)('x', () => {",
+      "  it('y', async () => {",
+      '    await vi.advanceTimersByTimeAsync(30000);',
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await settleRealUntil(() => reenteredPipeline(100), Boolean, { label: "tick1" });',
+      '    const seen = answerSpy.mock.calls.length;',
+      '    await vi.advanceTimersByTimeAsync(30000);',
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await settleRealUntil(() => answerSpy.mock.calls.length, (n) => n > seen, { label: "tick2" });',
+      '  });',
+      '});',
+    ].join('\n');
+    expect(findSecondTickPassiveWaitViolations(bad, 'synthetic-bad').length).toBe(1);
+
+    // Variable poll-period argument also counts as a fire.
+    const badVariable = [
+      "describe.skipIf(!REAL_PG)('x', () => {",
+      "  it('y', async () => {",
+      '    const pollPeriodMs = 30000;',
+      '    await vi.advanceTimersByTimeAsync(pollPeriodMs);',
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await settleRealUntil(() => reenteredPipeline(100), Boolean, { label: "tick1" });',
+      '    const seen = answerSpy.mock.calls.length;',
+      '    await vi.advanceTimersByTimeAsync(pollPeriodMs);',
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await settleRealUntil(() => answerSpy.mock.calls.length, (n) => n > seen, { label: "tick2" });',
+      '  });',
+      '});',
+    ].join('\n');
+    expect(findSecondTickPassiveWaitViolations(badVariable, 'synthetic-bad-variable').length).toBe(1);
+
+    // Underscore-separated numeric literal also counts as a fire.
+    const badUnderscore = [
+      "describe.skipIf(!REAL_PG)('x', () => {",
+      "  it('y', async () => {",
+      '    await vi.advanceTimersByTimeAsync(30_000);',
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await settleRealUntil(() => reenteredPipeline(100), Boolean, { label: "tick1" });',
+      '    const seen = answerSpy.mock.calls.length;',
+      '    await vi.advanceTimersByTimeAsync(30_000);',
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await settleRealUntil(() => answerSpy.mock.calls.length, (n) => n > seen, { label: "tick2" });',
+      '  });',
+      '});',
+    ].join('\n');
+    expect(findSecondTickPassiveWaitViolations(badUnderscore, 'synthetic-bad-underscore').length).toBe(1);
+
+    // Split-line zero flush after one non-zero fire is still just tick1 + settle.
+    const splitZeroClean = [
+      "describe.skipIf(!REAL_PG)('x', () => {",
+      "  it('y', async () => {",
+      '    await vi.advanceTimersByTimeAsync(30000);',
+      '    await vi.advanceTimersByTimeAsync(',
+      '      0',
+      '    );',
+      '    await settleRealUntil(() => reenteredPipeline(100), Boolean, { label: "tick1" });',
+      '  });',
+      '});',
+    ].join('\n');
+    expect(findSecondTickPassiveWaitViolations(splitZeroClean, 'synthetic-split-zero-clean')).toEqual([]);
+
+    // Split-line non-zero fire in second position + passive settle still fires.
+    const splitNonZeroBad = [
+      "describe.skipIf(!REAL_PG)('x', () => {",
+      "  it('y', async () => {",
+      '    await vi.advanceTimersByTimeAsync(30000);',
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await settleRealUntil(() => reenteredPipeline(100), Boolean, { label: "tick1" });',
+      '    const seen = answerSpy.mock.calls.length;',
+      '    await vi.advanceTimersByTimeAsync(',
+      '      30000',
+      '    );',
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await settleRealUntil(() => answerSpy.mock.calls.length, (n) => n > seen, { label: "tick2" });',
+      '  });',
+      '});',
+    ].join('\n');
+    expect(findSecondTickPassiveWaitViolations(splitNonZeroBad, 'synthetic-split-nonzero-bad').length).toBe(1);
+
+    // advanceTimersByTimeAsync(0) is a microtask flush, not a fire, even as the second call.
+    const zeroOnly = [
+      "describe.skipIf(!REAL_PG)('x', () => {",
+      "  it('y', async () => {",
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await settleRealUntil(() => true, Boolean, { label: "x" });',
+      '  });',
+      '});',
+    ].join('\n');
+    expect(findSecondTickPassiveWaitViolations(zeroOnly, 'synthetic-zero-only')).toEqual([]);
+
+    // One non-zero fire followed by (0) flushes + settle is the legitimate tick1 shape.
+    const cleanTick1 = [
+      "describe.skipIf(!REAL_PG)('x', () => {",
+      "  it('y', async () => {",
+      '    await vi.advanceTimersByTimeAsync(30000);',
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await settleRealUntil(() => reenteredPipeline(100), Boolean, { label: "tick1" });',
+      '  });',
+      '});',
+    ].join('\n');
+    expect(findSecondTickPassiveWaitViolations(cleanTick1, 'synthetic-clean')).toEqual([]);
+
+    // Marked with second-tick-ok: escapes.
+    const marked = [
+      "describe.skipIf(!REAL_PG)('x', () => {",
+      "  it('y', async () => {",
+      '    // second-tick-ok: predicate is satisfiable by tick1 effect alone',
+      '    await vi.advanceTimersByTimeAsync(30000);',
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await settleRealUntil(() => reenteredPipeline(100), Boolean, { label: "tick1" });',
+      '    const seen = answerSpy.mock.calls.length;',
+      '    await vi.advanceTimersByTimeAsync(30000);',
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await settleRealUntil(() => answerSpy.mock.calls.length, (n) => n > seen, { label: "tick2" });',
+      '  });',
+      '});',
+    ].join('\n');
+    expect(findSecondTickPassiveWaitViolations(marked, 'synthetic-marked')).toEqual([]);
+
+    // Same shape outside a real-PG describe is ignored.
+    const plain = [
+      "describe('fake', () => {",
+      "  it('y', async () => {",
+      '    await vi.advanceTimersByTimeAsync(30000);',
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await settleRealUntil(() => true, Boolean, { label: "x" });',
+      '    const seen = 0;',
+      '    await vi.advanceTimersByTimeAsync(30000);',
+      '    await vi.advanceTimersByTimeAsync(0);',
+      '    await settleRealUntil(() => seen, (n) => n > 0, { label: "y" });',
+      '  });',
+      '});',
+    ].join('\n');
+    expect(findSecondTickPassiveWaitViolations(plain, 'synthetic-plain')).toEqual([]);
+
+    // Repo-wide sweep: no other test file contains the old shape.
+    const files = listTestFiles(PACKAGES_DIR);
+    const repoViolations = files.flatMap((f) =>
+      findSecondTickPassiveWaitViolations(readFileSync(f, 'utf8'), relative(PACKAGES_DIR, f)),
+    );
+    expect(repoViolations, `\n${repoViolations.join('\n')}\n`).toEqual([]);
+
+    // The converted daemon test file is clean and carries no escape markers.
+    const daemonTest = join(PACKAGES_DIR, 'daemon', 'src', 'control-plane', 'daemon.test.ts');
+    const daemonSrc = readFileSync(daemonTest, 'utf8');
+    expect(
+      findSecondTickPassiveWaitViolations(daemonSrc, 'daemon.test.ts'),
+      'daemon.test.ts still has a passive second-tick wait in a real-PG it()',
+    ).toEqual([]);
+    const markerCount = (daemonSrc.match(/second-tick-ok/g) ?? []).length;
+    expect(markerCount, 'daemon.test.ts should need no second-tick-ok markers').toBe(0);
   });
 });
