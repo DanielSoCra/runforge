@@ -7,10 +7,15 @@ on:
     branches: [main]
 
 concurrency:
-  group: ci-${{ github.ref }}
-  # Cancel superseded runs on feature branches / PRs (saves runner time), but
-  # NEVER on main: every trunk commit must complete its own CI so a rapid merge
-  # train can't cancel an in-flight main run and leave that commit unverified.
+  group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  # Branches/PRs share a per-ref group with supersede-cancellation (saves
+  # runner time). Main gets a PER-SHA group: cancel-in-progress:false only
+  # protects the RUNNING run — GitHub keeps at most ONE PENDING run per group
+  # and replace-cancels the queued one when a newer run enters (pending-slot
+  # replacement). A 3-commit merge train on 2026-07-03 13:45 cancelled the
+  # queued runs of 2 trunk commits that way, leaving the trunk tip with no CI
+  # verdict. Per-sha groups on main mean no shared pending slot, so every
+  # trunk commit completes its own run (the runner serializes them anyway).
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:

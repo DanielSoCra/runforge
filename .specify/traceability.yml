@@ -608,6 +608,7 @@ STACK-AC-CONVENTIONS:
     - packages/daemon/src/**/*.test.ts
     - packages/daemon/src/lib/structured-output.test.ts
     - scripts/check-ci-workflows.test.mjs
+    - scripts/check-ci-workflows-hardening.test.mjs
   status: draft
 
 STACK-AC-CONTROL-PLANE:

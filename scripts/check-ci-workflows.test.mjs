@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findLinuxOnlyContainerHits } from './check-ci-workflows.mjs';
+import { findLinuxOnlyContainerHits, findMainConcurrencyViolations } from './check-ci-workflows.mjs';
 
 // --- services: (job-level service containers) ---
 
@@ -235,4 +235,149 @@ test('still flags a real job container: even when a later step has a with.contai
   assert.equal(hits.length, 1);
   assert.equal(hits[0].kind, 'container');
   assert.equal(hits[0].line, 3);
+});
+
+// --- main push concurrency (top-level concurrency group) ---
+
+test('accepts push-to-main concurrency with a conditional main sha discriminator and ref fallback', () => {
+  const yaml = [
+    'name: CI',
+    '',
+    'on:',
+    '  push:',
+    '    branches: [main]',
+    '',
+    'concurrency:',
+    "  group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}",
+    "  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}",
+  ].join('\n');
+  assert.equal(findMainConcurrencyViolations(yaml, 'ci.yml').length, 0);
+});
+
+test('flags push-to-main concurrency that shares one ref group on main', () => {
+  const yaml = [
+    'name: CI',
+    '',
+    'on:',
+    '  push:',
+    '    branches: [main]',
+    '',
+    'concurrency:',
+    '  group: ci-${{ github.ref }}',
+    "  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}",
+  ].join('\n');
+  const hits = findMainConcurrencyViolations(yaml, 'ci.yml');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].line, 8);
+});
+
+test('flags unconditional github.sha concurrency because it breaks branch supersede cancellation', () => {
+  const yaml = [
+    'name: CI',
+    '',
+    'on:',
+    '  push:',
+    '    branches: [main]',
+    '',
+    'concurrency:',
+    '  group: ci-${{ github.sha }}',
+    "  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}",
+  ].join('\n');
+  const hits = findMainConcurrencyViolations(yaml, 'ci.yml');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].line, 8);
+});
+
+test('does NOT accept a main sha discriminator that appears only in a comment', () => {
+  const yaml = [
+    'name: CI',
+    '',
+    'on:',
+    '  push:',
+    '    branches: [main]',
+    '',
+    'concurrency:',
+    "  # group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}",
+    '  group: ci-${{ github.ref }}',
+    "  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}",
+  ].join('\n');
+  const hits = findMainConcurrencyViolations(yaml, 'ci.yml');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].line, 9);
+});
+
+test('does NOT accept a main sha discriminator that appears only inside a run block scalar', () => {
+  const yaml = [
+    'name: CI',
+    '',
+    'on:',
+    '  push:',
+    '    branches: [main]',
+    '',
+    'concurrency:',
+    '  group: ci-${{ github.ref }}',
+    "  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}",
+    '',
+    'jobs:',
+    '  ci:',
+    '    runs-on: self-hosted',
+    '    steps:',
+    '      - run: |',
+    "          echo \"ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}\"",
+  ].join('\n');
+  const hits = findMainConcurrencyViolations(yaml, 'ci.yml');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].line, 8);
+});
+
+test('ignores a workflow without a push-to-main trigger', () => {
+  const yaml = [
+    'name: CI',
+    '',
+    'on:',
+    '  pull_request:',
+    '    branches: [main]',
+    '',
+    'concurrency:',
+    '  group: ci-${{ github.ref }}',
+    "  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}",
+  ].join('\n');
+  assert.equal(findMainConcurrencyViolations(yaml, 'ci.yml').length, 0);
+});
+
+test('ignores a push-to-main workflow without a concurrency block', () => {
+  const yaml = [
+    'name: CI',
+    '',
+    'on:',
+    '  push:',
+    '    branches: [main]',
+    '',
+    'jobs:',
+    '  ci:',
+    '    runs-on: self-hosted',
+  ].join('\n');
+  assert.equal(findMainConcurrencyViolations(yaml, 'ci.yml').length, 0);
+});
+
+test('flags the current ci.yml ref-only concurrency shape', () => {
+  const yaml = [
+    'name: CI',
+    '',
+    'on:',
+    '  push:',
+    '    branches: [main]',
+    '  pull_request:',
+    '    branches: [main]',
+    '',
+    'concurrency:',
+    '  group: ci-${{ github.ref }}',
+    '  # Cancel superseded runs on feature branches / PRs (saves runner time), but',
+    '  # NEVER on main: every trunk commit must complete its own CI so a rapid merge',
+    "  # train can't cancel an in-flight main run and leave that commit unverified.",
+    "  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}",
+  ].join('\n');
+  const hits = findMainConcurrencyViolations(yaml, 'ci.yml');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].line, 10);
 });
