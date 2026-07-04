@@ -372,6 +372,7 @@ STACK-AC-OPERATOR-SURFACE-CLIENT:
     - packages/dashboard/app/api/decisions/[id]/reveal/route.test.ts
     - packages/dashboard/app/(dashboard)/steering/page.test.tsx
     - packages/dashboard/e2e/operator-surface.spec.ts
+    - packages/dashboard/answer-flow-hardening.gate.test.ts
   status: draft
 
 # Enacts L0 v6's verifier-gated-autonomy boundary (Delta H); the enforcing L1

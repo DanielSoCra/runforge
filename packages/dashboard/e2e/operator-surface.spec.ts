@@ -46,7 +46,18 @@ test.describe('operator surface', () => {
     await expect(page.getByText('Answer decision')).toBeVisible();
 
     // choose Approve -> POST /api/decisions/answer -> real daemon 200 -> optimistic confirm
-    await page.getByRole('button', { name: 'Approve' }).first().click();
+    // Anchor on the network round-trip: install the response wait BEFORE the
+    // click so it cannot race, and assert the POST succeeded — a missing
+    // badge is then attributable (POST failed/hung vs UI regression).
+    const [answerResponse] = await Promise.all([
+      page.waitForResponse(
+        (res) =>
+          res.url().includes('/api/decisions/answer') &&
+          res.request().method() === 'POST',
+      ),
+      page.getByRole('button', { name: 'Approve' }).first().click(),
+    ]);
+    expect(answerResponse.ok()).toBe(true);
     await expect(page.getByText(/answered/i).first()).toBeVisible();
 
     // After the next periodic refresh, the answered row is gone from the real read model.
