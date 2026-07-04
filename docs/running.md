@@ -206,6 +206,13 @@ launchctl list | grep autoclaude
 
 The install script reads `.env.mac` for `GITHUB_TOKEN`, `AUTO_CLAUDE_DATABASE_URL`, `DAEMON_DATA_BACKEND`, and `ENCRYPTION_KEY`, then substitutes them into the plist template at `scripts/com.autoclaude.daemon.plist`.
 
+> **Governed deployment requirement.** If your `auto-claude.config.json` contains a `deployment` block, the daemon will **refuse to boot at runtime** unless `AUTO_CLAUDE_DECISION_INDEX_ENABLED=1` is present in its environment — fail-closed by design. The install script does **not** wire this variable automatically from `.env.mac`; the plist template has no placeholder for it. For a governed launchd deployment, add it manually to the `EnvironmentVariables` dict in the generated plist (`~/Library/LaunchAgents/com.autoclaude.daemon.plist`) after running the install script, then reload:
+> ```bash
+> launchctl unload ~/Library/LaunchAgents/com.autoclaude.daemon.plist
+> launchctl load  ~/Library/LaunchAgents/com.autoclaude.daemon.plist
+> ```
+> See [Self-hosting posture](#self-hosting-posture) for details on why this guard exists.
+
 The daemon writes a heartbeat file to `~/logs/claude-daemon.heartbeat` on each poll interval. Check it with:
 
 ```bash
