@@ -64,6 +64,7 @@ type BuildReversalDecisionRequest = (input: {
   deployment: string;
   mergeSha: string;
   revertBranch: string;
+  gateIssueUrl: string;
   pullRequestUrl: string;
   now: string;
 }) => unknown;
@@ -223,6 +224,7 @@ async function loadRevertLaneExport<T>(exportName: string): Promise<T> {
 function expectReversalDecisionForMergeSha(
   request: DecisionRequest,
   mergeSha: string,
+  expectedSourceUrl = 'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/issues/42',
 ): DecisionRequest {
   const parsed = DecisionRequestSchema.parse(request);
   const optionIds = parsed.options.map((option) => option.id);
@@ -234,6 +236,7 @@ function expectReversalDecisionForMergeSha(
   expect(parsed.decision_id).toContain('reversal');
   expect(parsed.decision_id).not.toContain(':integrate:');
   expect(`${parsed.question} ${parsed.context}`).toContain(mergeSha);
+  expect(parsed.source_url).toBe(expectedSourceUrl);
 
   return parsed;
 }
@@ -324,6 +327,7 @@ describe('P1 G4 post-landing revert lane', () => {
         deployment: 'auto-claude',
         mergeSha,
         revertBranch: 'revert/g4-schema',
+        gateIssueUrl: 'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/issues/42',
         pullRequestUrl: 'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/pull/91',
         now: FIXED_NOW,
       }),

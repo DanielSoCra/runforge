@@ -33,6 +33,7 @@ export interface BuildReversalDecisionRequestInput {
   deployment: string;
   mergeSha: string;
   revertBranch: string;
+  gateIssueUrl: string;
   pullRequestUrl: string;
   now: string;
 }
@@ -80,6 +81,7 @@ export function buildReversalDecisionRequest({
   deployment,
   mergeSha,
   revertBranch,
+  gateIssueUrl,
   pullRequestUrl,
   now,
 }: BuildReversalDecisionRequestInput): DecisionRequest {
@@ -92,13 +94,13 @@ export function buildReversalDecisionRequest({
 
   const context = [
     `Run ${runRef} landed on ${mergeSha} and the trunk observation is red or indeterminate.`,
-    `Deployment: "${deployment}". Revert branch: ${revertBranch}.`,
+    `Deployment: "${deployment}". Revert branch: ${revertBranch}. Revert PR: ${pullRequestUrl}.`,
     `Approve merges the revert PR and undoes the landing; reject holds the revert for human review.`,
   ].join(' ');
 
   const request = {
     decision_id: decisionId,
-    source_url: pullRequestUrl,
+    source_url: gateIssueUrl,
     deployment,
     run_id: runRef,
     worker_session_id: run.workerClaimId ?? `run-${run.issueNumber}`,
@@ -277,6 +279,7 @@ export async function handlePostLandingObservation({
     deployment,
     mergeSha,
     revertBranch,
+    gateIssueUrl: `https://github.com/${owner}/${repo}/issues/${run.issueNumber}`,
     pullRequestUrl: pr.data.html_url,
     now,
   });

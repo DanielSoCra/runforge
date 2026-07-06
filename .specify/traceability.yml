@@ -329,6 +329,9 @@ STACK-AC-OPERATOR-SURFACE-API:
     - packages/daemon/src/control-plane/finding-dismissal/emit.test.ts
     - packages/daemon/src/control-plane/finding-dismissal/apply-consumer.test.ts
     - packages/daemon/src/control-plane/finding-dismissal/tick.test.ts
+    # repoCoordsFromDecisionSource: the answer publisher resolves the
+    # DecisionResponse target to the gate issue that resumeParkedRuns scans.
+    - packages/daemon/src/control-plane/repo-coords-from-source-url.test.ts
   status: draft
 
 # Operator Surface Client (dashboard) — L3 authored 2026-06-18 (slice 7b: the

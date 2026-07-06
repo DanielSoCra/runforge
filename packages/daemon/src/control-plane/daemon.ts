@@ -274,22 +274,41 @@ export interface StartDaemonOptions {
 const DEFAULT_WATCHDOG_IDLE_TIMEOUT_MS = 3 * 60 * 60 * 1000 + 15 * 60 * 1000;
 
 /**
- * Resolve the gate issue's repo coordinates from a decision's `source_url`
- * (`https://github.com/<owner>/<repo>/issues/<n>`), or `null` when it is not a
- * recognizable GitHub issue URL. The DecisionResponse must be posted to the
- * decision's OWN repo (not the seed `config.repo`): `resumeParkedRuns` polls the
- * run's repo, so a multi-repo deployment answering an imported repo's decision
- * must target that repo's issue or the answer is never observed.
+ * Resolve the gate issue's repo coordinates for an answer write-back. The
+ * DecisionResponse must be posted where `resumeParkedRuns` polls: the original
+ * run issue, in the decision's own repo.
+ *
+ * Normal merge decisions carry an `/issues/<n>` source URL. Older reversal
+ * decisions may carry the revert PR as `/pull/<n>`; for those, the thread the
+ * resume loop scans is NOT the revert PR, but the original `issue-<n>` encoded
+ * in the reversal decision id.
  */
-function repoCoordsFromSourceUrl(
+function repoCoordsFromDecisionSource(
+  decisionId: string,
   sourceUrl: string,
 ): { owner: string; repo: string; issueNumber: number } | null {
-  const m = /github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)(?:[/?#]|$)/.exec(sourceUrl);
-  if (m === null) return null;
-  const n = Number(m[3]);
+  const issue = /github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)(?:[/?#]|$)/.exec(sourceUrl);
+  if (issue !== null) {
+    const n = Number(issue[3]);
+    if (!Number.isInteger(n)) return null;
+    return { owner: issue[1]!, repo: issue[2]!, issueNumber: n };
+  }
+
+  const pull = /github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:[/?#]|$)/.exec(sourceUrl);
+  if (pull === null) return null;
+  const runIssue = /^issue-(\d+):reversal-raised:/.exec(decisionId);
+  if (runIssue === null) return null;
+  const n = Number(runIssue[1]);
   if (!Number.isInteger(n)) return null;
-  return { owner: m[1]!, repo: m[2]!, issueNumber: n };
+  return { owner: pull[1]!, repo: pull[2]!, issueNumber: n };
 }
+
+/**
+ * Exposed for unit tests only (the function is otherwise module-private). Kept as
+ * a named export so answer write-back coordinate parsing is directly asserted
+ * without booting the daemon.
+ */
+export const __test_repoCoordsFromDecisionSource = repoCoordsFromDecisionSource;
 
 export async function startDaemon(
   configPath: string,
@@ -2543,7 +2562,7 @@ export async function startDaemon(
                 // Post to the decision's OWN repo (from source_url), resolving that
                 // repo's token via the repo manager — NOT the seed config.repo, or a
                 // multi-repo answer lands on the wrong issue and the run strands.
-                const coords = repoCoordsFromSourceUrl(detail.source_url);
+                const coords = repoCoordsFromDecisionSource(decisionId, detail.source_url);
                 if (coords === null) {
                   throw new Error(
                     `answerDecision: could not resolve repo/issue from ${detail.source_url}`,
