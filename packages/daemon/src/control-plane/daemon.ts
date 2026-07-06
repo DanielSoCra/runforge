@@ -3510,8 +3510,52 @@ export async function startDaemon(
           ),
         );
 
+      let shouldReenterPipeline = true;
+
       if (answer.choice === 'approve') {
         run.mergeDecisionApprovedEpoch = mergeEpoch;
+        run.phase = 'integrate';
+      } else if (isReversalPark && answer.choice === 'reject') {
+        shouldReenterPipeline = false;
+        // Rejecting a reversal means "do not merge the revert PR"; the original
+        // change has already landed, so re-running implement would churn the run.
+        const revertPullRequestNumber = integrateArtifact.reversal?.revertPullRequestNumber;
+        if (revertPullRequestNumber === undefined) {
+          console.warn(
+            `[daemon] resumeParkedRuns: reversal reject for #${run.issueNumber} is missing revert PR metadata; staying parked`,
+          );
+          return;
+        }
+        try {
+          await runOctokit.pulls.update({
+            owner: runOwner,
+            repo: runRepoName,
+            pull_number: revertPullRequestNumber,
+            state: 'closed',
+          });
+        } catch (e) {
+          console.warn(
+            `[daemon] resumeParkedRuns: failed to close revert PR #${revertPullRequestNumber} for #${run.issueNumber} (staying parked): ${e instanceof Error ? e.message : String(e)}`,
+          );
+          return;
+        }
+        try {
+          await runOctokit.issues.createComment({
+            owner: runOwner,
+            repo: runRepoName,
+            issue_number: revertPullRequestNumber,
+            body:
+              `Reversal rejected by the operator for #${run.issueNumber}; ` +
+              `keeping the landed change and closing this revert PR.`,
+          });
+        } catch (e) {
+          console.warn(
+            `[daemon] resumeParkedRuns: failed to comment on closed revert PR #${revertPullRequestNumber} for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+        integrateArtifact.status = 'rejected';
+        integrateArtifact.updatedAt = new Date().toISOString();
+        run.mergeDecisionApprovedEpoch = undefined;
         run.phase = 'integrate';
       } else {
         // REJECT: capture operator feedback and route back to implement for rework.
@@ -3561,6 +3605,16 @@ export async function startDaemon(
         console.warn(
           `[daemon] resumeParkedRuns: decision-index advanceToResumed failed for #${run.issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
         );
+      }
+
+      if (!shouldReenterPipeline) {
+        await runWriter?.upsertRun(run.id, {
+          outcome: toDbOutcome('complete'),
+          completed_at: new Date().toISOString(),
+          total_cost: run.cost,
+        });
+        await releaseClaim(runOctokit, runOwner, runRepoName, run.issueNumber);
+        return;
       }
 
       // Re-enter pipeline.

@@ -97,6 +97,10 @@ import type { ClassificationComplexity } from '../types.js';
 // Single-process cooperative async — boolean suffices (same as integrationLock).
 let repoGitLock = false;
 
+// Main CI for the first live self-landing ran for roughly 4 minutes; wait with
+// margin before treating unresolved post-landing health as indeterminate.
+const POST_LANDING_OBSERVATION_BUDGET_MS = 10 * 60_000;
+
 type PhaseArtifactReconcileOutcome =
   | { kind: 'event'; event: PhaseEvent }
   | { kind: 'status'; status: ArtifactReconcileStatus };
@@ -2290,7 +2294,7 @@ export function createPhaseHandlers(
           repo: repoName,
           ref: mergeSha,
           requiredChecks,
-          budgetMs: 60_000,
+          budgetMs: POST_LANDING_OBSERVATION_BUDGET_MS,
           pollMs: 5_000,
         });
         if (result.status === 'green') {

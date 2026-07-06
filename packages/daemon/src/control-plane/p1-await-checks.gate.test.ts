@@ -89,6 +89,28 @@ describe('G3 awaitRequiredChecks', () => {
     expect(result.status).toBe('green');
   });
 
+  it('keeps polling while required checks are absent or pending instead of treating them as indeterminate', async () => {
+    const awaitRequiredChecks = await loadAwaitRequiredChecks();
+    const octokit = makeOctokit([
+      [],
+      [ok('daemon / test'), pending('daemon / typecheck')],
+      [ok('daemon / test'), ok('daemon / typecheck')],
+    ]);
+
+    const result = await awaitRequiredChecks({
+      octokit,
+      owner: 'o',
+      repo: 'r',
+      ref: 'main-merge-sha',
+      requiredChecks: ['daemon / test', 'daemon / typecheck'],
+      budgetMs: 1000,
+      pollMs: 1,
+    });
+
+    expect(result.status).toBe('green');
+    expect(octokit.checks.listForRef).toHaveBeenCalledTimes(3);
+  });
+
   it('returns red when any named required check fails', async () => {
     const awaitRequiredChecks = await loadAwaitRequiredChecks();
     const octokit = makeOctokit([[ok('daemon / test'), fail('daemon / typecheck')]]);

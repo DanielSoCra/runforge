@@ -160,6 +160,10 @@ const {
       removeLabel: vi.fn().mockResolvedValue(undefined),
       addLabels: vi.fn().mockResolvedValue(undefined),
       listComments: vi.fn().mockResolvedValue({ data: [] }),
+      createComment: vi.fn().mockResolvedValue({ data: {} }),
+    },
+    pulls: {
+      update: vi.fn().mockResolvedValue({ data: {} }),
     },
   },
   mockSpawnSession: vi.fn(),
@@ -362,6 +366,7 @@ vi.mock('@octokit/rest', () => {
   return {
     Octokit: class {
       issues = mockOctokit.issues;
+      pulls = mockOctokit.pulls;
     },
   };
 });
@@ -725,6 +730,8 @@ describe('daemon', () => {
     mockOctokit.issues.removeLabel.mockResolvedValue(undefined);
     mockOctokit.issues.addLabels.mockResolvedValue(undefined);
     mockOctokit.issues.listComments.mockResolvedValue({ data: [] });
+    mockOctokit.issues.createComment.mockResolvedValue({ data: {} });
+    mockOctokit.pulls.update.mockResolvedValue({ data: {} });
     mockRemoteControl.stop.mockResolvedValue(undefined);
     mockCostTracker.getDailyCost.mockReturnValue(0);
     mockRunWriter.insertRun.mockResolvedValue(undefined);
@@ -858,6 +865,8 @@ describe('daemon', () => {
       mockOctokit.issues.removeLabel,
       mockOctokit.issues.addLabels,
       mockOctokit.issues.listComments,
+      mockOctokit.issues.createComment,
+      mockOctokit.pulls.update,
       mockServer.close,
       mockRemoteControl.start,
       mockRemoteControl.stop,
@@ -4969,6 +4978,8 @@ describe('daemon', () => {
     //   approve -> mergeDecisionApprovedEpoch === mergeDecisionEpoch (the integrate
     //     override's exact precondition) + ledger driven to 'resumed';
     //   reject  -> routed to implement with feedback + block-published reset;
+    //   reversal reject -> records the revert as rejected/held and does NOT
+    //     re-run implementation for an already-landed change;
     //   already-resumed -> idempotent no-op (answer-once at the daemon level).
     // The MERGE half (approvedEpoch armed -> integrateToStaging CALLED on approve,
     // NOT called on reject) is proven CI-default by the real integrate handler in
@@ -4976,6 +4987,8 @@ describe('daemon', () => {
     // createPhaseHandlers + runPipeline, so the handler never runs in THIS harness.
     describe('integrate park resume (round-trip, CI-default fake — no Postgres)', () => {
       const DECISION_ID = 'issue-100:integrate:1';
+      const REVERSAL_DECISION_ID =
+        'issue-100:reversal-raised:1:abcdef12';
 
       const makeIntegrateParkedRun = (
         overrides?: Record<string, unknown>,
@@ -5009,6 +5022,42 @@ describe('daemon', () => {
         mergeDecisionBlockPublished: true,
         ...overrides,
       });
+
+      const makeReversalParkedRun = (
+        reversalOverrides?: Record<string, unknown>,
+      ): Record<string, unknown> =>
+        makeIntegrateParkedRun({
+          phaseArtifacts: {
+            integrate: {
+              issueNumber: 100,
+              phase: 'integrate',
+              artifactKind: 'pull_request',
+              proposalKey: 'test-owner/test-repo#100:integrate:main',
+              artifactPaths: [],
+              headBranch: 'feature/self-change',
+              baseBranch: 'main',
+              pullRequestNumber: 848,
+              pullRequestUrl: 'https://github.com/test-owner/test-repo/pull/848',
+              status: 'reversal-raised',
+              createdAt: '2026-07-04T10:00:00.000Z',
+              updatedAt: '2026-07-04T10:05:00.000Z',
+              mergeSha: 'abcdef1234567890abcdef1234567890abcdef12',
+              observation: {
+                status: 'red',
+                summary: 'trunk checks red after landing',
+                observedAt: '2026-07-04T10:05:00.000Z',
+              },
+              reversal: {
+                revertBranch: 'revert/100/848',
+                revertPullRequestNumber: 849,
+                revertPullRequestUrl:
+                  'https://github.com/test-owner/test-repo/pull/849',
+                decisionId: REVERSAL_DECISION_ID,
+                ...reversalOverrides,
+              },
+            },
+          },
+        });
 
       const decisionResponseComment = (
         decisionId: string,
@@ -5141,6 +5190,126 @@ describe('daemon', () => {
         const feedback = resumed?.mergeDecisionFeedback as string;
         expect(feedback).toContain('"chosen_option":"reject"');
         expect(await ledger.statusOf(DECISION_ID)).toBe('resumed');
+      });
+
+      it('REVERSAL REJECT: holds the revert decision without re-running implementation for the already-landed change', async () => {
+        const { manager, ledger } = createFakeDecisionManager();
+        mockStateMgr.findParkedRuns.mockResolvedValue([makeReversalParkedRun()]);
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment(REVERSAL_DECISION_ID, 'reject')],
+        });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', {
+          decisionManager: asDecisionManager(manager),
+        });
+        ledger.seedNotified(REVERSAL_DECISION_ID, ['approve', 'reject']);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
+
+        const resumed = resumedSaveFor(100);
+        expect(resumed).toBeDefined();
+        expect(resumed?.phase).toBe('integrate');
+        expect(resumed?.pausedAtPhase).toBeUndefined();
+        expect(resumed?.mergeDecisionApprovedEpoch).toBeUndefined();
+        expect(resumed?.mergeDecisionFeedback).toBeUndefined();
+        const integrateArtifact = (
+          resumed?.phaseArtifacts as Record<string, Record<string, unknown>>
+        )?.integrate;
+        expect(integrateArtifact?.status).toBe('rejected');
+        expect(integrateArtifact?.reversal).toEqual(
+          expect.objectContaining({ decisionId: REVERSAL_DECISION_ID }),
+        );
+        expect(await ledger.statusOf(REVERSAL_DECISION_ID)).toBe('resumed');
+        expect(mockOctokit.pulls.update).toHaveBeenCalledWith({
+          owner: 'test-owner',
+          repo: 'test-repo',
+          pull_number: 849,
+          state: 'closed',
+        });
+        expect(mockOctokit.issues.createComment).toHaveBeenCalledWith(
+          expect.objectContaining({
+            owner: 'test-owner',
+            repo: 'test-repo',
+            issue_number: 849,
+            body: expect.stringContaining('Reversal rejected'),
+          }),
+        );
+        expect(mockRunWriter.upsertRun).toHaveBeenCalledWith(
+          'run-parked-integrate-fake',
+          expect.objectContaining({ outcome: 'complete', total_cost: 5 }),
+        );
+        expect(mockOctokit.issues.removeLabel).toHaveBeenCalledWith(
+          expect.objectContaining({
+            owner: 'test-owner',
+            repo: 'test-repo',
+            issue_number: 100,
+            name: 'in-progress',
+          }),
+        );
+        expect(mockRunPipeline).not.toHaveBeenCalled();
+      });
+
+      it('REVERSAL REJECT: missing revert PR metadata stays parked and leaves ledger retryable', async () => {
+        const { manager, ledger } = createFakeDecisionManager();
+        mockStateMgr.findParkedRuns.mockResolvedValue([
+          makeReversalParkedRun({ revertPullRequestNumber: undefined }),
+        ]);
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment(REVERSAL_DECISION_ID, 'reject')],
+        });
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', {
+          decisionManager: asDecisionManager(manager),
+        });
+        ledger.seedNotified(REVERSAL_DECISION_ID, ['approve', 'reject']);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
+
+        expect(resumedSaveFor(100)).toBeUndefined();
+        expect(await ledger.statusOf(REVERSAL_DECISION_ID)).toBe('answered');
+        expect(mockOctokit.pulls.update).not.toHaveBeenCalled();
+        expect(mockOctokit.issues.createComment).not.toHaveBeenCalled();
+        expect(mockRunWriter.upsertRun).not.toHaveBeenCalled();
+        expect(mockOctokit.issues.removeLabel).not.toHaveBeenCalled();
+        expect(mockRunPipeline).not.toHaveBeenCalled();
+      });
+
+      it('REVERSAL REJECT: close failure stays parked and leaves ledger retryable', async () => {
+        const { manager, ledger } = createFakeDecisionManager();
+        mockStateMgr.findParkedRuns.mockResolvedValue([makeReversalParkedRun()]);
+        mockOctokit.issues.listComments.mockResolvedValue({
+          data: [decisionResponseComment(REVERSAL_DECISION_ID, 'reject')],
+        });
+        mockOctokit.pulls.update.mockRejectedValueOnce(new Error('close failed'));
+
+        const { startDaemon } = await loadDaemon();
+        await startDaemon('config.json', {
+          decisionManager: asDecisionManager(manager),
+        });
+        ledger.seedNotified(REVERSAL_DECISION_ID, ['approve', 'reject']);
+
+        await vi.advanceTimersByTimeAsync(30000);
+        await vi.advanceTimersByTimeAsync(0);
+        await settleRealAsync();
+
+        expect(resumedSaveFor(100)).toBeUndefined();
+        expect(await ledger.statusOf(REVERSAL_DECISION_ID)).toBe('answered');
+        expect(mockOctokit.pulls.update).toHaveBeenCalledWith({
+          owner: 'test-owner',
+          repo: 'test-repo',
+          pull_number: 849,
+          state: 'closed',
+        });
+        expect(mockOctokit.issues.createComment).not.toHaveBeenCalled();
+        expect(mockRunWriter.upsertRun).not.toHaveBeenCalled();
+        expect(mockOctokit.issues.removeLabel).not.toHaveBeenCalled();
+        expect(mockRunPipeline).not.toHaveBeenCalled();
       });
 
       it('IDEMPOTENT (answer-once at the daemon): an already-resumed decision is a no-op (no re-consume, no re-run)', async () => {
