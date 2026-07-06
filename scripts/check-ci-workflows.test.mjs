@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findLinuxOnlyContainerHits, findMainConcurrencyViolations } from './check-ci-workflows.mjs';
+import {
+  findFlakyProbeLogViolations,
+  findFlakyProbeTimeoutViolations,
+  findLinuxOnlyContainerHits,
+  findMainConcurrencyViolations,
+} from './check-ci-workflows.mjs';
 
 // --- services: (job-level service containers) ---
 
@@ -380,4 +385,158 @@ test('flags the current ci.yml ref-only concurrency shape', () => {
   const hits = findMainConcurrencyViolations(yaml, 'ci.yml');
   assert.equal(hits.length, 1);
   assert.equal(hits[0].line, 10);
+});
+
+// --- flaky-test probe artifact completeness ---
+
+test('flags a flaky-test probe that omits the first failing test log from the artifact', () => {
+  const yaml = [
+    'jobs:',
+    '  ci:',
+    '    steps:',
+    '      - name: Test',
+    '        id: test',
+    '        run: pnpm test',
+    '      - name: Flaky-test probe',
+    "        if: ${{ failure() && steps.test.outcome == 'failure' }}",
+    '        run: |',
+    '          if pnpm test > flake-reprobe.log 2>&1; then',
+    '            verdict=flaky',
+    '          else',
+    '            verdict=deterministic',
+    '          fi',
+    '      - name: Upload flake report',
+    "        if: ${{ failure() && steps.test.outcome == 'failure' }}",
+    '        uses: actions/upload-artifact@v4',
+    '        with:',
+    '          path: |',
+    '            flake-reprobe.log',
+    '            flake-verdict.txt',
+  ].join('\n');
+  const hits = findFlakyProbeLogViolations(yaml, 'ci.yml');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].line, 7);
+});
+
+test('accepts a flaky-test probe that captures and uploads the first failing test log', () => {
+  const yaml = [
+    'jobs:',
+    '  ci:',
+    '    steps:',
+    '      - name: Test',
+    '        id: test',
+    '        run: |',
+    '          set -o pipefail',
+    '          pnpm test 2>&1 | tee flake-gating.log',
+    '      - name: Flaky-test probe',
+    "        if: ${{ failure() && steps.test.outcome == 'failure' }}",
+    '        run: |',
+    '          if pnpm test > flake-reprobe.log 2>&1; then',
+    '            verdict=flaky',
+    '          else',
+    '            verdict=deterministic',
+    '          fi',
+    '      - name: Upload flake report',
+    "        if: ${{ failure() && steps.test.outcome == 'failure' }}",
+    '        uses: actions/upload-artifact@v4',
+    '        with:',
+    '          path: |',
+    '            flake-gating.log',
+    '            flake-reprobe.log',
+    '            flake-verdict.txt',
+  ].join('\n');
+  assert.equal(findFlakyProbeLogViolations(yaml, 'ci.yml').length, 0);
+});
+
+test('flags a flaky-test probe artifact that omits the reprobe log', () => {
+  const yaml = [
+    'jobs:',
+    '  ci:',
+    '    steps:',
+    '      - name: Test',
+    '        id: test',
+    '        run: |',
+    '          set -o pipefail',
+    '          pnpm test 2>&1 | tee flake-gating.log',
+    '      - name: Flaky-test probe',
+    "        if: ${{ failure() && steps.test.outcome == 'failure' }}",
+    '        run: |',
+    '          if pnpm test > flake-reprobe.log 2>&1; then',
+    '            verdict=flaky',
+    '          else',
+    '            verdict=deterministic',
+    '          fi',
+    '      - name: Upload flake report',
+    "        if: ${{ failure() && steps.test.outcome == 'failure' }}",
+    '        uses: actions/upload-artifact@v4',
+    '        with:',
+    '          path: |',
+    '            flake-gating.log',
+    '            flake-verdict.txt',
+  ].join('\n');
+  const hits = findFlakyProbeLogViolations(yaml, 'ci.yml');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].line, 9);
+});
+
+test('flags a flaky-test probe without enough ci job timeout for the second full test run', () => {
+  const yaml = [
+    'jobs:',
+    '  ci:',
+    '    runs-on: self-hosted',
+    '    timeout-minutes: 25',
+    '    steps:',
+    '      - name: Test',
+    '        id: test',
+    '        run: |',
+    '          set -o pipefail',
+    '          pnpm test 2>&1 | tee flake-gating.log',
+    '      - name: Flaky-test probe',
+    "        if: ${{ failure() && steps.test.outcome == 'failure' }}",
+    '        run: pnpm test > flake-reprobe.log 2>&1',
+  ].join('\n');
+  const hits = findFlakyProbeTimeoutViolations(yaml, 'ci.yml');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].line, 4);
+});
+
+test('does NOT accept ci timeout text that appears only inside a run block scalar', () => {
+  const yaml = [
+    'jobs:',
+    '  ci:',
+    '    runs-on: self-hosted',
+    '    steps:',
+    '      - run: |',
+    '          timeout-minutes: 45',
+    '      - name: Test',
+    '        id: test',
+    '        run: |',
+    '          set -o pipefail',
+    '          pnpm test 2>&1 | tee flake-gating.log',
+    '      - name: Flaky-test probe',
+    "        if: ${{ failure() && steps.test.outcome == 'failure' }}",
+    '        run: pnpm test > flake-reprobe.log 2>&1',
+  ].join('\n');
+  const hits = findFlakyProbeTimeoutViolations(yaml, 'ci.yml');
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].line, 12);
+});
+
+test('accepts a flaky-test probe with enough ci job timeout for the second full test run', () => {
+  const yaml = [
+    'jobs:',
+    '  ci:',
+    '    runs-on: self-hosted',
+    '    timeout-minutes: 45',
+    '    steps:',
+    '      - name: Test',
+    '        id: test',
+    '        run: |',
+    '          set -o pipefail',
+    '          pnpm test 2>&1 | tee flake-gating.log',
+    '      - name: Flaky-test probe',
+    "        if: ${{ failure() && steps.test.outcome == 'failure' }}",
+    '        run: pnpm test > flake-reprobe.log 2>&1',
+  ].join('\n');
+  assert.equal(findFlakyProbeTimeoutViolations(yaml, 'ci.yml').length, 0);
 });

@@ -139,6 +139,14 @@ const BRANCHES_KEY = /^branches:\s*/;
 const GROUP_KEY = /^group:\s*(\S.*)?$/;
 const MAIN_SHA_DISCRIMINATOR = /github\.ref\s*==\s*['"]refs\/heads\/main['"]\s*&&\s*github\.sha/;
 const REF_FALLBACK = /\|\|\s*github\.ref/;
+const FLAKY_PROBE_STEP = /^-\s+name:\s*Flaky-test probe\s*(#.*)?$/;
+const FLAKY_GATING_LOG_CAPTURE = /\bpnpm\s+test\b.*\|\s*tee\s+flake-gating\.log\b/;
+const FLAKY_GATING_LOG_UPLOAD = /^flake-gating\.log\s*(#.*)?$/;
+const FLAKY_REPROBE_LOG_CAPTURE = /\bpnpm\s+test\b.*>\s*flake-reprobe\.log\b/;
+const FLAKY_REPROBE_LOG_UPLOAD = /^flake-reprobe\.log\s*(#.*)?$/;
+const CI_JOB_KEY = /^ci:\s*(#.*)?$/;
+const TIMEOUT_MINUTES_KEY = /^timeout-minutes:\s*(\d+)\s*(#.*)?$/;
+const FLAKY_PROBE_MIN_CI_TIMEOUT_MINUTES = 45;
 
 /**
  * @param {string} content  raw workflow YAML
@@ -257,6 +265,115 @@ export function findMainConcurrencyViolations(content, file) {
   return hits;
 }
 
+/**
+ * @param {string} content  raw workflow YAML
+ * @param {string} file     filename for reporting
+ * @returns {{ file: string, line: number, text: string, kind: 'flaky-probe-log' }[]}
+ */
+export function findFlakyProbeLogViolations(content, file) {
+  const lines = content.split('\n');
+  let probeLine = -1;
+  let capturesGatingLog = false;
+  let uploadsGatingLog = false;
+  let capturesReprobeLog = false;
+  let uploadsReprobeLog = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const body = lines[i].trim();
+    if (body === '' || body.startsWith('#')) continue;
+    if (FLAKY_PROBE_STEP.test(body) && probeLine === -1) probeLine = i + 1;
+    if (FLAKY_GATING_LOG_CAPTURE.test(body)) capturesGatingLog = true;
+    if (FLAKY_GATING_LOG_UPLOAD.test(body)) uploadsGatingLog = true;
+    if (FLAKY_REPROBE_LOG_CAPTURE.test(body)) capturesReprobeLog = true;
+    if (FLAKY_REPROBE_LOG_UPLOAD.test(body)) uploadsReprobeLog = true;
+  }
+
+  if (probeLine !== -1 && (!capturesGatingLog || !uploadsGatingLog || !capturesReprobeLog || !uploadsReprobeLog)) {
+    return [
+      {
+        file,
+        line: probeLine,
+        text: 'Flaky-test probe must preserve and upload flake-gating.log and flake-reprobe.log',
+        kind: 'flaky-probe-log',
+      },
+    ];
+  }
+  return [];
+}
+
+/**
+ * @param {string} content  raw workflow YAML
+ * @param {string} file     filename for reporting
+ * @returns {{ file: string, line: number, text: string, kind: 'flaky-probe-timeout' }[]}
+ */
+export function findFlakyProbeTimeoutViolations(content, file) {
+  const lines = content.split('\n');
+  let probeLine = -1;
+  let inJobs = false;
+  let inCiJob = false;
+  let ciIndent = -1;
+  let scalarIndent = -1;
+  let timeoutLine = -1;
+  let timeoutMinutes = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    if (raw.trim() === '') continue;
+    const indent = raw.length - raw.trimStart().length;
+
+    if (scalarIndent >= 0) {
+      if (indent > scalarIndent) continue;
+      scalarIndent = -1;
+    }
+
+    const body = raw.slice(indent);
+    if (body.startsWith('#')) continue;
+    if (FLAKY_PROBE_STEP.test(body) && probeLine === -1) probeLine = i + 1;
+
+    if (indent === 0) {
+      inJobs = /^jobs:\s*(#.*)?$/.test(body);
+      inCiJob = false;
+      ciIndent = -1;
+      continue;
+    }
+
+    if (!inJobs) continue;
+    if (inCiJob && indent <= ciIndent && !CI_JOB_KEY.test(body)) {
+      inCiJob = false;
+      ciIndent = -1;
+    }
+    if (!inCiJob && CI_JOB_KEY.test(body)) {
+      inCiJob = true;
+      ciIndent = indent;
+      continue;
+    }
+    if (inCiJob && indent > ciIndent) {
+      const timeoutMatch = body.match(TIMEOUT_MINUTES_KEY);
+      if (timeoutMatch && timeoutLine === -1) {
+        timeoutLine = i + 1;
+        timeoutMinutes = Number.parseInt(timeoutMatch[1], 10);
+      }
+    }
+
+    if (BLOCK_SCALAR.test(body)) scalarIndent = indent;
+  }
+
+  if (
+    probeLine !== -1 &&
+    (timeoutMinutes === null || timeoutMinutes < FLAKY_PROBE_MIN_CI_TIMEOUT_MINUTES)
+  ) {
+    return [
+      {
+        file,
+        line: timeoutLine === -1 ? probeLine : timeoutLine,
+        text: `ci timeout must be at least ${FLAKY_PROBE_MIN_CI_TIMEOUT_MINUTES} minutes with Flaky-test probe`,
+        kind: 'flaky-probe-timeout',
+      },
+    ];
+  }
+  return [];
+}
+
 function main() {
   const root = resolve(import.meta.dirname, '..');
   const dir = resolve(root, '.github/workflows');
@@ -267,11 +384,15 @@ function main() {
   const files = readdirSync(dir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
   const containerOffenders = [];
   const concurrencyOffenders = [];
+  const flakyProbeOffenders = [];
+  const flakyTimeoutOffenders = [];
   for (const f of files) {
     const content = readFileSync(resolve(dir, f), 'utf-8');
     const filePath = `.github/workflows/${f}`;
     containerOffenders.push(...findLinuxOnlyContainerHits(content, filePath));
     concurrencyOffenders.push(...findMainConcurrencyViolations(content, filePath));
+    flakyProbeOffenders.push(...findFlakyProbeLogViolations(content, filePath));
+    flakyTimeoutOffenders.push(...findFlakyProbeTimeoutViolations(content, filePath));
   }
   let failed = false;
   if (containerOffenders.length > 0) {
@@ -302,8 +423,34 @@ function main() {
     }
     failed = true;
   }
+  if (flakyProbeOffenders.length > 0) {
+    console.error(
+      'check-ci-workflows: found flaky-test probe artifact violation(s).\n' +
+        'A non-masking flaky-test probe must preserve the original failing `pnpm test`\n' +
+        'output as `flake-gating.log` and upload it with `flake-reprobe.log`; otherwise\n' +
+        'a fail-then-pass flake has no durable record of which test failed.\n',
+    );
+    for (const o of flakyProbeOffenders) {
+      console.error(`  ${o.file}:${o.line}  [${o.kind}]  ${o.text}`);
+    }
+    failed = true;
+  }
+  if (flakyTimeoutOffenders.length > 0) {
+    console.error(
+      'check-ci-workflows: found flaky-test probe timeout violation(s).\n' +
+        `A workflow with Flaky-test probe must give the ci job at least ${FLAKY_PROBE_MIN_CI_TIMEOUT_MINUTES} minutes,\n` +
+        'because a red Test step can run the full suite twice before artifact upload\n' +
+        'and Postgres cleanup execute.\n',
+    );
+    for (const o of flakyTimeoutOffenders) {
+      console.error(`  ${o.file}:${o.line}  [${o.kind}]  ${o.text}`);
+    }
+    failed = true;
+  }
   if (failed) return 1;
-  console.log(`check-ci-workflows: ${files.length} workflow file(s) clean — no Linux-only container or main-concurrency issues.`);
+  console.log(
+    `check-ci-workflows: ${files.length} workflow file(s) clean — no Linux-only container, main-concurrency, or flaky-probe issues.`,
+  );
   return 0;
 }
 

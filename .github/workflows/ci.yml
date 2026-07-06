@@ -48,7 +48,9 @@ jobs:
   ci:
     needs: guard
     runs-on: self-hosted
-    timeout-minutes: 25
+    # Red Test runs may execute the full suite twice: first as the gating run,
+    # then once more in the flaky-test probe before artifact upload + cleanup.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -114,12 +116,58 @@ jobs:
         run: pnpm typecheck
 
       - name: Test
-        run: pnpm test
+        id: test
+        run: |
+          set -o pipefail
+          pnpm test 2>&1 | tee flake-gating.log
         env:
           # Makes the decision-index real-Postgres integration suite REQUIRED
           # (not skipped). Points at the docker Postgres started above.
           AUTO_CLAUDE_TEST_DATABASE_URL: ${{ env.PG_URL }}
           AUTO_CLAUDE_DATABASE_URL: ${{ env.PG_URL }}
+
+      # Flaky-test visibility (NON-MASKING). Runs ONLY when the Test step itself
+      # failed (not when an earlier lint/typecheck step did — that would re-run
+      # tests and mislabel an unrelated failure). Re-runs the suite ONCE to
+      # classify the failure: passes on re-run -> flaky; fails again -> a real
+      # (deterministic) failure. This NEVER turns the build green — the job is
+      # already red from the Test step above; this step only annotates + writes a
+      # report artifact so the CI-health digest can tell flakes from regressions.
+      # Postgres is still up here (Stop Postgres runs last, if: always()).
+      - name: Flaky-test probe
+        if: ${{ failure() && steps.test.outcome == 'failure' }}
+        env:
+          AUTO_CLAUDE_TEST_DATABASE_URL: ${{ env.PG_URL }}
+          AUTO_CLAUDE_DATABASE_URL: ${{ env.PG_URL }}
+        run: |
+          set -u
+          echo "## Flaky-test probe" >> "$GITHUB_STEP_SUMMARY"
+          echo "The gating \`pnpm test\` failed. Re-running once to classify…" >> "$GITHUB_STEP_SUMMARY"
+          if pnpm test > flake-reprobe.log 2>&1; then
+            verdict=flaky
+            echo "::warning title=Flaky test detected::\`pnpm test\` FAILED in the gating run but PASSED on an isolated re-run — likely a flaky/nondeterministic test, not a real regression. Download the \`flake-report\` artifact for the gating failure + re-run logs."
+            { echo "- ❗ **FLAKY**: gating run failed, isolated re-run passed → nondeterministic."
+              echo "- The build stays **red** (the gating failure is real); this is a visibility signal, not a pass."; } >> "$GITHUB_STEP_SUMMARY"
+          else
+            verdict=deterministic
+            { echo "- ✅ **Deterministic failure**: the re-run failed too → a real failure. Fix the code/test."; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "$verdict" > flake-verdict.txt
+          # Informational step: do NOT alter job status. The job is already red
+          # from the Test step; exit 0 here so a flaky verdict isn't itself noise.
+          exit 0
+
+      - name: Upload flake report
+        if: ${{ failure() && steps.test.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: flake-report
+          path: |
+            flake-gating.log
+            flake-reprobe.log
+            flake-verdict.txt
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Install Playwright Chromium
         run: pnpm --filter @auto-claude/dashboard exec playwright install chromium

@@ -321,6 +321,8 @@ describe('earn-in mint seam — same-run auto-widen (F17)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // The seeded outcome window is relative to NOW; keep the recency floor stable.
+    vi.spyOn(Date, 'now').mockReturnValue(NOW);
     // git() returns a Result<string> — a successful push is { ok: true, value }.
     mockGit.mockResolvedValue({ ok: true, value: '' } as any);
     mockIntegrate.mockResolvedValue({ ok: true, merged: true, mergeSha: 'deadbeef' } as any);
@@ -329,6 +331,7 @@ describe('earn-in mint seam — same-run auto-widen (F17)', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     while (dirs.length) {
       const d = dirs.pop();
       if (d !== undefined) rmSync(d, { recursive: true, force: true });
