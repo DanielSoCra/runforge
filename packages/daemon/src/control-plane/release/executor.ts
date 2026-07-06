@@ -56,7 +56,7 @@ export interface ReleaseLaneDeps {
     deployment: string,
     decisionId: string,
     issueNumber: number,
-  ) => Promise<"approve" | "reject" | undefined>;
+  ) => Promise<"approve" | "reject" | "approve-with-debut" | undefined>;
   octokit: Octokit;
   issueNumberFor: (deployment: string) => number;
 }
@@ -130,7 +130,12 @@ export function createReleaseLane(deps: ReleaseLaneDeps): ReleaseLane {
     proposal: ReleaseProposal,
     issueNumber: number,
   ): Promise<boolean> {
-    const req = buildReleaseDecisionRequest(proposal);
+    const reader = ledger.reader();
+    let offerDebut = true;
+    if (typeof reader.hasPriorApprovedRelease === 'function') {
+      offerDebut = !(await reader.hasPriorApprovedRelease(proposal.deployment));
+    }
+    const req = buildReleaseDecisionRequest(proposal, { offerDebut });
     const sanitized = await sanitize(req);
     const deployment = proposal.deployment;
     const repo = repositoriesFor(deployment)[0];
@@ -322,26 +327,42 @@ export function createReleaseLane(deps: ReleaseLaneDeps): ReleaseLane {
         asReleaseOutcome(r.detail.outcome) !== undefined,
     );
     if (terminalExecution) {
-      const decisionRow = rows.find((r) => r.event === "decision");
-      const answer =
-        typeof decisionRow?.detail.answer === "string"
-          ? decisionRow.detail.answer
-          : await readAnswer(deployment, decisionId, issueNumber);
-      if (answer === undefined) {
-        return { kind: "pending" };
-      }
-      await terminalize(deployment, releaseId, answer);
-      await appendResolved(deployment, releaseId, answer);
-      return { kind: "already-resolved" };
+    const decisionRow = rows.find((r) => r.event === "decision");
+    let answer:
+      | "approve"
+      | "reject"
+      | "approve-with-debut"
+      | undefined = decisionRow?.detail.answer as
+      | "approve"
+      | "reject"
+      | "approve-with-debut"
+      | undefined;
+    if (answer === undefined) {
+      answer = await readAnswer(deployment, decisionId, issueNumber);
+    }
+    if (answer === undefined) {
+      return { kind: "pending" };
+    }
+    await terminalize(deployment, releaseId, answer);
+    await appendResolved(deployment, releaseId, answer);
+    return { kind: "already-resolved" };
     }
 
     const hasAttempt = rows.some((r) => r.event === "attempt");
     if (hasAttempt) {
       const decisionRow = rows.find((r) => r.event === "decision");
-      const answer =
-        typeof decisionRow?.detail.answer === "string"
-          ? decisionRow.detail.answer
-          : await readAnswer(deployment, decisionId, issueNumber);
+      let answer:
+        | "approve"
+        | "reject"
+        | "approve-with-debut"
+        | undefined = decisionRow?.detail.answer as
+        | "approve"
+        | "reject"
+        | "approve-with-debut"
+        | undefined;
+      if (answer === undefined) {
+        answer = await readAnswer(deployment, decisionId, issueNumber);
+      }
       if (answer === undefined) {
         return { kind: "pending" };
       }
@@ -393,9 +414,11 @@ export function createReleaseLane(deps: ReleaseLaneDeps): ReleaseLane {
     let answer:
       | "approve"
       | "reject"
+      | "approve-with-debut"
       | undefined = decisionRow?.detail.answer as
       | "approve"
       | "reject"
+      | "approve-with-debut"
       | undefined;
     if (answer === undefined) {
       answer = await readAnswer(deployment, decisionId, issueNumber);
@@ -410,7 +433,7 @@ export function createReleaseLane(deps: ReleaseLaneDeps): ReleaseLane {
         deployment,
         event: "decision",
         targetRevision: null,
-        detail: { answer },
+        detail: { answer, debutAuthorized: answer === "approve-with-debut" },
       });
     }
 

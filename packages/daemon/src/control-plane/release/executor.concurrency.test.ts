@@ -113,6 +113,8 @@ function makeFakeLedger() {
       }
       return out;
     }),
+    hasPriorApprovedRelease: vi.fn(async () => false),
+    hasDebutAuthorization: vi.fn(async () => false),
   };
 
   const writer: ReleaseLedgerWriter = {

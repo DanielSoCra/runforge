@@ -73,20 +73,32 @@ import { buildMergeDecisionRequest,
   observeVerifierStatus,
 } from './merge-decision/index.js';
 import { alertOnNotifyApplied, type DecisionRaisedAlert } from './decision-alert.js';
+import { ReleaseLedgerManager } from './release/release-ledger-manager.js';
 import type { DecisionRequest } from '@auto-claude/decision-protocol';
 import { SanitizationPipeline } from '@auto-claude/sanitization';
 import { applyDecisionSanitization } from './decision-escalation/sanitize-request.js';
 import {
   assignLane,
+  evaluateMergeEligibility,
   evaluateVerifierGate,
   gateSetVerdict,
   resolveForMode,
 } from './lane-engine/index.js';
+import { laneOutcomesPath, loadLaneOutcomes, appendLaneOutcome } from './lane-engine/outcome-ledger.js';
 import type {
   ClassifierVerdict,
   GateSetDefinitions,
   RiskLevel,
 } from './lane-engine/types.js';
+import {
+  derivePromotionTrackRecord,
+  evaluatePromotion,
+  isDebut,
+  planMint,
+  triggerDemoteOnRed,
+  EARN_IN_FLOORS,
+} from './earn-in/index.js';
+import type { BounceReason } from './earn-in/types.js';
 import type { VerifierInvocationRef } from './lane-engine/verifier-gate/types.js';
 import type { LaneEngineInputsResult } from './deployment-registry/types.js';
 import type { ClassificationComplexity } from '../types.js';
@@ -288,6 +300,8 @@ export function createPhaseHandlers(
   isPaused?: () => boolean,
   // P3.3 operator alert: fired once when a decision-raise notify transition applies.
   alert?: DecisionRaisedAlert,
+  // P4.2 earn-in debut gate: reads the release ledger for debut authorization.
+  releaseLedgerManager?: ReleaseLedgerManager,
 ): PhaseHandlerMap {
   const repo = repoName;
   // Lazily constructed only when the decision index is enabled — a disabled
@@ -324,6 +338,22 @@ export function createPhaseHandlers(
     return applyDecisionSanitization(pipeline, request);
   }
 
+  /**
+   * Read whether the deployment's first production release recorded a debut
+   * authorization. Fail-closed: if the release ledger is unavailable, returns false.
+   */
+  async function hasDebutAuthorizationFor(deploymentId: string): Promise<boolean> {
+    if (releaseLedgerManager?.isAvailable() !== true) return false;
+    try {
+      return await releaseLedgerManager.ledger().reader().hasDebutAuthorization(deploymentId);
+    } catch (e) {
+      console.warn(
+        `[integrate] hasDebutAuthorization read failed for ${deploymentId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return false;
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // P1 controlled code-change delivery helpers
   // ---------------------------------------------------------------------------
@@ -353,6 +383,16 @@ export function createPhaseHandlers(
       landsOn: declared.value.landsOn,
       requiredChecks: declared.value.requiredChecks ?? [],
     };
+  }
+
+  /** Map a merge-decision escalate reason to an earn-in bounce reason, if any. */
+  function bounceReasonFromDecision(
+    reason: string | undefined,
+  ): BounceReason | undefined {
+    if (reason === 'out-of-scope') return 'scope-tripwire';
+    if (reason === 'verification-not-passed') return 'failed-check';
+    // Pending / not-yet-earned outcomes are not bounces.
+    return undefined;
   }
 
   function getOrCreateIntegrateArtifact(
@@ -2418,6 +2458,23 @@ export function createPhaseHandlers(
             };
             integrateArtifact.updatedAt = new Date().toISOString();
             run.pausedAtPhase = 'integrate';
+
+            if (
+              registry !== undefined &&
+              deploymentId !== undefined &&
+              run.mergeDecision !== undefined
+            ) {
+              await triggerDemoteOnRed({
+                registry,
+                stateDir,
+                deploymentId,
+                lane: run.mergeDecision.lane.name,
+                riskClass: run.mergeDecision.effectiveRisk,
+                redReason: 'post-merge-tripwire',
+                now: Date.now(),
+              });
+            }
+
             return 'success';
           }
 
@@ -2471,6 +2528,23 @@ export function createPhaseHandlers(
             observedAt: new Date().toISOString(),
           };
           integrateArtifact.updatedAt = new Date().toISOString();
+
+          if (
+            registry !== undefined &&
+            deploymentId !== undefined &&
+            run.mergeDecision !== undefined
+          ) {
+            await triggerDemoteOnRed({
+              registry,
+              stateDir,
+              deploymentId,
+              lane: run.mergeDecision.lane.name,
+              riskClass: run.mergeDecision.effectiveRisk,
+              redReason: 'failed-release',
+              now: Date.now(),
+            });
+          }
+
           return 'failure';
         }
       }
@@ -2552,6 +2626,75 @@ export function createPhaseHandlers(
         }
       }
 
+      // P4.2 earn-in mint step: evaluate and possibly auto-widen autonomy BEFORE
+      // decideMerge reads it, so the same integrate run benefits from the widening.
+      if (
+        registry !== undefined &&
+        deploymentId !== undefined &&
+        assignedLane !== undefined
+      ) {
+        const eligForMint = evaluateMergeEligibility({
+          lane: assignedLane,
+          classifierLevel,
+          riskPathMap,
+          defaultMinLevel,
+          touchedPaths,
+          modeResolution: resolvedSet.resolution,
+        });
+        const laneOutcomes = (await loadLaneOutcomes(laneOutcomesPath(stateDir))).filter(
+          (o) => o.deploymentId === deploymentId && o.lane === assignedLane.name,
+        );
+        const record = derivePromotionTrackRecord(
+          laneOutcomes,
+          registry.readAutonomyHistory(deploymentId),
+          Date.now(),
+          EARN_IN_FLOORS,
+        );
+        const promotion = evaluatePromotion({
+          record,
+          bar: assignedLane.earnIn,
+          preApproved: assignedLane.preApprovedEarnIn,
+          verifierFalsifying: verifierStatus.falsifying,
+          scopeHolding: eligForMint.tripwire.kind === 'in-scope',
+        });
+        const level = eligForMint.effectiveRisk;
+        const laneName = assignedLane.name;
+        const currentlyHumanGated =
+          (registry.readAutonomyState(deploymentId, level, laneName)[0]?.level ?? 'human-gated') ===
+          'human-gated';
+        const debut = isDebut(registry.readAutonomyHistory(deploymentId));
+        const hasAuth = debut ? await hasDebutAuthorizationFor(deploymentId) : false;
+        const plan = planMint({
+          promotion,
+          effectiveRisk: level,
+          verifierFalsifying: verifierStatus.falsifying,
+          complianceForced,
+          currentlyHumanGated,
+          isDebut: debut,
+          hasDebutAuthorization: hasAuth,
+        });
+        if (plan.kind === 'mint') {
+          const outcome = registry.recordWidening(
+            deploymentId,
+            plan.level,
+            'widened',
+            {
+              kind: 'earn-in-policy',
+              policyRef: plan.policyRef,
+              clearedFloors: plan.clearedFloors,
+              evidence: plan.evidence,
+            },
+            Date.now(),
+            laneName,
+          );
+          if (!outcome.ok) {
+            console.warn(
+              `[integrate] earn-in mint failed for ${deploymentId}/${laneName}: ${outcome.reason}`,
+            );
+          }
+        }
+      }
+
       const decision = decideMerge({
         laneSet,
         riskPathMap,
@@ -2612,11 +2755,45 @@ export function createPhaseHandlers(
           });
         }
 
+        // P4.2 earn-in: record a clean-merge outcome for every successful merge
+        // (auto-merge or operator-approved re-entry), so the lane accrues record
+        // before autonomy exists.
+        if (shouldMerge && deploymentId !== undefined && assignedLane !== undefined) {
+          void appendLaneOutcome(stateDir, {
+            ts: new Date().toISOString(),
+            deploymentId,
+            lane: assignedLane.name,
+            kind: 'clean-merge',
+            riskClass: decision.effectiveRisk,
+            issueNumber: workRequest.issueNumber,
+          });
+        }
+
         // Post-landing observation on the squash merge SHA.
         return await runPostLandingObservation(
           deliveryResult.mergeSha,
           deliveryResult.prNumber,
         );
+      }
+
+      // P4.2 earn-in: record a bounce for rejection-type non-merge outcomes.
+      if (
+        deploymentId !== undefined &&
+        assignedLane !== undefined &&
+        decision.kind === 'escalate'
+      ) {
+        const bounceReason = bounceReasonFromDecision(decision.reason);
+        if (bounceReason !== undefined) {
+          void appendLaneOutcome(stateDir, {
+            ts: new Date().toISOString(),
+            deploymentId,
+            lane: assignedLane.name,
+            kind: 'bounce',
+            bounceReason,
+            riskClass: decision.effectiveRisk,
+            issueNumber: workRequest.issueNumber,
+          });
+        }
       }
 
       // PR was created/adopted but NOT merged (checks red/timeout, hold/escalate,

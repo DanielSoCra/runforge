@@ -162,7 +162,21 @@ function extractMatchingChoice(
   // the daemon answers the ledger with `raw`, which matches the stored options[]
   // the state machine validates against. (l2-gate never emits `approve-merge`.)
   if (chosen === 'approve-merge') return { choice: 'approve', raw: chosen };
+  // First production-release debut option: semantic approve, raw preserves debut.
+  if (chosen === 'approve-with-debut') return { choice: 'approve', raw: chosen };
   return null;
+}
+
+/**
+ * Pure mapping helper: widen a parsed cockpit answer to the release answer union.
+ * Returns 'approve-with-debut' when the raw chosen option signals a debut authorization.
+ */
+export function releaseAnswerFromParsed(
+  parsed: { choice: 'approve' | 'reject'; rawChosenOption: string } | undefined,
+): 'approve' | 'reject' | 'approve-with-debut' | undefined {
+  if (parsed === undefined) return undefined;
+  if (parsed.rawChosenOption === 'approve-with-debut') return 'approve-with-debut';
+  return parsed.choice;
 }
 
 /**

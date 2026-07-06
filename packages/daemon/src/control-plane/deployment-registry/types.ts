@@ -34,12 +34,29 @@ export type RiskClass = RiskLevel;
 export type AutonomyLevel = 'human-gated' | 'widened';
 
 /**
- * How a widening was authorized. Either a per-event Operator grant or a
- * reference to a pre-approved earn-in policy that auto-promoted.
+ * How a widening was authorized. Either a per-event Operator grant, a pre-approved
+ * earn-in policy auto-promotion (carrying cleared floors + triggering evidence),
+ * or an automatic demote-on-red reversal.
  */
 export type AutonomyAuthorization =
   | { kind: 'operator-grant'; operator: string }
-  | { kind: 'earn-in-policy'; policyRef: string };
+  | {
+      kind: 'earn-in-policy';
+      policyRef: string;
+      /** Required on a mint; optional on the type only for backward-compat with existing tests. */
+      clearedFloors?: string[];
+      /** Required on a mint; optional on the type only for backward-compat with existing tests. */
+      evidence?: EarnInWideningEvidence;
+    }
+  | { kind: 'demote-on-red'; trigger: string };
+
+/** The triggering track-record snapshot recorded with an earn-in-policy widening. */
+export interface EarnInWideningEvidence {
+  cleanMerges: number;
+  cleanMergesInWindow: number;
+  bounceFreeDays: number;
+  redEventInWindow: boolean;
+}
 
 /** A repository this deployment owns, identified by owner + name. */
 export interface OwnedRepository {

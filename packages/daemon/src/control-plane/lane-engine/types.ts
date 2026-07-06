@@ -89,8 +89,13 @@ export interface LaneDefinition {
   postMergeReview?: BatchReviewPolicy;
   earnIn?: EarnInPolicy;
   /**
+   * Optional pre-approved earn-in policy declaration. Opaque to the Lane Engine;
+   * earn-in is its sole interpreter. `enabled: false` makes the policy inert.
+   */
+  preApprovedEarnIn?: { enabled: boolean; policyRef: string };
+  /**
    * The falsifiable oracle this lane declares for verifier-gated autonomy. A
-   * lane with no verifier withholds autonomy (the merge-decision gate escalates
+   * lane without it withholds autonomy (the merge-decision gate escalates
    * `verifier-withheld`). Optional so existing packs without a declaration stay
    * valid — they simply never earn auto-merge.
    */
@@ -114,6 +119,8 @@ export interface ResolvedLane {
   mergePolicy: MergePolicy;
   postMergeReview?: BatchReviewPolicy;
   earnIn?: EarnInPolicy;
+  /** Carried through mode resolution unchanged (earn-in is mode-invariant). */
+  preApprovedEarnIn?: { enabled: boolean; policyRef: string };
   /** Carried through mode resolution unchanged (the verifier is mode-invariant). */
   verifier?: VerifierDeclaration;
 }

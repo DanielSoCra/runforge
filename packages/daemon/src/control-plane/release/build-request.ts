@@ -15,6 +15,8 @@ export interface BuildReleaseDecisionRequestOpts {
   now?: string;
   expiresAt?: string;
   sourceUrl?: string;
+  /** If true, offer the third `approve-with-debut` option for first releases. */
+  offerDebut?: boolean;
 }
 
 export function buildReleaseDecisionRequest(
@@ -38,6 +40,22 @@ export function buildReleaseDecisionRequest(
     `Declared release path: ${proposal.declaredPath.kind}.`,
   ].join(" ");
 
+  const options: DecisionRequest["options"] = [
+    {
+      id: "approve",
+      label: "Approve the production release and carry out the declared path.",
+    },
+    { id: "reject", label: "Reject; production is left unchanged." },
+  ];
+
+  if (opts.offerDebut === true) {
+    options.push({
+      id: "approve-with-debut",
+      label:
+        "Approve the production release AND authorize this deployment to begin pre-approved unattended merging.",
+    });
+  }
+
   return DecisionRequestSchema.parse({
     decision_id: id,
     idempotency_key: id,
@@ -51,13 +69,7 @@ export function buildReleaseDecisionRequest(
     reversibility: "external_effect",
     question: `Approve the production release for "${proposal.deployment}"?`,
     context,
-    options: [
-      {
-        id: "approve",
-        label: "Approve the production release and carry out the declared path.",
-      },
-      { id: "reject", label: "Reject; production is left unchanged." },
-    ],
+    options,
     consequence_of_no_answer:
       "No production release happens; the deployment stays on its last release.",
     expires_at: expiresAt,

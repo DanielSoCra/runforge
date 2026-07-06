@@ -59,6 +59,13 @@ vi.mock('./merge-decision/index.js', () => ({
 
 vi.mock('./lane-engine/index.js', () => ({
   assignLane: vi.fn(() => ({ lane: 'review' })),
+  evaluateMergeEligibility: vi.fn(() => ({
+    kind: 'escalate',
+    effectiveRisk: 'yellow',
+    reason: 'out-of-scope',
+    tripwire: { kind: 'out-of-scope', touched: [], outside: [] },
+    modeResolution: { mode: 'velocity', degraded: false },
+  })),
   gateSetVerdict: vi.fn(() => true),
   resolveForMode: vi.fn((laneSet: unknown) => laneSet),
 }));
@@ -262,6 +269,7 @@ function makeRegistry(): DeploymentRegistry {
     }),
     ownsRepo: () => true,
     readAutonomyState: () => [],
+    readAutonomyHistory: () => [],
     readDeclaredData: (deploymentId: string, which: string) => {
       if (which === 'landing') {
         return {

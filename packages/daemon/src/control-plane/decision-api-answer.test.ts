@@ -60,6 +60,22 @@ function detailView(id: string, status: string): DetailView {
   };
 }
 
+/**
+ * A production-release detail view (id prefix `release:`) that also offers the
+ * third `approve-with-debut` option — the only decision shape that does.
+ */
+function releaseDetailView(id: string, status: string): DetailView {
+  return {
+    ...detailView(id, status),
+    decision_id: id,
+    options: [
+      { id: 'approve', label: { kind: 'text', value: 'Approve' } },
+      { id: 'reject', label: { kind: 'text', value: 'Reject' } },
+      { id: 'approve-with-debut', label: { kind: 'text', value: 'Approve + debut' } },
+    ],
+  };
+}
+
 /** A read-model fake seeded with detail views. */
 function fakeReadModel(details: Record<string, DetailView>): DecisionReadModel {
   return {
@@ -87,9 +103,13 @@ function throwingReadModel(): DecisionReadModel {
 /** A publisher fake that records what it published. */
 function recordingPublisher(): {
   publisher: DecisionAnswerPublisher;
-  calls: Array<{ decisionId: string; chosenOption: 'approve' | 'reject' }>;
+  calls: Array<{ decisionId: string; chosenOption: 'approve' | 'reject'; debut?: boolean }>;
 } {
-  const calls: Array<{ decisionId: string; chosenOption: 'approve' | 'reject' }> = [];
+  const calls: Array<{
+    decisionId: string;
+    chosenOption: 'approve' | 'reject';
+    debut?: boolean;
+  }> = [];
   return {
     calls,
     publisher: {
@@ -225,5 +245,53 @@ describe('answerDecision', () => {
       })(),
     ).resolves.toBeUndefined();
     expect(res?.status).toBe(503);
+  });
+
+  // ── approve-with-debut over the daemon answer transport (codex P4.2 P2) ──────
+  //
+  // The GitHub-comment path (parseCockpitAnswer) already recognizes
+  // `approve-with-debut`, but the daemon answer API rejected any option that is
+  // not approve/reject — so an Operator answering a production-release decision
+  // THROUGH the API could never authorize the debut. These pin that the release
+  // phase (and ONLY the release phase) now carries the third option through.
+
+  it('a production-release decision answered with approve-with-debut → publishes the debut authorization + 200 (codex P4.2)', async () => {
+    // Before the fix this returned 400 ("not supported by the answer transport"),
+    // so the debut authorization was never recorded; now the answer flows to the
+    // publisher carrying the debut flag (which the publisher records as the
+    // `approve-with-debut` option the release ledger's decision event reads back).
+    const rm = fakeReadModel({
+      'release:acme/widgets:abc12345': releaseDetailView('release:acme/widgets:abc12345', 'notified'),
+    });
+    const { publisher, calls } = recordingPublisher();
+    const res = await answerDecision(deps(rm, publisher), 'release:acme/widgets:abc12345', {
+      chosen_option: 'approve-with-debut',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ answered: true, chosen_option: 'approve-with-debut' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({
+      decisionId: 'release:acme/widgets:abc12345',
+      chosenOption: 'approve',
+      debut: true,
+    });
+  });
+
+  it('a NON-release decision that offers approve-with-debut → 400, never publishes (release-phase gated)', async () => {
+    // Defense-in-depth: even if some non-release decision listed the option, the
+    // answer transport accepts the debut grant ONLY for a `release:`-phase id, so
+    // no other decision class can smuggle a debut authorization.
+    const custom = {
+      ...releaseDetailView('issue-42:l2-gate:1', 'notified'),
+      decision_id: 'issue-42:l2-gate:1',
+    } as DetailView;
+    const { publisher, calls } = recordingPublisher();
+    const res = await answerDecision(
+      deps(fakeReadModel({ 'issue-42:l2-gate:1': custom }), publisher),
+      'issue-42:l2-gate:1',
+      { chosen_option: 'approve-with-debut' },
+    );
+    expect(res.status).toBe(400);
+    expect(calls).toHaveLength(0);
   });
 });

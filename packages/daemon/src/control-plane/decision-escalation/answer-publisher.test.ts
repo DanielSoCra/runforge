@@ -60,6 +60,18 @@ describe('buildDecisionResponseComment', () => {
     expect(answer!.rawChosenOption).toBe('reject');
   });
 
+  it('CONTRACT: an approve-with-debut body round-trips to choice=approve with the raw debut option preserved (codex P4.2)', () => {
+    // The daemon answer path posts `approve-with-debut` for a release-phase debut
+    // answer; parseCockpitAnswer must recognize it (semantic approve) while keeping
+    // the raw option so release/read-answer.ts reads back the debut authorization.
+    const releaseId = 'release:acme/widgets:abc12345';
+    const body = buildDecisionResponseComment(releaseId, 'approve-with-debut', IDEMPOTENCY_KEY);
+    const answer = parseCockpitAnswer([{ body }], releaseId);
+    expect(answer).not.toBeNull();
+    expect(answer!.choice).toBe('approve');
+    expect(answer!.rawChosenOption).toBe('approve-with-debut');
+  });
+
   it('is bound to its decisionId — parseCockpitAnswer for a DIFFERENT decision_id does NOT match (no cross-epoch resume)', () => {
     const body = buildDecisionResponseComment(DECISION_ID, 'approve', IDEMPOTENCY_KEY);
     // a different epoch (different decision_id) must never resume on this comment.

@@ -41,6 +41,7 @@ import {
   type PromotionPort,
   type ReleaseLane,
 } from './release/executor.js';
+import { createReleaseReadAnswer } from './release/read-answer.js';
 import { resolveAnsweredReleases } from './release/resolve-consumer.js';
 import type { CoveredCommit, TrunkReader } from './release/types.js';
 import { applyDecisionSanitization } from './decision-escalation/sanitize-request.js';
@@ -1093,31 +1094,10 @@ export async function startDaemon(
     // issue's comments via `parseCockpitAnswer` (the SAME reader the merge-decision
     // resume path uses). Returns undefined (→ pending) on any missing issue / fetch
     // failure, so a release only executes on a recorded DecisionResponse.
-    const readAnswer = async (
-      deployment: string,
-      decisionId: string,
-      issueNumber: number,
-    ): Promise<'approve' | 'reject' | undefined> => {
-      if (issueNumber <= 0) return undefined;
-      const repo = repositoriesFor(deployment)[0];
-      if (!repo) return undefined;
-      let comments: Array<{ body?: string | null }> = [];
-      try {
-        const res = await releaseOctokit.issues.listComments({
-          owner: repo.owner,
-          repo: repo.name,
-          issue_number: issueNumber,
-          per_page: 100,
-        });
-        comments = res.data ?? [];
-      } catch (e) {
-        console.warn(
-          `[release] readAnswer: failed to fetch comments for #${issueNumber}: ${e instanceof Error ? e.message : String(e)}`,
-        );
-        return undefined;
-      }
-      return parseCockpitAnswer(comments, decisionId)?.choice;
-    };
+    const readAnswer = createReleaseReadAnswer({
+      octokit: releaseOctokit,
+      repositoriesFor,
+    });
 
     releaseLane = createReleaseLane({
       registry: deploymentRegistry,
@@ -2554,7 +2534,7 @@ export async function startDaemon(
               detail: (decisionId) => decisionManager.ledger().reader.detail(decisionId),
             },
             publisher: {
-              async publish({ decisionId, chosenOption }) {
+              async publish({ decisionId, chosenOption, debut }) {
                 const reader = decisionManager.ledger().reader;
                 const detail = await reader.detail(decisionId);
                 if (detail === undefined) {
@@ -2578,7 +2558,10 @@ export async function startDaemon(
                 const answerOctokit = new Octokit({ auth: answerToken });
                 await postDecisionResponse({
                   decisionId,
-                  chosenOption,
+                  // A release-phase debut answer records `approve-with-debut` so the
+                  // release path reads back the debut authorization; every other
+                  // answer posts its plain `approve`/`reject`.
+                  chosenOption: debut === true ? 'approve-with-debut' : chosenOption,
                   // a deterministic, operator-surface idempotency suffix; the resume
                   // matcher anchors on `write_response\b`, so any suffix is recognized.
                   idempotencyKey: `op-${decisionId}`,
@@ -2757,6 +2740,8 @@ export async function startDaemon(
                 () => paused,
                 // P3.3 decision-raised operator alert.
                 notifyOperator,
+                // P4.2 earn-in debut gate reads the release ledger.
+                releaseLedgerManager,
               );
       const table = getPipeline(run.variant);
 
@@ -3687,6 +3672,8 @@ export async function startDaemon(
                 () => paused,
                 // P3.3 decision-raised operator alert.
                 notifyOperator,
+                // P4.2 earn-in debut gate reads the release ledger.
+                releaseLedgerManager,
               );
       const table = getPipeline(run.variant);
 
@@ -4185,6 +4172,8 @@ async function processWorkRequest(
             // P0.5 pause gate at integrate-entry.
             isPaused,
             // Single-issue CLI path has no decision index => no decision-raised alert.
+            undefined,
+            // P4.2 earn-in debut gate reads the release ledger (unavailable here).
             undefined,
           );
   const table = getPipeline(variant);

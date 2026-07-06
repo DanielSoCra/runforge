@@ -239,7 +239,7 @@ FUNC-AC-FLEET:
   status: approved
 
 FUNC-AC-MERGE-DECISION:
-  children: [ARCH-AC-LANE-ENGINE]
+  children: [ARCH-AC-LANE-ENGINE, ARCH-AC-EARN-IN]
   related: [FUNC-AC-COMPLIANCE-GATE, FUNC-AC-FLEET, FUNC-AC-DECISION-ESCALATION, FUNC-AC-QUALITY]
   status: approved
 
@@ -474,6 +474,20 @@ ARCH-AC-LANE-ENGINE:
   parent: FUNC-AC-MERGE-DECISION
   children: [STACK-AC-LANE-ENGINE]
   related: [FUNC-AC-COMPLIANCE-GATE, ARCH-AC-CONTROL-PLANE, ARCH-AC-BATCH-CLASSIFIER]
+  status: draft
+
+# The EARNING half of earned autonomy: pre-approved earn-in that auto-widens a
+# lane's autonomy off its own proven track record WITHOUT a per-promotion Operator
+# decision, behind non-configurable fail-closed floors (FUNC-AC-MERGE-DECISION
+# v2.3). Composes a pure floor evaluator OVER the lane engine's bar predicate;
+# mints a widening only through the registry's reversible autonomy write; gates
+# the deployment's DEBUT unattended merge on its first production-release approval
+# (FUNC-AC-FLEET) and reverses every auto-promotion on a later red (demote-on-red).
+# Builds only on the verifier gate (FUNC-AC-VERIFIER-GATE). decideMerge stays pure.
+ARCH-AC-EARN-IN:
+  parent: FUNC-AC-MERGE-DECISION
+  children: [STACK-AC-EARN-IN]
+  related: [FUNC-AC-FLEET, FUNC-AC-VERIFIER-GATE, ARCH-AC-LANE-ENGINE, ARCH-AC-DEPLOYMENT-REGISTRY, ARCH-AC-RELEASE]
   status: draft
 
 # Verifier gate composes AHEAD of the lane engine: it is a precondition that can
@@ -890,6 +904,45 @@ STACK-AC-LANE-ENGINE:
     - packages/daemon/src/control-plane/merge-decision/build-request.test.ts
     - packages/daemon/src/control-plane/merge-decision/compliance.test.ts
     - packages/daemon/src/control-plane/merge-decision-wiring.integration.test.ts
+  status: draft
+
+# Pre-approved earn-in: a pure `evaluatePromotion` floor evaluator composed OVER
+# the existing `evaluateEarnIn` bar, a separate MINT step at the integrate seam
+# (recordWidening with an `earn-in-policy` authorization, run BEFORE the
+# autonomyWidened closure so decideMerge reads the fresh state), the debut gate
+# (hasDebutAuthorization over the release ledger + debut derived from the registry
+# autonomy history), and the demote-on-red trigger. decideMerge is NOT touched.
+# code_paths deferred [] — net-new files don't exist yet and the seams it composes
+# are owned by their own nodes (cf. STACK-AC-DEPLOYMENT-REGISTRY).
+STACK-AC-EARN-IN:
+  parent: ARCH-AC-EARN-IN
+  children: []
+  code_paths:  # P4.2 pre-approved earn-in: floors, track-record, promotion policy, mint seam, debut, demote-on-red
+    - packages/daemon/src/control-plane/earn-in/
+    - packages/daemon/src/control-plane/earn-in/types.ts
+    - packages/daemon/src/control-plane/earn-in/floors.ts
+    - packages/daemon/src/control-plane/earn-in/track-record.ts
+    - packages/daemon/src/control-plane/earn-in/promotion-policy.ts
+    - packages/daemon/src/control-plane/earn-in/mint.ts
+    - packages/daemon/src/control-plane/earn-in/debut.ts
+    - packages/daemon/src/control-plane/earn-in/demote-on-red.ts
+    - packages/daemon/src/control-plane/earn-in/index.ts
+    # lane-outcome ledger the track-record reads (append-only clean-merge/bounce trail)
+    - packages/daemon/src/control-plane/lane-engine/outcome-ledger.ts
+    # release-lane debut answer reader (approve-with-debut → debut authorization)
+    - packages/daemon/src/control-plane/release/read-answer.ts
+  test_paths:
+    - packages/daemon/src/control-plane/earn-in/floors.test.ts
+    - packages/daemon/src/control-plane/earn-in/track-record.test.ts
+    - packages/daemon/src/control-plane/earn-in/promotion-policy.test.ts
+    - packages/daemon/src/control-plane/earn-in/mint.test.ts
+    - packages/daemon/src/control-plane/earn-in/debut.test.ts
+    - packages/daemon/src/control-plane/earn-in/demote-on-red.test.ts
+    - packages/daemon/src/control-plane/lane-engine/outcome-ledger.test.ts
+    - packages/daemon/src/control-plane/release/executor.debut.test.ts
+    - packages/daemon/src/control-plane/p4-earn-in.gate.test.ts
+    - packages/daemon/src/control-plane/p4-earn-in-store.gate.test.ts
+    - packages/daemon/src/control-plane/p4-earn-in-mint.integration.test.ts
   status: draft
 
 STACK-AC-VERIFIER-GATE:

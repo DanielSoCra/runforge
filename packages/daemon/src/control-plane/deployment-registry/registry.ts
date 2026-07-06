@@ -54,6 +54,9 @@ function isValidAuthorization(auth: AutonomyAuthorization): boolean {
   if (auth.kind === 'earn-in-policy') {
     return auth.policyRef.length > 0;
   }
+  if (auth.kind === 'demote-on-red') {
+    return auth.trigger.length > 0;
+  }
   return false;
 }
 
@@ -342,6 +345,14 @@ export class DeploymentRegistry {
         authorization: record?.authorization,
       };
     });
+  }
+
+  /**
+   * Read the append-only widening history for a deployment. Empty array for an
+   * unknown id; never throws.
+   */
+  readAutonomyHistory(id: string): WideningRecord[] {
+    return this.autonomy.get(id)?.history ?? [];
   }
 
   /**

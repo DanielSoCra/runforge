@@ -19,9 +19,10 @@
  *     `:<idempotencyKey>` is recognized — this mirrors the cockpit's own
  *     deterministic effectId `<decision_id>:write_response:<idempotency_key>`);
  *   - the literal `**DecisionResponse**`;
- *   - a fenced ```json block whose `chosen_option` ∈ {approve, reject} (the
- *     resume-consumer also accepts the legacy `approve-merge` alias, but the
- *     operator surface only ever emits `approve` / `reject`).
+ *   - a fenced ```json block whose `chosen_option` ∈ {approve, reject,
+ *     approve-with-debut} (the resume-consumer also accepts the legacy
+ *     `approve-merge` alias; `approve-with-debut` is emitted only for a
+ *     production-release decision that offers it).
  * The decision_id is carried in the MARKER, NOT in the JSON — the JSON is the
  * minimal `{ "chosen_option": "<choice>" }` the cockpit writes (mirrored
  * byte-for-byte so the SAME `parseCockpitAnswer` recognizes both transports).
@@ -33,8 +34,13 @@
  * so the publisher is fakeable in tests.
  */
 
-/** The choices the operator surface emits (resume-consumer maps each to a `choice`). */
-export type AnswerChoice = 'approve' | 'reject';
+/**
+ * The choices the operator surface emits (resume-consumer maps each to a `choice`).
+ * `approve-with-debut` is the third, production-release-only option: it maps to the
+ * semantic `approve` in `parseCockpitAnswer` while preserving the raw id, so the
+ * release path can read it back as a debut authorization (release/read-answer.ts).
+ */
+export type AnswerChoice = 'approve' | 'reject' | 'approve-with-debut';
 
 /**
  * Build the DecisionResponse comment body for `(decisionId, chosenOption)`. Pure
@@ -49,7 +55,8 @@ export type AnswerChoice = 'approve' | 'reject';
  * @param decisionId      the parked decision id (e.g. `issue-42:l2-gate:1`); bound
  *                        into the effect marker so the resume loop matches strictly
  *                        on the current epoch (cross-epoch answers never resume).
- * @param chosenOption    `approve` | `reject` — written verbatim into the JSON.
+ * @param chosenOption    `approve` | `reject` | `approve-with-debut` — written
+ *                        verbatim into the JSON (the debut option is release-only).
  * @param idempotencyKey  the cockpit-style idempotency suffix on the effect marker;
  *                        any value is fine (the resume matcher anchors on
  *                        `write_response\b`, so the trailing `:<key>` is recognized).

@@ -73,6 +73,10 @@ export interface ReleaseLedgerReader {
   openReleases(): Promise<
     { deployment: string; releaseId: string; detail: Record<string, unknown> }[]
   >;
+  /** True iff any decision event for the deployment has an approve-family answer. */
+  hasPriorApprovedRelease(deployment: string): Promise<boolean>;
+  /** True iff any decision event for the deployment carries debutAuthorized: true. */
+  hasDebutAuthorization(deployment: string): Promise<boolean>;
 }
 
 function parseDetail(json: string | null): Record<string, unknown> {
@@ -196,6 +200,38 @@ class Reader implements ReleaseLedgerReader {
       }
     }
     return out;
+  }
+
+  async hasPriorApprovedRelease(deployment: string): Promise<boolean> {
+    const rows = await this.db
+      .select()
+      .from(releaseEvents)
+      .where(
+        and(
+          eq(releaseEvents.deployment, deployment),
+          eq(releaseEvents.event, "decision"),
+        ),
+      );
+    return rows.some((r) => {
+      const detail = parseDetail(r.detail_json);
+      return detail.answer === "approve" || detail.answer === "approve-with-debut";
+    });
+  }
+
+  async hasDebutAuthorization(deployment: string): Promise<boolean> {
+    const rows = await this.db
+      .select()
+      .from(releaseEvents)
+      .where(
+        and(
+          eq(releaseEvents.deployment, deployment),
+          eq(releaseEvents.event, "decision"),
+        ),
+      );
+    return rows.some((r) => {
+      const detail = parseDetail(r.detail_json);
+      return detail.answer === "approve-with-debut" && detail.debutAuthorized === true;
+    });
   }
 }
 

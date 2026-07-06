@@ -30,6 +30,13 @@ const EarnInPolicy = z
   })
   .strict();
 
+const PreApprovedEarnIn = z
+  .object({
+    enabled: z.boolean(),
+    policyRef: z.string().min(1),
+  })
+  .strict();
+
 const LaneDefinitionSchema = z
   .object({
     name: z.string().min(1),
@@ -52,6 +59,7 @@ const LaneDefinitionSchema = z
     mergePolicy: byMode(MergePolicy),
     postMergeReview: BatchReviewPolicy.optional(),
     earnIn: EarnInPolicy.optional(),
+    preApprovedEarnIn: PreApprovedEarnIn.optional(),
     // The lane's optional falsifiable-oracle declaration (verifier-gate's own
     // .strict() schema). A lane without it can never earn auto-merge — the
     // merge-decision gate escalates `verifier-withheld`.

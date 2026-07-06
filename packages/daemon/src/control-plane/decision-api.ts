@@ -445,7 +445,17 @@ export const ANSWERABLE_DECISION_STATUSES: readonly string[] = ['notified', 'vie
  * `decisionId` carries the issue/epoch the publisher resolves the gate issue from.
  */
 export interface DecisionAnswerPublisher {
-  publish(args: { decisionId: string; chosenOption: 'approve' | 'reject' }): Promise<void>;
+  publish(args: {
+    decisionId: string;
+    chosenOption: 'approve' | 'reject';
+    /**
+     * Release-phase ONLY: when true, the transport records the debut option
+     * (`approve-with-debut`) instead of a plain `approve`. Semantically still an
+     * approve, so `chosenOption` stays `approve`; the flag carries the debut
+     * authorization the release path reads back (release/read-answer.ts).
+     */
+    debut?: boolean;
+  }): Promise<void>;
 }
 
 /** The dependencies `answerDecision` injects: the read-model (for validation) + the publisher. */
@@ -495,12 +505,21 @@ export async function answerDecision(
         body: { error: 'chosen_option must be one of the decision options' },
       };
     }
-    // The answer is carried as a DecisionResponse the resume loop consumes, and
-    // parseCockpitAnswer only recognizes `approve`/`reject`. Reject any other
-    // option id with 400 rather than posting a response the loop ignores (which
-    // would 200 the operator while leaving the run parked). This narrows `chosen`
-    // to the publisher's AnswerChoice — no cast needed.
-    if (chosen !== 'approve' && chosen !== 'reject') {
+    // The answer is carried as a DecisionResponse the resume loop consumes.
+    // parseCockpitAnswer recognizes `approve`/`reject` for EVERY decision, plus
+    // `approve-with-debut` — but only a production-release decision offers that
+    // third option (release/build-request.ts, offerDebut). Accept the debut option
+    // solely for a release-phase decision (its `release:` id prefix), so no other
+    // decision's answer can smuggle a debut authorization; the option-membership
+    // check above already requires it to be one of the offered options. Any OTHER
+    // option id would post a response the resume loop IGNORES — a 200 that strands
+    // the parked run — so reject it with 400.
+    const isReleaseDecision = decisionId.startsWith('release:');
+    if (
+      chosen !== 'approve' &&
+      chosen !== 'reject' &&
+      !(isReleaseDecision && chosen === 'approve-with-debut')
+    ) {
       return {
         status: 400,
         body: {
@@ -508,7 +527,14 @@ export async function answerDecision(
         },
       };
     }
-    await deps.publisher.publish({ decisionId, chosenOption: chosen });
+    // `approve-with-debut` is a semantic approve that ALSO authorizes the debut;
+    // carry it via the `debut` flag so the publisher records the debut option while
+    // `chosenOption` stays the transport's `approve`/`reject` union.
+    if (chosen === 'approve-with-debut') {
+      await deps.publisher.publish({ decisionId, chosenOption: 'approve', debut: true });
+    } else {
+      await deps.publisher.publish({ decisionId, chosenOption: chosen });
+    }
     return { status: 200, body: { answered: true, chosen_option: chosen } };
   } catch {
     return { status: 503, body: { error: 'decision index unavailable' } };

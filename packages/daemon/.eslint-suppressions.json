@@ -92,6 +92,21 @@
       "count": 5
     }
   },
+  "src/control-plane/p4-earn-in-mint.integration.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "src/control-plane/p4-earn-in-store.gate.test.ts": {
+    "@typescript-eslint/strict-boolean-expressions": {
+      "count": 1
+    }
+  },
+  "src/control-plane/p4-earn-in.gate.test.ts": {
+    "@typescript-eslint/no-unused-vars": {
+      "count": 1
+    }
+  },
   "src/control-plane/p5-release-lane.gate.test.ts": {
     "@typescript-eslint/strict-boolean-expressions": {
       "count": 1
