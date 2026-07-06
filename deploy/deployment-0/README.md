@@ -24,6 +24,14 @@ clean).
 
 ## Cutover from the pre-rename live box (REQUIRED once, before the next promote)
 
+> **Executed 2026-07-06.** Kept for reference. Deviations learned live:
+> the Postgres ROLE stays `autoclaude` (roles don't rename with text; renaming
+> would break the container healthcheck) — scripts here reflect that; pg_dump/
+> pg_restore run IN-CONTAINER (host Homebrew pg_dump 17 vs server 18); the
+> promote health gate accepts the known `alert-channel-degraded` state only;
+> a compat symlink `~/code/auto-claude → ~/code/runforge` was left for live
+> sessions/tools holding the old path.
+
 The live Mac mini was provisioned under the old project name. Every path, DB,
 and launchd label below the old names still exists there; the tooling in this
 directory now targets the new names. Until this one-time migration runs, the

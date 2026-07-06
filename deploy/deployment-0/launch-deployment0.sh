@@ -22,7 +22,7 @@ source "$ENV_MAC"
 set +a
 
 # Deployment #0 overrides: dedicated fresh DB + governed boot requirements.
-export RUNFORGE_DATABASE_URL="postgres://runforge:${POSTGRES_PASSWORD}@127.0.0.1:45432/runforge_prod0"
+export RUNFORGE_DATABASE_URL="postgres://autoclaude:${POSTGRES_PASSWORD}@127.0.0.1:45432/runforge_prod0"
 export DAEMON_DATA_BACKEND=postgres
 export RUNFORGE_DECISION_INDEX_ENABLED=1
 

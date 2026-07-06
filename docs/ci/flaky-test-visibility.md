@@ -1,9 +1,7 @@
 # CI flaky-test visibility (non-masking)
 
-**Status:** adopted — merged to `main` by the Operator in #792 (2026-07-06). The two
-policy questions in the last section remain open Operator decisions; until decided,
-the conservative defaults hold (full-suite re-probe stays; no downstream auto-retry
-of `flaky`-classified failures).
+**Status:** adopted — merged to `main` by the Operator in #792 (2026-07-06); both
+policy questions decided by the Operator on 2026-07-06 (see the last section).
 
 ## Problem
 
@@ -54,11 +52,13 @@ rejected here.
   real failure as ignorable-flaky; worst case a flake is under-reported, not a
   regression waved through.
 
-## Open Operator decisions
+## Operator decisions (decided 2026-07-06)
 
-1. Accept the full-suite re-probe cost, or hold for the surgical (failed-files-only)
-   version first?
-2. Should a downstream consumer (the daemon / operator loop) be allowed to
-   *auto-retry* a failure classified `flaky` by this probe — and if so, with what
-   cap? That edges toward auto-masking and is exactly the policy call to make
-   deliberately, not by default.
+1. **Full-suite re-probe cost: accepted.** Only red Test builds pay it and those
+   are rare. The surgical (failed-files-only) variant stays a follow-up, to be
+   built only if the re-probe cost shows up in practice — not speculatively.
+2. **Downstream auto-retry of `flaky`-classified failures: NOT allowed.** No
+   consumer (daemon, operator loop, CI) may turn a `flaky` verdict into an
+   automatic retry-to-green. The probe stays visibility-only; red stays red until
+   a human (or an explicitly Operator-approved future policy) acts. Anything else
+   is auto-masking by the back door.

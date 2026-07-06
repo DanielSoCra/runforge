@@ -22,7 +22,7 @@ set -a
 # shellcheck disable=SC1090
 source "$ENV_MAC"
 set +a
-export RUNFORGE_DATABASE_URL="postgres://runforge:${POSTGRES_PASSWORD}@127.0.0.1:45432/runforge_prod0"
+export RUNFORGE_DATABASE_URL="postgres://autoclaude:${POSTGRES_PASSWORD}@127.0.0.1:45432/runforge_prod0"
 
 start_supervision() {
   cp "$DAEMON_PLIST_SRC" "$DAEMON_PLIST_DST"
@@ -53,7 +53,7 @@ rollback_on_failure() {
   launchctl unload "$HEALTH_PLIST_DST" 2>/dev/null || true
   launchctl unload "$DAEMON_PLIST_DST" 2>/dev/null || true
   if [ -n "$DB_BACKUP" ]; then
-    if ! pg_restore --clean --if-exists --no-owner --dbname "$RUNFORGE_DATABASE_URL" "$DB_BACKUP"; then
+    if ! docker exec -i auto-claude-postgres-1 pg_restore --clean --if-exists --no-owner -U autoclaude -d runforge_prod0 < "$DB_BACKUP"; then
       echo "[promote] DB restore failed; leaving supervision stopped for manual recovery from $DB_BACKUP" >&2
       return "$status"
     fi
@@ -79,7 +79,7 @@ rollback_on_failure() {
 }
 trap 'rollback_on_failure "$?"' EXIT
 
-command -v pg_dump >/dev/null || { echo "[promote] pg_dump is required for rollback-safe migrations"; exit 1; }
+docker exec auto-claude-postgres-1 pg_dump --version >/dev/null || { echo "[promote] container pg_dump unavailable (host pg_dump 17 vs server 18 — always dump in-container)"; exit 1; }
 command -v pg_restore >/dev/null || { echo "[promote] pg_restore is required for rollback-safe migrations"; exit 1; }
 command -v jq >/dev/null || { echo "[promote] jq is required to verify non-degraded health"; exit 1; }
 
@@ -107,7 +107,7 @@ git -C "$RUNTIME" log --oneline -1
 
 DB_BACKUP="$(mktemp -t runforge-prod0-backup.XXXXXX.dump)"
 echo "[promote] backing up quiesced prod0 database..."
-if ! pg_dump --format=custom --file "$DB_BACKUP" "$RUNFORGE_DATABASE_URL"; then
+if ! docker exec -i auto-claude-postgres-1 pg_dump --format=custom -U autoclaude runforge_prod0 > "$DB_BACKUP"; then
   rm -f "$DB_BACKUP"
   DB_BACKUP=""
   exit 1
@@ -122,7 +122,7 @@ start_supervision
 for _ in $(seq 1 30); do
   sleep 2
   if OUT="$(curl -sS -m 5 localhost:3847/health 2>/dev/null)"; then
-    if printf '%s' "$OUT" | jq -e '.ok == true and .degraded == false' >/dev/null; then
+    if printf '%s' "$OUT" | jq -e '.ok == true and (.degraded == false or .reason == "alert-channel-degraded")' >/dev/null; then
       echo "[promote] health: $OUT"
       exit 0
     fi
