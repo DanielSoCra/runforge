@@ -611,6 +611,8 @@ STACK-AC-CONVENTIONS:
     - .husky/pre-push
     - package.json
     - scripts/check-ci-workflows.mjs
+    - docs/ci/flaky-test-visibility.md
+    - .gitleaks.toml
     - packages/daemon/package.json
     - packages/daemon/eslint.config.js
     - packages/daemon/.eslint-suppressions.json

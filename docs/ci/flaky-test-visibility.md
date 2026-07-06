@@ -1,6 +1,9 @@
 # CI flaky-test visibility (non-masking)
 
-**Status:** proposed — open for Operator review (design-sensitive: anti-masking).
+**Status:** adopted — merged to `main` by the Operator in #792 (2026-07-06). The two
+policy questions in the last section remain open Operator decisions; until decided,
+the conservative defaults hold (full-suite re-probe stays; no downstream auto-retry
+of `flaky`-classified failures).
 
 ## Problem
 
@@ -51,7 +54,7 @@ rejected here.
   real failure as ignorable-flaky; worst case a flake is under-reported, not a
   regression waved through.
 
-## Operator decisions (why this is left open, not merged)
+## Open Operator decisions
 
 1. Accept the full-suite re-probe cost, or hold for the surgical (failed-files-only)
    version first?

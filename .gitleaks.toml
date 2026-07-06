@@ -1,0 +1,16 @@
+# gitleaks configuration — extends the default ruleset.
+#
+# The only allowlisted paths are test files and golden fixtures: this repo ships
+# its own secret-scanner (session-output audit), whose tests necessarily contain
+# synthetic credential-shaped strings (truncated PKCS8 header, `sk-ant-0123…`,
+# `SENSITIVE-RAW-FAILURE-abc123`, …). Never put a real credential in a test.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic secret fixtures in tests (secret-scanner self-tests, protocol fixtures)"
+paths = [
+  '''.*\.test\.(ts|tsx|mjs|js)$''',
+  '''packages/[^/]+/test/fixtures/.*''',
+]

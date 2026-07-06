@@ -16,7 +16,7 @@ Cockpit prototype: `pm-cockpit/docs/integration/2026-06-03-cockpit-redesign-prot
 ## 1. Context & problem
 Six overlapping projects (auto-claude, pm-cockpit, product, local-product, plus OSS side-project & Archon) are secretly **one system sliced differently** — each reinvents agents/roles, goals, workflows, gates, specs. Months of work, no convergence. This spec converges them into **one product** and a phased roadmap, starting with a sharp first wedge.
 
-Existing reality to reconcile: the Operator already runs a **side-project "Acme" company for the billing/ops side** (team CEO+CPO+Engineer; roadmap CLA-10, board-approved; engine M0–M4 done, only live KZV send missing). The company OS must *integrate with / grow from* that, not ignore it (see §8 integration point).
+Existing reality to reconcile: the Operator already runs a **side-project "Dental-PVS" company for the billing/ops side** (team CEO+CPO+Engineer; roadmap CLA-10, board-approved; engine M0–M4 done, only live KZV send missing). The company OS must *integrate with / grow from* that, not ignore it (see §8 integration point).
 
 ## 2. Decisions (locked in the brainstorm)
 | # | Decision | Choice |
@@ -72,7 +72,7 @@ Acceptance for every slice includes its tests being green in CI + a documented s
 - **Slice 2 — The goal primitive:** "set a goal → it creates the L0/L1 + the work item → the pipeline runs." Generalize the local-product goal-loop.
 - **Slice 3 — The cockpit v2 (real):** implement the approved prototype into pm-cockpit via `/frontend-design`, wired to live data (`/api/runs/live` + the index), Playwright-tested.
 - **Slice 4 — Multiplayer-light:** identity, assignment/claim, threads, presence.
-- **Slice 5 — Wire to acme + full e2e/smoke + reconcile with the side-project-Acme company.**
+- **Slice 5 — Wire to acme + full e2e/smoke + reconcile with the side-project-Dental-PVS company.**
 
 ## 7. Slice 1 — detailed scope & acceptance (this cycle)
 **Goal:** prove the engineering department is *trustworthy and autonomous end-to-end*, on a real repo, with automated proof.
@@ -90,7 +90,7 @@ Acceptance:
 
 ## 8. Open items / integration points
 - **GPT-5.5 steering pass** → fold into §3 before Phase 1.
-- **Reconcile with the existing side-project-Acme company** (ops/billing already runs there): is Phase 1's shell a fork we own, or do we extend the running side-project and own it later? Decide before Phase 1.
+- **Reconcile with the existing side-project-Dental-PVS company** (ops/billing already runs there): is Phase 1's shell a fork we own, or do we extend the running side-project and own it later? Decide before Phase 1.
 - First 2–3 human teammates (for multiplayer seeding).
 - Goal-arbitration rules across orgs/departments.
 - Pipeline view-switcher (board / swimlane / timeline) — small UI follow-up in Slice 3.
