@@ -6,7 +6,7 @@
 
 **Architecture:** The daemon spawns `claude remote-control` as a child process, captures the session URL from stdout, and exposes it via the `/status` HTTP endpoint. The dashboard polls that endpoint and renders a collapsible right-side Claude panel (client component) on every page. The Command Center page and New Project wizard are standard Next.js App Router pages with Server Actions for the GitHub API calls.
 
-**Tech Stack:** Next.js 16 App Router, Tailwind v4, shadcn/ui, Vitest + jsdom + @testing-library/react (dashboard), Vitest Node (daemon), child_process.spawn (Node.js built-in), GitHub REST API via fetch, Supabase SSR client, pnpm monorepo (`pnpm --filter @auto-claude/dashboard test`, `pnpm --filter @auto-claude/daemon test`).
+**Tech Stack:** Next.js 16 App Router, Tailwind v4, shadcn/ui, Vitest + jsdom + @testing-library/react (dashboard), Vitest Node (daemon), child_process.spawn (Node.js built-in), GitHub REST API via fetch, Supabase SSR client, pnpm monorepo (`pnpm --filter @runforge/dashboard test`, `pnpm --filter @runforge/daemon test`).
 
 **Spec:** `docs/superpowers/specs/2026-03-19-command-center-design.md`
 
@@ -54,7 +54,7 @@
 **Files:**
 - Modify: `packages/dashboard/package.json`
 
-The dashboard has `vitest` installed and a `vitest.config.ts` but no `test` or `typecheck` script. Without this, every `pnpm --filter @auto-claude/dashboard test` call in subsequent tasks silently exits 0 — tests never run. Fix this first.
+The dashboard has `vitest` installed and a `vitest.config.ts` but no `test` or `typecheck` script. Without this, every `pnpm --filter @runforge/dashboard test` call in subsequent tasks silently exits 0 — tests never run. Fix this first.
 
 - [ ] **Step 1: Add scripts to dashboard package.json**
 
@@ -81,14 +81,14 @@ The full scripts block becomes:
 - [ ] **Step 2: Verify existing tests pass**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test
+pnpm --filter @runforge/dashboard test
 ```
 Expected: vitest output with passing tests (actions, components, lib/types, proxy tests)
 
 - [ ] **Step 3: Verify typecheck passes**
 
 ```bash
-pnpm --filter @auto-claude/dashboard typecheck
+pnpm --filter @runforge/dashboard typecheck
 ```
 Expected: no TypeScript errors
 
@@ -141,7 +141,7 @@ In `packages/dashboard/lib/types.ts`:
 - [ ] **Step 3: Run dashboard tests to confirm types compile**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test
+pnpm --filter @runforge/dashboard test
 ```
 Expected: all existing tests pass
 
@@ -259,7 +259,7 @@ describe('RemoteControlManager', () => {
 - [ ] **Step 2: Run tests to confirm they fail**
 
 ```bash
-pnpm --filter @auto-claude/daemon test src/control-plane/remote-control
+pnpm --filter @runforge/daemon test src/control-plane/remote-control
 ```
 Expected: FAIL — `remote-control.ts` does not exist yet
 
@@ -367,7 +367,7 @@ export class RemoteControlManager {
 - [ ] **Step 4: Run tests to confirm they pass**
 
 ```bash
-pnpm --filter @auto-claude/daemon test src/control-plane/remote-control
+pnpm --filter @runforge/daemon test src/control-plane/remote-control
 ```
 Expected: all 4 tests pass
 
@@ -419,7 +419,7 @@ it('GET /status includes remote_control fields', async () => {
 - [ ] **Step 2: Run test to confirm it fails**
 
 ```bash
-pnpm --filter @auto-claude/daemon test src/control-plane/server
+pnpm --filter @runforge/daemon test src/control-plane/server
 ```
 Expected: the new test fails because `remote_control_url` is not in the ControlHandlers type
 
@@ -474,8 +474,8 @@ await remoteControl.stop();
 - [ ] **Step 5: Run tests**
 
 ```bash
-pnpm --filter @auto-claude/daemon test src/control-plane/server
-pnpm --filter @auto-claude/daemon test src/control-plane/remote-control
+pnpm --filter @runforge/daemon test src/control-plane/server
+pnpm --filter @runforge/daemon test src/control-plane/remote-control
 ```
 Expected: all pass
 
@@ -565,7 +565,7 @@ describe('useClaudePanel', () => {
 - [ ] **Step 2: Run test to confirm it fails**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test components/claude-panel/use-claude-panel
+pnpm --filter @runforge/dashboard test components/claude-panel/use-claude-panel
 ```
 Expected: FAIL — module not found
 
@@ -628,7 +628,7 @@ export function useClaudePanel() {
 - [ ] **Step 4: Run tests**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test components/claude-panel/use-claude-panel
+pnpm --filter @runforge/dashboard test components/claude-panel/use-claude-panel
 ```
 Expected: all 5 tests pass
 
@@ -702,7 +702,7 @@ describe('buildRunContext', () => {
 - [ ] **Step 2: Run to confirm it fails**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test components/claude-panel/context-actions
+pnpm --filter @runforge/dashboard test components/claude-panel/context-actions
 ```
 Expected: FAIL — module not found
 
@@ -771,7 +771,7 @@ export function buildRunContext(run: RunSummary): string {
 - [ ] **Step 4: Run tests**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test components/claude-panel/context-actions
+pnpm --filter @runforge/dashboard test components/claude-panel/context-actions
 ```
 Expected: all 4 tests pass
 
@@ -859,7 +859,7 @@ describe('ClaudePanel', () => {
 - [ ] **Step 2: Run to confirm it fails**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test components/claude-panel/claude-panel
+pnpm --filter @runforge/dashboard test components/claude-panel/claude-panel
 ```
 Expected: FAIL — module not found
 
@@ -972,7 +972,7 @@ export function ClaudePanel() {
 - [ ] **Step 4: Run tests**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test components/claude-panel/claude-panel
+pnpm --filter @runforge/dashboard test components/claude-panel/claude-panel
 ```
 Expected: all 4 tests pass
 
@@ -1031,7 +1031,7 @@ Add to the `nav` array (after Runs, before Costs):
 - [ ] **Step 3: Run all dashboard tests**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test
+pnpm --filter @runforge/dashboard test
 ```
 Expected: all existing tests still pass
 
@@ -1128,7 +1128,7 @@ describe('commitFile', () => {
 - [ ] **Step 2: Run to confirm it fails**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test lib/github-api
+pnpm --filter @runforge/dashboard test lib/github-api
 ```
 Expected: FAIL — module not found
 
@@ -1208,7 +1208,7 @@ export async function commitFile(token: string, opts: CommitFileOptions): Promis
 - [ ] **Step 4: Run tests**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test lib/github-api
+pnpm --filter @runforge/dashboard test lib/github-api
 ```
 Expected: all 3 tests pass
 
@@ -1274,7 +1274,7 @@ describe('scaffold templates', () => {
 - [ ] **Step 2: Run to confirm it fails**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test lib/scaffold-templates
+pnpm --filter @runforge/dashboard test lib/scaffold-templates
 ```
 Expected: FAIL — module not found
 
@@ -1314,7 +1314,7 @@ export function buildClaudeMd(): string {
 
 export function buildTraceabilityYml(projectName: string): string {
   return `# .specify/traceability.yml
-# Auto-generated by auto-claude command center
+# Auto-generated by runforge command center
 # Project: ${projectName}
 
 specs: []
@@ -1322,8 +1322,8 @@ specs: []
 }
 
 export function buildWorkflowYml(): string {
-  return `# .auto-claude/workflow.yml
-# Workflow gate configuration — managed by auto-claude dashboard
+  return `# .runforge/workflow.yml
+# Workflow gate configuration — managed by runforge dashboard
 
 extends: default
 `;
@@ -1333,7 +1333,7 @@ extends: default
 - [ ] **Step 4: Run tests**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test lib/scaffold-templates
+pnpm --filter @runforge/dashboard test lib/scaffold-templates
 ```
 Expected: all 5 tests pass
 
@@ -1434,7 +1434,7 @@ describe('createProject', () => {
 - [ ] **Step 2: Run to confirm it fails**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test actions/new-project
+pnpm --filter @runforge/dashboard test actions/new-project
 ```
 Expected: FAIL — module not found
 
@@ -1505,7 +1505,7 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
 
     await commitFile(token, {
       owner, repo: repoName,
-      path: '.auto-claude/workflow.yml',
+      path: '.runforge/workflow.yml',
       content: buildWorkflowYml(),
       message: 'chore: scaffold workflow gates',
     });
@@ -1551,7 +1551,7 @@ export async function createProject(input: CreateProjectInput): Promise<CreatePr
 - [ ] **Step 4: Run tests**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test actions/new-project
+pnpm --filter @runforge/dashboard test actions/new-project
 ```
 Expected: all 5 tests pass
 
@@ -1825,7 +1825,7 @@ export default function NewProjectPage() {
 - [ ] **Step 2: Run all dashboard tests to confirm nothing broke**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test
+pnpm --filter @runforge/dashboard test
 ```
 Expected: all tests pass
 
@@ -1894,7 +1894,7 @@ export default function CommandCenterPage() {
 - [ ] **Step 2: Run all dashboard tests**
 
 ```bash
-pnpm --filter @auto-claude/dashboard test
+pnpm --filter @runforge/dashboard test
 ```
 Expected: all pass
 

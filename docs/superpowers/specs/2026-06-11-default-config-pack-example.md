@@ -4,7 +4,7 @@ status: NON-NORMATIVE — illustrative example data, not specification
 type: default-config-pack-example
 topic: The one place policy values live — default pipeline configuration example (masterplan D10)
 related:
-  - docs/superpowers/specs/2026-06-11-auto-claude-vnext-masterplan-design.md  # D5, D7, D10, D11, §6
+  - docs/superpowers/specs/2026-06-11-runforge-vnext-masterplan-design.md  # D5, D7, D10, D11, §6
   - .specify/functional/merge-decision.md   # mechanism: lanes, tripwire, earn-in
   - .specify/functional/plugins.md          # mechanism: role registry, config packs
   - .specify/functional/fleet.md            # mechanism: capacity pools, windows
@@ -22,7 +22,7 @@ pack: default-pipeline
 version: 1.0.0   # packs are versioned and immutable per version; deployments bind to a version
 ```
 
-## Lanes (example initial set, auto-claude deployment #0)
+## Lanes (example initial set, runforge deployment #0)
 
 ```yaml
 lanes:
@@ -58,7 +58,7 @@ deployments:
                                                # gate-sets; QA + review weight stays
                                                # high — trust rests on QA results.
                                                # clinical from first production release.
-  auto-claude:  { lifecyclePhase: hardening }
+  runforge:  { lifecyclePhase: hardening }
 ```
 
 Per-mode lane variance (only `gateSet` and `mergePolicy` may vary by phase):

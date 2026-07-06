@@ -7,7 +7,7 @@ authors: Claude (spec-chain goal run), per masterplan v2.1 §2.1; Deltas D–E s
 reads_down_from:
   - .specify/L0-ac-vision.md  # v5, Operator-approved — NOT edited by this proposal
 related:
-  - docs/superpowers/specs/2026-06-11-auto-claude-vnext-masterplan-design.md  # D5, D9–D11, §2.2
+  - docs/superpowers/specs/2026-06-11-runforge-vnext-masterplan-design.md  # D5, D9–D11, §2.2
   - docs/superpowers/specs/2026-06-11-branch-salvage-checklist.md  # provenance of Deltas D–E
 ---
 
@@ -25,7 +25,7 @@ For each delta: **accept** (the wording below, or your own), **amend**, or **rej
 
 **Where:** A new paragraph after "Project-agnostic by construction", and one sentence added to **Success**.
 
-**Why:** v5 frames auto-claude as a software-development platform with deployments. The v-next decisions (D9 two-layer model, D10 mechanism-vs-policy, D11 agents-as-data/config-packs) commit to something stronger: the platform's durable value is its *composability* — roles, lanes, workflows, and whole pipeline behaviors are data that an operator composes, so new systems are built **on top of** auto-claude rather than **into** it. Evidence basis: every shipped comparable (the opencode-based review system at scale, the heartbeat-agent orchestrator) put all its value in the configurable layer above a commodity runtime. The vision should claim the moat: trust machinery + governance + composability, not orchestration plumbing.
+**Why:** v5 frames runforge as a software-development platform with deployments. The v-next decisions (D9 two-layer model, D10 mechanism-vs-policy, D11 agents-as-data/config-packs) commit to something stronger: the platform's durable value is its *composability* — roles, lanes, workflows, and whole pipeline behaviors are data that an operator composes, so new systems are built **on top of** runforge rather than **into** it. Evidence basis: every shipped comparable (the opencode-based review system at scale, the heartbeat-agent orchestrator) put all its value in the configurable layer above a commodity runtime. The vision should claim the moat: trust machinery + governance + composability, not orchestration plumbing.
 
 **Proposed wording (new paragraph):**
 

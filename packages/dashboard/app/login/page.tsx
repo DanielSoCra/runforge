@@ -17,7 +17,7 @@ export default async function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-background">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">Auto-Claude</CardTitle>
+          <CardTitle className="text-2xl">Runforge</CardTitle>
           <CardDescription>Sign in to access the dashboard</CardDescription>
         </CardHeader>
         <CardContent>

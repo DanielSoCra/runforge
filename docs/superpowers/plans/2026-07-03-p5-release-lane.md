@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the per-deployment, Operator-approved production-release lane in the daemon Control Plane: a discriminated-union declared release path, an append-only per-deployment Release Ledger, per-deployment since-last-release proposal assembly, the 4th (`release`) DecisionRequest builder, and a 3-shape executor with preview-before-change and per-shape fail-safe — all reusing existing seams (`@auto-claude/decision-index`, the governed raise→publish→notify sequence, `readDeclaredData('landing')`).
+**Goal:** Build the per-deployment, Operator-approved production-release lane in the daemon Control Plane: a discriminated-union declared release path, an append-only per-deployment Release Ledger, per-deployment since-last-release proposal assembly, the 4th (`release`) DecisionRequest builder, and a 3-shape executor with preview-before-change and per-shape fail-safe — all reusing existing seams (`@runforge/decision-index`, the governed raise→publish→notify sequence, `readDeclaredData('landing')`).
 
-**Architecture:** Each deployment gets a release lane. The Control Plane derives that deployment's Last-Released Marker from its own append-only Release Ledger (a new `release_ledger` Postgres schema mirroring `@auto-claude/decision-index`), diffs its trunk since that marker to assemble a Release Proposal (preview — mutates nothing), and — on `proposeRelease` — raises the reserved `phase:'release'` decision through the existing Decision Ledger. The release decision is **always raised** and **never** routed through merge earn-in/auto-approve. On the Operator's approval, a 3-shape executor carries out the deployment's declared path (`platform-performs` / `trigger-automated` / `record-only`) with a per-shape fail-safe, appending every proposal, decision, execution, and completion to the Release Ledger. The Last-Released Marker is **derived** from the most recent `released` event, never stored twice.
+**Architecture:** Each deployment gets a release lane. The Control Plane derives that deployment's Last-Released Marker from its own append-only Release Ledger (a new `release_ledger` Postgres schema mirroring `@runforge/decision-index`), diffs its trunk since that marker to assemble a Release Proposal (preview — mutates nothing), and — on `proposeRelease` — raises the reserved `phase:'release'` decision through the existing Decision Ledger. The release decision is **always raised** and **never** routed through merge earn-in/auto-approve. On the Operator's approval, a 3-shape executor carries out the deployment's declared path (`platform-performs` / `trigger-automated` / `record-only`) with a per-shape fail-safe, appending every proposal, decision, execution, and completion to the Release Ledger. The Last-Released Marker is **derived** from the most recent `released` event, never stored twice.
 
 **Tech Stack:** TypeScript (NodeNext ESM), Zod v4, Drizzle ORM + `postgres-js`, PGlite (in-memory Postgres for tests), Vitest, `@octokit/rest`.
 
@@ -22,14 +22,14 @@
 
 ## Ground Truth
 
-Substrate recon is in `docs/superpowers/plans/2026-07-03-p5-release-lane.groundtruth.md` (verified vs `origin/main`). Do **not** restate it. One correction confirmed during planning and used throughout this plan: the deployment-registry files live at `packages/daemon/src/control-plane/deployment-registry/` (not `packages/daemon/src/deployment-registry/`), and the governed raise→publish→notify block is at `phases.ts:2520-2567` (the L3 cites `2522`). Also load-bearing: `sanitizeDecisionRequest` and `resolveDecisionPublisher` are **closures inside `createPhaseHandlers`** (`phases.ts:202,228`), NOT exported helpers — so the Operator-triggered release lane mirrors the *sequence* using the underlying primitives (`GitHubBlockPublisher` from `decision-escalation/github-block-notifier.js`, `withGovernedDecisionMarking` from `decision-escalation/manager.js`, `decisionManager.ledger().raise/notify`). **The sanitizer is reused, not elided:** Task 5 extracts the sanitize body (`phases.ts:228-252`) into a shared exported helper `applyDecisionSanitization(pipeline, req)` that BOTH `phases.ts`'s closure and the release lane call, and the lane is injected the deployment's `SanitizationPipeline` (`@auto-claude/sanitization`). Two further seams the fixes depend on: the authoritative Operator-answer reader is `parseCockpitAnswer(comments, decisionId)` (`decision-escalation/resume-consumer.ts:82`), and the per-tick answered-decision consumer pattern is `finding-dismissal/apply-consumer.ts` — the model for the release-resolution consumer (below). `posted:false` from `GitHubBlockPublisher.ensure` is the fail-closed retry state (`github-block-notifier.ts:180`), never a success.
+Substrate recon is in `docs/superpowers/plans/2026-07-03-p5-release-lane.groundtruth.md` (verified vs `origin/main`). Do **not** restate it. One correction confirmed during planning and used throughout this plan: the deployment-registry files live at `packages/daemon/src/control-plane/deployment-registry/` (not `packages/daemon/src/deployment-registry/`), and the governed raise→publish→notify block is at `phases.ts:2520-2567` (the L3 cites `2522`). Also load-bearing: `sanitizeDecisionRequest` and `resolveDecisionPublisher` are **closures inside `createPhaseHandlers`** (`phases.ts:202,228`), NOT exported helpers — so the Operator-triggered release lane mirrors the *sequence* using the underlying primitives (`GitHubBlockPublisher` from `decision-escalation/github-block-notifier.js`, `withGovernedDecisionMarking` from `decision-escalation/manager.js`, `decisionManager.ledger().raise/notify`). **The sanitizer is reused, not elided:** Task 5 extracts the sanitize body (`phases.ts:228-252`) into a shared exported helper `applyDecisionSanitization(pipeline, req)` that BOTH `phases.ts`'s closure and the release lane call, and the lane is injected the deployment's `SanitizationPipeline` (`@runforge/sanitization`). Two further seams the fixes depend on: the authoritative Operator-answer reader is `parseCockpitAnswer(comments, decisionId)` (`decision-escalation/resume-consumer.ts:82`), and the per-tick answered-decision consumer pattern is `finding-dismissal/apply-consumer.ts` — the model for the release-resolution consumer (below). `posted:false` from `GitHubBlockPublisher.ensure` is the fail-closed retry state (`github-block-notifier.ts:180`), never a success.
 
 ## File Structure
 
 **New package** `packages/release-ledger/` (mirrors `packages/decision-index/` structure — its own `release_ledger` pgSchema, single-writer, migrations):
 - `package.json`, `tsconfig.json`, `vitest.config.ts`, `drizzle.config.ts`
 - `src/schema.ts` — `pgSchema("release_ledger")` with one append-only `release_events` table
-- `src/db.ts` — `openDb` / `openReadOnlyDb` / `withTx` + advisory-lock single-writer (mirror `decision-index/src/db.ts`; lock name `auto-claude:release-ledger:writer`)
+- `src/db.ts` — `openDb` / `openReadOnlyDb` / `withTx` + advisory-lock single-writer (mirror `decision-index/src/db.ts`; lock name `runforge:release-ledger:writer`)
 - `src/migrate.ts` — `migrate()` into the `release_ledger` schema
 - `src/ledger.ts` — `createReleaseLedger({databaseUrl})` factory (openDb + migrate) + `ReleaseLedgerWriter` facade + `ReleaseLedgerReader` read-only projection
 - `src/index.ts` — public surface: writer facade + read-only projection only
@@ -50,7 +50,7 @@ Substrate recon is in `docs/superpowers/plans/2026-07-03-p5-release-lane.groundt
 **Modified:**
 - `packages/daemon/src/control-plane/deployment-registry/schema.ts:95-105` — `productionReleasePath` → discriminated 3-shape union
 - `packages/daemon/src/control-plane/deployment-registry/types.ts:63-73` — `LandingTarget.productionReleasePath` type + exported `DeclaredReleasePath`
-- ~18 test fixtures + `cause-driven-tasks.config.json` + `auto-claude.config.json` (if present) — migrate `productionReleasePath` string → union shape
+- ~18 test fixtures + `cause-driven-tasks.config.json` + `runforge.config.json` (if present) — migrate `productionReleasePath` string → union shape
 - `packages/daemon/src/control-plane/phases.ts:228-252` — the `sanitizeDecisionRequest` closure now delegates to the shared `applyDecisionSanitization` (no behavior change)
 - `packages/daemon/src/control-plane/daemon.ts:38,2123-2133` and `server.ts:5,38,205-215` — rewire the `release` handler to a **per-deployment** lane (`release(deployment)`); add the `resolveAnsweredReleases` sweep to the per-tick loop
 - `packages/daemon/src/control-plane/release.ts` — **deleted** (vestigial); its two gate tests (`phase0-single-trunk.gate.test.ts`, `phase0-halt.gate.test.ts`) rewired/retired
@@ -63,7 +63,7 @@ Substrate recon is in `docs/superpowers/plans/2026-07-03-p5-release-lane.groundt
 **Files:**
 - Modify: `packages/daemon/src/control-plane/deployment-registry/schema.ts:95-105` (LandingTargetSchema)
 - Modify: `packages/daemon/src/control-plane/deployment-registry/types.ts:63-73` (LandingTarget) + add `DeclaredReleasePath`
-- Modify (fixtures): every file listed by `grep -rn productionReleasePath packages` (~18 test files) + `cause-driven-tasks.config.json:56`, and `auto-claude.config.json` if it declares one
+- Modify (fixtures): every file listed by `grep -rn productionReleasePath packages` (~18 test files) + `cause-driven-tasks.config.json:56`, and `runforge.config.json` if it declares one
 - Test: `packages/daemon/src/control-plane/deployment-registry/release-path.test.ts` (new)
 
 **Interfaces:**
@@ -117,7 +117,7 @@ describe('landing.productionReleasePath — discriminated 3-shape union', () => 
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @auto-claude/daemon test release-path`
+Run: `pnpm --filter @runforge/daemon test release-path`
 Expected: FAIL — the bare-string case currently passes (old `z.string().min(1)`).
 
 - [ ] **Step 3: Upgrade the schema** — `deployment-registry/schema.ts`, replace line 98 (`productionReleasePath: z.string().min(1),`) inside `LandingTargetSchema` with the discriminated union:
@@ -141,17 +141,17 @@ export type DeclaredReleasePath =
 ```
 Then change `productionReleasePath: string;` (line 66) to `productionReleasePath: DeclaredReleasePath;`.
 
-- [ ] **Step 5: Migrate every fixture.** Run `grep -rln "productionReleasePath: '" packages` and in each hit replace the string form with a union shape. Mapping: `'release-sh'` → `{ kind: 'platform-performs' }`; `'tag-and-deploy'` (and any other string) → `{ kind: 'trigger-automated', trigger: 'tag-and-deploy' }`. Also update `cause-driven-tasks.config.json:56` (`"productionReleasePath": "tag-and-deploy"` → `"productionReleasePath": { "kind": "trigger-automated", "trigger": "tag-and-deploy" }`) and `auto-claude.config.json` if it declares one (`release-sh` → `{ "kind": "platform-performs" }`). These fixtures do not exercise release semantics; the mapping preserves intent.
+- [ ] **Step 5: Migrate every fixture.** Run `grep -rln "productionReleasePath: '" packages` and in each hit replace the string form with a union shape. Mapping: `'release-sh'` → `{ kind: 'platform-performs' }`; `'tag-and-deploy'` (and any other string) → `{ kind: 'trigger-automated', trigger: 'tag-and-deploy' }`. Also update `cause-driven-tasks.config.json:56` (`"productionReleasePath": "tag-and-deploy"` → `"productionReleasePath": { "kind": "trigger-automated", "trigger": "tag-and-deploy" }`) and `runforge.config.json` if it declares one (`release-sh` → `{ "kind": "platform-performs" }`). These fixtures do not exercise release semantics; the mapping preserves intent.
 
 - [ ] **Step 6: Run the new test + the whole deployment-registry suite to verify no fixture regressed**
 
-Run: `pnpm --filter @auto-claude/daemon test deployment-registry release-path`
+Run: `pnpm --filter @runforge/daemon test deployment-registry release-path`
 Expected: PASS (all shapes accepted, string rejected, no fixture parse failures).
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add packages/daemon/src/control-plane/deployment-registry cause-driven-tasks.config.json auto-claude.config.json 2>/dev/null; git add -A packages/daemon
+git add packages/daemon/src/control-plane/deployment-registry cause-driven-tasks.config.json runforge.config.json 2>/dev/null; git add -A packages/daemon
 git commit --no-verify -m "feat(release): consume landing.productionReleasePath as a discriminated 3-shape union"
 ```
 
@@ -217,7 +217,7 @@ export function createReleaseLedger(opts: { databaseUrl: string; skipMigrate?: b
 ```
 Consumed by Tasks 3 (`lastReleasedMarker`), 5 (`append`, `eventsForRelease`, `latestOutcome`).
 
-- [ ] **Step 1: Scaffold the package.** Copy `packages/decision-index/{package.json,tsconfig.json,vitest.config.ts,drizzle.config.ts}` to `packages/release-ledger/`, rename to `@auto-claude/release-ledger`, drop deps not needed (`ajv`, `ulid`, `@auto-claude/sanitizer-redaction`), keep `drizzle-orm`, `postgres`, `zod`, dev `@electric-sql/pglite`, `drizzle-kit`, `vitest`, `typescript`, `@types/node`. Point `drizzle.config.ts` `schema` at `./src/schema.ts`, `out` at `./drizzle`.
+- [ ] **Step 1: Scaffold the package.** Copy `packages/decision-index/{package.json,tsconfig.json,vitest.config.ts,drizzle.config.ts}` to `packages/release-ledger/`, rename to `@runforge/release-ledger`, drop deps not needed (`ajv`, `ulid`, `@runforge/sanitizer-redaction`), keep `drizzle-orm`, `postgres`, `zod`, dev `@electric-sql/pglite`, `drizzle-kit`, `vitest`, `typescript`, `@types/node`. Point `drizzle.config.ts` `schema` at `./src/schema.ts`, `out` at `./drizzle`.
 
 - [ ] **Step 2: Write the schema** — `src/schema.ts` (mirror `decision-index/src/schema.ts:104-120`):
 
@@ -252,7 +252,7 @@ export const releaseEvents = releaseLedger.table('release_events', {
 }));
 ```
 
-- [ ] **Step 3: Port `db.ts` and `migrate.ts`.** Copy `decision-index/src/db.ts` verbatim, changing only `WRITER_LOCK_NAME` to `"auto-claude:release-ledger:writer"` and the schema import to `./schema.js`. Copy `decision-index/src/migrate.ts`, changing `migrationsSchema` to `"release_ledger"`. Generate the baseline migration: `pnpm --filter @auto-claude/release-ledger exec drizzle-kit generate`.
+- [ ] **Step 3: Port `db.ts` and `migrate.ts`.** Copy `decision-index/src/db.ts` verbatim, changing only `WRITER_LOCK_NAME` to `"runforge:release-ledger:writer"` and the schema import to `./schema.js`. Copy `decision-index/src/migrate.ts`, changing `migrationsSchema` to `"release_ledger"`. Generate the baseline migration: `pnpm --filter @runforge/release-ledger exec drizzle-kit generate`.
 
 - [ ] **Step 4: Write the failing ledger append/read test** — `test/ledger.test.ts` (PGlite, mirror `decision-index/test/helpers/temp-db.ts`; migrate the `release_ledger` schema in-memory):
 
@@ -304,7 +304,7 @@ describe('Last-Released Marker is DERIVED from the most recent released event', 
 
 - [ ] **Step 6: Run to verify both fail**
 
-Run: `pnpm --filter @auto-claude/release-ledger test`
+Run: `pnpm --filter @runforge/release-ledger test`
 Expected: FAIL — `createReleaseLedger` / `makeTempLedger` not implemented.
 
 - [ ] **Step 7: Implement `src/ledger.ts`.** `createReleaseLedger` mirrors `createIndexWriter` (`openDb({url}) → migrate(db) → return writer`; on error `sql.end()` then rethrow). `append` uses `withTx(db, tx => tx.insert(releaseEvents).values({...}))` (serial writer + per-tx advisory lock inherited from the ported `db.ts`). `appendProposalIfAbsent` inserts the proposal inside `withTx` with `.onConflictDoNothing({ target: ... })` (or catches the unique-violation `23505`) so a concurrent second propose is a no-op, and returns whether a row was inserted (rowCount). `at` defaults to `new Date().toISOString()`. Reader queries:
@@ -331,7 +331,7 @@ async lastReleasedMarker(deployment: string): Promise<string | undefined> {
 
 - [ ] **Step 10: Run to verify both pass**
 
-Run: `pnpm --filter @auto-claude/release-ledger test`
+Run: `pnpm --filter @runforge/release-ledger test`
 Expected: PASS.
 
 - [ ] **Step 11: Commit**
@@ -464,7 +464,7 @@ describe('assembleReleaseProposal — per-deployment since-last-release', () => 
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @auto-claude/daemon test release/proposal`
+Run: `pnpm --filter @runforge/daemon test release/proposal`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement `release/types.ts`** with the interfaces above (`re-export DeclaredReleasePath` from `../deployment-registry/types.js`).
@@ -475,7 +475,7 @@ Expected: FAIL — module not found.
 
 - [ ] **Step 6: Run the test + typecheck**
 
-Run: `pnpm --filter @auto-claude/daemon test release/proposal && pnpm --filter @auto-claude/daemon typecheck`
+Run: `pnpm --filter @runforge/daemon test release/proposal && pnpm --filter @runforge/daemon typecheck`
 Expected: PASS + clean typecheck (no dangling `./release.js` imports).
 
 - [ ] **Step 7: Commit**
@@ -509,7 +509,7 @@ Consumed by Task 5 (`proposeRelease`).
 
 ```ts
 import { describe, it, expect } from 'vitest';
-import { DecisionRequestSchema } from '@auto-claude/decision-protocol';
+import { DecisionRequestSchema } from '@runforge/decision-protocol';
 import { buildReleaseDecisionRequest, releaseDecisionId } from './build-request.js';
 import type { ReleaseProposal } from './types.js';
 
@@ -550,7 +550,7 @@ describe('buildReleaseDecisionRequest', () => {
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `pnpm --filter @auto-claude/daemon test release/build-request`
+Run: `pnpm --filter @runforge/daemon test release/build-request`
 Expected: FAIL — module not found.
 
 - [ ] **Step 3: Implement `release/build-request.ts`** mirroring `buildMergeDecisionRequest`. `releaseDecisionId = \`release:${deployment}:${targetRevision.slice(0,8)}\``. Structured-safe context assembled from counts + issue numbers ONLY (never `commit.subject` verbatim — subjects may carry arbitrary worker output):
@@ -583,7 +583,7 @@ return DecisionRequestSchema.parse({
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `pnpm --filter @auto-claude/daemon test release/build-request`
+Run: `pnpm --filter @runforge/daemon test release/build-request`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -658,7 +658,7 @@ export function resolveAnsweredReleases(deps: {
 }): Promise<void>;
 ```
 
-- [ ] **Step 1: Extract the shared sanitizer.** Create `decision-escalation/sanitize-request.ts` exporting `applyDecisionSanitization(pipeline: SanitizationPipeline, req: DecisionRequest): Promise<DecisionRequest>` — move the body of the `phases.ts:228-252` closure verbatim (the `pipeline.isEmpty` fast-path + the 4-field `pipeline.run({content, deploymentRef: req.deployment, subjectRef: req.decision_id})` map). Change `phases.ts`'s `sanitizeDecisionRequest` closure to `return applyDecisionSanitization(pipeline, request);`. Run `pnpm --filter @auto-claude/daemon test phases sanitiz` — the existing phases sanitization tests must still pass (pure refactor, zero behavior change).
+- [ ] **Step 1: Extract the shared sanitizer.** Create `decision-escalation/sanitize-request.ts` exporting `applyDecisionSanitization(pipeline: SanitizationPipeline, req: DecisionRequest): Promise<DecisionRequest>` — move the body of the `phases.ts:228-252` closure verbatim (the `pipeline.isEmpty` fast-path + the 4-field `pipeline.run({content, deploymentRef: req.deployment, subjectRef: req.decision_id})` map). Change `phases.ts`'s `sanitizeDecisionRequest` closure to `return applyDecisionSanitization(pipeline, request);`. Run `pnpm --filter @runforge/daemon test phases sanitiz` — the existing phases sanitization tests must still pass (pure refactor, zero behavior change).
 
 - [ ] **Step 2: Write the failing manager test** — `release/release-ledger-manager.test.ts` (mirror `DecisionIndexManager` fail-closed): enabled + throwing opener → `isAvailable()===false` and `ledger()` throws `/unavailable/`; disabled → `ledger()` throws `/disabled/`.
 
@@ -736,7 +736,7 @@ it('recordCompletion on an already-terminal release is a no-op (already-terminal
 
 - [ ] **Step 5: Run to verify the executor tests fail**
 
-Run: `pnpm --filter @auto-claude/daemon test release/executor`
+Run: `pnpm --filter @runforge/daemon test release/executor`
 Expected: FAIL — `createReleaseLane` not implemented.
 
 - [ ] **Step 6: Implement `executor.ts`.**
@@ -763,11 +763,11 @@ Expected: FAIL — `createReleaseLane` not implemented.
 
 - [ ] **Step 7: Write the resolve-consumer + its test** — `release/resolve-consumer.ts` + `resolve-consumer.test.ts`. `resolveAnsweredReleases({lane, reader})` reads `reader.openReleases()` (every release with a `proposal` but no terminal `resolved` event — self-contained enumeration from the Release Ledger, NOT decision-index phase filtering; crash-stranded releases are included) and, for each `{deployment, releaseId}`, calls `lane.resolveRelease(deployment, releaseId)` (`decisionId === releaseId`) — the approval→execution path, mirroring `finding-dismissal/apply-consumer.ts`. The lane's injected `readAnswer(deployment, decisionId, issueNumber)` reuses `parseCockpitAnswer(comments, decisionId)` (`decision-escalation/resume-consumer.ts:82`) over the decision issue's comments (the `issueNumber` recorded in the proposal event), so an answer is recognized ONLY from an authoritative DecisionResponse — never an asserted approval. Tests: (a) a release with a verified `approve` DecisionResponse drives execution then is terminal (a second sweep finds it NOT in `openReleases` → not re-picked; no second execution event); (b) one with no DecisionResponse stays `pending` and REMAINS in `openReleases` (re-picked next sweep); (c) **crash-recovery:** a release seeded with a `decision(approve)` event but no `execution`/`resolved` is STILL in `openReleases` and the sweep RESUMES it to execution + `resolved`.
 
-- [ ] **Step 8: Wire the lane into the daemon.** `daemon.ts`: construct a `ReleaseLedgerManager` (enabled when the decision index is enabled; `databaseUrl` from `AUTO_CLAUDE_DATABASE_URL`), an octokit-backed `TrunkReader` (`repos.getBranch`/`repos.compareCommits`/`repos.listCommits`), the injected `sanitize` (= `(req) => applyDecisionSanitization(pipeline, req)` with the deployment's pipeline), the injected `readAnswer` (= `parseCockpitAnswer` over the decision issue comments), and a `PromotionPort` whose `platform-performs` impl shells the `scripts/release.sh` promotion (guarded, Operator-drill only) and whose `trigger-automated` impl dispatches the declared `trigger`. **The `trigger-automated` dispatch MUST apply the same SSRF + DNS-rebinding guards the existing deploy path uses** — `validateHealthCheckUrl` + `validateHealthCheckResolvedIP` (`validation/deploy.ts:120-160,92-115`) — before it fires, treating the `trigger` string as an untrusted URL/target; a guard rejection is a `fireTrigger` throw (→ `execution failed`, nothing promoted). (The concrete dispatch shape — GitHub `workflow_dispatch` vs webhook POST vs shell command — is DEFERRED; see "Deferred" below. This code unit validates + throws on an unsafe target but does not pin the transport.) Change `ControlHandlers.release` (`server.ts:38`) to **`release?: (deployment: string) => Promise<ProposeResult>`** and add **`previewRelease?: (deployment: string) => Promise<PreviewResult>`**; the `POST /release` and `POST /release/preview` routes read the deployment id from the JSON body (`{deployment}`) — the Operator names the registry key (`owner/repo`). Wire `handlers.release = (d) => lane.proposeRelease(d)` and `handlers.previewRelease = (d) => lane.previewRelease(d)` (`daemon.ts:2123`); drop the `ReleaseProposalResult` import (`server.ts:5`). Add the `resolveAnsweredReleases({lane, reader: releaseLedger.reader()})` sweep to the per-tick loop next to `resumeParkedRuns` (this is the wired approval→execution path; it enumerates OPEN releases from the Release Ledger — including crash-stranded decision-only / executed-not-terminalized ones — and is idempotent per tick; the actual LIVE promotion side effect stays Operator-gated per Global Constraints). Add a concrete report-back entrypoint for handed-off releases (L2 `recordCompletion`): `ControlHandlers.recordCompletion?: (deployment: string, releaseId: string, outcome: 'released' | 'failed') => Promise<{ result: 'applied' | 'already-terminal' }>` wired to `lane.recordCompletion`, exposed as `POST /release/completion` reading `{deployment, releaseId, outcome}` from the body. This is the **explicitly-invoked** operation by which a handed-off (`triggered-awaiting`/`recorded-awaiting-human`) release is resolved to `released`/`failed` and (on `released`) the Last-Released Marker advances. **What is DEFERRED (see "Deferred" below): the AUTO-trigger** — WHO/WHAT calls `recordCompletion` (an automation callback, platform polling, or an Operator manual-mark). This code unit builds only the callable operation + the `completion` event; it invents no polling or callback mechanism (the L1 does not specify one).
+- [ ] **Step 8: Wire the lane into the daemon.** `daemon.ts`: construct a `ReleaseLedgerManager` (enabled when the decision index is enabled; `databaseUrl` from `RUNFORGE_DATABASE_URL`), an octokit-backed `TrunkReader` (`repos.getBranch`/`repos.compareCommits`/`repos.listCommits`), the injected `sanitize` (= `(req) => applyDecisionSanitization(pipeline, req)` with the deployment's pipeline), the injected `readAnswer` (= `parseCockpitAnswer` over the decision issue comments), and a `PromotionPort` whose `platform-performs` impl shells the `scripts/release.sh` promotion (guarded, Operator-drill only) and whose `trigger-automated` impl dispatches the declared `trigger`. **The `trigger-automated` dispatch MUST apply the same SSRF + DNS-rebinding guards the existing deploy path uses** — `validateHealthCheckUrl` + `validateHealthCheckResolvedIP` (`validation/deploy.ts:120-160,92-115`) — before it fires, treating the `trigger` string as an untrusted URL/target; a guard rejection is a `fireTrigger` throw (→ `execution failed`, nothing promoted). (The concrete dispatch shape — GitHub `workflow_dispatch` vs webhook POST vs shell command — is DEFERRED; see "Deferred" below. This code unit validates + throws on an unsafe target but does not pin the transport.) Change `ControlHandlers.release` (`server.ts:38`) to **`release?: (deployment: string) => Promise<ProposeResult>`** and add **`previewRelease?: (deployment: string) => Promise<PreviewResult>`**; the `POST /release` and `POST /release/preview` routes read the deployment id from the JSON body (`{deployment}`) — the Operator names the registry key (`owner/repo`). Wire `handlers.release = (d) => lane.proposeRelease(d)` and `handlers.previewRelease = (d) => lane.previewRelease(d)` (`daemon.ts:2123`); drop the `ReleaseProposalResult` import (`server.ts:5`). Add the `resolveAnsweredReleases({lane, reader: releaseLedger.reader()})` sweep to the per-tick loop next to `resumeParkedRuns` (this is the wired approval→execution path; it enumerates OPEN releases from the Release Ledger — including crash-stranded decision-only / executed-not-terminalized ones — and is idempotent per tick; the actual LIVE promotion side effect stays Operator-gated per Global Constraints). Add a concrete report-back entrypoint for handed-off releases (L2 `recordCompletion`): `ControlHandlers.recordCompletion?: (deployment: string, releaseId: string, outcome: 'released' | 'failed') => Promise<{ result: 'applied' | 'already-terminal' }>` wired to `lane.recordCompletion`, exposed as `POST /release/completion` reading `{deployment, releaseId, outcome}` from the body. This is the **explicitly-invoked** operation by which a handed-off (`triggered-awaiting`/`recorded-awaiting-human`) release is resolved to `released`/`failed` and (on `released`) the Last-Released Marker advances. **What is DEFERRED (see "Deferred" below): the AUTO-trigger** — WHO/WHAT calls `recordCompletion` (an automation callback, platform polling, or an Operator manual-mark). This code unit builds only the callable operation + the `completion` event; it invents no polling or callback mechanism (the L1 does not specify one).
 
 - [ ] **Step 9: Run the executor + manager + consumer tests + daemon typecheck**
 
-Run: `pnpm --filter @auto-claude/daemon test release/ && pnpm --filter @auto-claude/daemon typecheck`
+Run: `pnpm --filter @runforge/daemon test release/ && pnpm --filter @runforge/daemon typecheck`
 Expected: PASS + clean typecheck.
 
 - [ ] **Step 10: Commit**
@@ -789,7 +789,7 @@ git commit --no-verify -m "feat(release): 3-shape executor + verified-answer res
 
 - [ ] **Step 1: Run the traceability check to see current state**
 
-Run: `pnpm --filter @auto-claude/daemon test traceability 2>/dev/null || node .specify/scripts/check-traceability.* 2>/dev/null; echo "check whichever exists"`
+Run: `pnpm --filter @runforge/daemon test traceability 2>/dev/null || node .specify/scripts/check-traceability.* 2>/dev/null; echo "check whichever exists"`
 Expected: currently GREEN with only `scripts/release.sh` + `scripts/test-release-dry-run.sh`.
 
 - [ ] **Step 2: Add the net-new code_paths** to `STACK-AC-RELEASE` in `.specify/traceability.yml` and the L3 front-matter `code_paths` — ONLY paths that now exist:
@@ -872,8 +872,8 @@ The gate is a suite of 24 concrete tests that MUST be RED before Tasks 1-5 land 
 ## Definition of Done
 
 - The acceptance gate (all 24 criteria) is GREEN.
-- `pnpm --filter @auto-claude/daemon test` and `pnpm --filter @auto-claude/release-ledger test`: no new failures vs `main`.
-- `pnpm --filter @auto-claude/daemon typecheck`, repo lint, and the traceability check: green.
+- `pnpm --filter @runforge/daemon test` and `pnpm --filter @runforge/release-ledger test`: no new failures vs `main`.
+- `pnpm --filter @runforge/daemon typecheck`, repo lint, and the traceability check: green.
 - PR opened to `main` (visibility per the autonomous branch model).
 - The **LIVE release drill** — actually promoting a real deployment's production through a shape — is Operator-gated and explicitly OUT of this code unit (mirrors P2's Phase-9 carve-out). This unit proves the lane against injectable ports + fakes; the real `launchctl`/`git`/trigger side effects are wired but proven live only under Operator gate.
 

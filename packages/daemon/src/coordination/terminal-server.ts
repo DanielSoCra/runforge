@@ -183,7 +183,7 @@ function mcpTextResult(data: unknown): { content: Array<{ type: 'text'; text: st
 /** Creates and starts an MCP server over stdio transport with all coordination tools. */
 export async function startTerminalServer(deps: TerminalServerDeps): Promise<void> {
   const handlers = createTerminalServerHandlers(deps);
-  const server = new McpServer({ name: 'auto-claude-coordination', version: '1.0.0' });
+  const server = new McpServer({ name: 'runforge-coordination', version: '1.0.0' });
 
   server.tool('list_proposals', { statusFilter: ProposalStatusSchema.optional() }, async (params) => {
     const result = await handlers.list_proposals({ statusFilter: params.statusFilter });

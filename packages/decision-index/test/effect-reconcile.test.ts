@@ -4,7 +4,7 @@ import { makePgliteDb, type PgliteTestDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { makeOutbox, answerItem } from "./helpers/effect-driver.js";
 import { decisions } from "../src/schema.js";
-import type { EffectKind } from "@auto-claude/decision-protocol";
+import type { EffectKind } from "@runforge/decision-protocol";
 
 type Fakes = ReturnType<typeof makeOutbox>;
 

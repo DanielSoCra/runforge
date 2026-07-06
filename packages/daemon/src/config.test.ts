@@ -63,7 +63,7 @@ describe('ConfigSchema', () => {
       ...validConfig,
       runtimeSource: {
         enabled: true,
-        sourceRoot: '/srv/auto-claude/runtime',
+        sourceRoot: '/srv/runforge/runtime',
         expectedRef: 'origin/dev',
         requireClean: false,
         requireExpectedRef: true,
@@ -155,7 +155,7 @@ describe('ConfigSchema', () => {
     const result = ConfigSchema.safeParse({
       ...validConfig,
       governance: {
-        documentPath: '.auto-claude/FACTORY_RULES.md',
+        documentPath: '.runforge/FACTORY_RULES.md',
         maxPrLinesChanged: 750,
       },
     });
@@ -585,7 +585,7 @@ describe('loadConfig', () => {
 describe('validateRequiredBootEnv', () => {
   const REQUIRED = {
     GITHUB_TOKEN: 'ghp_test',
-    AUTO_CLAUDE_DATABASE_URL: 'postgres://localhost/test',
+    RUNFORGE_DATABASE_URL: 'postgres://localhost/test',
     ENCRYPTION_KEY: Buffer.alloc(32).toString('base64url'),
   };
 
@@ -599,21 +599,21 @@ describe('validateRequiredBootEnv', () => {
     const result = validateRequiredBootEnv(env);
     expect(result.ok).toBe(false);
     if (result.ok === false) {
-      // Order must be stable: GITHUB_TOKEN, AUTO_CLAUDE_DATABASE_URL, ENCRYPTION_KEY
-      expect(result.missing).toEqual(['AUTO_CLAUDE_DATABASE_URL', 'ENCRYPTION_KEY']);
+      // Order must be stable: GITHUB_TOKEN, RUNFORGE_DATABASE_URL, ENCRYPTION_KEY
+      expect(result.missing).toEqual(['RUNFORGE_DATABASE_URL', 'ENCRYPTION_KEY']);
     }
   });
 
   it('treats whitespace-only required env values as missing', () => {
     const env = {
       GITHUB_TOKEN: 'ghp_test',
-      AUTO_CLAUDE_DATABASE_URL: '   ', // whitespace only — should be treated as absent
+      RUNFORGE_DATABASE_URL: '   ', // whitespace only — should be treated as absent
       ENCRYPTION_KEY: Buffer.alloc(32).toString('base64url'),
     };
     const result = validateRequiredBootEnv(env);
     expect(result.ok).toBe(false);
     if (result.ok === false) {
-      expect(result.missing).toContain('AUTO_CLAUDE_DATABASE_URL');
+      expect(result.missing).toContain('RUNFORGE_DATABASE_URL');
       expect(result.missing).not.toContain('GITHUB_TOKEN');
       expect(result.missing).not.toContain('ENCRYPTION_KEY');
     }

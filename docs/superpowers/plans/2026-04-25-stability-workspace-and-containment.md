@@ -4,7 +4,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Issue:** [#489](https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/issues/489) — Stability: prevent recoverable workspace/Git/containment failures from permanently sticking pipeline issues
+**Issue:** [#489](https://github.com/DANIELSOCRAHANDLEZZ/runforge/issues/489) — Stability: prevent recoverable workspace/Git/containment failures from permanently sticking pipeline issues
 
 **Scope:** Plan B — Phases 1 + 3 from the issue. Phases 2, 4, 5 (daemon-owned PR creation, typed failure metadata, runtime repo isolation) are deferred to separate plans because they require their own L1/L2/L3 spec chain.
 

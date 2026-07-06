@@ -23,7 +23,7 @@ superseded_date: 2026-06-02
 
 ## Problem
 
-The auto-claude system can execute work but cannot decide what to work on next. Work detection finds labeled issues, but nobody creates those issues proactively. The coordination spec (FUNC-AC-COORDINATION) lumps product ownership, technical health, and coordination mechanics into one spec — blurring responsibilities and leaving agent behavior underspecified.
+The runforge system can execute work but cannot decide what to work on next. Work detection finds labeled issues, but nobody creates those issues proactively. The coordination spec (FUNC-AC-COORDINATION) lumps product ownership, technical health, and coordination mechanics into one spec — blurring responsibilities and leaving agent behavior underspecified.
 
 Two distinct roles are missing:
 

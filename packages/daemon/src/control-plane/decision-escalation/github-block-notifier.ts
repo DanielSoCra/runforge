@@ -35,7 +35,7 @@
 import {
   DecisionRequestSchema,
   type DecisionRequest,
-} from '@auto-claude/decision-protocol';
+} from '@runforge/decision-protocol';
 
 /** Cockpit v1 block markers (must byte-match pm-cockpit's decision-block.ts). */
 export const BLOCK_START = '<!-- pm-cockpit:decision-request:v1 -->';

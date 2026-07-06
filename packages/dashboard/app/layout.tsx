@@ -4,7 +4,7 @@ import { GeistMono } from 'geist/font/mono';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Auto-Claude Dashboard',
+  title: 'Runforge Dashboard',
   description: 'Autonomous coding pipeline management',
 };
 

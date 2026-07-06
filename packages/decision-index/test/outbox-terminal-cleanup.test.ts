@@ -9,7 +9,7 @@ import { makeOutbox, answerItem, FIXED_NOW } from "./helpers/effect-driver.js";
 import { decisions, outbox as outboxTable, workerSessions } from "../src/schema.js";
 import { apply } from "../src/state-machine.js";
 import { IndexWriter } from "../src/index-writer.js";
-import { ProtectedStore } from "@auto-claude/sanitizer-redaction";
+import { ProtectedStore } from "@runforge/sanitizer-redaction";
 import { PgQuarantine } from "../src/quarantine.js";
 import { FakeNotifier } from "../src/adapters/fakes/fake-notifier.js";
 import { FakeSourceSink } from "../src/adapters/fakes/fake-source-sink.js";

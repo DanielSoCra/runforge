@@ -1,5 +1,5 @@
-import type { SanitizationPipeline } from "@auto-claude/sanitization";
-import type { DecisionRequest, DecisionOption } from "@auto-claude/decision-protocol";
+import type { SanitizationPipeline } from "@runforge/sanitization";
+import type { DecisionRequest, DecisionOption } from "@runforge/decision-protocol";
 
 /**
  * Apply the input-boundary sanitization pipeline to a DecisionRequest before it

@@ -22,7 +22,7 @@ The concierge runtime is a single runtime process (`concierge-core`) on the loca
 | `observer` | filesystem & daemon polling, event emission to event-bus |
 | `board-server` | reads `cards`/`messages`/`tool_calls`; serves board UI; SSE fan-out |
 | `cloudflared` | tunnel for Slack webhook + board URL |
-| (existing) `com.autoclaude.daemon` | unchanged, polled by observer |
+| (existing) `com.runforge.daemon` | unchanged, polled by observer |
 
 ## Storage
 
@@ -119,14 +119,14 @@ In-process. Uses Bolt-for-JS. Verifies signing secret on every event. Normalises
   "tunnelHostname": "concierge.<your-domain>",
   "boardHostname": "board.<your-domain>",
   "vaultPath": "~/code/knowledge-vault",
-  "watchedRepos": ["~/code/auto-claude"],
+  "watchedRepos": ["~/code/runforge"],
   "operatorEmail": "operator@example.com"
 }
 ```
 
 ## launchd
 
-`com.concierge.core`, `com.concierge.observer`, `com.concierge.board` plists. All three: `RunAtLoad: true`, `KeepAlive: true`, `WorkingDirectory: ~/code/auto-claude`, env loaded from `~/Library/Application Support/concierge/env`.
+`com.concierge.core`, `com.concierge.observer`, `com.concierge.board` plists. All three: `RunAtLoad: true`, `KeepAlive: true`, `WorkingDirectory: ~/code/runforge`, env loaded from `~/Library/Application Support/concierge/env`.
 
 ## Cloudflare Tunnel
 

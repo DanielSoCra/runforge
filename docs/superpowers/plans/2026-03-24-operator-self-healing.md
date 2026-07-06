@@ -4,7 +4,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add self-healing (Check 8) and usage throttling to the auto-claude-operator skill so the operator can autonomously diagnose and fix bugs in the auto-claude system, including daemon code changes.
+**Goal:** Add self-healing (Check 8) and usage throttling to the runforge-operator skill so the operator can autonomously diagnose and fix bugs in the runforge system, including daemon code changes.
 
 **Architecture:** The implementation is primarily skill-file updates (operator behavior is driven by the SKILL.md reference document) plus one daemon code change to expose `dailyRunCount` in the `/status` endpoint. The operator is a Claude Code session that reads the skill and follows its procedures.
 
@@ -65,7 +65,7 @@ Add a test to `daemon.test.ts` that verifies the status endpoint returns `dailyR
 
 - [ ] **Step 5: Run tests**
 
-Run: `pnpm --filter @auto-claude/daemon test`
+Run: `pnpm --filter @runforge/daemon test`
 Expected: All tests pass
 
 - [ ] **Step 6: Verify changes look correct**
@@ -79,14 +79,14 @@ Do NOT commit yet — Task 5 handles the final commit for all changes.
 Add the complete self-healing procedure as Check 8 in the operator skill. This is the core implementation — the skill document IS the code (it drives Claude Code's behavior).
 
 **Files:**
-- Modify: `~/.claude/skills/auto-claude-operator/SKILL.md`
+- Modify: `~/.claude/skills/runforge-operator/SKILL.md`
 
 - [ ] **Step 1: Update skill description**
 
 Update the frontmatter description to include self-healing:
 
 ```yaml
-description: Use when operating, monitoring, deploying, updating, or troubleshooting the auto-claude autonomous development system — daemon lifecycle, dashboard, operator loop, self-deployment, self-healing, usage throttling, Supabase migrations, health checks, launchd, docker compose
+description: Use when operating, monitoring, deploying, updating, or troubleshooting the runforge autonomous development system — daemon lifecycle, dashboard, operator loop, self-deployment, self-healing, usage throttling, Supabase migrations, health checks, launchd, docker compose
 ```
 
 - [ ] **Step 2: Update "Operator Loop" header**
@@ -104,7 +104,7 @@ Insert before Check 9, after Check 7. Full content:
 ```markdown
 ### Check 8: Self-Healing
 
-Diagnose and fix bugs in auto-claude itself. One fix per cycle max. See full spec: `docs/superpowers/specs/2026-03-24-operator-self-healing-design.md`
+Diagnose and fix bugs in runforge itself. One fix per cycle max. See full spec: `docs/superpowers/specs/2026-03-24-operator-self-healing-design.md`
 
 **Step 1: Collect signals**
 ```bash
@@ -120,8 +120,8 @@ Parse for: error messages, stack traces, Zod validation failures, "column does n
 **Expensive signals (hourly throttle):**
 Only run if `~/logs/operator-last-test-run` is older than 1 hour:
 ```bash
-pnpm --filter @auto-claude/daemon test 2>&1 | tail -20
-pnpm --filter @auto-claude/daemon typecheck 2>&1 | tail -10
+pnpm --filter @runforge/daemon test 2>&1 | tail -20
+pnpm --filter @runforge/daemon typecheck 2>&1 | tail -10
 date -u +%Y-%m-%dT%H:%M:%SZ > ~/logs/operator-last-test-run
 ```
 
@@ -142,7 +142,7 @@ Before applying ANY fix, verify ALL of these:
 4. **Dedup:** Check if this error key (file:normalized-message) was attempted 3+ times today. If so, open GitHub Issue with `needs-human` label and skip.
 5. **Path guard:** Abort if fix touches ANY of:
    - `.specify/functional/` (L1 specs)
-   - `~/.claude/skills/auto-claude-operator/` (this skill)
+   - `~/.claude/skills/runforge-operator/` (this skill)
    - `.env.mac`, `.env.prod` (secrets)
    - `package.json`, `*/package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `tsconfig*.json`
 6. **Per-file cooldown:** If target file was self-healed in last 3 cycles, skip.
@@ -166,7 +166,7 @@ git checkout -b self-heal/$(date +%s) dev
 1. Pause daemon: `curl -X POST http://127.0.0.1:3847/pause -H "X-Requested-By: cli"`
 2. Wait for `activeRuns == 0` (poll 5s, max 5 min). If timeout → abort, resume, release lock. After 3 consecutive timeouts → open Issue `needs-human`.
 3. Edit files, commit on branch
-4. Run tests: `pnpm --filter @auto-claude/daemon test`
+4. Run tests: `pnpm --filter @runforge/daemon test`
 5. If tests FAIL → `git checkout dev`, resume daemon, push branch, open PR, release lock
 6. If tests PASS → `git checkout dev && git merge self-heal/<ts>`, restart daemon (`launchctl unload/load`), wait 30s, check `/status`
 7. If health FAILS → `git revert HEAD --no-edit`, restart daemon, push fix branch, open PR, release lock
@@ -190,7 +190,7 @@ Append to `~/logs/operator-self-heal.log`:
 
 ```bash
 # Skills are outside the repo, so just verify the file is saved
-cat ~/.claude/skills/auto-claude-operator/SKILL.md | head -5
+cat ~/.claude/skills/runforge-operator/SKILL.md | head -5
 ```
 
 ---
@@ -200,7 +200,7 @@ cat ~/.claude/skills/auto-claude-operator/SKILL.md | head -5
 Add rate-limit detection and run budget caps to the existing system health check.
 
 **Files:**
-- Modify: `~/.claude/skills/auto-claude-operator/SKILL.md`
+- Modify: `~/.claude/skills/runforge-operator/SKILL.md`
 
 - [ ] **Step 1: Add usage throttling section to Check 6**
 
@@ -236,7 +236,7 @@ Verify file saved correctly.
 Update the cron prompt template in the skill to include Checks 8 and 9.
 
 **Files:**
-- Modify: `~/.claude/skills/auto-claude-operator/SKILL.md`
+- Modify: `~/.claude/skills/runforge-operator/SKILL.md`
 
 - [ ] **Step 1: Update the cron prompt example in the skill**
 
@@ -247,7 +247,7 @@ The skill should document the full 9-check cron prompt so new operator sessions 
 
 Create a 10-minute cron via CronCreate with this prompt:
 
-OPERATOR LOOP — Run the 9-check cycle using the auto-claude-operator skill. Make all decisions autonomously. L1 specs are sacred — NEVER modify them.
+OPERATOR LOOP — Run the 9-check cycle using the runforge-operator skill. Make all decisions autonomously. L1 specs are sacred — NEVER modify them.
 
 Checks: (1) Pipeline Health, (2) L2 Spec Review, (3) PR Review & Merge, (4) P2 Triage, (5) Stale Cleanup, (6) System Health + Usage Throttling, (7) Dashboard Playwright Verification, (8) Self-Healing, (9) Status Summary.
 ```
@@ -261,9 +261,9 @@ Checks: (1) Pipeline Health, (2) L2 Spec Review, (3) PR Review & Merge, (4) P2 T
 - [ ] **Step 1: Restart daemon to pick up `dailyRunCount` change**
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.autoclaude.daemon.plist 2>/dev/null
+launchctl unload ~/Library/LaunchAgents/com.runforge.daemon.plist 2>/dev/null
 sleep 2
-launchctl load ~/Library/LaunchAgents/com.autoclaude.daemon.plist
+launchctl load ~/Library/LaunchAgents/com.runforge.daemon.plist
 sleep 5
 curl -s http://127.0.0.1:3847/status | jq .dailyRunCount
 ```
@@ -274,7 +274,7 @@ Expected: `0` (or a number if runs happened since restart)
 
 Start a fresh Claude Code session and type:
 ```
-/auto-claude-operator
+/runforge-operator
 ```
 
 Verify Check 8 (Self-Healing) and usage throttling sections are visible.
@@ -289,7 +289,7 @@ Ask the operator to run the 9-check cycle. Verify:
 
 - [ ] **Step 4: Commit daemon changes**
 
-Note: Skill file changes (`~/.claude/skills/auto-claude-operator/SKILL.md`) live outside the repo and are not committed. Only daemon code changes go into git.
+Note: Skill file changes (`~/.claude/skills/runforge-operator/SKILL.md`) live outside the repo and are not committed. Only daemon code changes go into git.
 
 ```bash
 git add packages/daemon/src/control-plane/daemon.ts packages/daemon/src/control-plane/daemon.test.ts

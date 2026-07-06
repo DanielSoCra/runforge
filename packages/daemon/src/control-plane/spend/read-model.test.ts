@@ -20,7 +20,7 @@ import type {
   ProjectName,
   RunAttribution,
   StoreResult,
-} from '@auto-claude/db';
+} from '@runforge/db';
 import type { PricingReference } from './pricing-reference.js';
 import { SpendUnavailableError, type PeriodQuery } from './types.js';
 import {
@@ -119,7 +119,7 @@ const ATTRIBUTIONS: RunAttribution[] = [
 ];
 
 const NAMES: ProjectName[] = [
-  { id: 'p1', name: 'daniel/auto-claude' },
+  { id: 'p1', name: 'daniel/runforge' },
   { id: 'p2', name: 'daniel/demo' },
 ];
 
@@ -275,7 +275,7 @@ describe('SpendReadModel.byProject', () => {
 
     // Drill-down-ready: p1 carries BOTH its records, including the unreconciled one.
     const p1 = body.projects[2]!;
-    expect(p1.projectName).toBe('daniel/auto-claude');
+    expect(p1.projectName).toBe('daniel/runforge');
     expect(p1.moneyMicros).toBe('100000');
     expect(p1.usageUnits).toBe(1200);
     expect(p1.records.map((r) => r.costEventId).sort()).toEqual(['e1', 'e4']);

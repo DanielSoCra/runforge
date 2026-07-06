@@ -1,7 +1,7 @@
 ---
 id: ARCH-AC-VALIDATION
 type: architecture
-domain: auto-claude
+domain: runforge
 status: draft
 version: 3
 layer: 2

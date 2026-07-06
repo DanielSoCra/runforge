@@ -18,7 +18,7 @@
  *   - read-model / publisher throw → 503 fail-safe (never rethrows)
  */
 import { describe, it, expect } from 'vitest';
-import type { DetailView, RankedListItem, ListRankedArgs } from '@auto-claude/decision-index';
+import type { DetailView, RankedListItem, ListRankedArgs } from '@runforge/decision-index';
 import {
   answerDecision,
   type AnswerDeps,

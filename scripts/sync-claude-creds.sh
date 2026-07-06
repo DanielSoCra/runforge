@@ -12,10 +12,10 @@
 #
 # Usage:
 #   sync-claude-creds.sh [CREDS_DIR]
-#   AUTO_CLAUDE_CREDS_DIR=/path/to/creds sync-claude-creds.sh
+#   RUNFORGE_CREDS_DIR=/path/to/creds sync-claude-creds.sh
 #
 # CREDS_DIR is the host directory bind-mounted to /root/.claude in the daemon
-# (i.e. AUTO_CLAUDE_CLAUDE_CREDS_DIR). The script writes <CREDS_DIR>/.credentials.json.
+# (i.e. RUNFORGE_CLAUDE_CREDS_DIR). The script writes <CREDS_DIR>/.credentials.json.
 #
 # Secrets: the credential JSON is NEVER printed. Only success/length metadata
 # is logged. The output file is written 0600 via a temp file + atomic rename.
@@ -25,12 +25,12 @@ set -euo pipefail
 KEYCHAIN_SERVICE="Claude Code-credentials"
 # The service has several accounts (e.g. "unknown"/"instance-default" hold only
 # mcpOAuth); the subscription credential (claudeAiOauth) is stored under the
-# macOS username. Override with AUTO_CLAUDE_KEYCHAIN_ACCOUNT if yours differs.
-KEYCHAIN_ACCOUNT="${AUTO_CLAUDE_KEYCHAIN_ACCOUNT:-$(id -un)}"
-CREDS_DIR="${1:-${AUTO_CLAUDE_CREDS_DIR:-}}"
+# macOS username. Override with RUNFORGE_KEYCHAIN_ACCOUNT if yours differs.
+KEYCHAIN_ACCOUNT="${RUNFORGE_KEYCHAIN_ACCOUNT:-$(id -un)}"
+CREDS_DIR="${1:-${RUNFORGE_CREDS_DIR:-}}"
 
 if [[ -z "${CREDS_DIR}" ]]; then
-  echo "sync-claude-creds: no CREDS_DIR given (arg 1 or AUTO_CLAUDE_CREDS_DIR)" >&2
+  echo "sync-claude-creds: no CREDS_DIR given (arg 1 or RUNFORGE_CREDS_DIR)" >&2
   exit 2
 fi
 

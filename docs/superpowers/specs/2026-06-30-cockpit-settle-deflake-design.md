@@ -253,12 +253,12 @@ removal (4263 — asserts `removeLabel('ready')`, re-entry predicate covers it).
   (and the DOUBLE-DELIVERY tick/spy scaffolding per §3) change.
 - Acceptance:
   1. the full `packages/daemon` suite passes against real Postgres
-     (`AUTO_CLAUDE_TEST_DATABASE_URL` set) — `pnpm --filter @auto-claude/daemon test`;
+     (`RUNFORGE_TEST_DATABASE_URL` set) — `pnpm --filter @runforge/daemon test`;
   2. `test-hygiene.test.ts`'s new guard **fires** on a synthetic `settleRealAsync` placed in a
      real-PG resume describe without a `fixed-drain-ok` marker, and **passes** on the migrated
      `daemon.test.ts` (verified by `findHygieneViolations`-style unit assertions over fixtures,
      matching the existing RC-1/2 guard's test shape);
-  3. `pnpm --filter @auto-claude/daemon typecheck` and `pnpm lint` clean.
+  3. `pnpm --filter @runforge/daemon typecheck` and `pnpm lint` clean.
 - Robustness intent (not a CI assertion): the migrated tests pass under artificial CPU load
   (concurrent `pnpm test` runs) where the fixed-budget version flaked — the conductor runs
   this in Phase 9.

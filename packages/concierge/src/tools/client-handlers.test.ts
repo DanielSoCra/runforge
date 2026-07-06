@@ -55,8 +55,8 @@ describe('external client tool handlers', () => {
       },
     });
 
-    await expect(handlers.gh_search({ query: 'repo:auto-claude' }, { conversationId: 'c1', toolCallId: 't1' }))
-      .resolves.toEqual({ items: ['result:repo:auto-claude'] });
+    await expect(handlers.gh_search({ query: 'repo:runforge' }, { conversationId: 'c1', toolCallId: 't1' }))
+      .resolves.toEqual({ items: ['result:repo:runforge'] });
     await expect(handlers.gh_comment({
       repo: 'owner/repo',
       number: 1,

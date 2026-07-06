@@ -6,7 +6,7 @@ import {
   type VaultAccessManifest,
 } from './types.js';
 
-const MANIFEST_RELATIVE_PATH = '00-Meta/auto-claude-sync.md';
+const MANIFEST_RELATIVE_PATH = '00-Meta/runforge-sync.md';
 
 export function getManifestPath(vaultRoot: string): string {
   return `${vaultRoot}/${MANIFEST_RELATIVE_PATH}`;

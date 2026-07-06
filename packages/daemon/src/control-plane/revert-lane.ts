@@ -11,7 +11,7 @@
 import {
   DecisionRequestSchema,
   type DecisionRequest,
-} from '@auto-claude/decision-protocol';
+} from '@runforge/decision-protocol';
 import type { RunState } from '../types.js';
 import { git } from '../lib/git.js';
 
@@ -260,7 +260,7 @@ export async function handlePostLandingObservation({
 
   const title = `Revert landing ${mergeSha.slice(0, 8)}`;
   const body = [
-    `<!-- auto-claude-reversal: ${mergeSha} -->`,
+    `<!-- runforge-reversal: ${mergeSha} -->`,
     '',
     `Automatic revert of landing ${mergeSha} because trunk observation is ${observation.status}.`,
   ].join('\n');

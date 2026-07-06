@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import {
   DecisionRequestSchema,
   PROTOCOL_VERSION,
-} from '@auto-claude/decision-protocol';
+} from '@runforge/decision-protocol';
 import {
   buildFindingDismissalRequest,
   buildFindingDismissalDecisionId,

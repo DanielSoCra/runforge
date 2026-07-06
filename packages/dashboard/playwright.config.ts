@@ -33,7 +33,7 @@ export default defineConfig({
   use: { baseURL: BASE_URL, trace: 'on-first-retry' },
   webServer: [
     {
-      command: 'pnpm --filter @auto-claude/daemon exec tsx ../dashboard/e2e/real-daemon.mjs',
+      command: 'pnpm --filter @runforge/daemon exec tsx ../dashboard/e2e/real-daemon.mjs',
       port: REAL_DAEMON_PORT,
       reuseExistingServer: process.env.CI !== 'true',
       stdout: 'pipe',

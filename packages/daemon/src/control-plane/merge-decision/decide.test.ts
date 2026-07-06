@@ -23,7 +23,7 @@ import type { VerifierDeclaration, VerifierStatus } from '../lane-engine/verifie
 
 const verifier: VerifierDeclaration = {
   kind: 'test-suite',
-  invoke: { ref: 'pnpm --filter @auto-claude/daemon test' },
+  invoke: { ref: 'pnpm --filter @runforge/daemon test' },
 };
 
 /** A verifier observed runnable + falsifying — the ONLY status that gates. */

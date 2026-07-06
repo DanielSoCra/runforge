@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.autoclaude.creds-sync</string>
+  <string>com.runforge.creds-sync</string>
   <key>ProgramArguments</key>
   <array>
     <string>__REPO_ROOT__/scripts/sync-claude-creds.sh</string>

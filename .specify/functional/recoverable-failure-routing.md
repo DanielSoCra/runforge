@@ -1,7 +1,7 @@
 ---
 id: FUNC-AC-RECOVERABLE-FAILURE-ROUTING
 type: functional
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 1

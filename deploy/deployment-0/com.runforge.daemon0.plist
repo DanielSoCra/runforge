@@ -3,16 +3,16 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.autoclaude.daemon0</string>
-  <!-- Deployment #0: governed self-hosted auto-claude daemon.
-       Runs launch-deployment0.sh (runtime clone ~/code/auto-claude-runtime,
-       DB autoclaude_prod0 on the compose postgres :45432, decision index enabled).
-       Distinct label from the legacy com.autoclaude.daemon so scripts/install-daemon.sh
+  <string>com.runforge.daemon0</string>
+  <!-- Deployment #0: governed self-hosted runforge daemon.
+       Runs launch-deployment0.sh (runtime clone ~/code/runforge-runtime,
+       DB runforge_prod0 on the compose postgres :45432, decision index enabled).
+       Distinct label from the legacy com.runforge.daemon so scripts/install-daemon.sh
        never clobbers this. -->
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>~/code/auto-claude-ops/launch-deployment0.sh</string>
+    <string>~/code/runforge-ops/launch-deployment0.sh</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -28,8 +28,8 @@
   <key>ThrottleInterval</key>
   <integer>30</integer>
   <key>StandardOutPath</key>
-  <string>~/code/auto-claude-ops/logs/daemon0.log</string>
+  <string>~/code/runforge-ops/logs/daemon0.log</string>
   <key>StandardErrorPath</key>
-  <string>~/code/auto-claude-ops/logs/daemon0.log</string>
+  <string>~/code/runforge-ops/logs/daemon0.log</string>
 </dict>
 </plist>

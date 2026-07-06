@@ -5,13 +5,13 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { makePgliteDb, type PgliteTestDb, TEST_PROTECTED_KEY } from "./helpers/temp-db.js";
 import { IndexWriter } from "../src/index-writer.js";
-import { ProtectedStore } from "@auto-claude/sanitizer-redaction";
+import { ProtectedStore } from "@runforge/sanitizer-redaction";
 import { PgQuarantine } from "../src/quarantine.js";
 import { FakeNotifier } from "../src/adapters/fakes/fake-notifier.js";
 import { FakeSourceSink } from "../src/adapters/fakes/fake-source-sink.js";
 import { FakeResumeDispatcher } from "../src/adapters/fakes/fake-resume-dispatcher.js";
 import { ReadModel } from "../src/read-model.js";
-import { PROTOCOL_VERSION } from "@auto-claude/decision-protocol";
+import { PROTOCOL_VERSION } from "@runforge/decision-protocol";
 import { decisions } from "../src/schema.js";
 
 const NOW = "2026-06-11T12:00:00.000Z";

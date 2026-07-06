@@ -1,7 +1,7 @@
 #!/bin/bash
 # DEPRECATED: Migrated to daemon control plane. See docs/running.md
-cd ~/code/auto-claude
-REPO="DANIELSOCRAHANDLEZZ/auto-claude"
+cd ~/code/runforge
+REPO="DANIELSOCRAHANDLEZZ/runforge"
 FAIL_COUNT=0
 MAX_BACKOFF=3600
 

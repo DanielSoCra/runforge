@@ -1,7 +1,7 @@
 ---
 id: STACK-AC-OPERATOR-LEARNING-TS
 type: stack-specific
-domain: auto-claude
+domain: runforge
 status: draft
 version: 2
 layer: 3

@@ -85,8 +85,8 @@ changing the merge-decision risk gate; PHI/redaction feature work.
   **synchronous** verbs (`raise→observeRequest`, `answer→applyEvent`, `supersede→applyEvent`,
   `expireOverdue→applyEvent` loop, `statusOf/pending/reader.*`) are called from `phases.ts:841,
   2177` (`ledger.raise`), `reconcile.ts:52,68`, `daemon.ts:1552-1553`, `decision-api.ts`.
-- **Config gate** (`config.ts`): `AUTO_CLAUDE_DECISION_INDEX_ENABLED` default **false**;
-  `AUTO_CLAUDE_DECISION_INDEX_PATH` (sqlite file), `_PROTECTED_DIR`, `_PROTECTED_KEY`.
+- **Config gate** (`config.ts`): `RUNFORGE_DECISION_INDEX_ENABLED` default **false**;
+  `RUNFORGE_DECISION_INDEX_PATH` (sqlite file), `_PROTECTED_DIR`, `_PROTECTED_KEY`.
 - **Fail-closed-to-stuck path** (`phases.ts:828-862`): the L2-gate escalation block runs ONLY when
   `decisionManager?.isEnabled() === true`; a ledger throw leaves the run parked, block unpublished,
   no notify. When the flag is OFF the whole block is skipped — the run parks with a label/comment
@@ -100,7 +100,7 @@ changing the merge-decision risk gate; PHI/redaction feature work.
 
 ### 3.1 Connections & schema placement
 
-- **Same database, dedicated schema.** Reuse `AUTO_CLAUDE_DATABASE_URL` (the daemon's existing
+- **Same database, dedicated schema.** Reuse `RUNFORGE_DATABASE_URL` (the daemon's existing
   Postgres — see `packages/db/src/env.ts`). Place all decision-index tables in a dedicated Postgres
   schema **`decision_index`** via `pgSchema('decision_index')`. Rationale: unify on one store (the
   goal) while keeping a hard namespace boundary from `packages/db`'s `public` tables (no collision
@@ -187,7 +187,7 @@ backend session silently drops a session-scoped advisory lock while the writer o
 codex Important):
 
 1. **Boot fast-fail (best-effort, NON-holding):** at `createIndexWriter`, `pg_try_advisory_lock(K)`
-   where `K = hashtext('auto-claude:decision-index:writer')`, then **immediately
+   where `K = hashtext('runforge:decision-index:writer')`, then **immediately
    `pg_advisory_unlock(K)`**. False ⇒ another writer is currently mid-write ⇒ `createIndexWriter`
    throws (surfaced) — a cheap "two daemons pointed at one DB" alarm. It does NOT hold the lock for
    the connection lifetime: holding a session-scoped lock is both reconnect-unsafe (a transparent
@@ -346,14 +346,14 @@ The conversion is mechanical but pervasive. Every drizzle call returns a Promise
 ### 3.8 Fail-closed behavior change — DECISION
 
 **Make escalation-surfacing always-available when the daemon's Postgres is configured; flip
-`AUTO_CLAUDE_DECISION_INDEX_ENABLED` from a default-OFF hard gate to a default-ON explicit opt-OUT.**
+`RUNFORGE_DECISION_INDEX_ENABLED` from a default-OFF hard gate to a default-ON explicit opt-OUT.**
 
 - Today the flag defaults **false** SOLELY because of the `better-sqlite3` native module (a fresh
   env that can't load the native binary would crash on import, so surfacing was made opt-in +
   dynamically imported + fail-closed-to-`#broken`). Postgres removes that reason: the daemon
-  already requires `AUTO_CLAUDE_DATABASE_URL`, so the store is present whenever the daemon runs.
-- **New semantics:** the decision index initializes whenever `AUTO_CLAUDE_DATABASE_URL` is set
-  (i.e. always, for a real daemon). `AUTO_CLAUDE_DECISION_INDEX_ENABLED=false` becomes an explicit
+  already requires `RUNFORGE_DATABASE_URL`, so the store is present whenever the daemon runs.
+- **New semantics:** the decision index initializes whenever `RUNFORGE_DATABASE_URL` is set
+  (i.e. always, for a real daemon). `RUNFORGE_DECISION_INDEX_ENABLED=false` becomes an explicit
   opt-OUT escape hatch (a deployment that deliberately doesn't want the decision inbox); unset/any
   other value = enabled. `DecisionIndexManager.init()` no longer needs the dynamic import to dodge a
   native module (it MAY keep a static import now), and `#broken` now means only "Postgres genuinely
@@ -419,11 +419,11 @@ preflight, not assumed:**
 - **The runtime preflight must NOT open the sqlite file — that would reintroduce the very native
   module the migration removes (codex round-2 Critical).** So the boot check is a pure
   **file-existence** test (`fs.existsSync`) on the legacy sqlite path
-  (`AUTO_CLAUDE_DECISION_INDEX_PATH`, default `<stateDir>/decision-index.sqlite`), with NO
-  `better-sqlite3` open. If the file exists AND `AUTO_CLAUDE_DECISION_INDEX_CUTOVER_ACK` is NOT set,
+  (`RUNFORGE_DECISION_INDEX_PATH`, default `<stateDir>/decision-index.sqlite`), with NO
+  `better-sqlite3` open. If the file exists AND `RUNFORGE_DECISION_INDEX_CUTOVER_ACK` is NOT set,
   the daemon **aborts boot with an actionable error** ("a legacy sqlite decision store exists at
   <path>; it may hold unanswered escalations. Run the one-shot export tool to salvage them, or set
-  `AUTO_CLAUDE_DECISION_INDEX_CUTOVER_ACK=1` to proceed greenfield, then delete the file"). This is
+  `RUNFORGE_DECISION_INDEX_CUTOVER_ACK=1` to proceed greenfield, then delete the file"). This is
   fail-closed (won't silently drop a store) and native-free at runtime.
 - **Row inspection / export is an OPTIONAL separate pre-migration CLI tool** (e.g.
   `packages/decision-index/scripts/export-legacy-sqlite.ts`) that DOES carry the old
@@ -447,7 +447,7 @@ Document the cutover + the ack env in the L3 gotchas.
   `makeTempDb()` (on-disk sqlite) with an in-process `@electric-sql/pglite` instance wired through
   `drizzle-orm/pglite`. PGlite appears in the lockfile ONLY as an optional drizzle peer (`>=0.2.0`)
   — neither affected package declares it — so it must be **added explicitly** as a `devDependency`
-  of `@auto-claude/decision-index` (and `@auto-claude/sanitizer-redaction` where its tests need it).
+  of `@runforge/decision-index` (and `@runforge/sanitizer-redaction` where its tests need it).
   PGlite is a real Postgres (MVCC, transactions, advisory locks, `FOR UPDATE`, `RETURNING`) compiled
   to WASM, so the ~60 logic tests keep their "spin up a fresh migrated DB in `beforeEach`, no Docker"
   ergonomics. `makeTempDb()` → `makePgliteDb()` returning `{ db, cleanup }`; `cleanup` closes the
@@ -462,16 +462,16 @@ Document the cutover + the ack env in the L3 gotchas.
 - **REQUIRED real-Postgres integration test (codex Important — not optional).** PGlite is a single
   in-process backend and **cannot prove cross-process / multi-session locking**, so the
   cross-process single-writer guarantee must be tested against a real Postgres. Add a suite that runs
-  against `AUTO_CLAUDE_TEST_DATABASE_URL` and make it a **required CI job** backed by a
+  against `RUNFORGE_TEST_DATABASE_URL` and make it a **required CI job** backed by a
   `postgres:18-alpine` service (already in `docker-compose.yml`; CI gets a `services: postgres`
   block). It exercises: (1) construct the writer while `K` is free, THEN a second session holds
   `pg_advisory_lock(K)` and EVERY public mutator throws (the per-tx xact-lock proof, §3.5a — runnable
   precisely because the boot check is non-holding); (2) the boot fast-fail throws when a second
   session is already holding `K` at construction time; (3) a read-only session rejects writes.
-  Locally the suite `describe.skip`s when `AUTO_CLAUDE_TEST_DATABASE_URL` is unset, but CI must set
+  Locally the suite `describe.skip`s when `RUNFORGE_TEST_DATABASE_URL` is unset, but CI must set
   it — the cross-process invariant is safety-critical and PGlite leaves it unproven.
-- **Per-package commands** (confirmed): decision-index uses `pnpm --filter @auto-claude/decision-index test`
-  (`vitest run`) and `pnpm --filter @auto-claude/decision-index typecheck` (`tsc --noEmit`);
+- **Per-package commands** (confirmed): decision-index uses `pnpm --filter @runforge/decision-index test`
+  (`vitest run`) and `pnpm --filter @runforge/decision-index typecheck` (`tsc --noEmit`);
   sanitizer-redaction and daemon analogously. Run the affected specs' `test_paths` after each task.
 - **Daemon consumer tests** (13 files under `decision-escalation/`, plus `decision-api*.test.ts`,
   sanitization integration tests): update their fakes/fixtures to the async ledger + PGlite-backed
@@ -566,14 +566,14 @@ concrete edits to make at that task:
 ## 8. Out of scope
 
 `timestamptz` migration; moving `.enc` blob bodies into Postgres; merge-decision/risk-gate changes;
-PHI/redaction features; removing the `AUTO_CLAUDE_DECISION_INDEX_PATH`/sqlite env var names beyond
+PHI/redaction features; removing the `RUNFORGE_DECISION_INDEX_PATH`/sqlite env var names beyond
 deprecation; dashboard/HTTP projection changes beyond the await ripple.
 
 ---
 
 ## 9. Human-only open question (parked)
 
-**Default-flip of `AUTO_CLAUDE_DECISION_INDEX_ENABLED` (OFF → ON / opt-out).** Recommended ON
+**Default-flip of `RUNFORGE_DECISION_INDEX_ENABLED` (OFF → ON / opt-out).** Recommended ON
 (L1-aligned: escalations should always surface). Borderline operator territory because it changes
 shipped default behavior. The store migration (§2-§7) is mergeable independently with the flag left
 default-OFF; the surfacing flip can land as a one-line follow-up once the operator confirms. Decide:

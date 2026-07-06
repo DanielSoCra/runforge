@@ -20,7 +20,7 @@ const config: ConciergeConfig = {
   vaultPath: '/vault',
   watchedRepos: ['/repo'],
   operatorEmail: 'operator@example.com',
-  autoClaudeBaseUrl: 'http://127.0.0.1:3847',
+  runforgeBaseUrl: 'http://127.0.0.1:3847',
 };
 
 describe('concierge runtime composition', () => {
@@ -354,7 +354,7 @@ function clients(overrides: Partial<ConciergeRuntimeClients> = {}): ConciergeRun
       writeDecision: async (path) => ({ path }),
       writeClient: async (path) => ({ path }),
     },
-    autoClaude: {
+    runforge: {
       status: async () => ({ activeRuns: 0, paused: true }),
       pause: async () => ({ paused: true }),
       run: async (issue) => ({ issue, runId: `run-${issue}` }),

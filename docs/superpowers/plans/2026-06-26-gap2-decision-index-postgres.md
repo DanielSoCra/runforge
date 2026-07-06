@@ -2,15 +2,15 @@
 
 - **Spec:** `docs/superpowers/specs/2026-06-26-gap2-decision-index-postgres-design.md` (read it first)
 - **Branch/worktree:** `codex/779-gap2-postgres-migration-build` @
-  `~/code/auto-claude/.claude/worktrees/779-gap2`
+  `~/code/runforge/.claude/worktrees/779-gap2`
 - **Method:** TDD. For each task: write/adjust the failing test, implement, run the package's
   `test` + `typecheck`, then proceed. Estimate: ~4-5 engineering days (the sync→async outbox
   conversion + the consumer ripple dominate).
 - **Per-package commands (confirmed):**
-  - `pnpm --filter @auto-claude/decision-index test` and `pnpm --filter @auto-claude/decision-index typecheck`
-  - `pnpm --filter @auto-claude/sanitizer-redaction test` and `pnpm --filter @auto-claude/sanitizer-redaction typecheck`
-  - `pnpm --filter @auto-claude/daemon test` and `pnpm --filter @auto-claude/daemon typecheck`
-  - drizzle gen (after schema): `pnpm --filter @auto-claude/decision-index exec drizzle-kit generate`
+  - `pnpm --filter @runforge/decision-index test` and `pnpm --filter @runforge/decision-index typecheck`
+  - `pnpm --filter @runforge/sanitizer-redaction test` and `pnpm --filter @runforge/sanitizer-redaction typecheck`
+  - `pnpm --filter @runforge/daemon test` and `pnpm --filter @runforge/daemon typecheck`
+  - drizzle gen (after schema): `pnpm --filter @runforge/decision-index exec drizzle-kit generate`
 - **Line numbers:** all references below say "grep for X" — resolve dynamically, never hardcode.
 
 > **Sequencing rule:** the canonical L3 (`STACK-AC-DECISION-ESCALATION-STORE`) + `traceability.yml`
@@ -33,9 +33,9 @@
   `postgres`; add `@electric-sql/pglite` devDep.
 - `packages/decision-index/drizzle.config.ts`: `dialect: "sqlite"` → `dialect: "postgresql"`;
   `out: "./src/migrations"` → `out: "./drizzle"` (mirror `packages/db`); add
-  `dbCredentials: { url: process.env.AUTO_CLAUDE_DATABASE_URL! }`.
+  `dbCredentials: { url: process.env.RUNFORGE_DATABASE_URL! }`.
 - `pnpm install` from repo root.
-- **Verify:** `pnpm --filter @auto-claude/decision-index typecheck` (will fail on schema/db until
+- **Verify:** `pnpm --filter @runforge/decision-index typecheck` (will fail on schema/db until
   later tasks — expected; just confirm deps resolve / install succeeds).
 
 ### Task 2 — port schema to `pg-core` under a dedicated `decision_index` schema
@@ -53,7 +53,7 @@
   `decision_index` pgSchema (one physical table, two drizzle defs, as today).
 - **Test:** `packages/decision-index/test/schema-shape.test.ts` (new) — assert every table is
   exported and the boolean/identity columns have the right drizzle column type. Run
-  `pnpm --filter @auto-claude/decision-index typecheck`.
+  `pnpm --filter @runforge/decision-index typecheck`.
 
 ### Task 3 — generate the Postgres migration SQL + production migrator
 
@@ -63,7 +63,7 @@
 > the SAME generated SQL via the PGlite path. The migrate TEST moves to Task 4 (after the harness
 > exists), so nothing here depends on a not-yet-built helper.
 
-- Generate: `pnpm --filter @auto-claude/decision-index exec drizzle-kit generate` → produces
+- Generate: `pnpm --filter @runforge/decision-index exec drizzle-kit generate` → produces
   `packages/decision-index/drizzle/0000_init.sql` + `meta/`. **Hand-edit** the generated SQL to
   prepend `CREATE SCHEMA IF NOT EXISTS decision_index;` if drizzle-kit did not emit it for the
   `pgSchema`. Delete the old `packages/decision-index/src/migrations/` dir (the 6 sqlite migrations).
@@ -72,7 +72,7 @@
   'drizzle-orm/postgres-js/migrator'`; export `async function migrate(db: PostgresJsDatabase,
   migrationsFolder = <resolve ../drizzle>)` calling `pgMigrate(db, { migrationsFolder,
   migrationsSchema: 'decision_index' })`.
-- **Verify:** `pnpm --filter @auto-claude/decision-index typecheck` compiles `migrate.ts` (no DB run
+- **Verify:** `pnpm --filter @runforge/decision-index typecheck` compiles `migrate.ts` (no DB run
   needed here).
 
 ### Task 4 — PGlite test harness (applies the SAME generated SQL) + migrate test
@@ -88,7 +88,7 @@
 - **Test:** `packages/decision-index/test/migrate.test.ts` — `makePgliteDb()` then assert the
   `decision_index` tables exist (`SELECT … information_schema.tables WHERE
   table_schema='decision_index'`) + a trivial insert/select round-trips. Run
-  `pnpm --filter @auto-claude/decision-index test test/migrate.test.ts`.
+  `pnpm --filter @runforge/decision-index test test/migrate.test.ts`.
 
 ### Task 5 — connection layer + re-entrant guarded `withTx` (the heart)
 
@@ -99,7 +99,7 @@ This is the highest-risk task; give it its own tests.
   - `openDb(opts)` → opens the **writer** connection: `postgres(url, { max:1, idle_timeout:0,
     max_lifetime:0 })`, drizzle over it, run boot fast-fail (spec §3.4 layer 1: `pg_try_advisory_lock(K)`
     then immediate `pg_advisory_unlock(K)`; throw if false), return `{ db, sql }` (need the raw `sql`
-    to `end()` on close). `K = hashtext('auto-claude:decision-index:writer')` — compute once.
+    to `end()` on close). `K = hashtext('runforge:decision-index:writer')` — compute once.
   - `openReadOnlyDb(opts)` → read-only pool: `postgres(url, { connection: {
     default_transaction_read_only: 'on' } })`, drizzle over it.
   - Re-entrant guarded `withTx` (spec §3.5 + §3.4 layer 2): an
@@ -196,7 +196,7 @@ Order: leaves first (no inter-module await surprises). For EACH, convert sync dr
   (`phases.ts:200 sanitizeDecisionRequest`, already `async`) awaits sanitizer results.
 - **Tests:** `packages/sanitizer-redaction/**/*.test.ts` → `await`; ADD a withholding integration
   test over PGlite: `put` → reuse-on-identical-value → fresh-mint-on-edit. Run
-  `pnpm --filter @auto-claude/sanitizer-redaction test`.
+  `pnpm --filter @runforge/sanitizer-redaction test`.
 
 ---
 
@@ -212,10 +212,10 @@ Order: leaves first (no inter-module await surprises). For EACH, convert sync dr
   `init()` may switch the dynamic import to a STATIC import now (native dep gone) — but keep the
   try/catch `#broken` for Postgres-unreachable. `close()` → `await this.#writer?.close()`.
 - `config.ts`: implement the STORE migration parts of spec §3.8 + §4 — **keep
-  `AUTO_CLAUDE_DECISION_INDEX_ENABLED` default-OFF for now** (the default-ON flip is operator-gated:
-  Task 11b / spec §9). Replace `dbPath` (sqlite) with the Postgres `AUTO_CLAUDE_DATABASE_URL`
+  `RUNFORGE_DECISION_INDEX_ENABLED` default-OFF for now** (the default-ON flip is operator-gated:
+  Task 11b / spec §9). Replace `dbPath` (sqlite) with the Postgres `RUNFORGE_DATABASE_URL`
   plumbing; keep `protectedDir`/`protectedKey`. Add the **file-existence-only** cutover preflight
-  (`fs.existsSync(legacySqlitePath)` + `AUTO_CLAUDE_DECISION_INDEX_CUTOVER_ACK` ⇒ abort boot with the
+  (`fs.existsSync(legacySqlitePath)` + `RUNFORGE_DECISION_INDEX_CUTOVER_ACK` ⇒ abort boot with the
   actionable error if the file is present and no ack; **never open the sqlite file**). This task is
   mergeable independently with the default OFF (per spec §9 "store migration mergeable with
   default-OFF").
@@ -232,7 +232,7 @@ Order: leaves first (no inter-module await surprises). For EACH, convert sync dr
   integration tests — update fakes to async ledger + PGlite-backed manager (inject `importer`/db).
   Add a `manager` test: `isAvailable()` false when `#broken`; an integrate-phase test: unavailable
   index at escalate/hold returns `'failure'` (visible), not `'success'`. Run
-  `pnpm --filter @auto-claude/daemon test`.
+  `pnpm --filter @runforge/daemon test`.
 
 ### Task 11b — OPERATOR-GATED: flip the default to ON (opt-out) — closes gap #2 surfacing
 
@@ -240,18 +240,18 @@ Order: leaves first (no inter-module await surprises). For EACH, convert sync dr
 > (Tasks 1-11) is the store migration and is mergeable with the flag default-OFF. This task is the
 > behavior change that actually makes escalations always-surface.
 
-- `config.ts`: flip `AUTO_CLAUDE_DECISION_INDEX_ENABLED` to default-ON opt-OUT — the index
-  initializes whenever `AUTO_CLAUDE_DATABASE_URL` is set; `=false` is the explicit opt-out escape
+- `config.ts`: flip `RUNFORGE_DECISION_INDEX_ENABLED` to default-ON opt-OUT — the index
+  initializes whenever `RUNFORGE_DATABASE_URL` is set; `=false` is the explicit opt-out escape
   hatch (spec §3.8). (The static-import switch already landed in Task 11 — native dep is gone after
   Tasks 1-10, independent of this flag.)
 - **Test:** a config test asserting unset ⇒ enabled, `=false` ⇒ disabled; an integration test that
   an escalate/hold verdict on a fresh (DB-configured) deployment surfaces a DecisionRequest by
-  default. Run `pnpm --filter @auto-claude/daemon test`.
+  default. Run `pnpm --filter @runforge/daemon test`.
 
 ### Task 12 — REQUIRED real-Postgres integration test + CI service + (optional) legacy export tool
 
 - `packages/decision-index/test/integration/cross-process-writer.pg.test.ts` (new, spec §5):
-  `describe.skip` unless `AUTO_CLAUDE_TEST_DATABASE_URL`. Cases: (1) construct writer while `K`
+  `describe.skip` unless `RUNFORGE_TEST_DATABASE_URL`. Cases: (1) construct writer while `K`
   free, then a SECOND `postgres` session `pg_advisory_lock(K)` and assert EVERY public mutator
   throws; (2) boot fast-fail throws when a second session holds `K` at construction; (3) read-only
   session rejects a write.
@@ -259,14 +259,14 @@ Order: leaves first (no inter-module await surprises). For EACH, convert sync dr
   "unique schema per run" is NOT possible without making the name configurable. Instead run this
   suite **serially** (`vitest` `--no-file-parallelism` or a dedicated config) and
   `DROP SCHEMA IF EXISTS decision_index CASCADE` in `beforeAll`, then migrate fresh. (Alternatively
-  point `AUTO_CLAUDE_TEST_DATABASE_URL` at a throwaway *database*.)
+  point `RUNFORGE_TEST_DATABASE_URL` at a throwaway *database*.)
 - **CI (codex Important — concrete):** the repo has ONE workflow `.github/workflows/ci.yml` (single
   `ci` job, `runs-on: self-hosted`, steps `pnpm typecheck` / `pnpm test` / `pnpm build`). Add a
   `services: postgres:` block (`image: postgres:18-alpine`, `POSTGRES_DB/USER/PASSWORD` env, a
   `pg_isready` health check) to that job. **The job runs directly on `self-hosted` (NOT inside a job
   container), so the service container must publish the port** — add `ports: ["5432:5432"]` (or read
   the runner-assigned `job.services.postgres.ports['5432']` into the URL) so `localhost:5432` is
-  reachable. Set `AUTO_CLAUDE_TEST_DATABASE_URL` + `AUTO_CLAUDE_DATABASE_URL`
+  reachable. Set `RUNFORGE_TEST_DATABASE_URL` + `RUNFORGE_DATABASE_URL`
   (`postgres://<user>:<pass>@localhost:5432/<db>`) env on the `Test` step so the integration suite is
   REQUIRED (not skipped). NOTE: the runner is self-hosted (known shared-resource contention) — keep
   the real-PG suite serial, and ensure a unique DB or `DROP SCHEMA` so concurrent CI runs don't
@@ -277,8 +277,8 @@ Order: leaves first (no inter-module await surprises). For EACH, convert sync dr
 - **Verify (local):** compose requires the `POSTGRES_*` vars (they are `:?`-mandatory in
   `docker-compose.yml`), so:
   `POSTGRES_DB=ac POSTGRES_USER=ac POSTGRES_PASSWORD=ac docker compose up -d postgres` then
-  `AUTO_CLAUDE_TEST_DATABASE_URL=postgres://ac:ac@localhost:5432/ac
-  AUTO_CLAUDE_DATABASE_URL=postgres://ac:ac@localhost:5432/ac pnpm --filter @auto-claude/decision-index test`
+  `RUNFORGE_TEST_DATABASE_URL=postgres://ac:ac@localhost:5432/ac
+  RUNFORGE_DATABASE_URL=postgres://ac:ac@localhost:5432/ac pnpm --filter @runforge/decision-index test`
   → the integration suite passes.
 
 ### Task 13 — L3 spec + traceability (FINAL, atomic with code)
@@ -293,10 +293,10 @@ Order: leaves first (no inter-module await surprises). For EACH, convert sync dr
   `packages/sanitizer-redaction/**/*.test.ts`.
 - Update `.specify/traceability.yml` `STACK-AC-DECISION-ESCALATION-STORE` entry (grep the node) with
   the same `code_paths`/`test_paths` additions.
-- Update `.specify/traceability.yml` env/path notes if `AUTO_CLAUDE_DECISION_INDEX_PATH` semantics
+- Update `.specify/traceability.yml` env/path notes if `RUNFORGE_DECISION_INDEX_PATH` semantics
   changed.
 - **Verify (codex Important — exact validator):** the traceability validator is the daemon test
-  `pnpm --filter @auto-claude/daemon exec vitest run src/infra/traceability-paths.test.ts`
+  `pnpm --filter @runforge/daemon exec vitest run src/infra/traceability-paths.test.ts`
   (`packages/daemon/src/infra/traceability-paths.test.ts` — checks path existence + parent/child
   reciprocity). There is NO root `spec` script. Run that; confirm all `code_paths` point at files
   that now exist.
@@ -305,17 +305,17 @@ Order: leaves first (no inter-module await surprises). For EACH, convert sync dr
 
 ## Final verification (before commit on the implementation branch)
 
-1. `pnpm --filter @auto-claude/decision-index test`
-   then `pnpm --filter @auto-claude/decision-index typecheck`
-2. `pnpm --filter @auto-claude/sanitizer-redaction test`
-   then `pnpm --filter @auto-claude/sanitizer-redaction typecheck`
-3. `pnpm --filter @auto-claude/daemon test`
-   then `pnpm --filter @auto-claude/daemon typecheck`
-4. With Postgres up + `AUTO_CLAUDE_TEST_DATABASE_URL` (see Task 12 local-verify): the real-PG
+1. `pnpm --filter @runforge/decision-index test`
+   then `pnpm --filter @runforge/decision-index typecheck`
+2. `pnpm --filter @runforge/sanitizer-redaction test`
+   then `pnpm --filter @runforge/sanitizer-redaction typecheck`
+3. `pnpm --filter @runforge/daemon test`
+   then `pnpm --filter @runforge/daemon typecheck`
+4. With Postgres up + `RUNFORGE_TEST_DATABASE_URL` (see Task 12 local-verify): the real-PG
    integration suite passes.
 5. `pnpm typecheck` (root `pnpm -r typecheck`) — catch un-awaited `Promise<T>` leaks across packages
    (the most likely residual bug class).
-6. `pnpm --filter @auto-claude/daemon exec vitest run src/infra/traceability-paths.test.ts` (Task 13
+6. `pnpm --filter @runforge/daemon exec vitest run src/infra/traceability-paths.test.ts` (Task 13
    validator) passes.
 7. Confirm no `better-sqlite3` import remains on any RUNTIME path:
    `grep -rn "better-sqlite3" packages/*/src` should hit only the optional Task-12 export tool.

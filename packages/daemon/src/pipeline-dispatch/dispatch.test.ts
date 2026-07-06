@@ -10,7 +10,7 @@ import { SessionError } from '../session-runtime/session-error.js';
 function makeRequest(overrides?: Partial<DispatchRequest>): DispatchRequest {
   return {
     sessionType: 'implementation',
-    context: { issueNumber: 42, repo: 'DANIELSOCRAHANDLEZZ/auto-claude' },
+    context: { issueNumber: 42, repo: 'DANIELSOCRAHANDLEZZ/runforge' },
     baseBranch: 'dev',
     ...overrides,
   };

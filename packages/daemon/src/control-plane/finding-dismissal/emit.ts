@@ -19,7 +19,7 @@
  * raised-but-not-surfaced (`detected`) row runs the raise/publish/notify; an
  * already-`notified`/answered/terminal row is skipped.
  */
-import type { DecisionRequest } from '@auto-claude/decision-protocol';
+import type { DecisionRequest } from '@runforge/decision-protocol';
 import type { ReviewCategory } from '../../coordination/review-scheduler.js';
 import type { OctokitLike as PublisherOctokit } from '../decision-escalation/github-block-notifier.js';
 import {

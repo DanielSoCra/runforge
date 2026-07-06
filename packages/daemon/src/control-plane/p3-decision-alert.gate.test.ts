@@ -1,7 +1,7 @@
 // G3: gates decision-raised operator alerts on applied notify transitions only.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Octokit } from '@octokit/rest';
-import type { DecisionRequest } from '@auto-claude/decision-protocol';
+import type { DecisionRequest } from '@runforge/decision-protocol';
 import type { Config } from '../config.js';
 import type { ImplementationCoordinator } from '../implementation/coordinator.js';
 import type { SessionRuntime } from '../session-runtime/runtime.js';

@@ -1,4 +1,4 @@
-import type { RiskClass } from "@auto-claude/decision-protocol";
+import type { RiskClass } from "@runforge/decision-protocol";
 
 export interface PriorityItem {
   decision_id: string;

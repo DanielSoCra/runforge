@@ -8,7 +8,7 @@
 ### Task A1 — Dashboard RC-3 floor
 - **File:** `packages/dashboard/vitest.config.ts`
 - Add `testTimeout: 30_000` and `hookTimeout: 30_000` inside `test: { … }`, with an RC-3 comment referencing `daemon/vitest.config.ts` and the guard.
-- **Verify:** `pnpm --filter @auto-claude/dashboard test` green.
+- **Verify:** `pnpm --filter @runforge/dashboard test` green.
 
 ### Task A2 — Generalize the RC-3 guard (TDD; codex-hardened)
 - **File:** `packages/daemon/src/test-hygiene.test.ts`
@@ -18,10 +18,10 @@
 - Add `packageDirOf(testFilePath)` — nearest ancestor under `packages/` containing a `vitest.config.ts`.
 - Replace the daemon-only precise-eval `it(...)` with a general one: scan all test files; collect flagged package dirs; assert the set is non-empty and ⊇ {`daemon`,`dashboard`} (non-vacuous). For each flagged package: dynamic-import its `vitest.config.ts` → effective `test` → `findTimeoutHardeningViolations`. **On import/eval throw → push a hard violation (fail-closed), NO textual fallback** (finding 2). Aggregate; expect `[]`.
 - Keep RC-1/RC-2 checks + their self-tests intact.
-- **Verify:** `pnpm --filter @auto-claude/daemon test -- test-hygiene` green; new self-tests fire (not no-ops); confirm the flagged set is exactly {daemon, dashboard} today.
+- **Verify:** `pnpm --filter @runforge/daemon test -- test-hygiene` green; new self-tests fire (not no-ops); confirm the flagged set is exactly {daemon, dashboard} today.
 
 ### Task A3 — PR-A verification gate
-- `pnpm --filter @auto-claude/dashboard test` + `pnpm --filter @auto-claude/daemon test` green.
+- `pnpm --filter @runforge/dashboard test` + `pnpm --filter @runforge/daemon test` green.
 - 4× concurrent daemon oracle green.
 - codex-on-diff (`main..HEAD`) → CLEAN (focus: detector false-negatives, cross-package eval safety, textual-fallback strength).
 

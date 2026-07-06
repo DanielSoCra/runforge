@@ -85,7 +85,7 @@ Frontmatter:
 ---
 id: FUNC-AC-PRODUCT-OWNER
 type: functional
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 1
@@ -323,7 +323,7 @@ Frontmatter:
 ---
 id: FUNC-AC-TECH-LEAD
 type: functional
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 1
@@ -760,7 +760,7 @@ git commit -m "spec: add FUNC-AC-PRODUCT-OWNER and FUNC-AC-TECH-LEAD to traceabi
 - [ ] **Step 1: Create FUNC-AC-PRODUCT-OWNER pipeline issue**
 
 ```bash
-gh issue create --repo DANIELSOCRAHANDLEZZ/auto-claude \
+gh issue create --repo DANIELSOCRAHANDLEZZ/runforge \
   --title "FUNC-AC-PRODUCT-OWNER: Product Owner agent L1 spec ready for L2 generation" \
   --body "$(cat <<'EOF'
 ## Spec Reference
@@ -780,7 +780,7 @@ EOF
 - [ ] **Step 2: Create FUNC-AC-TECH-LEAD pipeline issue**
 
 ```bash
-gh issue create --repo DANIELSOCRAHANDLEZZ/auto-claude \
+gh issue create --repo DANIELSOCRAHANDLEZZ/runforge \
   --title "FUNC-AC-TECH-LEAD: Tech Lead agent L1 spec ready for L2 generation" \
   --body "$(cat <<'EOF'
 ## Spec Reference
@@ -800,7 +800,7 @@ EOF
 - [ ] **Step 3: Create coordination update pipeline issue**
 
 ```bash
-gh issue create --repo DANIELSOCRAHANDLEZZ/auto-claude \
+gh issue create --repo DANIELSOCRAHANDLEZZ/runforge \
   --title "FUNC-AC-COORDINATION v3: Narrowed scope + LLM-augmented decision points" \
   --body "$(cat <<'EOF'
 ## Spec Reference
@@ -820,7 +820,7 @@ EOF
 - [ ] **Step 4: Create quality update pipeline issue**
 
 ```bash
-gh issue create --repo DANIELSOCRAHANDLEZZ/auto-claude \
+gh issue create --repo DANIELSOCRAHANDLEZZ/runforge \
   --title "FUNC-AC-QUALITY v3: QA agent vs proactive review agent distinction" \
   --body "$(cat <<'EOF'
 ## Spec Reference
@@ -840,7 +840,7 @@ EOF
 - [ ] **Step 5: Create learning update pipeline issue**
 
 ```bash
-gh issue create --repo DANIELSOCRAHANDLEZZ/auto-claude \
+gh issue create --repo DANIELSOCRAHANDLEZZ/runforge \
   --title "FUNC-AC-LEARNING v3: Retrospective/prospective learning scenarios" \
   --body "$(cat <<'EOF'
 ## Spec Reference
@@ -860,7 +860,7 @@ EOF
 - [ ] **Step 6: Verify issues created**
 
 ```bash
-gh issue list --repo DANIELSOCRAHANDLEZZ/auto-claude --label "feature-pipeline" --label "l1-approved" --state open
+gh issue list --repo DANIELSOCRAHANDLEZZ/runforge --label "feature-pipeline" --label "l1-approved" --state open
 ```
 
 Verify all 5 issues appear.

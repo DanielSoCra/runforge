@@ -3,14 +3,14 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.autoclaude.developer</string>
+  <string>com.runforge.developer</string>
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>~/code/auto-claude/scripts/developer.sh</string>
+    <string>~/code/runforge/scripts/developer.sh</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>~/code/auto-claude</string>
+  <string>~/code/runforge</string>
   <key>KeepAlive</key>
   <true/>
   <key>ThrottleInterval</key>

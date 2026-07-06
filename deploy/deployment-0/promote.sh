@@ -3,14 +3,15 @@
 # This is the documented "operator-gated restart" self-update path.
 set -euo pipefail
 
-OPS=~/code/auto-claude-ops
-RUNTIME=~/code/auto-claude-runtime
-ENV_MAC=~/code/auto-claude/.env.mac
+OPS=~/code/runforge-ops
+RUNTIME=~/code/runforge-runtime
+ENV_MAC=~/code/runforge/.env.mac
 LOG_DIR="$OPS/logs"
-DAEMON_PLIST_SRC="$OPS/com.autoclaude.daemon0.plist"
-DAEMON_PLIST_DST="$HOME/Library/LaunchAgents/com.autoclaude.daemon0.plist"
-HEALTH_PLIST_SRC="$OPS/com.autoclaude.health0.plist"
-HEALTH_PLIST_DST="$HOME/Library/LaunchAgents/com.autoclaude.health0.plist"
+DAEMON_PLIST_SRC="$OPS/com.runforge.daemon0.plist"
+DAEMON_PLIST_DST="$HOME/Library/LaunchAgents/com.runforge.daemon0.plist"
+HEALTH_PLIST_SRC="$OPS/com.runforge.health0.plist"
+HEALTH_PLIST_DST="$HOME/Library/LaunchAgents/com.runforge.health0.plist"
+[ -d "$RUNTIME" ] || { echo "ERROR: $RUNTIME missing — run the one-time cutover in deploy/deployment-0/README.md first." >&2; exit 1; }
 OLD_REV="$(git -C "$RUNTIME" rev-parse HEAD)"
 DAEMON_STOPPED=0
 DB_BACKUP=""
@@ -21,7 +22,7 @@ set -a
 # shellcheck disable=SC1090
 source "$ENV_MAC"
 set +a
-export AUTO_CLAUDE_DATABASE_URL="postgres://autoclaude:${POSTGRES_PASSWORD}@127.0.0.1:45432/autoclaude_prod0"
+export RUNFORGE_DATABASE_URL="postgres://runforge:${POSTGRES_PASSWORD}@127.0.0.1:45432/runforge_prod0"
 
 start_supervision() {
   cp "$DAEMON_PLIST_SRC" "$DAEMON_PLIST_DST"
@@ -52,7 +53,7 @@ rollback_on_failure() {
   launchctl unload "$HEALTH_PLIST_DST" 2>/dev/null || true
   launchctl unload "$DAEMON_PLIST_DST" 2>/dev/null || true
   if [ -n "$DB_BACKUP" ]; then
-    if ! pg_restore --clean --if-exists --no-owner --dbname "$AUTO_CLAUDE_DATABASE_URL" "$DB_BACKUP"; then
+    if ! pg_restore --clean --if-exists --no-owner --dbname "$RUNFORGE_DATABASE_URL" "$DB_BACKUP"; then
       echo "[promote] DB restore failed; leaving supervision stopped for manual recovery from $DB_BACKUP" >&2
       return "$status"
     fi
@@ -104,16 +105,16 @@ clean_runtime_source
 (cd "$RUNTIME" && pnpm install --frozen-lockfile --prefer-offline | tail -1)
 git -C "$RUNTIME" log --oneline -1
 
-DB_BACKUP="$(mktemp -t auto-claude-prod0-backup.XXXXXX.dump)"
+DB_BACKUP="$(mktemp -t runforge-prod0-backup.XXXXXX.dump)"
 echo "[promote] backing up quiesced prod0 database..."
-if ! pg_dump --format=custom --file "$DB_BACKUP" "$AUTO_CLAUDE_DATABASE_URL"; then
+if ! pg_dump --format=custom --file "$DB_BACKUP" "$RUNFORGE_DATABASE_URL"; then
   rm -f "$DB_BACKUP"
   DB_BACKUP=""
   exit 1
 fi
 
 echo "[promote] applying database migrations..."
-(cd "$RUNTIME" && pnpm --filter @auto-claude/db run db:migrate)
+(cd "$RUNTIME" && pnpm --filter @runforge/db run db:migrate)
 
 echo "[promote] starting under launchd..."
 start_supervision

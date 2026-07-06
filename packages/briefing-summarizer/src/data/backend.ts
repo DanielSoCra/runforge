@@ -5,7 +5,7 @@ export type BriefingDataBackendKind = 'postgres';
 
 export interface BriefingBackendEnv {
   BRIEFING_DATA_BACKEND?: string;
-  AUTO_CLAUDE_DATABASE_URL?: string;
+  RUNFORGE_DATABASE_URL?: string;
 }
 
 export function readBriefingDataBackendKind(
@@ -24,8 +24,8 @@ export function validateBriefingDataBackendEnv(
   const missing: string[] = [];
 
   readBriefingDataBackendKind(env);
-  if (!env.AUTO_CLAUDE_DATABASE_URL) {
-    missing.push('AUTO_CLAUDE_DATABASE_URL');
+  if (!env.RUNFORGE_DATABASE_URL) {
+    missing.push('RUNFORGE_DATABASE_URL');
   }
 
   if (missing.length > 0) {
@@ -39,5 +39,5 @@ export function createBriefingDataBackend(
   env: BriefingBackendEnv = process.env,
 ): BriefingDataBackend {
   readBriefingDataBackendKind(env);
-  return createPostgresBriefingBackend(env.AUTO_CLAUDE_DATABASE_URL);
+  return createPostgresBriefingBackend(env.RUNFORGE_DATABASE_URL);
 }

@@ -1,7 +1,7 @@
 ---
 id: FUNC-AC-TECH-LEAD
 type: functional
-domain: auto-claude
+domain: runforge
 status: draft
 version: 2
 layer: 1

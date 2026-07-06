@@ -44,7 +44,7 @@ describe('normalizeError', () => {
   });
 
   it('strips intermediate path segments (keeps basename)', () => {
-    const error = 'Cannot find /home/user/projects/auto-claude/foo.ts module';
+    const error = 'Cannot find /home/user/projects/runforge/foo.ts module';
     const normalized = normalizeError(error);
     expect(normalized).toContain('.../');
   });

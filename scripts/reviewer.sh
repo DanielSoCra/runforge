@@ -1,6 +1,6 @@
 #!/bin/bash
 # DEPRECATED: Migrated to daemon control plane. See docs/running.md
-cd ~/code/auto-claude
+cd ~/code/runforge
 FAIL_COUNT=0
 MAX_BACKOFF=3600
 
@@ -24,17 +24,17 @@ while true; do
   fi
 
   # Count existing issues before this cycle
-  BEFORE_COUNT=$(gh issue list --repo DANIELSOCRAHANDLEZZ/auto-claude --label "review-finding" --state open --json number --jq 'length' 2>/dev/null || echo 0)
+  BEFORE_COUNT=$(gh issue list --repo DANIELSOCRAHANDLEZZ/runforge --label "review-finding" --state open --json number --jq 'length' 2>/dev/null || echo 0)
 
   if claude --dangerously-skip-permissions -p --max-budget-usd 5 "Use the verified-codebase-review skill. Review this repo. Use gh CLI to check existing review-finding issues and determine which category area is stalest. Two-phase discovery+verification with judge filter. HIGH confidence findings: create GitHub issue with review-finding + priority + category labels. MEDIUM: create with unverified label. Discard LOW. IMPORTANT: Maximum 5 new issues per cycle. If you have more than 5 findings after the judge phase, keep only the top 5 by severity. Also spot-check open issues and close any that have been fixed on dev."; then
 
     # Count issues after cycle
-    AFTER_COUNT=$(gh issue list --repo DANIELSOCRAHANDLEZZ/auto-claude --label "review-finding" --state open --json number --jq 'length' 2>/dev/null || echo 0)
+    AFTER_COUNT=$(gh issue list --repo DANIELSOCRAHANDLEZZ/runforge --label "review-finding" --state open --json number --jq 'length' 2>/dev/null || echo 0)
     NEW_ISSUES=$((AFTER_COUNT - BEFORE_COUNT))
 
     # Signal ratio (guard against division by zero)
-    VERIFIED=$(gh issue list --repo DANIELSOCRAHANDLEZZ/auto-claude --label "review-finding,verified" --state closed --json number --jq 'length' 2>/dev/null || echo 0)
-    TOTAL_CLOSED=$(gh issue list --repo DANIELSOCRAHANDLEZZ/auto-claude --label "review-finding" --state closed --json number --jq 'length' 2>/dev/null || echo 0)
+    VERIFIED=$(gh issue list --repo DANIELSOCRAHANDLEZZ/runforge --label "review-finding,verified" --state closed --json number --jq 'length' 2>/dev/null || echo 0)
+    TOTAL_CLOSED=$(gh issue list --repo DANIELSOCRAHANDLEZZ/runforge --label "review-finding" --state closed --json number --jq 'length' 2>/dev/null || echo 0)
     [ "$TOTAL_CLOSED" -eq 0 ] && TOTAL_CLOSED=1
     RATIO=$(( VERIFIED * 100 / TOTAL_CLOSED ))
 

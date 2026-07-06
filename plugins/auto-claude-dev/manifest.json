@@ -1,7 +1,0 @@
-{
-  "id": "auto-claude-dev",
-  "name": "Auto-Claude Dev",
-  "version": "1.0.0",
-  "description": "Skills and agents for developing the auto-claude daemon: spec-driven development, FSM patterns, traceability workflow.",
-  "tags": ["typescript", "daemon", "spec-driven", "fsm"]
-}

@@ -54,7 +54,7 @@ STACK-AC-KNOWLEDGE:
       fixAttempts: [],
       errorHashes: {},
       repoOwner: 'DANIELSOCRAHANDLEZZ',
-      repoName: 'auto-claude',
+      repoName: 'runforge',
       startedAt: '2026-04-24T00:00:00Z',
       updatedAt: '2026-04-24T01:00:00Z',
     }));
@@ -71,14 +71,14 @@ STACK-AC-KNOWLEDGE:
       fixAttempts: [],
       errorHashes: {},
       repoOwner: 'DANIELSOCRAHANDLEZZ',
-      repoName: 'auto-claude',
+      repoName: 'runforge',
       startedAt: '2026-04-24T00:00:00Z',
       updatedAt: '2026-04-24T01:00:00Z',
     }));
 
     const github = {
       owner: 'DANIELSOCRAHANDLEZZ',
-      repo: 'auto-claude',
+      repo: 'runforge',
       issues: {
         listForRepo: vi.fn(async ({ labels }: { labels?: string }) => ({
           data: labels === 'review-finding,tl-approved'
@@ -151,7 +151,7 @@ STACK-AC-KNOWLEDGE:
     const snapshot = JSON.parse(variables['signal_snapshot']!);
     expect(snapshot.specPipeline).toHaveLength(1);
     expect(snapshot.deliverySummary).toEqual([
-      { repo: 'DANIELSOCRAHANDLEZZ/auto-claude', passRate: 0.5, completionCount: 1 },
+      { repo: 'DANIELSOCRAHANDLEZZ/runforge', passRate: 0.5, completionCount: 1 },
     ]);
     expect(snapshot.backlog[0]).toMatchObject({ issueNumber: 8, isStale: true });
     expect(snapshot.activeProposals[0]).toMatchObject({ title: 'Active proposal' });

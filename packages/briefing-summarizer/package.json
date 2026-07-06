@@ -1,5 +1,5 @@
 {
-  "name": "@auto-claude/briefing-summarizer",
+  "name": "@runforge/briefing-summarizer",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@auto-claude/db": "workspace:*",
+    "@runforge/db": "workspace:*",
     "@anthropic-ai/sdk": "^0.52.0"
   },
   "devDependencies": {

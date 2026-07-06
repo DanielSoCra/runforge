@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, eq, ne } from "drizzle-orm";
 import AjvModule, { type ValidateFunction } from "ajv";
-import { TERMINAL_STATUSES } from "@auto-claude/decision-protocol";
+import { TERMINAL_STATUSES } from "@runforge/decision-protocol";
 
 // ajv 8 ships a CJS `module.exports = Ajv` plus a `.default`; under NodeNext the
 // default import resolves to the namespace, so unwrap `.default` (the actual
@@ -9,7 +9,7 @@ import { TERMINAL_STATUSES } from "@auto-claude/decision-protocol";
 type AjvCtor = typeof AjvModule.default;
 const Ajv: AjvCtor =
   (AjvModule as unknown as { default?: AjvCtor }).default ?? (AjvModule as unknown as AjvCtor);
-import type { TransitionEvent, ItemStatus, EffectKind } from "@auto-claude/decision-protocol";
+import type { TransitionEvent, ItemStatus, EffectKind } from "@runforge/decision-protocol";
 import type { Db } from "./db.js";
 import { withTx } from "./db.js";
 import { decisions, decisionResponses, appliedTransitions, outbox } from "./schema.js";

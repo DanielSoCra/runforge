@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createAutoClaudeToolHandlers } from './ac.js';
+import { createRunforgeToolHandlers } from './ac.js';
 
-describe('auto-claude tool handlers', () => {
+describe('runforge tool handlers', () => {
   it('reads daemon status through the control-plane HTTP API', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
-    const handlers = createAutoClaudeToolHandlers({
+    const handlers = createRunforgeToolHandlers({
       baseUrl: 'http://127.0.0.1:3847',
       fetch: async (url, init) => {
         requests.push({ url: String(url), init });
@@ -20,7 +20,7 @@ describe('auto-claude tool handlers', () => {
 
   it('sends X-Requested-By on mutating daemon calls', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
-    const handlers = createAutoClaudeToolHandlers({
+    const handlers = createRunforgeToolHandlers({
       baseUrl: 'http://daemon',
       requestedBy: 'concierge-test',
       fetch: async (url, init) => {
@@ -41,12 +41,12 @@ describe('auto-claude tool handlers', () => {
   });
 
   it('throws readable errors for non-2xx daemon responses', async () => {
-    const handlers = createAutoClaudeToolHandlers({
+    const handlers = createRunforgeToolHandlers({
       baseUrl: 'http://daemon',
       fetch: async () => new Response(JSON.stringify({ error: 'missing issue' }), { status: 404 }),
     });
 
     await expect(handlers.ac_run({ issue: 999 }, { conversationId: 'c1', toolCallId: 't1' }))
-      .rejects.toThrow(/auto-claude request failed 404: missing issue/);
+      .rejects.toThrow(/runforge request failed 404: missing issue/);
   });
 });

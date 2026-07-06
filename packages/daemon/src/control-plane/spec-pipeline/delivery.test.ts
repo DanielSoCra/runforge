@@ -210,7 +210,7 @@ describe('deliverPhaseArtifact', () => {
         head: 'spec/l2/42',
         title: 'L2 spec for #42: Build spec delivery',
         body: expect.stringContaining(
-          '<!-- auto-claude-proposal-key: owner/repo#42:l2-design:staging -->',
+          '<!-- runforge-proposal-key: owner/repo#42:l2-design:staging -->',
         ),
       }),
     );
@@ -235,7 +235,7 @@ describe('deliverPhaseArtifact', () => {
         html_url: 'https://github.example/pull/99',
         state: 'open',
         merged: false,
-        body: `<!-- auto-claude-proposal-key: ${proposalKey} -->`,
+        body: `<!-- runforge-proposal-key: ${proposalKey} -->`,
         head: { ref: 'spec/l3/42' },
         base: { ref: 'staging' },
       },
@@ -267,7 +267,7 @@ describe('deliverPhaseArtifact', () => {
         html_url: 'https://github.example/pull/77',
         state: 'open',
         merged: false,
-        body: `<!-- auto-claude-proposal-key: ${proposalKey} -->`,
+        body: `<!-- runforge-proposal-key: ${proposalKey} -->`,
         head: { ref: 'spec/l2/42' },
         base: { ref: 'staging' },
       },

@@ -43,7 +43,7 @@ describe('Postgres briefing backend', () => {
           id: 'run-1',
           repoId: 'repo-1',
           repoOwner: 'DANIELSOCRAHANDLEZZ',
-          repoName: 'auto-claude',
+          repoName: 'runforge',
           issueNumber: 626,
           issueTitle: 'Migrate data platform',
           pipelineVariant: 'standard',

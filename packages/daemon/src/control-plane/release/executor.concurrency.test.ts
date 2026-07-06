@@ -16,14 +16,14 @@
 //      `released` and forge a live marker from the proposal target.)
 
 import { describe, it, expect, vi } from "vitest";
-import type { DecisionRequest } from "@auto-claude/decision-protocol";
+import type { DecisionRequest } from "@runforge/decision-protocol";
 import type {
   AppendReleaseEvent,
   ReleaseEventRow,
   ReleaseLedgerReader,
   ReleaseLedgerWriter,
   ReleaseOutcome,
-} from "@auto-claude/release-ledger";
+} from "@runforge/release-ledger";
 import { createReleaseLane, type ReleaseLaneDeps } from "./executor.js";
 
 const DEPLOY = "acme/widgets";

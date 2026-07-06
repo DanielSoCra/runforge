@@ -71,7 +71,7 @@ export async function integrateToStaging(
 
     // 4. Push the staging branch to origin so the autonomous loop's output is
     // visible to the Operator without manual intervention. Per L0-AC-VISION
-    // (the auto-claude subsystem L0; product-level vision lives at
+    // (the runforge subsystem L0; product-level vision lives at
     // L0-CONCIERGE-VISION) and FUNC-AC-PIPELINE: pre-production delivery is
     // autonomous; only production releases need Operator approval. A push failure does NOT
     // fail the integration — the local merge already happened and is

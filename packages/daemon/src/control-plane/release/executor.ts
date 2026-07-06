@@ -1,4 +1,4 @@
-import type { DecisionRequest } from "@auto-claude/decision-protocol";
+import type { DecisionRequest } from "@runforge/decision-protocol";
 import type { Octokit } from "@octokit/rest";
 import { DeclaredReleasePathSchema } from "../deployment-registry/schema.js";
 import type { DeploymentRegistry } from "../deployment-registry/registry.js";
@@ -14,7 +14,7 @@ import type {
   ReleaseLedgerWriter,
   ReleaseLedgerReader,
   ReleaseOutcome,
-} from "@auto-claude/release-ledger";
+} from "@runforge/release-ledger";
 import { assembleReleaseProposal } from "./proposal.js";
 import { buildReleaseDecisionRequest, releaseDecisionId } from "./build-request.js";
 import type {

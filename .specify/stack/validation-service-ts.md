@@ -1,7 +1,7 @@
 ---
 id: STACK-AC-VALIDATION
 type: stack-specific
-domain: auto-claude
+domain: runforge
 status: draft
 version: 3
 layer: 3

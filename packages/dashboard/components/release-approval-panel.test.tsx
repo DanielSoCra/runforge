@@ -20,7 +20,7 @@ describe('ReleaseApprovalPanel', () => {
       new Response(JSON.stringify({
         status: 'success',
         prNumber: 12,
-        prUrl: 'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/pull/12',
+        prUrl: 'https://github.com/DANIELSOCRAHANDLEZZ/runforge/pull/12',
       }), { status: 200 }),
     );
 
@@ -34,7 +34,7 @@ describe('ReleaseApprovalPanel', () => {
     expect(await screen.findByText('Release proposal #12 created')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open release PR' })).toHaveAttribute(
       'href',
-      'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/pull/12',
+      'https://github.com/DANIELSOCRAHANDLEZZ/runforge/pull/12',
     );
   });
 

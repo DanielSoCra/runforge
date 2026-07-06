@@ -17,7 +17,7 @@ describe('Daemon Dockerfile', () => {
 
   it('should scope pnpm install to daemon package only (#189)', () => {
     // Must use --filter to avoid installing dashboard dependencies
-    expect(DOCKERFILE).toMatch(/pnpm install.*--filter.*@auto-claude\/daemon/);
+    expect(DOCKERFILE).toMatch(/pnpm install.*--filter.*@runforge\/daemon/);
   });
 
   it('should copy the shared db workspace package for runtime imports (#626)', () => {

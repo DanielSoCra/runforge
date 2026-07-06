@@ -29,7 +29,7 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.52.0
         version: 0.52.0
-      '@auto-claude/db':
+      '@runforge/db':
         specifier: workspace:*
         version: link:../db
     devDependencies:
@@ -70,30 +70,30 @@ importers:
 
   packages/daemon:
     dependencies:
-      '@auto-claude/db':
-        specifier: workspace:*
-        version: link:../db
-      '@auto-claude/decision-index':
-        specifier: workspace:*
-        version: link:../decision-index
-      '@auto-claude/decision-protocol':
-        specifier: workspace:*
-        version: link:../decision-protocol
-      '@auto-claude/release-ledger':
-        specifier: workspace:*
-        version: link:../release-ledger
-      '@auto-claude/sanitization':
-        specifier: workspace:*
-        version: link:../sanitization
-      '@auto-claude/sanitizer-redaction':
-        specifier: workspace:*
-        version: link:../sanitizer-redaction
       '@modelcontextprotocol/sdk':
         specifier: ^1.27.1
         version: 1.27.1(zod@4.3.6)
       '@octokit/rest':
         specifier: ^21.0.0
         version: 21.1.1
+      '@runforge/db':
+        specifier: workspace:*
+        version: link:../db
+      '@runforge/decision-index':
+        specifier: workspace:*
+        version: link:../decision-index
+      '@runforge/decision-protocol':
+        specifier: workspace:*
+        version: link:../decision-protocol
+      '@runforge/release-ledger':
+        specifier: workspace:*
+        version: link:../release-ledger
+      '@runforge/sanitization':
+        specifier: workspace:*
+        version: link:../sanitization
+      '@runforge/sanitizer-redaction':
+        specifier: workspace:*
+        version: link:../sanitizer-redaction
       commander:
         specifier: ^13.0.0
         version: 13.1.0
@@ -152,12 +152,6 @@ importers:
       '@anthropic-ai/sdk':
         specifier: ^0.80.0
         version: 0.80.0(zod@4.3.6)
-      '@auto-claude/auth':
-        specifier: workspace:*
-        version: link:../auth
-      '@auto-claude/db':
-        specifier: workspace:*
-        version: link:../db
       '@hookform/resolvers':
         specifier: ^5.2.2
         version: 5.2.2(react-hook-form@7.71.2(react@19.2.4))
@@ -170,6 +164,12 @@ importers:
       '@radix-ui/react-slot':
         specifier: ^1.2.4
         version: 1.2.4(@types/react@19.2.14)(react@19.2.4)
+      '@runforge/auth':
+        specifier: workspace:*
+        version: link:../auth
+      '@runforge/db':
+        specifier: workspace:*
+        version: link:../db
       '@tailwindcss/postcss':
         specifier: ^4.2.2
         version: 4.2.2
@@ -298,10 +298,10 @@ importers:
 
   packages/decision-index:
     dependencies:
-      '@auto-claude/decision-protocol':
+      '@runforge/decision-protocol':
         specifier: workspace:*
         version: link:../decision-protocol
-      '@auto-claude/sanitizer-redaction':
+      '@runforge/sanitizer-redaction':
         specifier: workspace:*
         version: link:../sanitizer-redaction
       ajv:
@@ -398,7 +398,7 @@ importers:
 
   packages/sanitizer-redaction:
     dependencies:
-      '@auto-claude/sanitization':
+      '@runforge/sanitization':
         specifier: workspace:*
         version: link:../sanitization
       drizzle-orm:

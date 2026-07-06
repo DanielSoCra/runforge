@@ -1,7 +1,7 @@
 ---
 id: ARCH-AC-DASHBOARD
 type: architecture
-domain: auto-claude
+domain: runforge
 status: draft
 version: 4
 layer: 2

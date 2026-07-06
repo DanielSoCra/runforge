@@ -46,7 +46,7 @@ export async function startConciergeObserverProcess(
     daemonPoller: createDaemonStatusPoller({
       events: stores.events,
       client: createDaemonStatusHttpClient({
-        baseUrl: config.autoClaudeBaseUrl,
+        baseUrl: config.runforgeBaseUrl,
         fetch: options.fetch,
       }),
     }),

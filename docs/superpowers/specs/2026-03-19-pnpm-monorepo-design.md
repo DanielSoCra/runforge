@@ -14,32 +14,32 @@ superseded_date: 2026-06-11
 
 ## Goal
 
-Convert the auto-claude repo from a single root package to a pnpm monorepo with two workspace packages: `@auto-claude/daemon` and `@auto-claude/dashboard`. Work is done entirely within the `feature/dashboard` worktree so both packages land in a single merge to main.
+Convert the runforge repo from a single root package to a pnpm monorepo with two workspace packages: `@runforge/daemon` and `@runforge/dashboard`. Work is done entirely within the `feature/dashboard` worktree so both packages land in a single merge to main.
 
 ## Directory Structure
 
 ```
-auto-claude/
+runforge/
 ├── pnpm-workspace.yaml          # packages: ['packages/*']
 ├── package.json                 # workspace root — scripts only, no deps
 ├── CLAUDE.md, AGENTS.md
 ├── docs/, .specify/, infra/     # cross-cutting, stay at root
 ├── prompts/, fitness/           # daemon docker volume mounts — stay at root
-├── auto-claude.config.json      # user config — stays at root
+├── runforge.config.json      # user config — stays at root
 ├── docker-compose.yml           # dev compose — updated build context
 ├── docker-compose.prod.yml      # prod compose — updated build contexts
 ├── Caddyfile
 └── packages/
     ├── daemon/
     │   ├── src/
-    │   ├── package.json         # name: "@auto-claude/daemon"
+    │   ├── package.json         # name: "@runforge/daemon"
     │   ├── tsconfig.json
     │   ├── vitest.config.ts
     │   ├── eslint.config.js
     │   └── Dockerfile
     └── dashboard/
         ├── app/, actions/, components/, lib/
-        ├── package.json         # name: "@auto-claude/dashboard"
+        ├── package.json         # name: "@runforge/dashboard"
         └── Dockerfile
 ```
 
@@ -49,15 +49,15 @@ auto-claude/
 
 ```json
 {
-  "name": "auto-claude",
+  "name": "runforge",
   "version": "1.0.0",
   "private": true,
   "packageManager": "pnpm@10.32.1",
   "scripts": {
-    "dev:dashboard": "pnpm --filter @auto-claude/dashboard dev",
+    "dev:dashboard": "pnpm --filter @runforge/dashboard dev",
     "test": "pnpm -r test",
-    "test:daemon": "pnpm --filter @auto-claude/daemon test",
-    "test:dashboard": "pnpm --filter @auto-claude/dashboard test",
+    "test:daemon": "pnpm --filter @runforge/daemon test",
+    "test:dashboard": "pnpm --filter @runforge/dashboard test",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck"
   }
@@ -90,7 +90,7 @@ Both Dockerfiles use selective COPY that works from the repo root context:
 
 ### Daemon Dockerfile (`packages/daemon/Dockerfile`)
 
-The daemon uses `process.cwd()` to resolve `state/`, `prompts/`, `fitness/`, and `auto-claude.config.json`. Setting `WORKDIR /app/packages/daemon` makes those relative paths resolve correctly, and volume mounts in the compose files target that same path.
+The daemon uses `process.cwd()` to resolve `state/`, `prompts/`, `fitness/`, and `runforge.config.json`. Setting `WORKDIR /app/packages/daemon` makes those relative paths resolve correctly, and volume mounts in the compose files target that same path.
 
 ```dockerfile
 FROM node:22-slim
@@ -120,7 +120,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
 EXPOSE 3847
 
 # CMD (not ENTRYPOINT) so docker-compose `command:` can fully override it in dev
-CMD ["pnpm", "start", "--", "-c", "/app/packages/daemon/auto-claude.config.json"]
+CMD ["pnpm", "start", "--", "-c", "/app/packages/daemon/runforge.config.json"]
 ```
 
 ### Dashboard Dockerfile (`packages/dashboard/Dockerfile`)
@@ -172,13 +172,13 @@ services:
     volumes:
       - ./prompts:/app/packages/daemon/prompts:ro
       - ./fitness:/app/packages/daemon/fitness:ro
-      - ./auto-claude.config.json:/app/packages/daemon/auto-claude.config.json:ro
+      - ./runforge.config.json:/app/packages/daemon/runforge.config.json:ro
       - daemon-state:/app/packages/daemon/state
     command: >
       sh -c "
-        git config --global user.name 'Auto-Claude' &&
-        git config --global user.email 'auto-claude@localhost' &&
-        pnpm start -- -c /app/packages/daemon/auto-claude.config.json
+        git config --global user.name 'Runforge' &&
+        git config --global user.email 'runforge@localhost' &&
+        pnpm start -- -c /app/packages/daemon/runforge.config.json
       "
 ```
 
@@ -199,7 +199,7 @@ Two context updates. Also fixes the `dockerfile: Dockerfile.daemon` reference (t
     volumes:
       - ./prompts:/app/packages/daemon/prompts:ro
       - ./fitness:/app/packages/daemon/fitness:ro
-      - ./auto-claude.config.json:/app/packages/daemon/auto-claude.config.json:ro
+      - ./runforge.config.json:/app/packages/daemon/runforge.config.json:ro
       - daemon-state:/app/packages/daemon/state
 ```
 
@@ -220,8 +220,8 @@ All steps run in the `feature/dashboard` worktree. `git mv` is used throughout t
 2. `git mv` daemon files to `packages/daemon/`: `src/`, `Dockerfile`, `tsconfig.json`, `vitest.config.ts`, `eslint.config.js`, `package.json`
 3. `git mv dashboard/ packages/dashboard/`
 4. Create new root `package.json` and `pnpm-workspace.yaml`
-5. Update `packages/daemon/package.json` — set `name: "@auto-claude/daemon"`
-6. Update `packages/dashboard/package.json` — set `name: "@auto-claude/dashboard"`
+5. Update `packages/daemon/package.json` — set `name: "@runforge/daemon"`
+6. Update `packages/dashboard/package.json` — set `name: "@runforge/dashboard"`
 7. Delete `packages/dashboard/pnpm-lock.yaml` and `packages/dashboard/pnpm-workspace.yaml`
 8. Rewrite `packages/daemon/Dockerfile` — use repo-root context pattern with dual `WORKDIR` (see Daemon Dockerfile section)
 9. Rewrite `packages/dashboard/Dockerfile` — use repo-root context pattern (see Dashboard Dockerfile section)

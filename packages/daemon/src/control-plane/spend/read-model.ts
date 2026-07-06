@@ -29,7 +29,7 @@ import type {
   ProjectName,
   RunAttribution,
   StoreResult,
-} from '@auto-claude/db';
+} from '@runforge/db';
 import type { BillingShape, PricingReference } from './pricing-reference.js';
 import { DEFAULT_BILLING_SHAPE } from './pricing-reference.js';
 import { periodWindow, precedingWindow } from './windows.js';

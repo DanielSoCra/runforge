@@ -12,11 +12,11 @@ describe('buildDashboardAuthOptions', () => {
       },
     });
 
-    expect(options.appName).toBe('Auto-Claude');
+    expect(options.appName).toBe('Runforge');
     expect(options.baseURL).toBe('https://dashboard.example.test');
     expect(options.secret).toBe('test-secret');
     expect(typeof options.database).toBe('function');
-    expect(options.advanced?.cookiePrefix).toBe('auto-claude');
+    expect(options.advanced?.cookiePrefix).toBe('runforge');
     expect(options.advanced?.database?.generateId).toBe('uuid');
     expect(options.session?.expiresIn).toBe(60 * 60 * 24 * 7);
     expect(options.session?.updateAge).toBe(60 * 60 * 24);

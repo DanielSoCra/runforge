@@ -1141,7 +1141,7 @@ git commit -m "feat(dashboard): add IssuesBoard client component with Scan Now b
 - [ ] **Step 10.1: Run all tests across the monorepo**
 
 ```bash
-cd ~/code/auto-claude && pnpm --filter daemon test && pnpm --filter dashboard test
+cd ~/code/runforge && pnpm --filter daemon test && pnpm --filter dashboard test
 ```
 
 Expected: all tests PASS

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DecisionRequestSchema } from "@auto-claude/decision-protocol";
+import { DecisionRequestSchema } from "@runforge/decision-protocol";
 import { buildReleaseDecisionRequest, releaseDecisionId } from "./build-request.js";
 import type { ReleaseProposal } from "./types.js";
 

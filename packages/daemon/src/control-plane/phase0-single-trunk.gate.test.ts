@@ -14,7 +14,7 @@ const REPO_ROOT = join(
 
 function readRootConfig(): { branches: { staging: string; production: string } } {
   return JSON.parse(
-    readFileSync(join(REPO_ROOT, 'auto-claude.config.json'), 'utf8'),
+    readFileSync(join(REPO_ROOT, 'runforge.config.json'), 'utf8'),
   ) as { branches: { staging: string; production: string } };
 }
 

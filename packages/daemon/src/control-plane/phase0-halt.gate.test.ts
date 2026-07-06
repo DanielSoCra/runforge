@@ -12,7 +12,7 @@ import type { StartDaemonOptions } from './daemon.js';
 import type { StateManager } from './state.js';
 import type { CostTracker } from '../session-runtime/cost.js';
 
-const originalControlToken = process.env.AUTO_CLAUDE_CONTROL_TOKEN;
+const originalControlToken = process.env.RUNFORGE_CONTROL_TOKEN;
 let serverRef: Server | undefined;
 
 const daemonMockIds = [
@@ -60,7 +60,7 @@ const daemonMockIds = [
   './decision-escalation/resume-consumer.js',
   './batch-classifier.js',
   './heartbeat.js',
-  '@auto-claude/db',
+  '@runforge/db',
   '../data/config-reader.js',
   '../data/run-writer.js',
   '../data/backend-kind.js',
@@ -99,9 +99,9 @@ afterEach(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
   if (originalControlToken === undefined) {
-    delete process.env.AUTO_CLAUDE_CONTROL_TOKEN;
+    delete process.env.RUNFORGE_CONTROL_TOKEN;
   } else {
-    process.env.AUTO_CLAUDE_CONTROL_TOKEN = originalControlToken;
+    process.env.RUNFORGE_CONTROL_TOKEN = originalControlToken;
   }
   vi.clearAllTimers();
   vi.useRealTimers();
@@ -241,7 +241,7 @@ function expectHaltPark(
 
 describe('phase0 halt gate: POST /halt', () => {
   it('returns the injected halted response with X-Requested-By', async () => {
-    delete process.env.AUTO_CLAUDE_CONTROL_TOKEN;
+    delete process.env.RUNFORGE_CONTROL_TOKEN;
     const halt = vi.fn().mockResolvedValue({
       halted: true,
       parked: [101, 102],
@@ -265,8 +265,8 @@ describe('phase0 halt gate: POST /halt', () => {
     expect(halt).toHaveBeenCalledOnce();
   });
 
-  it('requires a Bearer token for /halt when AUTO_CLAUDE_CONTROL_TOKEN is set', async () => {
-    process.env.AUTO_CLAUDE_CONTROL_TOKEN = 'phase0-secret';
+  it('requires a Bearer token for /halt when RUNFORGE_CONTROL_TOKEN is set', async () => {
+    process.env.RUNFORGE_CONTROL_TOKEN = 'phase0-secret';
     const halt = vi.fn().mockResolvedValue({
       halted: true,
       parked: [],
@@ -769,7 +769,7 @@ function installDaemonResumeMocks() {
   vi.doMock('./heartbeat.js', () => ({
     startHeartbeat: vi.fn(() => vi.fn()),
   }));
-  vi.doMock('@auto-claude/db', () => ({
+  vi.doMock('@runforge/db', () => ({
     createDbClient: vi.fn(() => ({ db: {}, sql: { end: vi.fn().mockResolvedValue(undefined) } })),
     createPostgresStores: vi.fn(() => ({
       settings: {},

@@ -19,7 +19,7 @@ export {
   type WorkflowOpOptions,
   type WorkflowOpResult,
 } from "./index-writer.js";
-export type { ProtectedStore, PutArgs } from "@auto-claude/sanitizer-redaction";
+export type { ProtectedStore, PutArgs } from "@runforge/sanitizer-redaction";
 export {
   WORKFLOW_AUDIT_EVENTS,
   type WorkflowAuditEvent,

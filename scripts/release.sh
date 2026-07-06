@@ -7,7 +7,7 @@
 # the working tree is clean, and HEAD is in sync with origin/main.
 set -euo pipefail
 
-DAEMON_LABEL="com.autoclaude.daemon"
+DAEMON_LABEL="com.runforge.daemon"
 
 CONFIRM=0
 for arg in "$@"; do

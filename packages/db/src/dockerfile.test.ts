@@ -14,9 +14,9 @@ describe('DB migration Dockerfile', () => {
     expect(DOCKERFILE).toContain(
       'COPY packages/db/package.json ./packages/db/package.json',
     );
-    expect(DOCKERFILE).toMatch(/pnpm install.*--filter @auto-claude\/db/);
+    expect(DOCKERFILE).toMatch(/pnpm install.*--filter @runforge\/db/);
     expect(DOCKERFILE).toContain(
-      'CMD ["pnpm", "--filter", "@auto-claude/db", "db:migrate"]',
+      'CMD ["pnpm", "--filter", "@runforge/db", "db:migrate"]',
     );
   });
 });

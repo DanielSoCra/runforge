@@ -2,11 +2,11 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION } from '@auto-claude/decision-protocol';
+import { PROTOCOL_VERSION } from '@runforge/decision-protocol';
 import {
   createIndexWriter,
   type IndexWriter,
-} from '@auto-claude/decision-index';
+} from '@runforge/decision-index';
 import { LogNotifier, RecordingSourceSink, AckResumeDispatcher } from './adapters.js';
 import { DecisionLedger } from './ledger.js';
 import { bootReconcile, supersedeIfMoot, markOverdue } from './reconcile.js';

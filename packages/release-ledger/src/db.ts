@@ -11,7 +11,7 @@ export type Db = PostgresJsDatabase<typeof schema>;
 export type Sql = ReturnType<typeof postgres>;
 
 export interface OpenDbOptions {
-  /** Postgres connection URL (AUTO_CLAUDE_DATABASE_URL). */
+  /** Postgres connection URL (RUNFORGE_DATABASE_URL). */
   url: string;
 }
 
@@ -26,7 +26,7 @@ export interface ReadOnlyHandle {
   sql: Sql;
 }
 
-const WRITER_LOCK_NAME = "auto-claude:release-ledger:writer";
+const WRITER_LOCK_NAME = "runforge:release-ledger:writer";
 
 class Mutex {
   private tail: Promise<void> = Promise.resolve();

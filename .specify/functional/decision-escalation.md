@@ -1,7 +1,7 @@
 ---
 id: FUNC-AC-DECISION-ESCALATION
 type: functional
-domain: auto-claude
+domain: runforge
 status: approved
 version: 3
 layer: 1

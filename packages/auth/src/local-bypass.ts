@@ -3,8 +3,8 @@ export interface OperatorAuthEnv {
   LOCAL_AUTH_BYPASS?: string;
   NODE_ENV?: string;
   VERCEL_ENV?: string;
-  AUTO_CLAUDE_ENV?: string;
-  AUTO_CLAUDE_DEPLOYMENT?: string;
+  RUNFORGE_ENV?: string;
+  RUNFORGE_DEPLOYMENT?: string;
   RAILWAY_ENVIRONMENT?: string;
   RENDER?: string;
   FLY_APP_NAME?: string;
@@ -51,9 +51,9 @@ export function findProductionIndicator(
 ): string | null {
   if (isProduction(env.NODE_ENV)) return 'NODE_ENV';
   if (isProduction(env.VERCEL_ENV)) return 'VERCEL_ENV';
-  if (isProduction(env.AUTO_CLAUDE_ENV)) return 'AUTO_CLAUDE_ENV';
-  if (isProduction(env.AUTO_CLAUDE_DEPLOYMENT)) {
-    return 'AUTO_CLAUDE_DEPLOYMENT';
+  if (isProduction(env.RUNFORGE_ENV)) return 'RUNFORGE_ENV';
+  if (isProduction(env.RUNFORGE_DEPLOYMENT)) {
+    return 'RUNFORGE_DEPLOYMENT';
   }
   if (isProduction(env.RAILWAY_ENVIRONMENT)) return 'RAILWAY_ENVIRONMENT';
   if (isTrue(env.RENDER)) return 'RENDER';

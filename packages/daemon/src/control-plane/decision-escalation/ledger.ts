@@ -1,5 +1,5 @@
 /**
- * DecisionLedger — the daemon-facing facade over the real `@auto-claude/decision-index`
+ * DecisionLedger — the daemon-facing facade over the real `@runforge/decision-index`
  * `IndexWriter`. It wraps ONLY the real verbs (`observeRequest`, `applyEvent`,
  * `runEffect`, `reconcile`, `reader`) and drives the verified §6.2 lifecycle:
  *
@@ -16,8 +16,8 @@
  * emits a runtime require of the native package — the only runtime load is the
  * manager's dynamic import inside its enabled branch.
  */
-import type { IndexWriter, DecisionView, ReadModel, ProtectedStore } from '@auto-claude/decision-index';
-import type { ResumeMode } from '@auto-claude/decision-protocol';
+import type { IndexWriter, DecisionView, ReadModel, ProtectedStore } from '@runforge/decision-index';
+import type { ResumeMode } from '@runforge/decision-protocol';
 
 /** Terminal statuses are excluded from the pending read (mirrors TERMINAL_STATUSES). */
 const TERMINAL: ReadonlySet<string> = new Set(['resumed', 'superseded', 'failed']);

@@ -571,5 +571,5 @@ function proposalBody(request: DeliveryRequest, proposalKey: string): string {
 }
 
 function proposalMarker(proposalKey: string): string {
-  return `<!-- auto-claude-proposal-key: ${proposalKey} -->`;
+  return `<!-- runforge-proposal-key: ${proposalKey} -->`;
 }

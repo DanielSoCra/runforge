@@ -27,7 +27,7 @@ Investigation also surfaced two adjacent bugs that #437 depends on:
 
 ### Why this matters now
 
-the Operator's stated goal: *auto-claude must self-improve without getting stuck.* The l3 cluster is the cleanest example of the cost: silent context drops produce bad outputs, the broken compliance gate hides the bad outputs, the uncounted cross-phase loop keeps spinning until session timeout retries hit `maxRetries=3` and stick. One bug class, one tangled control-plane gap, multiple intervention events.
+the Operator's stated goal: *runforge must self-improve without getting stuck.* The l3 cluster is the cleanest example of the cost: silent context drops produce bad outputs, the broken compliance gate hides the bad outputs, the uncounted cross-phase loop keeps spinning until session timeout retries hit `maxRetries=3` and stick. One bug class, one tangled control-plane gap, multiple intervention events.
 
 ## Goal
 

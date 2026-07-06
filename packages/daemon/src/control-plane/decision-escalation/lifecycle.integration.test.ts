@@ -1,6 +1,6 @@
 /**
  * lifecycle.integration.test.ts — end-to-end (T7) integration over a REAL
- * `@auto-claude/decision-index` writer (real Postgres, real migrations) driven
+ * `@runforge/decision-index` writer (real Postgres, real migrations) driven
  * through the daemon's real entry points: `DecisionIndexManager` +
  * `buildL2GateRequest`. NOTHING in the index layer is mocked here.
  *
@@ -19,7 +19,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import * as decisionIndex from '@auto-claude/decision-index';
+import * as decisionIndex from '@runforge/decision-index';
 import { DecisionIndexManager } from './manager.js';
 import { buildL2GateRequest, decisionIdFor } from './build-request.js';
 import type { DecisionLedger } from './ledger.js';
@@ -73,7 +73,7 @@ describe.skipIf(!REAL_PG)('decision-escalation lifecycle (real index over real P
       databaseUrl: DECISION_DB_URL!,
       protectedKey: TEST_PROTECTED_KEY,
       protectedDir: join(dir, 'protected'),
-      // no importer override → loads the REAL @auto-claude/decision-index
+      // no importer override → loads the REAL @runforge/decision-index
     });
     await m.init();
     return m;

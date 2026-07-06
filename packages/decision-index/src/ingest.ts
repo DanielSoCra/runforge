@@ -1,4 +1,4 @@
-import { DecisionRequestSchema, PROTOCOL_VERSION, type DecisionRequest } from "@auto-claude/decision-protocol";
+import { DecisionRequestSchema, PROTOCOL_VERSION, type DecisionRequest } from "@runforge/decision-protocol";
 import type { Db } from "./db.js";
 import type { Quarantine } from "./quarantine.js";
 import { decisions } from "./schema.js";

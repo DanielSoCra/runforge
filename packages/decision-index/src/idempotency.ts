@@ -1,4 +1,4 @@
-import type { TransitionEvent, EffectKind } from "@auto-claude/decision-protocol";
+import type { TransitionEvent, EffectKind } from "@runforge/decision-protocol";
 
 /**
  * transition_key = <event>:<semantic_key> (spec §57). Two transitions that share

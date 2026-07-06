@@ -12,7 +12,7 @@ superseded_date: 2026-06-02
 **Date:** 2026-05-01
 **Status:** Brainstorm complete; awaiting review before implementation plan.
 **Brainstormed by:** the Operator + Claude Opus 4.7 + Codex GPT-5.5 (pair-review of spec restructure).
-**Successor to:** the current `auto-claude` L0 vision. `auto-claude` becomes one subsystem under a broader L0.
+**Successor to:** the current `runforge` L0 vision. `runforge` becomes one subsystem under a broader L0.
 
 ---
 
@@ -20,9 +20,9 @@ superseded_date: 2026-06-02
 
 ### 1.1 Pitch
 
-A single conversational entry point — a Slack DM with a bot — that turns the Operator's intent into action across his tools. The concierge is an LLM agent with a fixed toolbox (auto-claude pipeline, knowledge-vault MCP, GitHub CLI, calendar, email, Slack-send, file-system observer). It acts directly when it can. When it can't — ambiguous, high-blast-radius, or genuinely needing human judgment — it surfaces a single card on a mobile-friendly board served from the Mac mini behind a Cloudflare Tunnel.
+A single conversational entry point — a Slack DM with a bot — that turns the Operator's intent into action across his tools. The concierge is an LLM agent with a fixed toolbox (runforge pipeline, knowledge-vault MCP, GitHub CLI, calendar, email, Slack-send, file-system observer). It acts directly when it can. When it can't — ambiguous, high-blast-radius, or genuinely needing human judgment — it surfaces a single card on a mobile-friendly board served from the Mac mini behind a Cloudflare Tunnel.
 
-Heavy compute (auto-claude runs, knowledge-vault edits, manual coding sessions) lives on the Mac mini. The Slack bot and the web board are thin surfaces over the same process.
+Heavy compute (runforge runs, knowledge-vault edits, manual coding sessions) lives on the Mac mini. The Slack bot and the web board are thin surfaces over the same process.
 
 ### 1.2 Operator role (replaces the current L0 operator clause)
 
@@ -41,11 +41,11 @@ Everything else is autonomous.
 
 ### 1.4 Success criterion (one, falsifiable)
 
-> On a typical Tuesday, the Operator sends ≤3 chat messages, glances at the board ≤2 times, and the system handles ≥80 % of routine coordination work (issue triage, draft replies, calendar prep, knowledge-vault captures, auto-claude babysitting) without further input.
+> On a typical Tuesday, the Operator sends ≤3 chat messages, glances at the board ≤2 times, and the system handles ≥80 % of routine coordination work (issue triage, draft replies, calendar prep, knowledge-vault captures, runforge babysitting) without further input.
 
-### 1.5 Subsystem position of `auto-claude`
+### 1.5 Subsystem position of `runforge`
 
-The existing `packages/daemon` (the GitHub-issue → PR pipeline) becomes the **`auto-claude` subsystem** — one tool the concierge calls. Its current `FUNC-AC-*` specs stay verbatim, governed by `L0-AC-VISION` (which itself is now a subsystem-scope L0, conceptually under the new product L0 but expressed in prose, not via a `parent:` field — see §5).
+The existing `packages/daemon` (the GitHub-issue → PR pipeline) becomes the **`runforge` subsystem** — one tool the concierge calls. Its current `FUNC-AC-*` specs stay verbatim, governed by `L0-AC-VISION` (which itself is now a subsystem-scope L0, conceptually under the new product L0 but expressed in prose, not via a `parent:` field — see §5).
 
 ---
 
@@ -77,7 +77,7 @@ The existing `packages/daemon` (the GitHub-issue → PR pipeline) becomes the **
         ┌────────────────────┬─────────────┬────────┼────────┬──────────────┬──────────────┐
         ▼                    ▼             ▼        ▼        ▼              ▼              ▼
 ┌─────────────────┐ ┌──────────────┐ ┌────────┐ ┌──────────┐ ┌─────────────┐ ┌─────────┐
-│   auto-claude   │ │ knowledge-vault │ │   gh   │ │ calendar │ │   email     │ │   web   │
+│   runforge   │ │ knowledge-vault │ │   gh   │ │ calendar │ │   email     │ │   web   │
 │  (HTTP→3847)    │ │  (Obsidian   │ │ (CLI/  │ │  (Google │ │   (Gmail    │ │ (fetch) │
 │  pause/run/...  │ │     MCP)     │ │Octokit)│ │   MCP)   │ │     MCP)    │ │         │
 └────────┬────────┘ └──────┬───────┘ └────────┘ └──────────┘ └─────────────┘ └─────────┘
@@ -131,7 +131,7 @@ The existing `packages/daemon` (the GitHub-issue → PR pipeline) becomes the **
 
 | Plist | Purpose | New / existing |
 |---|---|---|
-| `com.autoclaude.daemon` | Existing auto-claude pipeline daemon | unchanged |
+| `com.runforge.daemon` | Existing runforge pipeline daemon | unchanged |
 | `com.concierge.core` | LLM loop + Slack adapter + tool router | NEW |
 | `com.concierge.observer` | Filesystem + git watcher | NEW |
 | `com.concierge.board` | Hono board server | NEW |
@@ -151,7 +151,7 @@ Four canonical paths.
 
 Slack webhook → `slack-adapter` verifies + normalises → `concierge-core` loads conversation history (current Slack thread + 7-day compressed summary from SQLite + relevant knowledge-vault notes if memory tool is queried) → LLM turn with tools → tool calls dispatched → tool results fed back → LLM continues → reply text → `slack-adapter` posts to Slack thread → turn persisted to SQLite.
 
-### 3.2 Reactive event — auto-claude gets stuck
+### 3.2 Reactive event — runforge gets stuck
 
 `observer` polls daemon HTTP every 30 s → diff vs prior status → inserts event `daemon_stuck` into event-bus → classifier rule: stuck → `surface_card` + `slack_dm` → board card row inserted, Block Kit DM sent via `slack-adapter`. SSE stream pushes the new card to any open board client.
 
@@ -182,7 +182,7 @@ A nightly **consolidation job** (launchd `StartCalendarInterval`) scans yesterda
 Default-confirm list:
 - `email.send` to anyone external.
 - `slack.send` to channels other than the Operator's DM.
-- `auto_claude.merge_to_main`.
+- `runforge.merge_to_main`.
 - `second_brain.write` under `20-Areas/clients/`.
 
 Anything else: autonomous, audited.
@@ -223,7 +223,7 @@ See `FUNC-CONCIERGE-MEMORY` for the governing contract. Key rules:
 | L0-to-L0 `parent:` field violates resolver contract | No L0-to-L0 parent. Relationship expressed in prose inside `L0-CONCIERGE-VISION`. |
 | L1s contained architecture/API detail | "Slack Events API / Block Kit / SSE / LLM loop / tool registry" wording belongs in L2/L3. L1s describe **observable behavior only**. |
 | Moving L0 into `vision/` breaks scaffolding | L0 path stays. `L0-vision.md` is rewritten as `L0-CONCIERGE-VISION` (id changes; path doesn't). New file `.specify/L0-ac-vision.md` holds extracted AC content. `spec-loader.ts` learns to scan multi-L0 (~30 LOC). |
-| `FUNC-BOARD` overlapped `FUNC-AC-DASHBOARD` | New spec is `FUNC-CONCIERGE-BOARD`; existing `FUNC-AC-DASHBOARD` stays in its lane (auto-claude operator dashboard). Boundary documented in both specs' "Related" section. |
+| `FUNC-BOARD` overlapped `FUNC-AC-DASHBOARD` | New spec is `FUNC-CONCIERGE-BOARD`; existing `FUNC-AC-DASHBOARD` stays in its lane (runforge operator dashboard). Boundary documented in both specs' "Related" section. |
 | Deferred subsystem L1s leave tool surface ungoverned | `ARCH-TOOL-REGISTRY` carries minimal entries (name, blast-radius, audit, failure semantics) for every tool, even those without a full subsystem L1. |
 | Filename convention | Lowercase descriptive: `concierge.md`, `concierge-board.md`, `channel-slack.md`, `observer.md`, `concierge-memory.md`. IDs uppercase in frontmatter. |
 | Launchd / cloudflared deserves L3 | Folded into `STACK-CONCIERGE-NODE`. Split out to `STACK-CONCIERGE-LAUNCHD` if it grows. |
@@ -238,7 +238,7 @@ See `FUNC-CONCIERGE-MEMORY` for the governing contract. Key rules:
 ```
 .specify/
 ├── L0-vision.md                              ← REWRITTEN. id: L0-CONCIERGE-VISION.
-│                                                Includes inline "Subsystem: auto-claude
+│                                                Includes inline "Subsystem: runforge
 │                                                (governed by L0-AC-VISION)" section.
 ├── L0-ac-vision.md                           ← NEW. id: L0-AC-VISION.
 │                                                Holds current L0 content verbatim
@@ -346,10 +346,10 @@ Sequence: **bot-first** (chosen variant `i`).
 **Output:** the Operator DMs the bot from his phone, it responds. No skills yet.
 **Effort:** ~2–3 days.
 
-### Phase 2 — First subsystem: auto-claude tool *(first real capability)*
+### Phase 2 — First subsystem: runforge tool *(first real capability)*
 
 - `ARCH-TOOL-REGISTRY` implemented: tool registration, schema, audit log.
-- Tool clients: `auto_claude.run`, `.status`, `.pause`, `.unstuck`, `.paused_state`.
+- Tool clients: `runforge.run`, `.status`, `.pause`, `.unstuck`, `.paused_state`.
 - `ARCH-CONFIRMATION-LIFECYCLE` for `merge_to_main`.
 - Conversation memory: current thread context only; no consolidation yet.
 

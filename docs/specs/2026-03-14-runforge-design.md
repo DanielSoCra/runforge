@@ -1,6 +1,6 @@
 > **🗄 HISTORICAL (2026-06-02).** Completed/superseded record, kept for provenance — superseded by the unified **L0-AC-VISION v5** (`.specify/L0-ac-vision.md`) + its L1 children. The canonical current specs live in `.specify/`. See `docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`. <!-- RECONCILIATION-LEDGER-BANNER -->
 
-# Auto-Claude — Autonomous Agent Orchestrator for Spec-Driven Development
+# Runforge — Autonomous Agent Orchestrator for Spec-Driven Development
 
 **Date:** 2026-03-14
 **Status:** Draft
@@ -16,7 +16,7 @@ The goal: write specs, walk away, get notified when the work is done and live on
 
 ## Solution
 
-A TypeScript daemon ("Auto-Claude") that polls GitHub Issues for implementation requests, spawns Claude Code CLI sessions to implement them autonomously, and manages the full pipeline from spec decomposition through dev deployment, testing, and release preparation.
+A TypeScript daemon ("Runforge") that polls GitHub Issues for implementation requests, spawns Claude Code CLI sessions to implement them autonomously, and manages the full pipeline from spec decomposition through dev deployment, testing, and release preparation.
 
 Two decoupled workflows connected by GitHub Issues:
 
@@ -57,7 +57,7 @@ The codebase is organized into three layers, each depending only downward:
 ### Components
 
 ```
-auto-claude/
+runforge/
 ├── src/
 │   ├── index.ts                 # entry: cron loop
 │   ├── config.ts                # load factory.config.yaml
@@ -128,7 +128,7 @@ auto-claude/
 │   └── prompt-optimizer.md
 ├── .factory/                    # runtime worktrees (gitignored)
 │   └── worktrees/
-└── state/                       # local runtime state (gitignored, symlinked from ~/.auto-claude/state/{project}/)
+└── state/                       # local runtime state (gitignored, symlinked from ~/.runforge/state/{project}/)
 ```
 
 ---
@@ -145,7 +145,7 @@ Any state can transition to `stuck` (retries exhausted or circular fix detected)
 
 ### Phase 1: Detect
 
-Daemon cron polls GitHub Issues: `gh issue list --label "factory-ready"`. When found, swaps label to `factory-in-progress` and parses the issue body. Only one daemon instance per repo is supported — the daemon writes a lock file (`~/.auto-claude/state/{repo-path-hash}/daemon.lock`) with its PID on startup and refuses to start if a live process holds the lock.
+Daemon cron polls GitHub Issues: `gh issue list --label "factory-ready"`. When found, swaps label to `factory-in-progress` and parses the issue body. Only one daemon instance per repo is supported — the daemon writes a lock file (`~/.runforge/state/{repo-path-hash}/daemon.lock`) with its PID on startup and refuses to start if a live process holds the lock.
 
 ### Phase 1b: Classify (Feature Issues Only)
 
@@ -559,28 +559,28 @@ safety:
 ### CLI
 
 ```
-auto-claude init           # scaffold factory.config.yaml
-auto-claude start          # foreground
-auto-claude start --daemon # background (launchd on macOS, systemd on Linux)
-auto-claude stop
-auto-claude status         # active runs, costs, next poll
-auto-claude logs [--run N]
-auto-claude pause          # stop picking up new issues
-auto-claude resume
-auto-claude retry N        # retry a stuck issue
-auto-claude release        # trigger dev→main PR now
+runforge init           # scaffold factory.config.yaml
+runforge start          # foreground
+runforge start --daemon # background (launchd on macOS, systemd on Linux)
+runforge stop
+runforge status         # active runs, costs, next poll
+runforge logs [--run N]
+runforge pause          # stop picking up new issues
+runforge resume
+runforge retry N        # retry a stuck issue
+runforge release        # trigger dev→main PR now
 ```
 
 ### Process Management
 
-- macOS: generates `~/Library/LaunchAgents/com.auto-claude.{project}.plist` with `KeepAlive: true`
-- Linux: generates `~/.config/systemd/user/auto-claude-{project}.service` with `Restart=always`
+- macOS: generates `~/Library/LaunchAgents/com.runforge.{project}.plist` with `KeepAlive: true`
+- Linux: generates `~/.config/systemd/user/runforge-{project}.service` with `Restart=always`
 - Auto-restarts on crash. Resumes from `run.json` state.
 
 ### State & Logging
 
 ```
-~/.auto-claude/
+~/.runforge/
 ├── logs/{project}.log       # structured JSON, one object per line
 ├── state/{project}/
 │   ├── daemon.json          # PID, uptime, config path
@@ -614,8 +614,8 @@ Claude sessions running with `--dangerously-skip-permissions` have full filesyst
 1. **Worktree isolation + sparse checkout:** Workers run in git worktrees under `.factory/worktrees/`. The worktree is created with sparse checkout that **excludes** `.specify/scenarios/` — workers literally cannot see scenario files in their filesystem. (Note: The Claude CLI supports `--worktree`/`-w` for native worktree management. We manage worktrees manually because we need sparse checkout to exclude `.specify/scenarios/` — a capability the native flag does not support.)
 2. **PreToolUse hooks:** A deterministic hook blocks `Read` tool calls on `.specify/scenarios/**` at the tool boundary. This enforces scenario blindness in ALL sessions, including reviewers running on the feature branch (not in a worktree). The hook is configured in `.claude/hooks.json` and returns an explicit "holdout scenarios are off-limits" message into the agent's context. Additional hooks block:
    - Writes to `.specify/methodology/**` (AGENTS.md rule 3)
-   - Reads/writes to `state/**`, `.factory/**`, `.auto-claude/**`
-   - Writes to daemon source `src/**` (when running in the auto-claude repo itself)
+   - Reads/writes to `state/**`, `.factory/**`, `.runforge/**`
+   - Writes to daemon source `src/**` (when running in the runforge repo itself)
 3. **Prompt-level constraints:** All prompts (`worker.md`, `reviewer-spec-compliance.md`, `reviewer-code-quality.md`, `reviewer-security.md`) include explicit prohibitions: never read `.specify/scenarios/`, never modify files outside the worktree, never modify the daemon's own source code under `src/`.
 4. **Post-session audit:** After each Claude session completes, the daemon scans session output logs for references to prohibited paths. Violations are logged and the issue is labeled `factory-stuck` with a containment breach note.
 5. **Per-session budget cap:** `--max-budget-usd` on every session prevents runaway cost from a single stuck or looping agent, independent of the daemon's daily budget tracker.
@@ -652,7 +652,7 @@ The daemon uses **port-based locking** (primary) with a PID file (fallback):
    - `GET /health` — liveness probe for systemd/launchd
    - `POST /pause` / `POST /resume` — remote control
    - `GET /logs?issue=N` — stream logs for a specific run
-3. **PID file (fallback):** Write PID to `~/.auto-claude/state/{repo-path-hash}/daemon.lock` as a convenience. Signal handlers clean up on shutdown. Stale PID detection via `process.kill(pid, 0)`.
+3. **PID file (fallback):** Write PID to `~/.runforge/state/{repo-path-hash}/daemon.lock` as a convenience. Signal handlers clean up on shutdown. Stale PID detection via `process.kill(pid, 0)`.
 4. **Scope:** Both lock mechanisms are scoped by a hash of the repository's absolute path.
 
 ### Secrets Management
@@ -685,7 +685,7 @@ When `maintenance.enabled: true`:
 
 ### Multi-Project
 
-Each project runs its own daemon instance with its own config. `auto-claude status --all` shows all running factories.
+Each project runs its own daemon instance with its own config. `runforge status --all` shows all running factories.
 
 ---
 
@@ -822,7 +822,7 @@ Bug issues skip classification entirely.
 
 ## Gotcha Injection
 
-A `GotchaStore` persists per-repo learnings between sessions as a JSONL file (`~/.auto-claude/state/{project}/gotchas.jsonl`).
+A `GotchaStore` persists per-repo learnings between sessions as a JSONL file (`~/.runforge/state/{project}/gotchas.jsonl`).
 
 ### Recording
 

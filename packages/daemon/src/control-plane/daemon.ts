@@ -71,7 +71,7 @@ import {
   markRuntimeDegradedIfGoverned,
   clearRuntimeDegradedIfGoverned,
 } from './decision-escalation/manager.js';
-import type { ProtectedStore } from '@auto-claude/sanitizer-redaction';
+import type { ProtectedStore } from '@runforge/sanitizer-redaction';
 import { readDecisionIndexConfig } from './decision-escalation/config.js';
 import { decisionIdFor } from './decision-escalation/build-request.js';
 import { decisionIdFor as mergeDecisionIdFor } from './merge-decision/build-request.js';
@@ -153,7 +153,7 @@ import {
   createDbClient,
   createPostgresStores,
   readCredentialKey,
-} from '@auto-claude/db';
+} from '@runforge/db';
 import {
   PostgresConfigReader,
   type ConfigReader,
@@ -395,7 +395,7 @@ export async function startDaemon(
   // worktree trust is seeded separately in the CLI adapter before each spawn.
   const skipPermissions =
     config.autonomous === true ||
-    process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'] === '1';
+    process.env['RUNFORGE_SKIP_PERMISSIONS'] === '1';
   if (skipPermissions) {
     try {
       const { seedClaudeProjectTrust } =
@@ -491,7 +491,7 @@ export async function startDaemon(
             `[daemon] Refusing boot for configured deployment "${config.deployment.id}": the ` +
               `decision index is DISABLED, but a merge-governed deployment requires it to ` +
               `surface escalate/hold merge decisions for Operator approval. Set ` +
-              `AUTO_CLAUDE_DECISION_INDEX_ENABLED=1 (and AUTO_CLAUDE_DATABASE_URL) to enable ` +
+              `RUNFORGE_DECISION_INDEX_ENABLED=1 (and RUNFORGE_DATABASE_URL) to enable ` +
               `it, or remove the deployment profile to run ungoverned.`,
           ),
         );
@@ -501,7 +501,7 @@ export async function startDaemon(
           `[daemon] Refusing boot for configured deployment "${config.deployment.id}": the ` +
             `decision index is enabled but unreachable — the approval surface is dead, so ` +
             `escalate/hold merge decisions cannot reach the Operator. Check ` +
-            `AUTO_CLAUDE_DATABASE_URL / Postgres connectivity for the decision index.`,
+            `RUNFORGE_DATABASE_URL / Postgres connectivity for the decision index.`,
         ),
       );
     }
@@ -792,7 +792,7 @@ export async function startDaemon(
     const registry = runtime.getProviderRegistry();
     const skipPermissions =
       config.autonomous === true ||
-      process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'] === '1';
+      process.env['RUNFORGE_SKIP_PERMISSIONS'] === '1';
 
     const runSmoke = async (
       provider: ProviderDefinition,
@@ -936,7 +936,7 @@ export async function startDaemon(
 
   // 3a-2. Per-deployment RELEASE LANE (STACK-AC-RELEASE). Gated on a configured
   // (governed) deployment WITH the decision index enabled via REAL config (the same
-  // `AUTO_CLAUDE_DECISION_INDEX_ENABLED` flag the decision index reads) — NOT the
+  // `RUNFORGE_DECISION_INDEX_ENABLED` flag the decision index reads) — NOT the
   // manager's `isEnabled()`, which a test can force true via an injected fake without
   // a real Postgres; gating on the manager would make governed-boot tests open a live
   // DB and hang. In production the A1 boot guard already refuses a configured
@@ -947,7 +947,7 @@ export async function startDaemon(
   // release handlers are omitted (routes 404) and the sweep is skipped. When no
   // deployment is configured this is a byte-identical no-op for local runs.
   const decisionIndexEnvEnabled = ((): boolean => {
-    const raw = process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED;
+    const raw = process.env.RUNFORGE_DECISION_INDEX_ENABLED;
     if (raw === undefined) return false;
     const v = raw.trim().toLowerCase();
     return v === '1' || v === 'true' || v === 'yes';
@@ -956,7 +956,7 @@ export async function startDaemon(
     config.deployment !== undefined && decisionIndexEnvEnabled;
   const releaseLedgerManager = new ReleaseLedgerManager({
     enabled: releaseLaneEnabled,
-    databaseUrl: process.env.AUTO_CLAUDE_DATABASE_URL,
+    databaseUrl: process.env.RUNFORGE_DATABASE_URL,
     opener: undefined,
   });
   await releaseLedgerManager.init();
@@ -1030,11 +1030,11 @@ export async function startDaemon(
     // LIVE release drill is Operator-gated and OUT of this code unit — `scripts/release.sh`
     // self-restarts the daemon (`launchctl kickstart -k`), so it must not run in-process
     // during normal operation. The real invocation is wired but requires the explicit
-    // Operator drill gate (AUTO_CLAUDE_RELEASE_DRILL=1); without it every prod-mutating
+    // Operator drill gate (RUNFORGE_RELEASE_DRILL=1); without it every prod-mutating
     // shape fails CLOSED (throw → the executor records execution `failed` + marks the
     // deployment degraded, never a half-release). The gate suite proves the lane against
     // a FAKE PromotionPort; this real port is proven live only under the Operator gate.
-    const RELEASE_DRILL_ENV = 'AUTO_CLAUDE_RELEASE_DRILL';
+    const RELEASE_DRILL_ENV = 'RUNFORGE_RELEASE_DRILL';
     const assertReleaseDrillEnabled = (op: string): void => {
       if (process.env[RELEASE_DRILL_ENV] !== '1') {
         throw new Error(
@@ -1096,7 +1096,7 @@ export async function startDaemon(
     };
 
     // issueNumberFor — the deployment's release-decision GitHub issue. Read from
-    // config (AUTO_CLAUDE_RELEASE_DECISION_ISSUE). AUTO-create-on-first-propose is
+    // config (RUNFORGE_RELEASE_DECISION_ISSUE). AUTO-create-on-first-propose is
     // DEFERRED: the executor's injected `issueNumberFor` is SYNCHRONOUS (called
     // inline in proposeRelease with no async seam to create-and-await an issue), and
     // a boot-time auto-create was rejected to avoid an unconditional GitHub side
@@ -1104,7 +1104,7 @@ export async function startDaemon(
     // publisher cannot post the release decision → proposeRelease fails CLOSED
     // (`degraded`), never silently proceeding.
     const issueNumberFor = (_deployment: string): number => {
-      const raw = process.env.AUTO_CLAUDE_RELEASE_DECISION_ISSUE;
+      const raw = process.env.RUNFORGE_RELEASE_DECISION_ISSUE;
       const n = raw !== undefined && raw !== '' ? Number(raw) : Number.NaN;
       return Number.isInteger(n) && n > 0 ? n : 0;
     };
@@ -1170,16 +1170,16 @@ export async function startDaemon(
   // (needs a trusted workspace + interactive login, no permission-bypass flag)
   // and is not part of the autonomous worker loop. Default off so a root
   // container doesn't crash-loop on the trust gate; operators enable it via
-  // config.remoteControl.enabled or AUTO_CLAUDE_REMOTE_CONTROL=1.
+  // config.remoteControl.enabled or RUNFORGE_REMOTE_CONTROL=1.
   const remoteControl = new RemoteControlManager();
   const remoteControlEnabled =
     config.remoteControl?.enabled === true ||
-    process.env['AUTO_CLAUDE_REMOTE_CONTROL'] === '1';
+    process.env['RUNFORGE_REMOTE_CONTROL'] === '1';
   if (remoteControlEnabled) {
     remoteControl.start();
   } else {
     console.log(
-      '[daemon] Remote Control disabled (opt-in: config.remoteControl.enabled or AUTO_CLAUDE_REMOTE_CONTROL=1).',
+      '[daemon] Remote Control disabled (opt-in: config.remoteControl.enabled or RUNFORGE_REMOTE_CONTROL=1).',
     );
   }
 
@@ -2636,7 +2636,7 @@ export async function startDaemon(
   }
 
   console.log(
-    `Auto-Claude daemon started on ${daemonHost}:${config.controlPort}`,
+    `Runforge daemon started on ${daemonHost}:${config.controlPort}`,
   );
 
   // 6b. Crash resumption — resume incomplete runs from prior crash

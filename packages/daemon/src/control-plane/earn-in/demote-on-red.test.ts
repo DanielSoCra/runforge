@@ -10,7 +10,7 @@ const NOW = Date.UTC(2026, 6, 3);
 
 function makeProfile() {
   return {
-    repositories: [{ owner: 'acme', name: 'auto-claude' }],
+    repositories: [{ owner: 'acme', name: 'runforge' }],
     riskPathMap: [{ paths: ['**'], minLevel: 'green' }],
     defaultMinLevel: 'green',
     laneSet: {

@@ -1,6 +1,6 @@
 # Hetzner Deployment Guide
 
-Auto-Claude runs on Hetzner via Docker Compose. The stack includes **Postgres**, a one-shot **migration** job, **daemon**, **dashboard**, **briefing-summarizer**, and **Caddy** on a private Docker network. Caddy handles TLS termination and proxies HTTPS traffic to the dashboard.
+Runforge runs on Hetzner via Docker Compose. The stack includes **Postgres**, a one-shot **migration** job, **daemon**, **dashboard**, **briefing-summarizer**, and **Caddy** on a private Docker network. Caddy handles TLS termination and proxies HTTPS traffic to the dashboard.
 
 ## Prerequisites
 
@@ -32,11 +32,11 @@ docker compose version
 
 ## 3. Create the Deploy User
 
-The `autoclaude` user is created automatically by `cloud-init.yml` (with Docker group membership). If provisioning manually:
+The `runforge` user is created automatically by `cloud-init.yml` (with Docker group membership). If provisioning manually:
 
 ```bash
-useradd -m -s /bin/bash autoclaude
-usermod -aG docker autoclaude
+useradd -m -s /bin/bash runforge
+usermod -aG docker runforge
 ```
 
 > **Note:** All `docker compose` commands below are run as **root** (or via `sudo`). Even with the `docker` group, some volume-mount permission issues require root on this server.
@@ -44,9 +44,9 @@ usermod -aG docker autoclaude
 ## 4. Clone the Repository
 
 ```bash
-git clone https://github.com/DANIELSOCRAHANDLEZZ/auto-claude.git /home/autoclaude/auto-claude
-chown -R autoclaude:autoclaude /home/autoclaude/auto-claude
-cd /home/autoclaude/auto-claude
+git clone https://github.com/DANIELSOCRAHANDLEZZ/runforge.git /home/runforge/runforge
+chown -R runforge:runforge /home/runforge/runforge
+cd /home/runforge/runforge
 ```
 
 ## 5. Create the Environment File
@@ -62,10 +62,10 @@ Fill in all values:
 |----------|----------------|
 | `GITHUB_TOKEN` | GitHub → Settings → Developer settings → Fine-grained PAT with `repo` scope |
 | `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com/settings/keys) |
-| `POSTGRES_DB` | Use `autoclaude` unless you need a different local database name |
-| `POSTGRES_USER` | Use `autoclaude` unless you need a different local database user |
+| `POSTGRES_DB` | Use `runforge` unless you need a different local database name |
+| `POSTGRES_USER` | Use `runforge` unless you need a different local database user |
 | `POSTGRES_PASSWORD` | Generate a strong database password |
-| `AUTO_CLAUDE_DOCKER_DATABASE_URL` | `postgres://autoclaude:<url-encoded-password>@postgres:5432/autoclaude` |
+| `RUNFORGE_DOCKER_DATABASE_URL` | `postgres://runforge:<url-encoded-password>@postgres:5432/runforge` |
 | `DAEMON_DATA_BACKEND` | `postgres` |
 | `BRIEFING_DATA_BACKEND` | `postgres` |
 | `NEXT_PUBLIC_SITE_URL` | `https://app.example.com` (your domain) |
@@ -77,8 +77,8 @@ Fill in all values:
 ## 6. Configure the Daemon
 
 ```bash
-cp auto-claude.config.example.json auto-claude.config.json
-nano auto-claude.config.json
+cp runforge.config.example.json runforge.config.json
+nano runforge.config.json
 ```
 
 Set at minimum:
@@ -111,7 +111,7 @@ The Compose stack runs the app-owned Postgres migrations automatically through t
 ## 9. Deploy
 
 ```bash
-cd /home/autoclaude/auto-claude
+cd /home/runforge/runforge
 docker compose --env-file .env.prod --profile public up --build -d
 ```
 
@@ -141,7 +141,7 @@ The daemon's control port (3847) is **not** exposed externally — it is interna
 ### Update to latest
 
 ```bash
-cd /home/autoclaude/auto-claude
+cd /home/runforge/runforge
 git pull
 docker compose --env-file .env.prod --profile public up --build -d
 ```
@@ -171,7 +171,7 @@ Back up the app-owned database with `pg_dump`. Store `.env.prod` and especially 
 mkdir -p backups
 docker compose --env-file .env.prod exec -T postgres sh -c \
   'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' \
-  > "backups/autoclaude-$(date +%Y%m%d-%H%M%S).dump"
+  > "backups/runforge-$(date +%Y%m%d-%H%M%S).dump"
 ```
 
 ### Restore Postgres
@@ -183,7 +183,7 @@ docker compose --env-file .env.prod --profile public stop dashboard briefing-sum
 # If this host also runs the containerized daemon profile:
 docker compose --env-file .env.prod --profile containerized-daemon stop daemon
 
-cat backups/autoclaude-YYYYMMDD-HHMMSS.dump | docker compose --env-file .env.prod exec -T postgres sh -c \
+cat backups/runforge-YYYYMMDD-HHMMSS.dump | docker compose --env-file .env.prod exec -T postgres sh -c \
   'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner'
 
 docker compose --env-file .env.prod --profile public up --build -d
@@ -200,7 +200,7 @@ docker compose --env-file .env.prod --profile public down
 **`git pull` fails with "unsafe directory"**
 
 ```bash
-chown -R autoclaude:autoclaude /home/autoclaude/auto-claude
+chown -R runforge:runforge /home/runforge/runforge
 ```
 
 **`git pull` blocked by untracked files**

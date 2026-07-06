@@ -42,14 +42,14 @@ them — they are the `do_not_modify` set):
 - Worktree deps installed: `pnpm install --frozen-lockfile` (done).
 - Real Postgres for the fix-1 suite (docker, mirrors ci.yml):
   container `ci-pg-sparring`, `postgres:18-alpine`, db/user/pass
-  `auto_claude_ci`/`auto_claude`/`auto_claude`, mapped port recorded in
+  `runforge_ci`/`runforge`/`runforge`, mapped port recorded in
   `.sparring/pg-url.txt` (currently
-  `postgres://auto_claude:auto_claude@127.0.0.1:60212/auto_claude_ci`).
-  **Every fix-1 test run MUST set `AUTO_CLAUDE_TEST_DATABASE_URL` (and
-  `AUTO_CLAUDE_DATABASE_URL`) to that URL — without it the real-PG suite
+  `postgres://runforge:runforge@127.0.0.1:60212/runforge_ci`).
+  **Every fix-1 test run MUST set `RUNFORGE_TEST_DATABASE_URL` (and
+  `RUNFORGE_DATABASE_URL`) to that URL — without it the real-PG suite
   SKIPS and a green run is hollow.**
 - Playwright browser for fix-2:
-  `pnpm --filter @auto-claude/dashboard exec playwright install chromium`.
+  `pnpm --filter @runforge/dashboard exec playwright install chromium`.
 
 ## Task 1 — PR 1: daemon tick2 deflake (`codex/ci-deflake-daemon-tick2-build`)
 
@@ -107,7 +107,7 @@ Files: `packages/daemon/src/control-plane/daemon.test.ts`,
    `findSecondTickPassiveWaitViolations`.
 4. **Verify** (PG env vars from `.sparring/pg-url.txt`, per prerequisites):
    ```bash
-   cd packages/daemon && AUTO_CLAUDE_TEST_DATABASE_URL=<pg-url> AUTO_CLAUDE_DATABASE_URL=<pg-url> \
+   cd packages/daemon && RUNFORGE_TEST_DATABASE_URL=<pg-url> RUNFORGE_DATABASE_URL=<pg-url> \
      pnpm exec vitest run src/control-plane/daemon.test.ts src/test-hygiene.test.ts src/cockpit-settle-deflake.gate.test.ts
    ```
    Expected: all pass, 0 skipped in the decision-index describes. Run the
@@ -159,8 +159,8 @@ PR additionally carries (GATE-AUTHORED, implementer-untouchable):
    assertions) untouched.
 3. **Verify**:
    ```bash
-   pnpm --filter @auto-claude/dashboard test
-   pnpm --filter @auto-claude/dashboard e2e --project=desktop
+   pnpm --filter @runforge/dashboard test
+   pnpm --filter @runforge/dashboard e2e --project=desktop
    ```
    Expected: e2e 3/3 desktop tests pass. Run the e2e twice for sampling.
    Then repo-root `pnpm lint && pnpm typecheck`.

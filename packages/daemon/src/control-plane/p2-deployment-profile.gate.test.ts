@@ -1,12 +1,12 @@
 // G1 — self-hosting deployment profile acceptance gate.
 //
-// auto-claude must govern ITSELF: the repo-root auto-claude.config.json must
+// runforge must govern ITSELF: the repo-root runforge.config.json must
 // carry a `deployment` block that the registry's own authoritative validator
 // (parseProfile) accepts, whose landing target fails closed on explicit
 // required checks, and whose every autonomously-merging lane declares a
 // runnable verifier oracle (the verifier-gated-autonomy hard boundary).
 //
-// RED at HEAD: auto-claude.config.json has NO `deployment` block, so the very
+// RED at HEAD: runforge.config.json has NO `deployment` block, so the very
 // first assertion (block present) fails. The downstream assertions are the
 // immovable shape the fix must satisfy to go green.
 import { readFile } from 'node:fs/promises';
@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseProfile } from './deployment-registry/index.js';
 
-const CONFIG_PATH = join(import.meta.dirname, '../../../../auto-claude.config.json');
+const CONFIG_PATH = join(import.meta.dirname, '../../../../runforge.config.json');
 
 interface ConfigShape {
   deployment?: { id?: string; profile?: unknown };
@@ -39,13 +39,13 @@ function isAutonomousLane(lane: { mergePolicy: unknown }): boolean {
 }
 
 describe('G1 self-hosting deployment profile', () => {
-  it('registers auto-claude as its own governed deployment via parseProfile', async () => {
+  it('registers runforge as its own governed deployment via parseProfile', async () => {
     const raw = JSON.parse(await readFile(CONFIG_PATH, 'utf-8')) as ConfigShape;
     const deployment = raw.deployment;
 
     expect(
       deployment,
-      'auto-claude.config.json must declare a `deployment` block — the daemon cannot self-govern without registering itself',
+      'runforge.config.json must declare a `deployment` block — the daemon cannot self-govern without registering itself',
     ).toBeDefined();
     if (deployment === undefined) return; // unreachable after expect; narrows for TS
 

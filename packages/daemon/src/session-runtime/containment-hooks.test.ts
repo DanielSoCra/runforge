@@ -406,70 +406,70 @@ describe('checkContainment', () => {
     expect(result.allowed).toBe(false);
   });
 
-  // Regression tests for SEC-3: auto-claude.config.json must be read-only
-  it('blocks Write to auto-claude.config.json', () => {
+  // Regression tests for SEC-3: runforge.config.json must be read-only
+  it('blocks Write to runforge.config.json', () => {
     const call: ToolCall = {
       tool: 'Write',
-      input: { file_path: 'auto-claude.config.json' },
+      input: { file_path: 'runforge.config.json' },
     };
     const result = checkContainment(call, DEFAULT_POLICY);
     expect(result.allowed).toBe(false);
     if (!result.allowed) expect(result.reason).toContain('read-only');
   });
 
-  it('blocks Edit on auto-claude.config.json', () => {
+  it('blocks Edit on runforge.config.json', () => {
     const call: ToolCall = {
       tool: 'Edit',
-      input: { file_path: 'auto-claude.config.json' },
+      input: { file_path: 'runforge.config.json' },
     };
     const result = checkContainment(call, DEFAULT_POLICY);
     expect(result.allowed).toBe(false);
     if (!result.allowed) expect(result.reason).toContain('read-only');
   });
 
-  it('allows Read on auto-claude.config.json', () => {
+  it('allows Read on runforge.config.json', () => {
     const call: ToolCall = {
       tool: 'Read',
-      input: { file_path: 'auto-claude.config.json' },
+      input: { file_path: 'runforge.config.json' },
     };
     const result = checkContainment(call, DEFAULT_POLICY);
     expect(result.allowed).toBe(true);
   });
 
-  it('blocks Bash write to auto-claude.config.json', () => {
+  it('blocks Bash write to runforge.config.json', () => {
     const call: ToolCall = {
       tool: 'Bash',
-      input: { command: 'echo \'{"perRunBudget": 999}\' > auto-claude.config.json' },
+      input: { command: 'echo \'{"perRunBudget": 999}\' > runforge.config.json' },
     };
     const result = checkContainment(call, DEFAULT_POLICY);
     expect(result.allowed).toBe(false);
     if (!result.allowed) expect(result.reason).toContain('read-only path in command');
   });
 
-  it('blocks Write to auto-claude.config.json via traversal', () => {
+  it('blocks Write to runforge.config.json via traversal', () => {
     const call: ToolCall = {
       tool: 'Write',
-      input: { file_path: 'src/../auto-claude.config.json' },
+      input: { file_path: 'src/../runforge.config.json' },
     };
     const result = checkContainment(call, DEFAULT_POLICY);
     expect(result.allowed).toBe(false);
     if (!result.allowed) expect(result.reason).toContain('read-only');
   });
 
-  it('blocks NotebookEdit on auto-claude.config.json', () => {
+  it('blocks NotebookEdit on runforge.config.json', () => {
     const call: ToolCall = {
       tool: 'NotebookEdit',
-      input: { file_path: 'auto-claude.config.json' },
+      input: { file_path: 'runforge.config.json' },
     };
     const result = checkContainment(call, DEFAULT_POLICY);
     expect(result.allowed).toBe(false);
     if (!result.allowed) expect(result.reason).toContain('read-only');
   });
 
-  it('allows Bash read of auto-claude.config.json (no write indicator)', () => {
+  it('allows Bash read of runforge.config.json (no write indicator)', () => {
     const call: ToolCall = {
       tool: 'Bash',
-      input: { command: 'cat auto-claude.config.json' },
+      input: { command: 'cat runforge.config.json' },
     };
     const result = checkContainment(call, DEFAULT_POLICY);
     expect(result.allowed).toBe(true);

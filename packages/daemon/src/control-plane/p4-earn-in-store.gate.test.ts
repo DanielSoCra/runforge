@@ -143,7 +143,7 @@ function tmpDir(): string {
 
 function makeProfile(over: { repositories?: { owner: string; name: string }[] } = {}) {
   return {
-    repositories: over.repositories ?? [{ owner: 'acme', name: 'auto-claude' }],
+    repositories: over.repositories ?? [{ owner: 'acme', name: 'runforge' }],
     riskPathMap: [{ paths: ['infra/**'], minLevel: 'orange' }],
     defaultMinLevel: 'green',
     laneSet: {

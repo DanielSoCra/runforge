@@ -16,7 +16,7 @@
   },
   "webhooks": [],
   "deployment": {
-    "id": "auto-claude",
+    "id": "runforge",
     "profile": {
       "repositories": [{ "owner": "DANIELSOCRAHANDLEZZ", "name": "auto-claude" }],
       "riskPathMap": [
@@ -64,7 +64,7 @@
   "runtimeSource": { "expectedRef": "origin/main" },
   "validation": {
     "gate1Commands": [
-      "pnpm --filter @auto-claude/daemon run test"
+      "pnpm --filter @runforge/daemon run test"
     ],
     "maxFixCycles": 4,
     "baselinePreexistingFailures": true

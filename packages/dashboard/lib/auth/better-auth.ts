@@ -23,7 +23,7 @@ const {
   teamMembers,
 } = schema;
 
-const OPERATOR_MEMBERSHIP_LOCK_NAME = 'auto_claude_operator_membership';
+const OPERATOR_MEMBERSHIP_LOCK_NAME = 'runforge_operator_membership';
 
 export interface DashboardAuthEnv extends BetterAuthEnv {
   BETTER_AUTH_GITHUB_CLIENT_ID?: string;
@@ -45,7 +45,7 @@ export function buildDashboardAuthOptions(
   const socialProviders = readGithubLoginProvider(env);
 
   return {
-    appName: 'Auto-Claude',
+    appName: 'Runforge',
     baseURL: resolveBetterAuthBaseUrl(env),
     secret: resolveBetterAuthSecret(env),
     database: drizzleAdapter(options.db, {
@@ -85,7 +85,7 @@ export function buildDashboardAuthOptions(
       },
     },
     advanced: {
-      cookiePrefix: 'auto-claude',
+      cookiePrefix: 'runforge',
       database: { generateId: 'uuid' },
     },
     ...(socialProviders ? { socialProviders } : {}),

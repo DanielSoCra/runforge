@@ -390,7 +390,7 @@ export function ImportReposModal({
                                 <span className="text-muted-foreground">
                                   Remove{' '}
                                   <span className="font-mono font-medium text-foreground">{repo.name}</span>{' '}
-                                  from Auto-Claude?
+                                  from Runforge?
                                 </span>
                               )}
                               <div className="flex gap-2">

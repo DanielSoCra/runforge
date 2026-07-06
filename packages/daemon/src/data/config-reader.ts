@@ -4,7 +4,7 @@ import type {
   Repository,
   SettingsAccess,
   StoreResult,
-} from '@auto-claude/db';
+} from '@runforge/db';
 
 import type { GlobalConfig, RepoConfig } from '../config.js';
 import { err, ok, type Result } from '../lib/result.js';

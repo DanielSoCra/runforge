@@ -979,7 +979,7 @@ npm run build
 
 - [ ] **Step 2: Create test config**
 
-Create a config file pointing at the auto-claude repo with coordination enabled.
+Create a config file pointing at the runforge repo with coordination enabled.
 
 - [ ] **Step 3: Start the daemon**
 

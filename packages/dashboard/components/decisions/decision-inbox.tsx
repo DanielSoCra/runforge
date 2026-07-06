@@ -46,7 +46,7 @@ export interface ListOption {
 /**
  * A ranked inbox row, mirroring the daemon `RankedListItem` wire shape (the fields
  * the inbox renders). Kept as a dashboard-local type — the dashboard does NOT
- * depend on `@auto-claude/decision-index`; the boundary is JSON over HTTP.
+ * depend on `@runforge/decision-index`; the boundary is JSON over HTTP.
  */
 export interface RankedListItem {
   decision_id: string;

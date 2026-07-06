@@ -7,14 +7,14 @@ import { processSingleIssue } from './control-plane/process-single.js';
 
 const program = new Command();
 program
-  .name('auto-claude')
+  .name('runforge')
   .description('Autonomous spec implementation daemon')
   .version('0.1.0');
 
 program
   .command('start')
   .description('Start the daemon')
-  .option('-c, --config <path>', 'Config file path', 'auto-claude.config.json')
+  .option('-c, --config <path>', 'Config file path', 'runforge.config.json')
   .action(async (options: { config: string }) => {
     loadDotenv();
     const result = await startDaemon(options.config);
@@ -27,7 +27,7 @@ program
 program
   .command('process <issue>')
   .description('Process a single issue by number (one-shot)')
-  .option('-c, --config <path>', 'Config file path', 'auto-claude.config.json')
+  .option('-c, --config <path>', 'Config file path', 'runforge.config.json')
   .action(async (issue: string, options: { config: string }) => {
     loadDotenv();
     const issueNumber = Number(issue);

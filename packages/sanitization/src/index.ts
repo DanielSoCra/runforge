@@ -1,5 +1,5 @@
 /**
- * @auto-claude/sanitization — input-boundary content sanitization (STACK-AC-SANITIZATION).
+ * @runforge/sanitization — input-boundary content sanitization (STACK-AC-SANITIZATION).
  *
  * Domain-blind middleware host: a Sanitizer port, an ordered SanitizationPipeline
  * (empty = identity), a name→factory SanitizerRegistry, and the zod config for a

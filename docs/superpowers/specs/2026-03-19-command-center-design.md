@@ -4,13 +4,13 @@
 
 **Date:** 2026-03-19
 **Status:** draft
-**Domain:** auto-claude dashboard
+**Domain:** runforge dashboard
 
 ---
 
 ## Problem
 
-The auto-claude dashboard monitors runs and manages repositories, but the operator has no way to create new work from within it. Starting a conversation with Claude requires switching to a separate terminal or browser tab. Creating GitHub issues, editing specs, and bootstrapping new projects all happen outside the dashboard with no integration. The result is a fragmented workflow: the dashboard shows what happened, but the operator has to leave it to decide what happens next.
+The runforge dashboard monitors runs and manages repositories, but the operator has no way to create new work from within it. Starting a conversation with Claude requires switching to a separate terminal or browser tab. Creating GitHub issues, editing specs, and bootstrapping new projects all happen outside the dashboard with no integration. The result is a fragmented workflow: the dashboard shows what happened, but the operator has to leave it to decide what happens next.
 
 ## Goal
 
@@ -119,7 +119,7 @@ Executes the following in order, showing live progress:
 1. Create GitHub repository via GitHub API
 2. Commit `.specify/L0-vision.md`
 3. Commit `.specify/traceability.yml` (scaffolded)
-4. Commit `.auto-claude/workflow.yml` (from Step 3 configuration)
+4. Commit `.runforge/workflow.yml` (from Step 3 configuration)
 5. Commit `AGENTS.md` and `CLAUDE.md` from templates
 6. Create `Repo` record in Supabase with `enabled: false`
 7. Redirect to `/repos/[id]/settings` to add credentials and enable
@@ -170,14 +170,14 @@ When a GitHub issue spans multiple categories (e.g. `workflow` + `schema`), the 
 
 ### Config file
 
-The matrix is stored as `.auto-claude/workflow.yml` in each repo. The dashboard reads and writes it via the GitHub API. Every save is a git commit with a descriptive message (`chore: update workflow gates [category: schema, gate: pr → auto]`). Rolling back a gate change is a `git revert`.
+The matrix is stored as `.runforge/workflow.yml` in each repo. The dashboard reads and writes it via the GitHub API. Every save is a git commit with a descriptive message (`chore: update workflow gates [category: schema, gate: pr → auto]`). Rolling back a gate change is a `git revert`.
 
 ### Inheritance
 
 ```
-System defaults (built into auto-claude)
+System defaults (built into runforge)
   └── Org-level profile (optional, shared config repo)
-        └── Repo overrides (.auto-claude/workflow.yml)
+        └── Repo overrides (.runforge/workflow.yml)
 ```
 
 Repos only need to declare what they override. The `extends` key is a top-level YAML key accepting either `"default"` (system defaults) or a raw GitHub URL to the org profile file.
@@ -187,7 +187,7 @@ Repos only need to declare what they override. The `extends` key is a top-level 
 extends: default
 
 # Extend an org-level profile
-extends: https://raw.githubusercontent.com/my-org/.auto-claude-defaults/main/workflow.yml
+extends: https://raw.githubusercontent.com/my-org/.runforge-defaults/main/workflow.yml
 ```
 
 At sync time, the daemon fetches the URL (if not `default`), merges the org profile over system defaults, then merges the repo overrides on top. The resolved merged config is what gets written to Supabase.
@@ -198,7 +198,7 @@ At sync time, the daemon fetches the URL (if not `default`), merges the org prof
 
 The daemon caches the merged config (system defaults → org profile → repo overrides, fully resolved) in Supabase on every sync cycle (60s). Issue evaluation reads from Supabase — no GitHub API call per issue.
 
-**Cache invalidation — repo config:** When the dashboard saves a change to `.auto-claude/workflow.yml`, the save Server Action resolves the new merged config immediately and writes it to Supabase before returning a 200 response. The operator sees the updated state instantly. The 60s polling cycle is a safety net for out-of-band edits made directly to the file in git.
+**Cache invalidation — repo config:** When the dashboard saves a change to `.runforge/workflow.yml`, the save Server Action resolves the new merged config immediately and writes it to Supabase before returning a 200 response. The operator sees the updated state instantly. The 60s polling cycle is a safety net for out-of-band edits made directly to the file in git.
 
 **Cache invalidation — org-level profile:** Changes to the shared org profile file affect every repo that extends it. The daemon re-fetches and re-resolves the org profile URL for all affected repos on every 60s sync cycle. There is no webhook mechanism for org profile changes — the 60s polling cadence is the propagation window. The dashboard exposes a "Force re-sync all repos" button on the Org-Level Profile card for operators who need immediate propagation. The button is disabled while a sync is in progress and re-enabled when it completes; re-triggering a sync that is already running is a no-op.
 
@@ -261,7 +261,7 @@ When creating an issue through the Claude session, Claude proposes `size:`, `spe
 
 - **Claude Panel** owns: displaying session status, URL, QR code, quick context actions. It does not relay terminal I/O — it surfaces the Remote Control session URL only.
 - **Command Center page** owns: New Project wizard, global matrix defaults editor, org profile card.
-- **Workflow Matrix editor** owns: reading and writing `.auto-claude/workflow.yml` via GitHub API, displaying the merged inherited + override matrix.
+- **Workflow Matrix editor** owns: reading and writing `.runforge/workflow.yml` via GitHub API, displaying the merged inherited + override matrix.
 - **Daemon** owns: reading the matrix from Supabase cache, evaluating gate state from issue labels, advancing or pausing the workflow, adding/removing `awaiting:[gate]-review` and `[gate]:approved` labels.
 - **Claude session** owns: issue creation, spec editing, anything that requires reasoning — all through the Remote Control session with existing MCPs.
 

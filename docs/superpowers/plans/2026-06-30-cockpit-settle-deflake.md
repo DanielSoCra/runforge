@@ -111,7 +111,7 @@ function reentryCount(issueNumber: number): number {
 }
 ```
 
-- [ ] **Step 2: Typecheck.** Run: `pnpm --filter @auto-claude/daemon typecheck`. Expected: clean
+- [ ] **Step 2: Typecheck.** Run: `pnpm --filter @runforge/daemon typecheck`. Expected: clean
   (the helpers are unused until later tasks — TS `noUnusedLocals` is off for these or they are
   referenced soon; if a strict unused error appears, proceed to Task 2 which uses them and
   re-check).
@@ -176,7 +176,7 @@ length 1, `statusOf === 'resumed'`).
   `await settleRealAsync();`.
 
 - [ ] **Step 4: Run the describe** (needs real Postgres — see the "Running real-PG tests" box).
-  Run: `AUTO_CLAUDE_TEST_DATABASE_URL=$PG pnpm --filter @auto-claude/daemon test -t "cockpit answer consumer"`
+  Run: `RUNFORGE_TEST_DATABASE_URL=$PG pnpm --filter @runforge/daemon test -t "cockpit answer consumer"`
   Expected: all pass.
 
 - [ ] **Step 5: Commit.**
@@ -240,7 +240,7 @@ Leave the `answer`-before-save ordering + `pending()`-excludes assertions unchan
 
 - [ ] **Step 5: Run + commit.**
 ```bash
-AUTO_CLAUDE_TEST_DATABASE_URL=$PG pnpm --filter @auto-claude/daemon test -t "decision-index enabled mode"
+RUNFORGE_TEST_DATABASE_URL=$PG pnpm --filter @runforge/daemon test -t "decision-index enabled mode"
 git add packages/daemon/src/control-plane/daemon.test.ts
 git commit -m "test(daemon): deterministic settle for decision-index enabled-mode resume tests"
 ```
@@ -271,7 +271,7 @@ git commit -m "test(daemon): deterministic settle for decision-index enabled-mod
 
 - [ ] **Step 3: Run + commit.**
 ```bash
-AUTO_CLAUDE_TEST_DATABASE_URL=$PG pnpm --filter @auto-claude/daemon test -t "integrate park resume \\(follow-up"
+RUNFORGE_TEST_DATABASE_URL=$PG pnpm --filter @runforge/daemon test -t "integrate park resume \\(follow-up"
 git add packages/daemon/src/control-plane/daemon.test.ts
 git commit -m "test(daemon): deterministic settle for integrate park resume (#9)"
 ```
@@ -455,7 +455,7 @@ it('RC-4: forbids fixed-budget settleRealAsync in real-PG resume describes (and 
 });
 ```
 
-- [ ] **Step 3: Run the guard.** `pnpm --filter @auto-claude/daemon test -t "test hygiene"`.
+- [ ] **Step 3: Run the guard.** `pnpm --filter @runforge/daemon test -t "test hygiene"`.
   Expected: pass (synthetic-bad → 1 violation; marked/plain/real-file → none).
 
 - [ ] **Step 4: Commit.**
@@ -470,21 +470,21 @@ git commit -m "test(hygiene): RC-4 guard — forbid fixed-budget settle in real-
 
 ```bash
 CONTAINER=cockpit-deflake-pg
-docker run -d --name "$CONTAINER" -e POSTGRES_DB=auto_claude_ci -e POSTGRES_USER=auto_claude \
-  -e POSTGRES_PASSWORD=auto_claude -p 127.0.0.1::5432 postgres:18-alpine
+docker run -d --name "$CONTAINER" -e POSTGRES_DB=runforge_ci -e POSTGRES_USER=runforge \
+  -e POSTGRES_PASSWORD=runforge -p 127.0.0.1::5432 postgres:18-alpine
 # wait for ready, resolve port:
-until docker exec "$CONTAINER" pg_isready -U auto_claude -d auto_claude_ci >/dev/null 2>&1; do sleep 1; done
+until docker exec "$CONTAINER" pg_isready -U runforge -d runforge_ci >/dev/null 2>&1; do sleep 1; done
 PORT=$(docker port "$CONTAINER" 5432/tcp | head -1 | sed 's/.*://')
-export PG="postgres://auto_claude:auto_claude@127.0.0.1:${PORT}/auto_claude_ci"
-export AUTO_CLAUDE_TEST_DATABASE_URL="$PG" AUTO_CLAUDE_DATABASE_URL="$PG"
+export PG="postgres://runforge:runforge@127.0.0.1:${PORT}/runforge_ci"
+export RUNFORGE_TEST_DATABASE_URL="$PG" RUNFORGE_DATABASE_URL="$PG"
 # teardown when done: docker rm -f "$CONTAINER"
 ```
 
 ## Final verification (whole-change acceptance)
 
-- [ ] `AUTO_CLAUDE_TEST_DATABASE_URL=$PG pnpm --filter @auto-claude/daemon test` — full daemon
+- [ ] `RUNFORGE_TEST_DATABASE_URL=$PG pnpm --filter @runforge/daemon test` — full daemon
   suite green (all three real-PG resume describes + the RC-4 guard).
-- [ ] `pnpm --filter @auto-claude/daemon typecheck` — clean.
+- [ ] `pnpm --filter @runforge/daemon typecheck` — clean.
 - [ ] `pnpm lint` — clean.
 - [ ] `grep -nE "await settleRealAsync\(" packages/daemon/src/control-plane/daemon.test.ts` — every
   remaining hit is either OUTSIDE the three `skipIf(!REAL_PG)` describes or carries a

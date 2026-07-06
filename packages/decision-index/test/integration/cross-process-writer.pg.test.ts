@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import postgres from "postgres";
-import { PROTOCOL_VERSION } from "@auto-claude/decision-protocol";
+import { PROTOCOL_VERSION } from "@runforge/decision-protocol";
 import { openDb, openReadOnlyDb } from "../../src/db.js";
 import { migrate } from "../../src/migrate.js";
 import { createIndexWriter, type IndexWriter } from "../../src/index-writer.js";
@@ -25,14 +25,14 @@ import { FakeResumeDispatcher } from "../../src/adapters/fakes/fake-resume-dispa
  *       construction time;
  *   (3) a read-only session rejects writes.
  *
- * Gated on AUTO_CLAUDE_TEST_DATABASE_URL (CI sets it; local skips). The suite
+ * Gated on RUNFORGE_TEST_DATABASE_URL (CI sets it; local skips). The suite
  * mutates the shared `decision_index` schema, so it holds a SESSION-level
  * serialize advisory lock for its whole run — under parallel CI forks the other
  * real-PG-gated files (gated-writer, handle-leak) take the same lock and serialize.
  */
-const DB_URL = process.env.AUTO_CLAUDE_TEST_DATABASE_URL;
+const DB_URL = process.env.RUNFORGE_TEST_DATABASE_URL;
 
-// K = hashtext('auto-claude:decision-index:writer') — the writer lock the source
+// K = hashtext('runforge:decision-index:writer') — the writer lock the source
 // computes. A separate large constant serializes the real-PG-gated test FILES.
 const SERIALIZE_LOCK = 982_451_653;
 
@@ -71,7 +71,7 @@ describe.skipIf(!DB_URL)("cross-process single-writer [real Postgres]", () => {
     serializer = postgres(DB_URL!, { max: 1 });
     await serializer`SELECT pg_advisory_lock(${SERIALIZE_LOCK})`;
     const [{ k }] = await serializer<{ k: number }[]>`
-      SELECT hashtext('auto-claude:decision-index:writer') AS k`;
+      SELECT hashtext('runforge:decision-index:writer') AS k`;
     writerKey = Number(k);
   });
 

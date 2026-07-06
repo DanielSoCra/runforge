@@ -1,7 +1,7 @@
 ---
 id: STACK-AC-OPERATOR-SURFACE-CLIENT
 type: stack-specific
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 3
@@ -45,7 +45,7 @@ test_paths:
 
 **The presentational component takes `items: RankedListItem[]` + `unavailable?: boolean`, not a fetch promise.** Separating the pure render from data fetching is what lets the component test assert rows / empty / degraded / redaction with a hand-rolled array and zero network mocking. The server component (or a future client wrapper for realtime refresh) owns the fetch; `DecisionInbox` owns only the pixels. This is the same seam as `BriefingCard(briefing)` and `LivePanels(activeRuns, ...)` already in the tree.
 
-**Mirror `RankedListItem`/`ListField` as a dashboard-local type, do not import `@auto-claude/decision-index`.** The dashboard package does **not** depend on `@auto-claude/decision-index` (it would pull the native better-sqlite/drizzle index into the Next.js bundle). The inbox defines the narrow read-only shape it renders — `RankedListItem` with the fields it actually shows (`decision_id`, `status`, `risk_class`, `created_at`, `question`, `score`, `why_ranked`, …) and the `ListField` discriminated union — as a local TS type co-located with the component, kept structurally compatible with the daemon's wire shape. The boundary is JSON over HTTP, so a structural mirror is the correct coupling, not a package dependency.
+**Mirror `RankedListItem`/`ListField` as a dashboard-local type, do not import `@runforge/decision-index`.** The dashboard package does **not** depend on `@runforge/decision-index` (it would pull the native better-sqlite/drizzle index into the Next.js bundle). The inbox defines the narrow read-only shape it renders — `RankedListItem` with the fields it actually shows (`decision_id`, `status`, `risk_class`, `created_at`, `question`, `score`, `why_ranked`, …) and the `ListField` discriminated union — as a local TS type co-located with the component, kept structurally compatible with the daemon's wire shape. The boundary is JSON over HTTP, so a structural mirror is the correct coupling, not a package dependency.
 
 **The proxy route is read-only `GET` and reuses `daemonFetch`; it does not re-implement the daemon URL or CSRF.** `daemonFetch(path)` already injects the base URL, the `X-Requested-By: dashboard` header, and a 5s `AbortSignal.timeout`. The route passes `/decisions/pending` (forwarding `request.nextUrl.searchParams` when present, so focus/filters round-trip) and returns the parsed JSON on `200`. It does not add auth here beyond what the platform already enforces — operator auth is FUNC-AC-OPERATOR-AUTH at the surface; this route follows whatever the sibling daemon routes do (`requireDashboardUser` is the established read-route guard) so it stays consistent with `app/api/daemon/status/route.ts`.
 

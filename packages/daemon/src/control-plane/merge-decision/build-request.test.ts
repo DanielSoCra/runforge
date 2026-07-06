@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 import {
   DecisionRequestSchema,
   PROTOCOL_VERSION,
-} from '@auto-claude/decision-protocol';
+} from '@runforge/decision-protocol';
 import type { RunState } from '../../types.js';
 import { buildMergeDecisionRequest, decisionIdFor } from './build-request.js';
 import type { MergeDecision } from './types.js';
@@ -39,7 +39,7 @@ function makeRun(overrides: Partial<RunState> = {}): RunState {
     fixAttempts: [],
     errorHashes: {},
     repoOwner: 'DANIELSOCRAHANDLEZZ',
-    repoName: 'auto-claude',
+    repoName: 'runforge',
     startedAt: FIXED_NOW,
     updatedAt: FIXED_NOW,
     workerClaimId: 'claim-abc',
@@ -95,7 +95,7 @@ describe('decisionIdFor (merge-decision)', () => {
 
 describe('buildMergeDecisionRequest', () => {
   it('produces an object the REAL DecisionRequestSchema accepts', () => {
-    const req = buildMergeDecisionRequest(makeRun(), 1, 'auto-claude', escalateDecision('green'), {
+    const req = buildMergeDecisionRequest(makeRun(), 1, 'runforge', escalateDecision('green'), {
       now: FIXED_NOW,
     });
     const parsed = DecisionRequestSchema.parse(req);
@@ -104,7 +104,7 @@ describe('buildMergeDecisionRequest', () => {
   });
 
   it('deterministic decision_id = issue-<n>:integrate:<epoch>; idempotency_key derived from it', () => {
-    const req = buildMergeDecisionRequest(makeRun(), 5, 'auto-claude', escalateDecision('green'), {
+    const req = buildMergeDecisionRequest(makeRun(), 5, 'runforge', escalateDecision('green'), {
       now: FIXED_NOW,
     });
     expect(req.decision_id).toBe('issue-42:integrate:5');
@@ -112,10 +112,10 @@ describe('buildMergeDecisionRequest', () => {
   });
 
   it('epoch 1 id !== epoch 2 id', () => {
-    const e1 = buildMergeDecisionRequest(makeRun(), 1, 'auto-claude', escalateDecision('green'), {
+    const e1 = buildMergeDecisionRequest(makeRun(), 1, 'runforge', escalateDecision('green'), {
       now: FIXED_NOW,
     });
-    const e2 = buildMergeDecisionRequest(makeRun(), 2, 'auto-claude', escalateDecision('green'), {
+    const e2 = buildMergeDecisionRequest(makeRun(), 2, 'runforge', escalateDecision('green'), {
       now: FIXED_NOW,
     });
     expect(e1.decision_id).not.toBe(e2.decision_id);
@@ -133,7 +133,7 @@ describe('buildMergeDecisionRequest', () => {
       ['red', 'P0'],
     ];
     for (const [level, expected] of cases) {
-      const req = buildMergeDecisionRequest(makeRun(), 1, 'auto-claude', escalateDecision(level), {
+      const req = buildMergeDecisionRequest(makeRun(), 1, 'runforge', escalateDecision(level), {
         now: FIXED_NOW,
       });
       expect(req.risk_class).toBe(expected);
@@ -141,7 +141,7 @@ describe('buildMergeDecisionRequest', () => {
   });
 
   it('answer_schema is option; resume_mode=requeue; reversibility=reversible', () => {
-    const req = buildMergeDecisionRequest(makeRun(), 1, 'auto-claude', escalateDecision('green'), {
+    const req = buildMergeDecisionRequest(makeRun(), 1, 'runforge', escalateDecision('green'), {
       now: FIXED_NOW,
     });
     expect(req.answer_schema).toEqual({ kind: 'option' });
@@ -151,7 +151,7 @@ describe('buildMergeDecisionRequest', () => {
   });
 
   it('protocol_version is set', () => {
-    const req = buildMergeDecisionRequest(makeRun(), 1, 'auto-claude', escalateDecision('green'), {
+    const req = buildMergeDecisionRequest(makeRun(), 1, 'runforge', escalateDecision('green'), {
       now: FIXED_NOW,
     });
     expect(req.protocol_version).toBe(PROTOCOL_VERSION);
@@ -165,14 +165,14 @@ describe('buildMergeDecisionRequest', () => {
     expect(req.worker_session_id).toBe('claim-abc');
     expect(req.phase).toBe('integrate');
     expect(req.deployment).toBe('prod-deploy');
-    expect(req.source_url).toBe('https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/issues/42');
+    expect(req.source_url).toBe('https://github.com/DANIELSOCRAHANDLEZZ/runforge/issues/42');
   });
 
   it('worker_session_id falls back to run-<issueNumber> when no workerClaimId', () => {
     const req = buildMergeDecisionRequest(
       makeRun({ workerClaimId: undefined }),
       1,
-      'auto-claude',
+      'runforge',
       escalateDecision('green'),
       { now: FIXED_NOW },
     );
@@ -184,7 +184,7 @@ describe('buildMergeDecisionRequest', () => {
     const req = buildMergeDecisionRequest(
       makeRun({ l2Feedback: secret, handoffNotes: { 'l2-design': secret }, report: secret }),
       1,
-      'auto-claude',
+      'runforge',
       escalateDecision('green'),
       { now: FIXED_NOW },
     );

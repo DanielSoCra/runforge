@@ -1,5 +1,5 @@
 #!/bin/bash
-echo "=== Auto-Claude Health Check ==="
+echo "=== Runforge Health Check ==="
 echo ""
 
 # Check daemon heartbeat (unified process replaces legacy per-role heartbeats)
@@ -50,11 +50,11 @@ echo "=== Blocked ==="
 gh issue list --label "blocked" --state open --json number,title --template '{{range .}}#{{.number}} {{.title}}{{"\n"}}{{end}}'
 echo ""
 echo "=== Pipeline Status ==="
-gh issue list --label "feature-pipeline" --state open --repo DANIELSOCRAHANDLEZZ/auto-claude --json number,title,labels --template '{{range .}}#{{.number}} [{{range .labels}}{{.name}} {{end}}] {{.title}}{{"\n"}}{{end}}'
+gh issue list --label "feature-pipeline" --state open --repo DANIELSOCRAHANDLEZZ/runforge --json number,title,labels --template '{{range .}}#{{.number}} [{{range .labels}}{{.name}} {{end}}] {{.title}}{{"\n"}}{{end}}'
 echo ""
 echo "=== Stale Pipeline Issues (>1hr) ==="
 for label in l3-in-progress l3-review implementing; do
-  STALE=$(gh issue list --repo DANIELSOCRAHANDLEZZ/auto-claude \
+  STALE=$(gh issue list --repo DANIELSOCRAHANDLEZZ/runforge \
     --label "feature-pipeline,$label" \
     --state open --json number,title,updatedAt \
     --jq "[.[] | select((.updatedAt | fromdateiso8601) < (now - 3600))]" 2>/dev/null)

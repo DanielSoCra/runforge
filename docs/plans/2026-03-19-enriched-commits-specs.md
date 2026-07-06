@@ -39,7 +39,7 @@ Write `.specify/functional/enriched-commits.md` with exactly this content:
 ---
 id: FUNC-AC-ENRICHED-COMMITS
 type: functional
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 1
@@ -105,7 +105,7 @@ If anything fails, fix it before proceeding.
 
 - [ ] **Step 3: Add traceability entry**
 
-Add to `.specify/traceability.yml` under the Auto-Claude L1 section:
+Add to `.specify/traceability.yml` under the Runforge L1 section:
 
 ```yaml
 FUNC-AC-ENRICHED-COMMITS:
@@ -141,7 +141,7 @@ Write `.specify/architecture/enriched-commits.md` with exactly this content:
 ---
 id: ARCH-AC-ENRICHED-COMMITS
 type: architecture
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 2
@@ -212,7 +212,7 @@ Verify all of the following:
 
 - [ ] **Step 3: Update traceability**
 
-Add to `.specify/traceability.yml` under the Auto-Claude L2 section:
+Add to `.specify/traceability.yml` under the Runforge L2 section:
 
 ```yaml
 ARCH-AC-ENRICHED-COMMITS:
@@ -243,7 +243,7 @@ Write `.specify/stack/enriched-commits-worker-ts.md` with exactly this content:
 ---
 id: STACK-AC-ENRICHED-COMMITS-WORKER
 type: stack-specific
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 3
@@ -335,7 +335,7 @@ Write `.specify/stack/enriched-commits-knowledge-ts.md` with exactly this conten
 ---
 id: STACK-AC-ENRICHED-COMMITS-KNOWLEDGE
 type: stack-specific
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 3

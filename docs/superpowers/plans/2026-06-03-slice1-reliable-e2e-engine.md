@@ -16,7 +16,7 @@
 
 Four PRs are validated but unmerged; they must land (clean `main`) before the engine fixes.
 
-**Files:** none (review/merge ops). PRs: auto-claude #709 (workspace clone-on-startup + token-sync), #710 (gate1 baseline), #711 (l2-designer output paths); pm-cockpit #7 (answerable inbox: colon-id 404 + inline cards + timeout).
+**Files:** none (review/merge ops). PRs: runforge #709 (workspace clone-on-startup + token-sync), #710 (gate1 baseline), #711 (l2-designer output paths); pm-cockpit #7 (answerable inbox: colon-id 404 + inline cards + timeout).
 
 - [ ] **Step 1:** `/deep-review` #711 (smallest, prompt-only) → address findings → merge.
 - [ ] **Step 2:** `/deep-review` #709 → address → merge. Rebase #710 on the new main.
@@ -116,7 +116,7 @@ P7 set up the credential store only on the clone path; on `force-recreate` the c
 **Files:**
 - Create: `packages/daemon/test/e2e/full-pipeline.e2e.test.ts` (gated behind `RUN_E2E=1`; uses a throwaway repo)
 
-- [ ] **Step 1:** Write an e2e that: seeds a fresh issue (`feature-pipeline,l1-approved` + a tiny L1 in the scaffolded `auto-claude-example`), starts the daemon (Docker, the rebuilt image with Tasks 2–4), approves the l2-gate via the intent path, and **polls until a PR is merged** (`gh pr list --state merged`) or fails after a bounded timeout. Assert final issue labels include `complete`/closed.
+- [ ] **Step 1:** Write an e2e that: seeds a fresh issue (`feature-pipeline,l1-approved` + a tiny L1 in the scaffolded `runforge-example`), starts the daemon (Docker, the rebuilt image with Tasks 2–4), approves the l2-gate via the intent path, and **polls until a PR is merged** (`gh pr list --state merged`) or fails after a bounded timeout. Assert final issue labels include `complete`/closed.
 - [ ] **Step 2:** Run locally with `RUN_E2E=1` → expect PASS (the loop completes L0→L3→merged).
 - [ ] **Step 3:** Wire it into CI as a nightly/manual job (not the fast gate).
 - [ ] **Step 4: Commit** `test(e2e): autonomous run reaches a merged PR end-to-end`.
@@ -128,7 +128,7 @@ P7 set up the credential store only on the clone path; on `force-recreate` the c
 **Files:**
 - Create: `packages/daemon/scripts/smoke-engine.sh`; add `"smoke:engine"` to `packages/daemon/package.json`.
 
-- [ ] **Step 1:** Script: bring up the Docker daemon (P7 image) against `auto-claude-example`; assert `/health` = healthy and the boot log shows the workspace line; create a throwaway issue; wait for it to reach `l2-gate` (decision emitted) within N min; print PASS/FAIL; tear down.
+- [ ] **Step 1:** Script: bring up the Docker daemon (P7 image) against `runforge-example`; assert `/health` = healthy and the boot log shows the workspace line; create a throwaway issue; wait for it to reach `l2-gate` (decision emitted) within N min; print PASS/FAIL; tear down.
 - [ ] **Step 2:** Run `pnpm --dir packages/daemon smoke:engine` → PASS.
 - [ ] **Step 3: Commit** `chore(smoke): one-command engine smoke (boot → run → l2-gate)`. Document it in `docs/running-the-daemon-in-docker.md`.
 
@@ -136,7 +136,7 @@ P7 set up the credential store only on the clone path; on `force-recreate` the c
 
 ### Task 7: Re-run the live pilot end-to-end + close out
 
-- [ ] **Step 1:** Rebuild the daemon image (Tasks 2–4). Run a fresh issue on `auto-claude-example`; approve the l2-gate from the cockpit (the answerable inbox from #7); watch it advance L2-merge → L3 → review → merged.
+- [ ] **Step 1:** Rebuild the daemon image (Tasks 2–4). Run a fresh issue on `runforge-example`; approve the l2-gate from the cockpit (the answerable inbox from #7); watch it advance L2-merge → L3 → review → merged.
 - [ ] **Step 2:** Confirm via `gh` the PR merged + issue closed. Capture the cockpit screenshots.
 - [ ] **Step 3:** Close #49, #43, #41. Update the spec §7 acceptance as met.
 - [ ] **Step 4: Commit/PR** the Slice-1 branch → `/deep-review` → merge to `main`.

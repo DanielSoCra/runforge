@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, ne } from "drizzle-orm";
-import { type EffectKind, type TransitionEvent, type ItemStatus, TERMINAL_STATUSES } from "@auto-claude/decision-protocol";
+import { type EffectKind, type TransitionEvent, type ItemStatus, TERMINAL_STATUSES } from "@runforge/decision-protocol";
 import type { Db } from "./db.js";
 import { withTx } from "./db.js";
 import { decisions, outbox, decisionResponses, workerSessions } from "./schema.js";

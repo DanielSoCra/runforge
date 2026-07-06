@@ -2,12 +2,12 @@ import {
   createDbClient,
   createPostgresStores,
   type ActivityEvent,
-  type AutoClaudeStores,
+  type RunforgeStores,
   type Briefing,
   type JsonValue,
   type Run,
   type StoreResult,
-} from '@auto-claude/db';
+} from '@runforge/db';
 
 import type { ActivityEventInsert } from '../events.js';
 import type { SignalResult } from '../signals.js';
@@ -28,7 +28,7 @@ export function createPostgresBriefingBackend(
 }
 
 export function createPostgresBriefingBackendFromStores(
-  stores: Pick<AutoClaudeStores, 'briefings'>,
+  stores: Pick<RunforgeStores, 'briefings'>,
   close?: () => Promise<void>,
 ): BriefingDataBackend {
   return {

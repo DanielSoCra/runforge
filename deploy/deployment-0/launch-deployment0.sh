@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Deployment #0: auto-claude governed self-hosted daemon (Mac mini).
+# Deployment #0: runforge governed self-hosted daemon (Mac mini).
 #
-# Runtime source: ~/code/auto-claude-runtime — a clean, dedicated
+# Runtime source: ~/code/runforge-runtime — a clean, dedicated
 # clone pinned to origin/main (validateRuntimeSource requires clean + at/ahead
 # of origin/main; state/ and workspaces/ inside it are ignored dirty paths).
 #
-# To promote a new auto-claude version: stop the daemon, `git -C
-# ~/code/auto-claude-runtime pull --ff-only && pnpm install
+# To promote a new runforge version: stop the daemon, `git -C
+# ~/code/runforge-runtime pull --ff-only && pnpm install
 # --frozen-lockfile`, restart. The daemon never mutates its own source.
 set -euo pipefail
 
-RUNTIME=~/code/auto-claude-runtime
-ENV_MAC=~/code/auto-claude/.env.mac
+RUNTIME=~/code/runforge-runtime
+ENV_MAC=~/code/runforge/.env.mac
 export PATH="/opt/homebrew/bin:~/.local/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 
 # Secrets (GITHUB_TOKEN fallback, ENCRYPTION_KEY, POSTGRES_PASSWORD) come from
@@ -22,9 +22,9 @@ source "$ENV_MAC"
 set +a
 
 # Deployment #0 overrides: dedicated fresh DB + governed boot requirements.
-export AUTO_CLAUDE_DATABASE_URL="postgres://autoclaude:${POSTGRES_PASSWORD}@127.0.0.1:45432/autoclaude_prod0"
+export RUNFORGE_DATABASE_URL="postgres://runforge:${POSTGRES_PASSWORD}@127.0.0.1:45432/runforge_prod0"
 export DAEMON_DATA_BACKEND=postgres
-export AUTO_CLAUDE_DECISION_INDEX_ENABLED=1
+export RUNFORGE_DECISION_INDEX_ENABLED=1
 
 # Prefer a fresh gh CLI token when available (the .env.mac PAT is the fallback).
 if [ -x /opt/homebrew/bin/gh ]; then
@@ -35,4 +35,4 @@ fi
 cd "$RUNTIME"
 exec "$RUNTIME/packages/daemon/node_modules/.bin/tsx" \
   "$RUNTIME/packages/daemon/src/main.ts" start \
-  --config "$RUNTIME/auto-claude.config.json"
+  --config "$RUNTIME/runforge.config.json"

@@ -17,13 +17,13 @@ describe('cloud-init.yml', () => {
     expect(cloudInit).toContain('https://get.docker.com');
   });
 
-  it('adds autoclaude user to docker group', () => {
-    expect(cloudInit).toContain('usermod -aG docker autoclaude');
+  it('adds runforge user to docker group', () => {
+    expect(cloudInit).toContain('usermod -aG docker runforge');
   });
 
-  it('uses correct username "autoclaude" (not "autoclaud")', () => {
+  it('uses correct username "runforge" (not "autoclaud")', () => {
     expect(cloudInit).not.toMatch(/autoclaud(?!e)/);
-    expect(cloudInit).toContain('useradd -m -s /bin/bash autoclaude');
+    expect(cloudInit).toContain('useradd -m -s /bin/bash runforge');
   });
 
   it('pins Claude CLI to the same version as the Dockerfile (#184)', () => {
@@ -40,7 +40,7 @@ describe('cloud-init.yml', () => {
 
   it('installs Docker before adding user to docker group', () => {
     const dockerInstallIndex = cloudInit.indexOf('https://get.docker.com');
-    const usermodIndex = cloudInit.indexOf('usermod -aG docker autoclaude');
+    const usermodIndex = cloudInit.indexOf('usermod -aG docker runforge');
     expect(dockerInstallIndex).toBeLessThan(usermodIndex);
   });
 });

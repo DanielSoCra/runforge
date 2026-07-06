@@ -56,7 +56,7 @@ describe('ReleasesPage', () => {
         repo_id: 'repo-1',
         issue_number: 519,
         repo_owner: 'DANIELSOCRAHANDLEZZ',
-        repo_name: 'auto-claude',
+        repo_name: 'runforge',
         issue_title: 'Validate repo numeric fields',
         pipeline_variant: 'bug',
         current_phase: null,
@@ -77,7 +77,7 @@ describe('ReleasesPage', () => {
 
     expect(screen.getByRole('heading', { name: 'Releases' })).toBeInTheDocument();
     expect(screen.getByText('#519')).toBeInTheDocument();
-    expect(screen.getByText('DANIELSOCRAHANDLEZZ/auto-claude')).toBeInTheDocument();
+    expect(screen.getByText('DANIELSOCRAHANDLEZZ/runforge')).toBeInTheDocument();
     expect(screen.getByText('Validate repo numeric fields')).toBeInTheDocument();
     expect(screen.getByText('Release Notes')).toBeInTheDocument();
     expect(screen.getByText('Issues completed: 1')).toBeInTheDocument();

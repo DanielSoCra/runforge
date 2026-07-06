@@ -271,7 +271,7 @@ vi.mock('./workspace-bootstrap.js', () => ({
 vi.mock('./heartbeat.js', () => ({
   startHeartbeat: (...args: unknown[]) => mockStartHeartbeat(...args),
 }));
-vi.mock('@auto-claude/db', () => ({
+vi.mock('@runforge/db', () => ({
   createDbClient: () => ({ db: {}, sql: { end: mockDbSqlEnd } }),
   createPostgresStores: () => ({
     settings: {},
@@ -591,7 +591,7 @@ async function handlersFromLastBoot(): Promise<Handlers> {
 describe('first-use safety net (PR2 wiring)', () => {
   const originalEnv = {
     GITHUB_TOKEN: process.env.GITHUB_TOKEN,
-    AUTO_CLAUDE_DATABASE_URL: process.env.AUTO_CLAUDE_DATABASE_URL,
+    RUNFORGE_DATABASE_URL: process.env.RUNFORGE_DATABASE_URL,
     ENCRYPTION_KEY: process.env.ENCRYPTION_KEY,
     DAEMON_DATA_BACKEND: process.env.DAEMON_DATA_BACKEND,
   };
@@ -600,7 +600,7 @@ describe('first-use safety net (PR2 wiring)', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     process.env.GITHUB_TOKEN = 'ghp_test_token';
-    process.env.AUTO_CLAUDE_DATABASE_URL = 'postgres://test';
+    process.env.RUNFORGE_DATABASE_URL = 'postgres://test';
     process.env.ENCRYPTION_KEY = Buffer.alloc(32).toString('base64url');
     process.env.DAEMON_DATA_BACKEND = 'postgres';
 
@@ -730,7 +730,7 @@ describe('first-use safety net (PR2 wiring)', () => {
     vi.clearAllMocks();
     phaseHandlerCalls.length = 0;
     process.env.GITHUB_TOKEN = originalEnv.GITHUB_TOKEN;
-    process.env.AUTO_CLAUDE_DATABASE_URL = originalEnv.AUTO_CLAUDE_DATABASE_URL;
+    process.env.RUNFORGE_DATABASE_URL = originalEnv.RUNFORGE_DATABASE_URL;
     process.env.ENCRYPTION_KEY = originalEnv.ENCRYPTION_KEY;
     process.env.DAEMON_DATA_BACKEND = originalEnv.DAEMON_DATA_BACKEND;
   });

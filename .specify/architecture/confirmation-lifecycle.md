@@ -83,7 +83,7 @@ The audit row carries the slack_message_ts for traceability.
 
 ## Board interaction
 
-If the same logical action also surfaces a board card (e.g. an "approve auto-claude L1 spec" card), the card and the confirmation share the same `confirmation_id`. Tapping the card's Approve button and the Slack confirm button are equivalent — both resolve the same confirmation. Only one client wins; the other is shown "already approved by you (other surface)".
+If the same logical action also surfaces a board card (e.g. an "approve runforge L1 spec" card), the card and the confirmation share the same `confirmation_id`. Tapping the card's Approve button and the Slack confirm button are equivalent — both resolve the same confirmation. Only one client wins; the other is shown "already approved by you (other surface)".
 
 ## Constraints
 

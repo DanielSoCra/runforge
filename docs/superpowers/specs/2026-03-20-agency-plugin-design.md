@@ -16,9 +16,9 @@ superseded_date: 2026-06-11
 
 ## Summary
 
-The Agency plugin turns auto-claude into a professional website production system. It provides a granular, composable skill suite that takes a client website from brief to live deployment — covering intelligence gathering, brand strategy, design, SEO, copywriting, assets, Astro or native HTML build, QA, and deployment. Each skill runs independently or as part of a category workflow. A master orchestrator sequences everything.
+The Agency plugin turns runforge into a professional website production system. It provides a granular, composable skill suite that takes a client website from brief to live deployment — covering intelligence gathering, brand strategy, design, SEO, copywriting, assets, Astro or native HTML build, QA, and deployment. Each skill runs independently or as part of a category workflow. A master orchestrator sequences everything.
 
-The plugin lives in `plugins/agency/` inside the auto-claude repo. Each client website becomes its own private GitHub repository, created and polled by auto-claude's existing multi-repo infrastructure. The website workflow runs as a new `website` pipeline variant triggered by an issue in the client repo.
+The plugin lives in `plugins/agency/` inside the runforge repo. Each client website becomes its own private GitHub repository, created and polled by runforge's existing multi-repo infrastructure. The website workflow runs as a new `website` pipeline variant triggered by an issue in the client repo.
 
 ---
 
@@ -275,7 +275,7 @@ Each category workflow boundary has a checkpoint value of `"auto"` or `"checkpoi
 
 ### Credentials — global ENV
 
-All third-party service credentials live as global environment variables in auto-claude's dashboard settings. No credentials appear in plugin config or client repos.
+All third-party service credentials live as global environment variables in runforge's dashboard settings. No credentials appear in plugin config or client repos.
 
 | Variable | Used by |
 |---|---|
@@ -359,7 +359,7 @@ When a phase boundary has `"checkpoint"`, the pipeline posts a GitHub comment wi
 {
   "version": 1,
   "plugins": [
-    { "id": "auto-claude-dev", "name": "Auto-Claude Dev", "tags": ["typescript", "daemon", "spec-driven", "fsm"] },
+    { "id": "runforge-dev", "name": "Runforge Dev", "tags": ["typescript", "daemon", "spec-driven", "fsm"] },
     { "id": "agency", "name": "Agency — Website Workflow", "tags": ["website", "astro", "brand", "seo"] }
   ]
 }
@@ -370,7 +370,7 @@ Without this entry, `loadPluginRegistry` throws `Plugin directory not found` and
 ### Client repo lifecycle
 
 ```
-1. Admin clicks "New Website" in auto-claude dashboard
+1. Admin clicks "New Website" in runforge dashboard
    → fills client name, source URL (optional), features, stack, deploy target
 
 2. Dashboard creates private GitHub repo at configured org

@@ -29,7 +29,7 @@ export function Sidebar() {
       <div className="px-6 py-5 border-b border-border">
         <div className="flex items-center gap-2">
           <Terminal className="h-5 w-5" />
-          <span className="font-semibold text-sm">Auto-Claude</span>
+          <span className="font-semibold text-sm">Runforge</span>
         </div>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1">

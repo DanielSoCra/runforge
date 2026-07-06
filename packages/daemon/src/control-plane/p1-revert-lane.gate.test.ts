@@ -7,7 +7,7 @@ import { spawnSync } from 'child_process';
 import {
   DecisionRequestSchema,
   type DecisionRequest,
-} from '@auto-claude/decision-protocol';
+} from '@runforge/decision-protocol';
 import type { RunState } from '../types.js';
 
 const FIXED_NOW = '2026-07-03T12:00:00.000Z';
@@ -174,8 +174,8 @@ function makeRun(overrides: Partial<RunState> = {}): RunState {
     fixAttempts: [],
     errorHashes: {},
     repoOwner: 'DANIELSOCRAHANDLEZZ',
-    repoName: 'auto-claude',
-    deploymentId: 'auto-claude',
+    repoName: 'runforge',
+    deploymentId: 'runforge',
     startedAt: FIXED_NOW,
     updatedAt: FIXED_NOW,
     workerClaimId: 'claim-g4',
@@ -194,7 +194,7 @@ function makeFakes(status: ObservationStatus): FlowFakes {
   const pullsCreate = vi.fn(async (_input: PullsCreateInput): Promise<PullsCreateResult> => ({
     data: {
       number: 91,
-      html_url: 'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/pull/91',
+      html_url: 'https://github.com/DANIELSOCRAHANDLEZZ/runforge/pull/91',
     },
   }));
 
@@ -224,7 +224,7 @@ async function loadRevertLaneExport<T>(exportName: string): Promise<T> {
 function expectReversalDecisionForMergeSha(
   request: DecisionRequest,
   mergeSha: string,
-  expectedSourceUrl = 'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/issues/42',
+  expectedSourceUrl = 'https://github.com/DANIELSOCRAHANDLEZZ/runforge/issues/42',
 ): DecisionRequest {
   const parsed = DecisionRequestSchema.parse(request);
   const optionIds = parsed.options.map((option) => option.id);
@@ -276,8 +276,8 @@ async function exerciseReversalFlow(
   await handlePostLandingObservation({
     repoRoot: repo.repoDir,
     owner: 'DANIELSOCRAHANDLEZZ',
-    repo: 'auto-claude',
-    deployment: 'auto-claude',
+    repo: 'runforge',
+    deployment: 'runforge',
     run: makeRun(),
     trunkBranch: 'main',
     mergeSha: repo.mergeSha,
@@ -305,7 +305,7 @@ async function exerciseReversalFlow(
   expect(firstPrCall?.[0]).toEqual(
     expect.objectContaining({
       owner: 'DANIELSOCRAHANDLEZZ',
-      repo: 'auto-claude',
+      repo: 'runforge',
       head: revertBranch,
       base: 'main',
     }),
@@ -324,11 +324,11 @@ describe('P1 G4 post-landing revert lane', () => {
     const request = DecisionRequestSchema.parse(
       buildReversalDecisionRequest({
         run: makeRun(),
-        deployment: 'auto-claude',
+        deployment: 'runforge',
         mergeSha,
         revertBranch: 'revert/g4-schema',
-        gateIssueUrl: 'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/issues/42',
-        pullRequestUrl: 'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/pull/91',
+        gateIssueUrl: 'https://github.com/DANIELSOCRAHANDLEZZ/runforge/issues/42',
+        pullRequestUrl: 'https://github.com/DANIELSOCRAHANDLEZZ/runforge/pull/91',
         now: FIXED_NOW,
       }),
     );
@@ -350,8 +350,8 @@ describe('P1 G4 post-landing revert lane', () => {
     await handlePostLandingObservation({
       repoRoot: repo.repoDir,
       owner: 'DANIELSOCRAHANDLEZZ',
-      repo: 'auto-claude',
-      deployment: 'auto-claude',
+      repo: 'runforge',
+      deployment: 'runforge',
       run: makeRun(),
       trunkBranch: 'main',
       mergeSha: repo.mergeSha,

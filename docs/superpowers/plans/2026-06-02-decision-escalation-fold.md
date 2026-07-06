@@ -1,14 +1,14 @@
 # Decision-Escalation Fold Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans, task-by-task. Apply superpowers:test-driven-development to all new code. **Work in the worktree `~/code/auto-claude-wt-decision-emitter` on branch `codex/phase2-decision-escalation-impl` — `cd` there first in every task.**
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans, task-by-task. Apply superpowers:test-driven-development to all new code. **Work in the worktree `~/code/runforge-wt-decision-emitter` on branch `codex/phase2-decision-escalation-impl` — `cd` there first in every task.**
 
-**Goal:** Fold pm-cockpit's `@pm/protocol` + `@pm/index` into auto-claude as `@auto-claude/decision-protocol` + `@auto-claude/decision-index`, and wire an additive l2-gate DecisionRequest emitter into the daemon control-plane, realizing FUNC-AC-DECISION-ESCALATION (#685).
+**Goal:** Fold pm-cockpit's `@pm/protocol` + `@pm/index` into runforge as `@runforge/decision-protocol` + `@runforge/decision-index`, and wire an additive l2-gate DecisionRequest emitter into the daemon control-plane, realizing FUNC-AC-DECISION-ESCALATION (#685).
 
 **Architecture:** P1 (port onto zod4/drizzle0.45/better-sqlite3^12, preserve shape/behavior/tests) + S2 (decision-index = durable ledger + pending source; the existing GitHub-label requeue stays the v1 executor; mid_run/notifier-delivery/source-of-truth/PHI deferred). See `docs/superpowers/specs/2026-06-02-decision-escalation-fold-design.md` (codex-CLEAN) and the L1/L2/L3 specs.
 
 **Tech Stack:** TypeScript ES2022/Node16/strict, pnpm workspace, zod ^4.3.6, zod-to-json-schema ^3.25.1, drizzle-orm ^0.45.2, better-sqlite3 ^12, ajv ^8, ulid ^2, vitest ^3.2.4.
 
-**Port source of truth:** `~/code/pm-cockpit/packages/protocol` and `~/code/pm-cockpit/packages/index`. Port = copy `src/` **and `test/`** (+ protocol `schema/`, + index `drizzle.config.ts`, + each package's `vitest.config.ts`/`tsconfig.json`), rename scope `@pm/*` → `@auto-claude/decision-*`, upgrade deps, fix only what the version bump breaks. **A failing ported test is a porting bug, not a spec change.**
+**Port source of truth:** `~/code/pm-cockpit/packages/protocol` and `~/code/pm-cockpit/packages/index`. Port = copy `src/` **and `test/`** (+ protocol `schema/`, + index `drizzle.config.ts`, + each package's `vitest.config.ts`/`tsconfig.json`), rename scope `@pm/*` → `@runforge/decision-*`, upgrade deps, fix only what the version bump breaks. **A failing ported test is a porting bug, not a spec change.**
 
 **Real package API (verified — build against THIS, do not invent methods):**
 - Factory: `createIndexWriter({ dbPath, protectedKey, protectedDir, notifier, sourceSink, resumeDispatcher, clock, channel?, maxAttempts?, skipMigrate?, generation? }): IndexWriter` — opens the single writable connection AND runs `migrate()` internally.
@@ -20,65 +20,65 @@
 
 ---
 
-## Task 1: Port `@pm/protocol` → `@auto-claude/decision-protocol` (zod4)
+## Task 1: Port `@pm/protocol` → `@runforge/decision-protocol` (zod4)
 
 **Files:** Create `packages/decision-protocol/{package.json,tsconfig.json,vitest.config.ts}`, `packages/decision-protocol/src/**`, `packages/decision-protocol/test/**`, `packages/decision-protocol/schema/decision-request.schema.json` (all copied from `~/code/pm-cockpit/packages/protocol`).
 
 - [ ] **Step 1: Copy src/, test/, schema/, configs**
 ```bash
-cd ~/code/auto-claude-wt-decision-emitter && mkdir -p packages/decision-protocol
+cd ~/code/runforge-wt-decision-emitter && mkdir -p packages/decision-protocol
 cp -R ~/code/pm-cockpit/packages/protocol/src   packages/decision-protocol/src
 cp -R ~/code/pm-cockpit/packages/protocol/test  packages/decision-protocol/test
 cp -R ~/code/pm-cockpit/packages/protocol/schema packages/decision-protocol/schema
 cp ~/code/pm-cockpit/packages/protocol/vitest.config.ts packages/decision-protocol/vitest.config.ts
 cp packages/db/tsconfig.json packages/decision-protocol/tsconfig.json
 ```
-- [ ] **Step 2: Write `package.json`** — name `@auto-claude/decision-protocol`, zod ^4.3.6, zod-to-json-schema ^3.25.1 (zod4-compatible peer). `test: vitest run`, `typecheck: tsc --noEmit`. Match `typescript` version from `packages/db/package.json`.
+- [ ] **Step 2: Write `package.json`** — name `@runforge/decision-protocol`, zod ^4.3.6, zod-to-json-schema ^3.25.1 (zod4-compatible peer). `test: vitest run`, `typecheck: tsc --noEmit`. Match `typescript` version from `packages/db/package.json`.
 - [ ] **Step 3: Install + typecheck to surface zod3→4 breakages**
 ```bash
-pnpm install && pnpm --filter @auto-claude/decision-protocol typecheck
+pnpm install && pnpm --filter @runforge/decision-protocol typecheck
 ```
 Known zod 3→4 fix points in `src/`: `z.record(z.unknown())` now needs `z.record(z.string(), z.unknown())`; `.datetime()`; errorMap→`error`; discriminated-union helpers; `zod-to-json-schema` import/usage under zod4. Fix until clean.
-- [ ] **Step 4: Tests green** — `pnpm --filter @auto-claude/decision-protocol test`. The committed `schema/decision-request.schema.json` diff test must pass (regenerate via the package's own script if zod4 changes JSON-schema output, and review the diff before accepting).
-- [ ] **Step 5: Commit** — `git add packages/decision-protocol pnpm-lock.yaml && git commit -m "feat(decision-protocol): port @pm/protocol -> @auto-claude/decision-protocol (zod4)"`
+- [ ] **Step 4: Tests green** — `pnpm --filter @runforge/decision-protocol test`. The committed `schema/decision-request.schema.json` diff test must pass (regenerate via the package's own script if zod4 changes JSON-schema output, and review the diff before accepting).
+- [ ] **Step 5: Commit** — `git add packages/decision-protocol pnpm-lock.yaml && git commit -m "feat(decision-protocol): port @pm/protocol -> @runforge/decision-protocol (zod4)"`
 
 ---
 
-## Task 2: Port `@pm/index` → `@auto-claude/decision-index` (drizzle0.45, better-sqlite3^12)
+## Task 2: Port `@pm/index` → `@runforge/decision-index` (drizzle0.45, better-sqlite3^12)
 
 **Files:** Create `packages/decision-index/{package.json,tsconfig.json,vitest.config.ts,drizzle.config.ts}`, `src/**` (+ `src/migrations/*.sql`), `test/**` (copied from `~/code/pm-cockpit/packages/index`).
 
 - [ ] **Step 1: Copy src/, test/, drizzle.config.ts, configs**
 ```bash
-cd ~/code/auto-claude-wt-decision-emitter && mkdir -p packages/decision-index
+cd ~/code/runforge-wt-decision-emitter && mkdir -p packages/decision-index
 cp -R ~/code/pm-cockpit/packages/index/src  packages/decision-index/src
 cp -R ~/code/pm-cockpit/packages/index/test packages/decision-index/test
 cp ~/code/pm-cockpit/packages/index/drizzle.config.ts packages/decision-index/drizzle.config.ts
 cp ~/code/pm-cockpit/packages/index/vitest.config.ts packages/decision-index/vitest.config.ts
 cp packages/db/tsconfig.json packages/decision-index/tsconfig.json
 ```
-- [ ] **Step 2: `package.json`** — name `@auto-claude/decision-index`; deps `@auto-claude/decision-protocol: workspace:*`, `drizzle-orm ^0.45.2`, `ajv ^8.20.0`, `ulid ^2.3.0`, `zod ^4.3.6`, `better-sqlite3 ^12.0.0`; dev `@types/better-sqlite3`, `drizzle-kit ^0.30.0`, `vitest ^3.2.4`, `typescript`. (better-sqlite3 is a normal dep — see Task 3/8 for the gating reality.)
+- [ ] **Step 2: `package.json`** — name `@runforge/decision-index`; deps `@runforge/decision-protocol: workspace:*`, `drizzle-orm ^0.45.2`, `ajv ^8.20.0`, `ulid ^2.3.0`, `zod ^4.3.6`, `better-sqlite3 ^12.0.0`; dev `@types/better-sqlite3`, `drizzle-kit ^0.30.0`, `vitest ^3.2.4`, `typescript`. (better-sqlite3 is a normal dep — see Task 3/8 for the gating reality.)
 - [ ] **Step 3: Rename protocol imports + drop `server-only`**
 ```bash
-grep -rl "@pm/protocol" packages/decision-index | xargs sed -i '' 's#@pm/protocol#@auto-claude/decision-protocol#g'
+grep -rl "@pm/protocol" packages/decision-index | xargs sed -i '' 's#@pm/protocol#@runforge/decision-protocol#g'
 grep -rn "server-only" packages/decision-index   # remove import + the `.server` export from src/index.ts; also remove any vitest server-only alias in vitest.config.ts
 ```
-- [ ] **Step 4: Install + typecheck** — `pnpm install && pnpm --filter @auto-claude/decision-index typecheck`. Known drizzle 0.36→0.45 points: `drizzle(db)` ctor, `sqliteTable` builders, `InferSelectModel`/`InferInsertModel`, `.$type<>()`. Fix to clean.
-- [ ] **Step 5: Full ported suite green** — `pnpm --filter @auto-claude/decision-index test` (answered-once, concurrent-claim, crash-recovery, effect-reconcile, etc. — the crash-safety contract; keep behavior, fix porting bugs).
-- [ ] **Step 6: Commit** — `git add packages/decision-index pnpm-lock.yaml && git commit -m "feat(decision-index): port @pm/index -> @auto-claude/decision-index (drizzle0.45, better-sqlite3^12)"`
+- [ ] **Step 4: Install + typecheck** — `pnpm install && pnpm --filter @runforge/decision-index typecheck`. Known drizzle 0.36→0.45 points: `drizzle(db)` ctor, `sqliteTable` builders, `InferSelectModel`/`InferInsertModel`, `.$type<>()`. Fix to clean.
+- [ ] **Step 5: Full ported suite green** — `pnpm --filter @runforge/decision-index test` (answered-once, concurrent-claim, crash-recovery, effect-reconcile, etc. — the crash-safety contract; keep behavior, fix porting bugs).
+- [ ] **Step 6: Commit** — `git add packages/decision-index pnpm-lock.yaml && git commit -m "feat(decision-index): port @pm/index -> @runforge/decision-index (drizzle0.45, better-sqlite3^12)"`
 
 ---
 
 ## Task 3: `DecisionLedger` facade + v1 adapters + `DecisionIndexManager` (flag-gated dynamic load)
 
-**Files:** Create `packages/daemon/src/control-plane/decision-escalation/{adapters.ts,ledger.ts,manager.ts}` (+ `.test.ts` each). Modify `packages/daemon/package.json` (add `@auto-claude/decision-protocol` + `@auto-claude/decision-index` as `workspace:*` deps).
+**Files:** Create `packages/daemon/src/control-plane/decision-escalation/{adapters.ts,ledger.ts,manager.ts}` (+ `.test.ts` each). Modify `packages/daemon/package.json` (add `@runforge/decision-protocol` + `@runforge/decision-index` as `workspace:*` deps).
 
 - [ ] **Step 1: v1 adapters** (`adapters.ts`) — daemon-owned no-op/log implementations of `Notifier`, `SourceSink`, `ResumeDispatcher` matching the ported contracts. **Critical: mirror the package's own test fakes so the lifecycle actually advances** (read `~/code/pm-cockpit/packages/index/test/helpers` for `FakeNotifier`/`FakeSourceSink`/`FakeResumeDispatcher`):
   - `Notifier.notify`→log+`'sent'`; `Notifier.probe`→track effect IDs seen, `'applied'` for known else `'absent'`.
   - `SourceSink.writeResponse`→record + return `'written'` (track the effect ID); `SourceSink.exists`→`'applied'` for recorded IDs else `'absent'`; **`SourceSink.currentEtag`→`{status:'equal'}` by default** (the real `runEffect('requeue')` defers unless equal — a vague `'unknown'` strands the row at `source_written`); `markSuperseded`→record.
   - `ResumeDispatcher.resume`→record + `'acked'`; `status`→`'applied'` for recorded.
   Test: a real `IndexWriter` built with these adapters drives `raise→notify→answer→advanceToResumed` all the way to `resumed` (proves the adapters don't strand the lifecycle).
-- [ ] **Step 2: `DecisionLedger` facade** (`ledger.ts`) — **build it TEST-FIRST against a real `IndexWriter` over a temp sqlite**, deriving every exact event name, `ApplyCtx`/`AnswerPayload` shape, effect kind, and `reader` method from the now-local `@auto-claude/decision-protocol` (`src/state-machine-types.ts`, `src/decision-request.ts`) and `@auto-claude/decision-index` source + its ported tests (`test/answered-once.test.ts`, `test/crash-recovery.test.ts`, `test/effect-reconcile.test.ts` show the real call sequences). **Do NOT invent method names or payload shapes — read them from the local code.**
+- [ ] **Step 2: `DecisionLedger` facade** (`ledger.ts`) — **build it TEST-FIRST against a real `IndexWriter` over a temp sqlite**, deriving every exact event name, `ApplyCtx`/`AnswerPayload` shape, effect kind, and `reader` method from the now-local `@runforge/decision-protocol` (`src/state-machine-types.ts`, `src/decision-request.ts`) and `@runforge/decision-index` source + its ported tests (`test/answered-once.test.ts`, `test/crash-recovery.test.ts`, `test/effect-reconcile.test.ts` show the real call sequences). **Do NOT invent method names or payload shapes — read them from the local code.**
 
   The facade wraps the real verbs only — `observeRequest`, `applyEvent`, `runEffect`, `reconcile`, `reader` — and drives the **real lifecycle** (verified order):
   `detected` —`runEffect('notify')`→ `notified` —`applyEvent('answer_submitted', {answer})` (auto-opens notified→viewed)→ `answered_pending_source_write` —`runEffect('write_response')`→ `source_written` —…→ `resume_requested` —`runEffect('resume'|'requeue')`→ `resume_dispatch`/`resume_ack` → `resumed`.
@@ -97,12 +97,12 @@ grep -rn "server-only" packages/decision-index   # remove import + the `.server`
 export class DecisionIndexManager {
   #enabled; #opts; #ledger: DecisionLedger | null = null; #broken = false;
   constructor(o: { enabled: boolean; dbPath: string; protectedKey: string; protectedDir: string;
-                   importer?: () => Promise<typeof import('@auto-claude/decision-index')> }) { /* … */ }
+                   importer?: () => Promise<typeof import('@runforge/decision-index')> }) { /* … */ }
   isEnabled() { return this.#enabled; }
   async init() {
     if (!this.#enabled) return;                              // disabled → NEVER imports native code
     try {
-      const mod = await (this.#opts.importer ?? (() => import('@auto-claude/decision-index')))();
+      const mod = await (this.#opts.importer ?? (() => import('@runforge/decision-index')))();
       const writer = mod.createIndexWriter({ dbPath: this.#opts.dbPath,
         protectedKey: this.#opts.protectedKey, protectedDir: this.#opts.protectedDir,
         notifier: new LogNotifier(), sourceSink: new RecordingSourceSink(),
@@ -128,7 +128,7 @@ export class DecisionIndexManager {
 **Files:** Create `packages/daemon/src/control-plane/decision-escalation/build-request.ts` (+ `.test.ts`). Modify `packages/daemon/src/control-plane/types.ts` (`RunState.decisionEpoch?: number`).
 
 - [ ] **Step 1: Failing test against the REAL schema** — `buildL2GateRequest(run, epoch, deployment)` produces an object that `DecisionRequestSchema.parse()` accepts and `assertFullyClassified()` passes; deterministic `decision_id` = `issue-<n>:l2-gate:<epoch>` and `idempotency_key` derived from it; epoch 1 ≠ epoch 2 ids; `field_sensitivity` classifies **every** field as operational/non-sensitive (no PHI); `options` = approve/reject; `resume_mode='requeue'`; `risk_class='P1'`; `reversibility='reversible'`; only structured fields (NO `l2Feedback`/`handoffNotes`/raw failure text in `context`).
-- [ ] **Step 2–4:** implement `build-request.ts` against `@auto-claude/decision-protocol`'s `DecisionRequestSchema`; TDD to green. Add `decisionEpoch?: number` to `RunState`.
+- [ ] **Step 2–4:** implement `build-request.ts` against `@runforge/decision-protocol`'s `DecisionRequestSchema`; TDD to green. Add `decisionEpoch?: number` to `RunState`.
 - [ ] **Step 5: Commit** — `git commit -am "feat(daemon): full l2-gate DecisionRequest builder + decisionEpoch on RunState"`
 
 ---
@@ -137,7 +137,7 @@ export class DecisionIndexManager {
 
 **Files:** Modify `packages/daemon/src/control-plane/phases.ts` (`createPhaseHandlers` signature/context + l2-gate park path), `daemon.ts` (`resumeParkedRuns` + construct/inject the manager), `state.ts`/`types.ts` as needed, `main.ts`/config for env parsing + shutdown.
 
-- [ ] **Step 1: Thread the manager as an explicit dependency** — extend the `createPhaseHandlers(...)` context (and the daemon wiring that builds it) to receive the `DecisionIndexManager`; parse `AUTO_CLAUDE_DECISION_INDEX_ENABLED` / `AUTO_CLAUDE_DECISION_INDEX_PATH` / `AUTO_CLAUDE_DECISION_PROTECTED_KEY` / `…_PROTECTED_DIR` in ONE place (the config reader) with safe defaults (path `state/decision-index.sqlite`, dir `state/decision-protected/`, generated key persisted to `state/` if unset). Update every `createPhaseHandlers` call site + its tests to pass a disabled manager by default (so existing tests are unaffected).
+- [ ] **Step 1: Thread the manager as an explicit dependency** — extend the `createPhaseHandlers(...)` context (and the daemon wiring that builds it) to receive the `DecisionIndexManager`; parse `RUNFORGE_DECISION_INDEX_ENABLED` / `RUNFORGE_DECISION_INDEX_PATH` / `RUNFORGE_DECISION_PROTECTED_KEY` / `…_PROTECTED_DIR` in ONE place (the config reader) with safe defaults (path `state/decision-index.sqlite`, dir `state/decision-protected/`, generated key persisted to `state/` if unset). Update every `createPhaseHandlers` call site + its tests to pass a disabled manager by default (so existing tests are unaffected).
 - [ ] **Step 2: raise (+notify) at the l2-gate park (idempotent)** — where the l2-gate handler sets `pausedAtPhase='l2-gate'` + posts `awaiting-l2-review`: on a FRESH park bump `run.decisionEpoch=(run.decisionEpoch??0)+1`; if `manager.isEnabled()`, `const r = manager.ledger().raise(buildL2GateRequest(run, run.decisionEpoch, deployment))` then `manager.ledger().notify(r.decision_id)` so the row reaches `notified` (the only state `answer` can proceed from — `answer_submitted` is illegal from `detected`). `observeRequest` dedupes by deterministic id across re-scans, and the facade's `notify()` status-guards (no-op once past `detected`), so repeated raise+notify across per-tick re-scans is safe (no `IllegalTransitionError`). Wrap in try/catch → fail-closed (stay parked, log) if `ledger()` throws.
 - [ ] **Step 3: answer with crash-safe ordering + PRESERVE rejection routing** — in `resumeParkedRuns`, after the existing `l2-approved`/`l2-rejected` detection: if enabled, `manager.ledger().answer(id, choice, 'operator')` (auto-opens `notified`→`viewed`; records `answered_pending_source_write`; answered-once). Then run the **existing** requeue (phase reset + `saveRunState`) **UNCHANGED** — approved re-enters `l2-gate`; rejected keeps its existing route through the l2-gate handler which captures `l2Feedback`→`l2-design`. **⚠ Pre-existing tension — verify and fix as part of this task (do NOT assume the current path works):** `resumeParkedRuns` (daemon.ts ~1373) *deliberately removes* `l2-rejected` before re-entry ("to prevent the l2-gate handler from immediately seeing it"), but the l2-gate handler (phases.ts ~515) captures rejection feedback into `run.l2Feedback` **only when it sees `l2-rejected`** on the re-fetched labels. These contradict — rejection feedback is likely already dropped on resume. **Write a regression test FIRST** asserting a rejected resume sets `run.l2Feedback` (from the rejection comment) and routes to `l2-design` (the existing test only checks `runPipeline` was called — too weak, codex). If it fails against current code, fix minimally as part of this task. **Capturing `run.l2Feedback` alone is NOT sufficient** — the l2-gate handler only routes to `l2-design` when the *re-fetched labels still include `l2-rejected`*. So the fix must do ONE of: (a) **preserve `l2-rejected` until the handler consumes it** — move the label removal out of `resumeParkedRuns` into the handler's rejection branch, after it captures feedback and routes; or (b) **have `resumeParkedRuns` route the rejected resume directly** — set `run.l2Feedback` (from the rejection comment) AND `run.phase='l2-design'` (instead of `l2-gate`) before save. The regression test asserts the run lands at `l2-design` with `l2Feedback` populated — not merely that `runPipeline` was called. The emitter's answer/ordering changes touch exactly this code; it must not make it worse. After `saveRunState()` commits, drive the ledger to `resumed` via the **real effect chain** `await manager.ledger().advanceToResumed(id, 'requeue')` (`write_response` → resume/requeue effects → `resumed`) — **never direct-apply `resume_ack`** (illegal from `answered_pending_source_write`). Fail-closed if enabled and `ledger()` throws (skip requeue this tick, stay parked).
 - [ ] **Step 4: Tests (the load-bearing ones):**
@@ -173,7 +173,7 @@ export class DecisionIndexManager {
 
 - [ ] **Step 1:** **better-sqlite3 native build is a workspace install concern** (codex: optionalDeps does NOT isolate `packages/*` install). Ensure the CI test job builds native deps (node-gyp toolchain present on the mac-mini runner; add an explicit `pnpm rebuild better-sqlite3` step if needed). Grep `.github/workflows/`.
 - [ ] **Step 2:** `pnpm -r test && pnpm -r typecheck` from root — all green (ported protocol + decision-index suites + daemon suite).
-- [ ] **Step 3:** Now that `packages/decision-protocol/`, `packages/decision-index/`, `packages/daemon/src/control-plane/decision-escalation/` exist, add their paths to `STACK-AC-DECISION-ESCALATION-STORE` / `-EMITTER` in `.specify/traceability.yml` (the path validator now passes). Run `pnpm --filter @auto-claude/daemon test -- traceability-paths`. **Commit.**
+- [ ] **Step 3:** Now that `packages/decision-protocol/`, `packages/decision-index/`, `packages/daemon/src/control-plane/decision-escalation/` exist, add their paths to `STACK-AC-DECISION-ESCALATION-STORE` / `-EMITTER` in `.specify/traceability.yml` (the path validator now passes). Run `pnpm --filter @runforge/daemon test -- traceability-paths`. **Commit.**
 
 ---
 

@@ -27,13 +27,13 @@ describe('briefing data backend config', () => {
 
   it('requires Postgres connection env', () => {
     expect(() => validateBriefingDataBackendEnv({})).toThrow(
-      /AUTO_CLAUDE_DATABASE_URL/,
+      /RUNFORGE_DATABASE_URL/,
     );
     expect(() =>
       validateBriefingDataBackendEnv({
         BRIEFING_DATA_BACKEND: 'postgres',
-        AUTO_CLAUDE_DATABASE_URL:
-          'postgres://postgres:postgres@localhost:5432/auto_claude',
+        RUNFORGE_DATABASE_URL:
+          'postgres://postgres:postgres@localhost:5432/runforge',
       }),
     ).not.toThrow();
   });

@@ -2,7 +2,7 @@
 # uninstall-daemon.sh — Unload the daemon plist for rollback.
 set -euo pipefail
 
-PLIST_DST="$HOME/Library/LaunchAgents/com.autoclaude.daemon.plist"
+PLIST_DST="$HOME/Library/LaunchAgents/com.runforge.daemon.plist"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
@@ -18,6 +18,6 @@ log "Removing plist file..."
 rm -f "$PLIST_DST"
 
 log "Done. To restore legacy scripts, re-load them manually:"
-log "  launchctl load ~/Library/LaunchAgents/com.autoclaude.pipeline.plist"
-log "  launchctl load ~/Library/LaunchAgents/com.autoclaude.developer.plist"
-log "  launchctl load ~/Library/LaunchAgents/com.autoclaude.reviewer.plist"
+log "  launchctl load ~/Library/LaunchAgents/com.runforge.pipeline.plist"
+log "  launchctl load ~/Library/LaunchAgents/com.runforge.developer.plist"
+log "  launchctl load ~/Library/LaunchAgents/com.runforge.reviewer.plist"

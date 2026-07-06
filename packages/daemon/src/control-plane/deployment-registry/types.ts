@@ -15,7 +15,7 @@ import type {
   GateSetDefinitions,
 } from '../lane-engine/types.js';
 import type { PoolConfig } from '../../session-runtime/providers/window-scheduler/types.js';
-import type { SanitizerConfig } from '@auto-claude/sanitization';
+import type { SanitizerConfig } from '@runforge/sanitization';
 import type { ComplianceReviewVerdict } from '../../compliance/schemas.js';
 
 // Re-export the sibling shapes so consumers of the registry import them from one

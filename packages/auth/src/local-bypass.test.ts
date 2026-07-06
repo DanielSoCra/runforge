@@ -54,7 +54,7 @@ describe('resolveLocalAuthBypass', () => {
       'VERCEL_ENV',
     );
     expect(findProductionIndicator({ RENDER: 'true' })).toBe('RENDER');
-    expect(findProductionIndicator({ FLY_APP_NAME: 'auto-claude' })).toBe(
+    expect(findProductionIndicator({ FLY_APP_NAME: 'runforge' })).toBe(
       'FLY_APP_NAME',
     );
     expect(findProductionIndicator({ K_SERVICE: 'dashboard' })).toBe(
@@ -63,7 +63,7 @@ describe('resolveLocalAuthBypass', () => {
     expect(findProductionIndicator({ AWS_EXECUTION_ENV: 'AWS_Lambda' })).toBe(
       'AWS_EXECUTION_ENV',
     );
-    expect(findProductionIndicator({ HEROKU_APP_NAME: 'auto-claude' })).toBe(
+    expect(findProductionIndicator({ HEROKU_APP_NAME: 'runforge' })).toBe(
       'HEROKU_APP_NAME',
     );
   });

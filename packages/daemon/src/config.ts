@@ -236,7 +236,7 @@ export const ConfigSchema = z.object({
   // (Claude Code evaluates hooks before the permission-mode check), so this is
   // a trust bypass, NOT a containment bypass. Off by default — interactive /
   // native runs keep the normal trust + permission prompts. Can also be turned
-  // on via the AUTO_CLAUDE_SKIP_PERMISSIONS=1 env (see runtime.ts).
+  // on via the RUNFORGE_SKIP_PERMISSIONS=1 env (see runtime.ts).
   autonomous: z.boolean().default(false),
   providers: ProvidersConfigSchema.optional(),
   // Per-agent-role model/provider overrides, keyed by resolved AgentDefinition
@@ -412,7 +412,7 @@ export const ConfigSchema = z.object({
   // bypass flag. Not needed for the autonomous worker loop, and in a root
   // container it crash-loops on the trust gate — so it is OFF by default and an
   // operator opts in explicitly. Can also be forced on via
-  // AUTO_CLAUDE_REMOTE_CONTROL=1 (see daemon.ts).
+  // RUNFORGE_REMOTE_CONTROL=1 (see daemon.ts).
   remoteControl: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
   activePlugins: z.array(z.string()).default([]),
   knowledge: z
@@ -634,7 +634,7 @@ export async function loadConfig(path: string): Promise<Result<Config>> {
   }
 }
 
-const REQUIRED_BOOT_ENV = ['GITHUB_TOKEN', 'AUTO_CLAUDE_DATABASE_URL', 'ENCRYPTION_KEY'] as const;
+const REQUIRED_BOOT_ENV = ['GITHUB_TOKEN', 'RUNFORGE_DATABASE_URL', 'ENCRYPTION_KEY'] as const;
 export function validateRequiredBootEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): { ok: true } | { ok: false; missing: string[] } {

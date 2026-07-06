@@ -31,7 +31,7 @@
  * erroring) maps to `503` — the handler never rethrows, so a wired route can never
  * crash the control server.
  */
-import type { RankedListItem, DetailView, ListRankedArgs } from '@auto-claude/decision-index';
+import type { RankedListItem, DetailView, ListRankedArgs } from '@runforge/decision-index';
 import type { InboxItem, RankedItem, RankingExplanation } from '../operator-learning/types.js';
 import { parseFindingDismissalDecisionId } from './finding-dismissal/build-request.js';
 import { findingDismissalClass } from './finding-dismissal/labels.js';
@@ -405,7 +405,7 @@ export async function revealProtected(
   } catch (e: unknown) {
     // STRUCTURAL detection by error name (not `instanceof`): this module is always
     // loaded by the control server, so a value import of RevealRefNotFoundError from
-    // @auto-claude/decision-index would eager-load the native package and defeat the
+    // @runforge/decision-index would eager-load the native package and defeat the
     // manager's dynamic-import fail-closed design. Match by name + a "not found" fallback.
     const message = e instanceof Error ? e.message : String(e);
     if ((e instanceof Error && e.name === 'RevealRefNotFoundError') || /not found/i.test(message)) {

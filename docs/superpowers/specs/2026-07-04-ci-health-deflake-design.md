@@ -23,7 +23,7 @@ runs). Root causes verified from `gh run view --log-failed` output.
 
 `packages/daemon/src/control-plane/daemon.test.ts`, describe
 `parked-run resume scan > decision-index enabled mode (real writer over real
-Postgres)` (skipIf(!REAL_PG); REAL_PG = `AUTO_CLAUDE_TEST_DATABASE_URL` set):
+Postgres)` (skipIf(!REAL_PG); REAL_PG = `RUNFORGE_TEST_DATABASE_URL` set):
 
 - `records the answer BEFORE save and drives the ledger to resumed AFTER save
   (crash-safe ordering)` (~L3878) and
@@ -300,12 +300,12 @@ trunk commits are poison for it).
 
 ## Test strategy
 
-- **Fix 1:** `AUTO_CLAUDE_TEST_DATABASE_URL` MUST be set (docker
+- **Fix 1:** `RUNFORGE_TEST_DATABASE_URL` MUST be set (docker
   `postgres:18-alpine`, mirroring ci.yml) — without it the real-PG suite skips
-  and a green run is hollow. Run `pnpm --filter @auto-claude/daemon test` with
+  and a green run is hollow. Run `pnpm --filter @runforge/daemon test` with
   it; additionally run the converted tests 3× to sample flake resistance.
   Detector self-tests run in the same suite.
-- **Fix 2:** `pnpm --filter @auto-claude/dashboard e2e --project=desktop`
+- **Fix 2:** `pnpm --filter @runforge/dashboard e2e --project=desktop`
   locally (webServer + real-daemon harness are self-contained).
 - **Fix 3:** `node --test scripts/check-ci-workflows.test.mjs` (or the repo's
   invocation) + run `node scripts/check-ci-workflows.mjs` against the edited

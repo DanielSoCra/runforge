@@ -1,7 +1,7 @@
 ---
 id: FUNC-AC-DASHBOARD
 type: functional
-domain: auto-claude
+domain: runforge
 status: approved
 version: 4
 layer: 1

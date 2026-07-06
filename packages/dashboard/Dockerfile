@@ -9,14 +9,14 @@ COPY packages/auth/package.json ./packages/auth/package.json
 COPY packages/db/package.json ./packages/db/package.json
 COPY packages/daemon/package.json ./packages/daemon/package.json
 COPY packages/dashboard/package.json ./packages/dashboard/package.json
-RUN pnpm install --frozen-lockfile --filter @auto-claude/dashboard...
+RUN pnpm install --frozen-lockfile --filter @runforge/dashboard...
 
 FROM base AS builder
 WORKDIR /app
 # NEXT_PUBLIC_* vars must be inlined at build time (not available at runtime in client bundles)
 ARG NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
-ENV AUTO_CLAUDE_DATABASE_URL=postgres://autoclaude:autoclaude@postgres:5432/autoclaude
+ENV RUNFORGE_DATABASE_URL=postgres://runforge:runforge@postgres:5432/runforge
 ENV ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
 # Workspace root files required: pnpm must see workspace context to resolve
 # node_modules from /app/node_modules during next build

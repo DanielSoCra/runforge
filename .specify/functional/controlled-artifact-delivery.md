@@ -1,7 +1,7 @@
 ---
 id: FUNC-AC-CONTROLLED-ARTIFACT-DELIVERY
 type: functional
-domain: auto-claude
+domain: runforge
 status: approved
 version: 2
 layer: 1

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { AutoClaudeDb } from './client.js';
+import type { RunforgeDb } from './client.js';
 import {
   PostgresCostEventStore,
   PostgresRepoStore,
@@ -44,7 +44,7 @@ function createCostEventDb(options: {
         return { returning: vi.fn(async () => [{ id: 'ce-1', ...values }]) };
       }),
     })),
-  } as unknown as AutoClaudeDb;
+  } as unknown as RunforgeDb;
   return { db, inserted };
 }
 
@@ -156,7 +156,7 @@ describe('PostgresCostEventStore.listForWindow', () => {
       select: vi.fn(() => {
         throw errWithCode('connect ECONNREFUSED 127.0.0.1:5432', 'ECONNREFUSED');
       }),
-    } as unknown as AutoClaudeDb;
+    } as unknown as RunforgeDb;
 
     const result = await new PostgresCostEventStore(db).listForWindow({
       from: new Date(0),
@@ -181,7 +181,7 @@ describe('PostgresRunStore.attributionFor', () => {
           where: vi.fn(async () => rows),
         })),
       })),
-    } as unknown as AutoClaudeDb;
+    } as unknown as RunforgeDb;
     return db;
   }
 
@@ -226,7 +226,7 @@ describe('PostgresRepoStore.namesFor', () => {
           where: vi.fn(async () => rows),
         })),
       })),
-    } as unknown as AutoClaudeDb;
+    } as unknown as RunforgeDb;
   }
 
   it('returns owner/name display identities for the requested projects', async () => {

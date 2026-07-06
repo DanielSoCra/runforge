@@ -2,7 +2,7 @@
 date: 2026-06-11
 status: draft-for-review
 type: design-spec
-topic: auto-claude v-next masterplan — single interface, lane engine, model ladder, acme
+topic: runforge v-next masterplan — single interface, lane engine, model ladder, acme
 authors: the Operator (lead) + Claude (synthesis)
 supersedes:
   - docs/superpowers/specs/2026-06-10-acme-autonomy-masterplan-design.md  # v1; its Layer-A/B split, the confidentiality statute/GDPR basis (App. B) and parked improvement-layer research (App. A) carry forward by reference
@@ -16,9 +16,9 @@ evidence:
   - system map wf_e0624a2c-bdb (7-subsystem code-level state, 2026-06-11)
 ---
 
-# auto-claude v-next Masterplan
+# runforge v-next Masterplan
 
-> **One-line goal:** auto-claude becomes the Operator's **single development interface** — replacing the manual tool zoo (Claude Code sessions, Superset, pi, opencode, codex) with a minimal inbox + drill-down + mid-flight intervention — running **completely stable**, implementing **acme** tasks, and exploiting **model tiers + subscriptions** through configurable lanes.
+> **One-line goal:** runforge becomes the Operator's **single development interface** — replacing the manual tool zoo (Claude Code sessions, Superset, pi, opencode, codex) with a minimal inbox + drill-down + mid-flight intervention — running **completely stable**, implementing **acme** tasks, and exploiting **model tiers + subscriptions** through configurable lanes.
 
 ## 0. What changed since v1 (2026-06-10)
 
@@ -31,7 +31,7 @@ v1 designed acme-as-deployment-#1 on the engine-vs-deployment split. This v2 **e
 
 ## 1. Vision (end state)
 
-the Operator writes ideas into a **minimal inbox** (GitHub issue or quick capture). The system shapes, classifies into a **lane**, implements with the cheapest capable model, gates per lane policy, and merges or escalates. the Operator sees: decisions needing him + a daily briefing — *by default nothing else*. When he wants depth: drill-down per run (live git diff, phase status, cost) and **operator notes** that redirect a run at its next phase boundary. acme is deployment #1; auto-claude itself is deployment #0; the engine stays repo-agnostic (v1 Layer-A/B split unchanged).
+the Operator writes ideas into a **minimal inbox** (GitHub issue or quick capture). The system shapes, classifies into a **lane**, implements with the cheapest capable model, gates per lane policy, and merges or escalates. the Operator sees: decisions needing him + a daily briefing — *by default nothing else*. When he wants depth: drill-down per run (live git diff, phase status, cost) and **operator notes** that redirect a run at its next phase boundary. acme is deployment #1; runforge itself is deployment #0; the engine stays repo-agnostic (v1 Layer-A/B split unchanged).
 
 **Operator-retained gates (unchanged):** L1 spec content · production releases · destructive ops outside the pipeline's mutation set.
 
@@ -52,12 +52,12 @@ the Operator writes ideas into a **minimal inbox** (GitHub issue or quick captur
 | D11 | **Agent = data bundle, pipelines = config packs.** An agent is role definition + tools + skills + `soul.md` + budget (Paperclip composition), in the declarative registry (extends D6). A complete pipeline configuration — lanes + agents + souls + gate sets + steering policy — is packaged as a versioned, swappable **config pack** in the existing plugin system (which already carries skills/agents/MCPs; extend to lanes + steering). Cloudflare's `ReviewPlugin` lifecycle (bootstrap/configure/postConfigure, contribute-via-context-API) is the reference shape. | Operator 2026-06-11; blog.cloudflare.com/ai-code-review |
 
 ### 2.1 L0/L1 impact (Operator gate)
-"Single interface replacing the operator's tool zoo", "lanes as configurable policy", and the **platform thesis — auto-claude is a system that lets you build systems on top** (D9–D11) — extend L0-AC-VISION v5's framing. The spec-writing goal run (§5) must surface these as **proposed L0/L1 amendments via DecisionRequest** — never auto-edit vision.
+"Single interface replacing the operator's tool zoo", "lanes as configurable policy", and the **platform thesis — runforge is a system that lets you build systems on top** (D9–D11) — extend L0-AC-VISION v5's framing. The spec-writing goal run (§5) must surface these as **proposed L0/L1 amendments via DecisionRequest** — never auto-edit vision.
 
 ### 2.2 Platform positioning (build vs buy)
-- **pi is a component, not the system.** One agent, one session, four tools, extensions, RPC — no tickets, heartbeats, gates, multi-agent, or memory across runs. Proof point: Cloudflare's AI-review system is built **on top of opencode** — the harness was the runtime; all value lived in the layer above (plugins, config control plane, risk tiers, coordinator). pi gives auto-claude what opencode gave Cloudflare. Role stays D1: cheap-tier worker runtime.
+- **pi is a component, not the system.** One agent, one session, four tools, extensions, RPC — no tickets, heartbeats, gates, multi-agent, or memory across runs. Proof point: Cloudflare's AI-review system is built **on top of opencode** — the harness was the runtime; all value lived in the layer above (plugins, config control plane, risk tiers, coordinator). pi gives runforge what opencode gave Cloudflare. Role stays D1: cheap-tier worker runtime.
 - **Paperclip is the closest existing "system on top"** and validates D9 wholesale (heartbeats, souls, ticket-mediated delegation). What it lacks is everything that makes unattended *software delivery* safe: no SDLC pipeline/FSM, no validation ladder, no risk lanes/tripwire, no spec governance, no earned-trust ramp, no holdout, no window-aware multi-subscription scheduling. It is a pattern donor + watchlist item — not a control-plane dependency (3 months old, single pseudonymous maintainer; not a foundation under client work).
-- **auto-claude's moat** = the trust machinery (gates, lanes, tripwire, earned autonomy, decision protocol) + spec-driven governance (auditable L1→L3) + composability (lanes/agents/souls/config-packs as data) + an operator surface built for one person steering many systems. The orchestration plumbing is commodity — adopt its patterns shamelessly, own the control plane.
+- **runforge's moat** = the trust machinery (gates, lanes, tripwire, earned autonomy, decision protocol) + spec-driven governance (auditable L1→L3) + composability (lanes/agents/souls/config-packs as data) + an operator surface built for one person steering many systems. The orchestration plumbing is commodity — adopt its patterns shamelessly, own the control plane.
 
 ## 3. Phases — reconciled with the open backlog
 
@@ -68,7 +68,7 @@ Merge the 5 in-flight fix branches (decision-transport, resume-consumer, reviewe
 *Exit:* branches merged, flakes guarded, daemon 24/7 on its durable host, soak clock running.
 
 **P1 — Trust: lane engine v1 + adversarial review (#679 ⊂ lane engine, #684)**
-Implement the merge-decision gate as the **lane engine** (D5): lane config schema, classifier verdict + diff-vs-scope tripwire, per-repo risk-path maps, gate-set selection per lane, auto-merge for qualifying lanes. #684 adversarial-mandate injection into reviewer seeds. Initial lane set: `standard` (full ladder) + `trivial` (gate1-only, auto-merge) on auto-claude itself.
+Implement the merge-decision gate as the **lane engine** (D5): lane config schema, classifier verdict + diff-vs-scope tripwire, per-repo risk-path maps, gate-set selection per lane, auto-merge for qualifying lanes. #684 adversarial-mandate injection into reviewer seeds. Initial lane set: `standard` (full ladder) + `trivial` (gate1-only, auto-merge) on runforge itself.
 *Exit:* a trivial change auto-merges through a lane; an out-of-scope diff gets bounced up; ORANGE/RED still raises DecisionRequests.
 
 **P2 — Model ladder + efficiency (Workstream M concretized)**
@@ -80,7 +80,7 @@ pi process adapter (D1) driving OpenRouter (Kimi/DeepSeek) + ChatGPT-Pro OAuth; 
 *Exit:* acme issues flow ticket→merged-PR unattended within lane policy.
 
 **P4 — Single interface (after stability bar; Q2)**
-Fold pm-cockpit into the auto-claude dashboard (kills the contract-drift class); **minimal inbox** (decisions + briefing) as default surface; drill-down per run (D3 git-derived live diffs, phases, cost); **operator notes + run verbs** (D4); #682 knowledge-approval UI. Retire Superset + manual CLI sessions for pipeline work.
+Fold pm-cockpit into the runforge dashboard (kills the contract-drift class); **minimal inbox** (decisions + briefing) as default surface; drill-down per run (D3 git-derived live diffs, phases, cost); **operator notes + run verbs** (D4); #682 knowledge-approval UI. Retire Superset + manual CLI sessions for pipeline work.
 *Exit:* a full week where the Operator steers exclusively from the inbox; Superset uninstalled or idle.
 
 **P5 — Compounding & scale**

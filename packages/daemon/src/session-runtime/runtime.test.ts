@@ -528,8 +528,8 @@ describe('SessionRuntime', () => {
   });
 
   it('does NOT pass skipPermissions when neither config.autonomous nor env is set (interactive default)', async () => {
-    const prev = process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'];
-    delete process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'];
+    const prev = process.env['RUNFORGE_SKIP_PERMISSIONS'];
+    delete process.env['RUNFORGE_SKIP_PERMISSIONS'];
     try {
       const interactive = new SessionRuntime(testConfig, costTracker);
       mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '', cost: 0.01 } });
@@ -544,13 +544,13 @@ describe('SessionRuntime', () => {
         expect.objectContaining({ skipPermissions: false }),
       );
     } finally {
-      if (prev !== undefined) process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'] = prev;
+      if (prev !== undefined) process.env['RUNFORGE_SKIP_PERMISSIONS'] = prev;
     }
   });
 
   it('passes skipPermissions=true when config.autonomous is set', async () => {
-    const prev = process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'];
-    delete process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'];
+    const prev = process.env['RUNFORGE_SKIP_PERMISSIONS'];
+    delete process.env['RUNFORGE_SKIP_PERMISSIONS'];
     try {
       const autonomous = new SessionRuntime(
         { ...testConfig, autonomous: true } as Config,
@@ -568,13 +568,13 @@ describe('SessionRuntime', () => {
         expect.objectContaining({ skipPermissions: true }),
       );
     } finally {
-      if (prev !== undefined) process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'] = prev;
+      if (prev !== undefined) process.env['RUNFORGE_SKIP_PERMISSIONS'] = prev;
     }
   });
 
-  it('passes skipPermissions=true when AUTO_CLAUDE_SKIP_PERMISSIONS=1 even if config.autonomous is false', async () => {
-    const prev = process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'];
-    process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'] = '1';
+  it('passes skipPermissions=true when RUNFORGE_SKIP_PERMISSIONS=1 even if config.autonomous is false', async () => {
+    const prev = process.env['RUNFORGE_SKIP_PERMISSIONS'];
+    process.env['RUNFORGE_SKIP_PERMISSIONS'] = '1';
     try {
       const envGated = new SessionRuntime(testConfig, costTracker);
       mockSpawn.mockResolvedValueOnce({ ok: true, value: { output: '', cost: 0.01 } });
@@ -589,8 +589,8 @@ describe('SessionRuntime', () => {
         expect.objectContaining({ skipPermissions: true }),
       );
     } finally {
-      if (prev !== undefined) process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'] = prev;
-      else delete process.env['AUTO_CLAUDE_SKIP_PERMISSIONS'];
+      if (prev !== undefined) process.env['RUNFORGE_SKIP_PERMISSIONS'] = prev;
+      else delete process.env['RUNFORGE_SKIP_PERMISSIONS'];
     }
   });
 

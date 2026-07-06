@@ -29,7 +29,7 @@ with:
 In the **Boundary** section, replace:
 
 ```
-The auto-claude operator dashboard (governed by `FUNC-AC-DASHBOARD`) remains the deep-control surface for the auto-claude subsystem (configuration, run history, cost reports). The triage surface defined here is the at-a-glance cross-subsystem surface for items that need attention or are in flight. The two surfaces have distinct scopes; they may cross-link, but they share no governing data and have no overlapping responsibilities.
+The runforge operator dashboard (governed by `FUNC-AC-DASHBOARD`) remains the deep-control surface for the runforge subsystem (configuration, run history, cost reports). The triage surface defined here is the at-a-glance cross-subsystem surface for items that need attention or are in flight. The two surfaces have distinct scopes; they may cross-link, but they share no governing data and have no overlapping responsibilities.
 ```
 
 with:
@@ -180,7 +180,7 @@ After Task 15 v2, Phase 0 creates `packages/concierge/` placeholder directory + 
 ```markdown
 ## Daemon coexistence
 
-The auto-claude daemon is running on the Mac mini. Phase 0 edits specs, prompts, traceability, tests, and creates a placeholder `packages/concierge/` skeleton (empty package.json + README + .gitkeep). **No existing production code under `packages/daemon/` or `packages/dashboard/` is modified.** The placeholder package adds no runtime behaviour — the daemon does not pick it up because it has no work-detection rules for it. After Phase 0 commits land on `dev`, the daemon picks up the new traceability tree and the FUNC-CONCIERGE issue (per Task 23 amendment) on its next poll cycle.
+The runforge daemon is running on the Mac mini. Phase 0 edits specs, prompts, traceability, tests, and creates a placeholder `packages/concierge/` skeleton (empty package.json + README + .gitkeep). **No existing production code under `packages/daemon/` or `packages/dashboard/` is modified.** The placeholder package adds no runtime behaviour — the daemon does not pick it up because it has no work-detection rules for it. After Phase 0 commits land on `dev`, the daemon picks up the new traceability tree and the FUNC-CONCIERGE issue (per Task 23 amendment) on its next poll cycle.
 ```
 
 ---

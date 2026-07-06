@@ -12,7 +12,7 @@ import { parseProfile } from './schema.js';
 /** A structurally valid raw profile WITHOUT gateSets (the inert baseline). */
 function baseProfile(): Record<string, unknown> {
   return {
-    repositories: [{ owner: 'acme', name: 'auto-claude' }],
+    repositories: [{ owner: 'acme', name: 'runforge' }],
     riskPathMap: [{ paths: ['infra/**'], minLevel: 'orange' }],
     defaultMinLevel: 'green',
     laneSet: {

@@ -1,7 +1,7 @@
 ---
 id: FUNC-AC-DATA-PLATFORM
 type: functional
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 1
@@ -11,11 +11,11 @@ layer: 1
 
 ## Problem Statement
 
-Auto-Claude keeps all of its operational records — which repositories are watched, the history of runs, what each run cost, stored access credentials, plugin activation, briefings, and activity — with an external hosted provider. Because the project does not own this data, the operator cannot back it up or restore it with ordinary self-hosted tooling, cannot guarantee continuity if the provider is unavailable, and cannot independently control how the shape of stored information evolves. This last gap has already caused real harm: the running system once expected a piece of stored information that the live provider did not actually have, and work stalled with no early warning. Until the project owns and controls its own operational data, the operator cannot promise recoverability, continuity, or controlled evolution of what the system remembers.
+Runforge keeps all of its operational records — which repositories are watched, the history of runs, what each run cost, stored access credentials, plugin activation, briefings, and activity — with an external hosted provider. Because the project does not own this data, the operator cannot back it up or restore it with ordinary self-hosted tooling, cannot guarantee continuity if the provider is unavailable, and cannot independently control how the shape of stored information evolves. This last gap has already caused real harm: the running system once expected a piece of stored information that the live provider did not actually have, and work stalled with no early warning. Until the project owns and controls its own operational data, the operator cannot promise recoverability, continuity, or controlled evolution of what the system remembers.
 
 ## Actors
 
-- **Operator** — the person who runs and maintains an Auto-Claude deployment.
+- **Operator** — the person who runs and maintains an Runforge deployment.
 - **Administrator** — an operator with full control over configuration and stored data.
 - **Viewer** — an operator with read-only visibility into the system.
 

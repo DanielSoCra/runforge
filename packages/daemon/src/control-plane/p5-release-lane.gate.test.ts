@@ -16,7 +16,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   DecisionRequestSchema,
   type DecisionRequest,
-} from '@auto-claude/decision-protocol';
+} from '@runforge/decision-protocol';
 
 const NOW = '2026-07-03T00:00:00.000Z';
 

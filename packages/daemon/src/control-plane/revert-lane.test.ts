@@ -7,7 +7,7 @@ import { spawnSync } from 'child_process';
 import {
   DecisionRequestSchema,
   type DecisionRequest,
-} from '@auto-claude/decision-protocol';
+} from '@runforge/decision-protocol';
 import type { RunState } from '../types.js';
 import {
   buildDegradedReversalEscalationRequest,
@@ -105,8 +105,8 @@ function makeRun(overrides: Partial<RunState> = {}): RunState {
     fixAttempts: [],
     errorHashes: {},
     repoOwner: 'DANIELSOCRAHANDLEZZ',
-    repoName: 'auto-claude',
-    deploymentId: 'auto-claude',
+    repoName: 'runforge',
+    deploymentId: 'runforge',
     startedAt: FIXED_NOW,
     updatedAt: FIXED_NOW,
     workerClaimId: 'claim-g4',
@@ -122,15 +122,15 @@ describe('revert-lane real-remote regressions', () => {
     const pullsCreate = vi.fn(async () => ({
       data: {
         number: 91,
-        html_url: 'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/pull/91',
+        html_url: 'https://github.com/DANIELSOCRAHANDLEZZ/runforge/pull/91',
       },
     }));
 
     await handlePostLandingObservation({
       repoRoot: localRepoDir,
       owner: 'DANIELSOCRAHANDLEZZ',
-      repo: 'auto-claude',
-      deployment: 'auto-claude',
+      repo: 'runforge',
+      deployment: 'runforge',
       run: makeRun(),
       trunkBranch: 'main',
       mergeSha,
@@ -168,7 +168,7 @@ describe('revert-lane real-remote regressions', () => {
   it('builds a schema-valid degraded escalation when the automated revert fails', () => {
     const request = buildDegradedReversalEscalationRequest({
       run: makeRun(),
-      deployment: 'auto-claude',
+      deployment: 'runforge',
       mergeSha: '1234567890abcdef1234567890abcdef12345678',
       error: 'git revert failed: conflict',
       now: FIXED_NOW,

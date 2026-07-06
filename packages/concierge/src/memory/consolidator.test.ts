@@ -173,7 +173,7 @@ describe('daily activity consolidator', () => {
         vaultPath,
         watchedRepos: ['/repo'],
         operatorEmail: 'operator@example.com',
-        autoClaudeBaseUrl: 'http://127.0.0.1:3847',
+        runforgeBaseUrl: 'http://127.0.0.1:3847',
       }),
       now: () => new Date(2026, 4, 4, 3).getTime(),
       logger: {

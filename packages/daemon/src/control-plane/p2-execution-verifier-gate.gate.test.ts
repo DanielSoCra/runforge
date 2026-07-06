@@ -100,7 +100,7 @@ describe('G2 pre-implement verifier gate', () => {
     const escalate = vi.fn(async (_event: PreImplementVerifierGateEscalation) => undefined);
 
     const result = await checkVerifierGateBeforeImplement({
-      deploymentId: 'auto-claude',
+      deploymentId: 'runforge',
       registry: makeRegistry(makeLaneSet()),
       classifierVerdict: matchingVerdict,
       probeOracle: () => true,
@@ -118,7 +118,7 @@ describe('G2 pre-implement verifier gate', () => {
     expect(escalate).toHaveBeenCalledTimes(1);
     expect(escalate).toHaveBeenCalledWith(
       expect.objectContaining({
-        deploymentId: 'auto-claude',
+        deploymentId: 'runforge',
         laneName: 'p1',
         reason: 'no-verifier',
       }),
@@ -132,7 +132,7 @@ describe('G2 pre-implement verifier gate', () => {
     const probeOracle = vi.fn((invoke: VerifierInvocationRef) => invoke.ref === 'test');
 
     const result = await checkVerifierGateBeforeImplement({
-      deploymentId: 'auto-claude',
+      deploymentId: 'runforge',
       registry: makeRegistry(makeLaneSet(verifier)),
       classifierVerdict: matchingVerdict,
       probeOracle,

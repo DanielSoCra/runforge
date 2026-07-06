@@ -16,7 +16,7 @@
  * strands the decision at `source_written`. Echoing `equal` for the expected etag
  * lets the resume/requeue dispatch and the decision reach terminal `resumed`.
  *
- * The types are imported from `@auto-claude/decision-index`. This is a TYPE-ONLY
+ * The types are imported from `@runforge/decision-index`. This is a TYPE-ONLY
  * import surface in v1: `import type` keeps it from emitting a runtime require, so
  * a disabled deployment never loads the package's native (better-sqlite3) code via
  * these adapters — only the manager's dynamic import inside the enabled branch
@@ -33,16 +33,16 @@ import type {
   ResumeDispatcher,
   ResumeArgs,
   ResumeResult,
-} from '@auto-claude/decision-index';
+} from '@runforge/decision-index';
 
 /**
  * Opt-in toggle for the v1 LogNotifier's console line. OFF by default so a
  * flag-ON daemon with no real publisher wired does not spam one log line per
  * notify (verdict fix_before_flag_on / adapters.ts). Set
- * AUTO_CLAUDE_DECISION_LOG_NOTIFY=1/true/yes to surface it for debugging.
+ * RUNFORGE_DECISION_LOG_NOTIFY=1/true/yes to surface it for debugging.
  */
 const LOG_NOTIFY_ENABLED = ((): boolean => {
-  const v = process.env.AUTO_CLAUDE_DECISION_LOG_NOTIFY?.trim().toLowerCase();
+  const v = process.env.RUNFORGE_DECISION_LOG_NOTIFY?.trim().toLowerCase();
   return v === '1' || v === 'true' || v === 'yes';
 })();
 
@@ -63,7 +63,7 @@ export class LogNotifier implements Notifier {
     // publisher wired would emit one line PER decision PER notify — pure log
     // noise. Gate it behind an opt-in so it is silent by default (verdict
     // fix_before_flag_on / adapters.ts LogNotifier). Set
-    // AUTO_CLAUDE_DECISION_LOG_NOTIFY=1 to surface the line for debugging.
+    // RUNFORGE_DECISION_LOG_NOTIFY=1 to surface the line for debugging.
     if (LOG_NOTIFY_ENABLED) {
       console.log(
         `[decision-escalation] notify decision=${args.decision_id} channel=${args.channel} effect=${args.effectId}`,

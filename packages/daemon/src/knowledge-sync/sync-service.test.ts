@@ -16,7 +16,7 @@ async function createVault(
 ) {
   await mkdir(dir, { recursive: true });
   await mkdir(join(dir, '00-Meta'), { recursive: true });
-  await writeFile(join(dir, '00-Meta', 'auto-claude-sync.md'), manifestContent);
+  await writeFile(join(dir, '00-Meta', 'runforge-sync.md'), manifestContent);
   for (const [relPath, content] of Object.entries(docs)) {
     const absPath = join(dir, relPath);
     await mkdir(join(absPath, '..'), { recursive: true });

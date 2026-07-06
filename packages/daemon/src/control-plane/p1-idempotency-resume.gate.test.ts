@@ -125,7 +125,7 @@ function makeOctokitWithExistingPull(existingPull: PullRequestSummary) {
 
 function makeArgs(overrides: Partial<DeliveryArgs> = {}): DeliveryArgs {
   const owner = 'octo-org';
-  const repo = 'auto-claude';
+  const repo = 'runforge';
   const featureBranch = 'feature/p1-resume';
   const landsOn = 'staging';
 
@@ -180,7 +180,7 @@ describe('G5 PR idempotency and resume', () => {
     expect(octokit.pulls.list).toHaveBeenCalledWith(
       expect.objectContaining({
         owner: 'octo-org',
-        repo: 'auto-claude',
+        repo: 'runforge',
         state: 'open',
         head: 'octo-org:feature/p1-resume',
       }),
@@ -189,7 +189,7 @@ describe('G5 PR idempotency and resume', () => {
     expect(octokit.pulls.merge).toHaveBeenCalledWith(
       expect.objectContaining({
         owner: 'octo-org',
-        repo: 'auto-claude',
+        repo: 'runforge',
         pull_number: 654,
         merge_method: 'squash',
       }),
@@ -217,7 +217,7 @@ describe('G5 PR idempotency and resume', () => {
         issueNumber: 42,
         phase: 'integrate',
         artifactKind: 'pull_request',
-        proposalKey: `octo-org/auto-claude#42:integrate:${status}`,
+        proposalKey: `octo-org/runforge#42:integrate:${status}`,
         artifactPaths: [],
         headBranch: 'feature/p1-resume',
         baseBranch: 'staging',

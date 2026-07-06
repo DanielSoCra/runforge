@@ -6,7 +6,7 @@
 import { join } from 'node:path';
 import { readJsonSafe, writeJsonSafe } from '../lib/json-store.js';
 import type { DecisionIndexManager } from './decision-escalation/manager.js';
-import type { EscalationCountBucket } from '@auto-claude/decision-index';
+import type { EscalationCountBucket } from '@runforge/decision-index';
 import type { HandlerResult } from './decision-api.js';
 
 export interface EscalationMetricEvent {

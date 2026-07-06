@@ -28,13 +28,13 @@ rather than shipped under task pressure in the same PR.
 
 ## The root cause #3 addresses
 
-`auto-claude.config.json` configures the FIRST review gate ("gate1", deterministic) as:
+`runforge.config.json` configures the FIRST review gate ("gate1", deterministic) as:
 
 ```json
-"gate1Commands": ["pnpm --filter @auto-claude/daemon run test"]
+"gate1Commands": ["pnpm --filter @runforge/daemon run test"]
 ```
 
-That runs auto-claude's **entire own** test suite (~2,460 tests). When the daemon
+That runs runforge's **entire own** test suite (~2,460 tests). When the daemon
 works on a **self-targeted** issue (an issue in its own repo), gate1 runs the whole
 suite. A **single** pre-existing red or flaky test — unrelated to the change — makes
 gate1 fail. review re-runs implement blind, exhausts `maxFixCycles`, and the run is

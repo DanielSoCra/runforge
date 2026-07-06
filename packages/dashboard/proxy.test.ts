@@ -44,7 +44,7 @@ describe('proxy', () => {
       const { proxy } = await import('./proxy');
 
       const response = await proxy(
-        makeRequest('/repos', 'auto-claude.session_token=signed-token'),
+        makeRequest('/repos', 'runforge.session_token=signed-token'),
       );
 
       expect(response.status).toBe(200);
@@ -55,7 +55,7 @@ describe('proxy', () => {
       const { proxy } = await import('./proxy');
 
       const response = await proxy(
-        makeRequest('/repos', '__Secure-auto-claude.session_token=signed-token'),
+        makeRequest('/repos', '__Secure-runforge.session_token=signed-token'),
       );
 
       expect(response.status).toBe(200);

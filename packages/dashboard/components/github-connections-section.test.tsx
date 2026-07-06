@@ -34,7 +34,7 @@ describe('GitHubConnectionsSection', () => {
           avatarUrl: 'https://example.test/avatar.png',
           status: 'active',
           createdAt: new Date('2026-01-01T00:00:00.000Z'),
-          organizations: [{ login: 'auto-claude' }, { login: 'tools' }],
+          organizations: [{ login: 'runforge' }, { login: 'tools' }],
         },
       ],
     });
@@ -45,7 +45,7 @@ describe('GitHubConnectionsSection', () => {
     render(await GitHubConnectionsSection());
 
     expect(screen.getByText('Primary GitHub')).toBeInTheDocument();
-    expect(screen.getByText('auto-claude, tools')).toBeInTheDocument();
+    expect(screen.getByText('runforge, tools')).toBeInTheDocument();
     expect(screen.getByAltText('octocat')).toHaveAttribute(
       'src',
       'https://example.test/avatar.png',

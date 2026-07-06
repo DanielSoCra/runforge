@@ -24,12 +24,12 @@ describe('concierge config loader', () => {
       },
       env: {
         CONCIERGE_SLACK_BOT_TOKEN: 'xoxb-env',
-        CONCIERGE_AUTO_CLAUDE_BASE_URL: 'http://daemon',
+        CONCIERGE_RUNFORGE_BASE_URL: 'http://daemon',
       },
     });
 
     expect(config.slackBotToken).toBe('xoxb-env');
-    expect(config.autoClaudeBaseUrl).toBe('http://daemon');
+    expect(config.runforgeBaseUrl).toBe('http://daemon');
     expect(config.operatorEmail).toBe('operator@example.com');
   });
 

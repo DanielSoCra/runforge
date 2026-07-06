@@ -11,7 +11,7 @@ export type Db = PostgresJsDatabase<typeof schema>;
 export type Sql = ReturnType<typeof postgres>;
 
 export interface OpenDbOptions {
-  /** Postgres connection URL (AUTO_CLAUDE_DATABASE_URL). */
+  /** Postgres connection URL (RUNFORGE_DATABASE_URL). */
   url: string;
 }
 
@@ -32,7 +32,7 @@ export interface ReadOnlyHandle {
  * Cross-process processes running this same code all compute the same K against
  * the same Postgres, so single-writer is enforced cross-process (spec §3.4).
  */
-const WRITER_LOCK_NAME = "auto-claude:decision-index:writer";
+const WRITER_LOCK_NAME = "runforge:decision-index:writer";
 
 /**
  * Minimal FIFO async mutex (no new dependency). Serializes the writer's own

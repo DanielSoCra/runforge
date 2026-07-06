@@ -95,15 +95,15 @@ services:
     ports: []
     command: >
       sh -c "
-        git config --global user.name 'Auto-Claude' &&
-        git config --global user.email 'auto-claude@localhost' &&
+        git config --global user.name 'Runforge' &&
+        git config --global user.email 'runforge@localhost' &&
         pnpm start
       "
     volumes:
       - ./prompts:/app/packages/daemon/prompts:ro
       - ./fitness:/app/packages/daemon/fitness:ro
       - ./plugins:/app/plugins:ro
-      - ./auto-claude.config.json:/app/packages/daemon/auto-claude.config.json:ro
+      - ./runforge.config.json:/app/packages/daemon/runforge.config.json:ro
       - daemon-state:/app/packages/daemon/state
     networks:
       - app
@@ -566,11 +566,11 @@ Fill in the actual values. Copy Supabase credentials, GitHub token, Anthropic ke
 - [ ] **Step 2: Stop launchd services**
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.autoclaude.reviewer.plist 2>/dev/null
-launchctl unload ~/Library/LaunchAgents/com.autoclaude.developer.plist 2>/dev/null
+launchctl unload ~/Library/LaunchAgents/com.runforge.reviewer.plist 2>/dev/null
+launchctl unload ~/Library/LaunchAgents/com.runforge.developer.plist 2>/dev/null
 ```
 
-- [ ] **Step 3: Verify no auto-claude processes running**
+- [ ] **Step 3: Verify no runforge processes running**
 
 ```bash
 ps aux | grep -E 'pipeline\.sh|reviewer\.sh|developer\.sh' | grep -v grep

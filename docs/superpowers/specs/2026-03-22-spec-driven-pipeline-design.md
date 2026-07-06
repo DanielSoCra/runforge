@@ -15,7 +15,7 @@ The existing autonomous system (reviewer + developer) is reactive — it finds a
 
 A spec-driven pipeline implemented as Claude Code skills, orchestrated by shell scripts with algorithmic pre-filtering. GitHub Issues with labels drive state transitions. The pipeline builds features by progressing through L1→L2→L3→implementation, with human gates at L1/L2 and full autonomy at L3+.
 
-The pipeline uses itself to evolve from skills/scripts into auto-claude's native Node.js control plane (Phase 2/3).
+The pipeline uses itself to evolve from skills/scripts into runforge's native Node.js control plane (Phase 2/3).
 
 ## Role Model
 
@@ -140,7 +140,7 @@ Note: `l3-review` is handled within the `spec-generate-l3` skill session (compli
 2. Read the L1 spec referenced in the issue body
 3. Read L0 vision and existing L2 specs for context and patterns
 4. Self-brainstorm: ask architectural questions and answer them grounded in L1 constraints. Explore 2-3 approaches, pick the best with reasoning.
-5. Validate generated spec using `l2-spec-guardian` skill (local skill at `plugins/auto-claude-dev/skills/spec-guardian.md`)
+5. Validate generated spec using `l2-spec-guardian` skill (local skill at `plugins/runforge-dev/skills/spec-guardian.md`)
 6. Write L2 spec file(s) to `.specify/architecture/` on branch `spec/l2/<issue-number>-<name>`
 7. Update `traceability.yml` with new spec linkages
 8. Open PR linked to the issue
@@ -168,7 +168,7 @@ Note: `l3-review` is handled within the `spec-generate-l3` skill session (compli
 2. Read approved L1 + L2 specs from the spec chain
 3. Generate L3 spec(s) in `.specify/stack/` on branch `spec/l3/<issue-number>-<name>`
 4. Update `traceability.yml` with `code_paths` and `test_paths`
-5. Validate generated spec using `l3-spec-guardian` skill (local skill at `plugins/auto-claude-dev/skills/spec-guardian.md`)
+5. Validate generated spec using `l3-spec-guardian` skill (local skill at `plugins/runforge-dev/skills/spec-guardian.md`)
 6. Run compliance check: does L3 contradict L2 or L1? If fixable, fix. If L2 must change: create `l2-suggestion` issue with evidence, add `blocked` to the feature issue with comment "Blocked on L2 change — see #<suggestion-issue>", remove `l3-in-progress`. The feature issue resumes when the Operator resolves the L2 suggestion and relabels to `l2-approved`.
 7. Relabel: remove `l3-in-progress`, add `l3-review`
 8. Run `spec-review-compliance` in **inline mode** (upstream consistency + traceability only, no code-gap check)
@@ -276,7 +276,7 @@ Note: Phase 1 validates the *workflow* on these specs — it doesn't implement t
 Phase 2 (native pipeline migration) and Phase 3 (convergence) are documented as L1 issues with `phase-2`/`phase-3` labels, created upfront but not activated until Phase 1 proves stable. Each will get its own design spec through this pipeline.
 
 **Phase 2 examples:**
-- "The spec-driven pipeline should run as a native auto-claude pipeline variant (`spec-driven`) instead of shell scripts"
+- "The spec-driven pipeline should run as a native runforge pipeline variant (`spec-driven`) instead of shell scripts"
 - "The pipeline orchestrator should use the Node.js control plane FSM instead of `pipeline.sh`"
 
 **Phase 3 examples:**
@@ -287,7 +287,7 @@ When Phase 1 proves stable, the Operator relabels Phase 2 issues to `l1-approved
 
 **Translation map (Phase 1 → Phase 2):**
 
-| Phase 1 (skills/scripts) | Phase 2 (native auto-claude) |
+| Phase 1 (skills/scripts) | Phase 2 (native runforge) |
 |---|---|
 | `pipeline.sh` polling loop | Control plane FSM + polling |
 | Label-based state in shell | `github-labels.ts` state management |
@@ -311,7 +311,7 @@ L0 states "never writes or modifies specifications" and "never modifies its own 
 
 1. **L3 spec generation is authorized.** The pipeline generates L3 specs from Operator-approved L1/L2 specs. This is not autonomous spec authoring — it is a mechanical derivation step where the Operator has already approved the business requirements (L1) and architecture (L2). The L3 output is auto-reviewed for compliance before proceeding. The Operator has explicitly designed and approved this workflow.
 
-2. **Implementation of Operator-approved specs is authorized.** Code changes flow from an Operator-approved spec chain (L1→L2→L3). The pipeline never decides *what* to build — only *how* to implement what the Operator has approved. This is equivalent to the existing reviewer/developer loop, which already modifies auto-claude's code autonomously under the same authorization model.
+2. **Implementation of Operator-approved specs is authorized.** Code changes flow from an Operator-approved spec chain (L1→L2→L3). The pipeline never decides *what* to build — only *how* to implement what the Operator has approved. This is equivalent to the existing reviewer/developer loop, which already modifies runforge's code autonomously under the same authorization model.
 
 3. **L1/L2 specs are never modified autonomously.** The pipeline can only suggest changes. The Operator retains full control over requirements and architecture.
 
@@ -335,9 +335,9 @@ The Hetzner deployment continues as-is. Local and remote don't need to coordinat
 
 | Existing Skill/Tool | Type | Location | Role in Pipeline |
 |---|---|---|---|
-| `l1-spec-guardian` | Local skill | `plugins/auto-claude-dev/skills/spec-guardian.md` | Validates L1 spec quality during brainstorming |
-| `l2-spec-guardian` | Local skill | `plugins/auto-claude-dev/skills/spec-guardian.md` | Used by `spec-brainstorm-l2` to validate generated L2 |
-| `l3-spec-guardian` | Local skill | `plugins/auto-claude-dev/skills/spec-guardian.md` | Used by `spec-generate-l3` to validate generated L3 |
+| `l1-spec-guardian` | Local skill | `plugins/runforge-dev/skills/spec-guardian.md` | Validates L1 spec quality during brainstorming |
+| `l2-spec-guardian` | Local skill | `plugins/runforge-dev/skills/spec-guardian.md` | Used by `spec-brainstorm-l2` to validate generated L2 |
+| `l3-spec-guardian` | Local skill | `plugins/runforge-dev/skills/spec-guardian.md` | Used by `spec-generate-l3` to validate generated L3 |
 | `verified-codebase-review` | Claude Code skill | `~/.claude/skills/verified-codebase-review/` | Maintenance track only (not used in feature pipeline) |
 | `fix-review-issues` | Claude Code skill | `~/.claude/skills/fix-review-issues/` | Maintenance track only (not used in feature pipeline) |
 | `progress-summary` | Claude Code skill | `~/.claude/skills/progress-summary/` | Reports on pipeline + maintenance activity |
@@ -356,8 +356,8 @@ The Hetzner deployment continues as-is. Local and remote don't need to coordinat
 
 ```bash
 #!/bin/bash
-cd ~/code/auto-claude
-REPO="DANIELSOCRAHANDLEZZ/auto-claude"
+cd ~/code/runforge
+REPO="DANIELSOCRAHANDLEZZ/runforge"
 FAIL_COUNT=0
 MAX_BACKOFF=3600
 

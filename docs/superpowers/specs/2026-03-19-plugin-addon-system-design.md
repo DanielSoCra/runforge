@@ -17,7 +17,7 @@ superseded_date: 2026-06-11
 
 ## Problem
 
-Auto-claude is a general-purpose daemon. Different repos need different expertise: a web app repo benefits from Astro patterns and a UI critic agent; an AI agent repo needs FastAPI patterns and a Pydantic validator. Today there is no way to give the daemon domain-specific skills — every session gets the same generic context regardless of what it is building.
+Runforge is a general-purpose daemon. Different repos need different expertise: a web app repo benefits from Astro patterns and a UI critic agent; an AI agent repo needs FastAPI patterns and a Pydantic validator. Today there is no way to give the daemon domain-specific skills — every session gets the same generic context regardless of what it is building.
 
 Beyond domain skills, repos need different MCP integrations and different validation gates. A design-heavy repo wants Figma access; a Python repo wants a mypy gate. These capabilities should be composable and repo-specific, not hardcoded in the daemon.
 
@@ -25,7 +25,7 @@ Beyond domain skills, repos need different MCP integrations and different valida
 
 ## Solution
 
-A plugin system built into the auto-claude codebase. Plugins are directories of Markdown files, agent prompts, MCP configs, and validation scripts. The daemon assembles active plugins into a composite context at session spawn time. Users activate plugins per repo through the dashboard. An LLM recommendation call suggests the right plugins when a repo is first added.
+A plugin system built into the runforge codebase. Plugins are directories of Markdown files, agent prompts, MCP configs, and validation scripts. The daemon assembles active plugins into a composite context at session spawn time. Users activate plugins per repo through the dashboard. An LLM recommendation call suggests the right plugins when a repo is first added.
 
 ---
 
@@ -33,21 +33,21 @@ A plugin system built into the auto-claude codebase. Plugins are directories of 
 
 ### Approach: Daemon-owned, injected at spawn
 
-Plugins live in `auto-claude/plugins/` — version-controlled alongside the daemon. No sync problem: when auto-claude updates, plugins update with it. Per-repo activation is stored in Supabase, read as part of the existing config sync. At session spawn time, the daemon assembles active plugins into a composite context and injects it into the initial prompt. No files are written to the target repo during a session.
+Plugins live in `runforge/plugins/` — version-controlled alongside the daemon. No sync problem: when runforge updates, plugins update with it. Per-repo activation is stored in Supabase, read as part of the existing config sync. At session spawn time, the daemon assembles active plugins into a composite context and injects it into the initial prompt. No files are written to the target repo during a session.
 
-For interactive developer use (working outside auto-claude), the dashboard provides an explicit "Export to repo" action that copies plugin skills into the repo's `.claude/` directory.
+For interactive developer use (working outside runforge), the dashboard provides an explicit "Export to repo" action that copies plugin skills into the repo's `.claude/` directory.
 
 ---
 
 ## Plugin Format
 
-Each plugin is a directory under `auto-claude/plugins/`:
+Each plugin is a directory under `runforge/plugins/`:
 
 ```
-auto-claude/
+runforge/
   plugins/
     registry.json              # flat index of all available plugins
-    auto-claude-dev/           # permanent plugin for auto-claude's own repo
+    runforge-dev/           # permanent plugin for runforge's own repo
     web-stack/
     ai-agents/
     [plugin-id]/
@@ -81,7 +81,7 @@ auto-claude/
 {
   "version": 1,
   "plugins": [
-    { "id": "auto-claude-dev", "name": "Auto-Claude Dev", "tags": ["typescript", "daemon", "spec-driven"] },
+    { "id": "runforge-dev", "name": "Runforge Dev", "tags": ["typescript", "daemon", "spec-driven"] },
     { "id": "web-stack",       "name": "Web Stack",        "tags": ["frontend", "astro", "tailwind"] },
     { "id": "ai-agents",       "name": "AI Agents",        "tags": ["python", "fastapi", "pydantic"] }
   ]
@@ -208,7 +208,7 @@ interface CompositeContext {
 - Gates: additive — all plugin gates run alongside the base `validation.gate1Commands`.
 - **Context window budget:** the total length of injected content (all `prompt-injection.md` + all skill and agent file contents) is capped at 20,000 tokens. If active plugins exceed this cap, the daemon logs a warning and truncates in this priority order: `prompt-injection.md` content is always preserved; skills are dropped before agents; within each type, content from the last-activated plugins is dropped first. The exact implementation of this algorithm is left to the L3 spec.
 
-**Injection:** the composite context is prepended to the initial session prompt that auto-claude already controls. No files are written to the target repo during a session.
+**Injection:** the composite context is prepended to the initial session prompt that runforge already controls. No files are written to the target repo during a session.
 
 ---
 
@@ -255,7 +255,7 @@ Located at `repos/[id]/plugins/page.tsx` — a tab on the repo detail page along
 **New Task 14: Plugin Management** — depends on Tasks 1, 3, and 7:
 
 ```
-auto-claude/plugins/           # plugin directories + registry.json
+runforge/plugins/           # plugin directories + registry.json
 actions/plugins.ts             # togglePlugin, triggerRecommendation, enableAllSuggested
 app/repos/[id]/plugins/        # Plugins tab page
 components/plugin-card.tsx     # card with toggle, badge, reason tooltip
@@ -276,11 +276,11 @@ Use `l1-spec-guardian`, `l2-spec-guardian`, and `l3-spec-guardian` skills to wri
 
 ---
 
-## Bootstrap Plugin: `auto-claude-dev`
+## Bootstrap Plugin: `runforge-dev`
 
-`auto-claude-dev` is a **permanent production plugin** — not a test fixture. It is the plugin activated on auto-claude's own repo when the daemon watches itself, enabling the meta-loop. It is a deliverable of Task 14.
+`runforge-dev` is a **permanent production plugin** — not a test fixture. It is the plugin activated on runforge's own repo when the daemon watches itself, enabling the meta-loop. It is a deliverable of Task 14.
 
 Contents:
 - **Skills:** spec-guardian patterns, FSM patterns, TypeScript daemon conventions, traceability workflow
 - **Agents:** spec-reviewer, architecture-critic
-- **Prompt injection:** "You are working on the auto-claude daemon. Always check traceability.yml before editing files. Read specs before implementing."
+- **Prompt injection:** "You are working on the runforge daemon. Always check traceability.yml before editing files. Read specs before implementing."

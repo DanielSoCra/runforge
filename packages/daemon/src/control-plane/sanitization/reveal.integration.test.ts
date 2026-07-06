@@ -12,8 +12,8 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION } from '@auto-claude/decision-protocol';
-import { createIndexWriter, type IndexWriter } from '@auto-claude/decision-index';
+import { PROTOCOL_VERSION } from '@runforge/decision-protocol';
+import { createIndexWriter, type IndexWriter } from '@runforge/decision-index';
 import { LogNotifier, RecordingSourceSink, AckResumeDispatcher } from '../decision-escalation/adapters.js';
 import { DecisionLedger } from '../decision-escalation/ledger.js';
 import {
@@ -30,7 +30,7 @@ const FIXED_NOW = '2026-06-02T00:00:00.000Z';
 const withholdingProfile = (fields: string[]): DeploymentProfile =>
   ({
     id: 'dep-a',
-    repositories: [{ owner: 'acme', name: 'auto-claude' }],
+    repositories: [{ owner: 'acme', name: 'runforge' }],
     riskPathMap: [{ paths: ['infra/**'], minLevel: 'orange' }],
     defaultMinLevel: 'green',
     laneSet: { declaredPhases: ['velocity'], mostCautiousLane: 'standard', lanes: [] },

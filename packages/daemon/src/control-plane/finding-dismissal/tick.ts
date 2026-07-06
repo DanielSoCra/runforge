@@ -16,7 +16,7 @@
  *     scan when there are no finding rows.
  */
 import type { Octokit } from '@octokit/rest';
-import type { DecisionRequest } from '@auto-claude/decision-protocol';
+import type { DecisionRequest } from '@runforge/decision-protocol';
 import {
   GitHubBlockPublisher,
   type OctokitLike as PublisherOctokit,

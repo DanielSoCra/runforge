@@ -1,4 +1,4 @@
-import type { RunStore } from '@auto-claude/db';
+import type { RunStore } from '@runforge/db';
 
 export interface RunHistoryReader {
   countStuckRunsForIssue(input: {

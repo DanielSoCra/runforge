@@ -54,7 +54,7 @@
 
 ### Task 4: SpendReadModel (pure, fake readers)
 
-**Consumes:** `CostEventStore.listForWindow`, `RunStore.attributionFor`, `RepoStore.namesFor` types from `@auto-claude/db` (structural narrow interfaces `CostEventReader`/`RunReader`/`RepoReader` defined locally).
+**Consumes:** `CostEventStore.listForWindow`, `RunStore.attributionFor`, `RepoStore.namesFor` types from `@runforge/db` (structural narrow interfaces `CostEventReader`/`RunReader`/`RepoReader` defined locally).
 **Produces:** `reconcile(ev, shape)`, `SpendReadModel({costEvents, runs, repos, loadPricing, now})` with `headline(q)`, `byProject(q)`, `providerSplit(q)`, `savings(q, overrides?)`.
 
 - [x] Write `read-model.test.ts` with hand-rolled reader fakes (no Postgres, no port):
@@ -78,11 +78,11 @@
 
 - [x] `server.ts`: add optional `ControlHandlers` fields (`getSpendPeriod`, `getSpendByProject`, `getSpendProviderSplit`, `getSpendSavings`, `getPricingReference`, `setPricingReference`); route each GET as a one-line `json(res, result.status, result.body)` adapter (mirroring `/metrics/escalation`); PUT `/spend/pricing-reference` reads the body with the existing 10KB-cap pattern (mirroring `/decisions/:id/answer`); extend the CSRF `X-Requested-By` guard from POST-only to POST+PUT; absent handler → `501` (decision-api precedent).
 - [x] `daemon.ts`: hold `{costs, runs, repos}` readers next to `configReader` at store construction; at control-server wiring build `PricingReferenceStore(join(stateDir, 'pricing-reference.json'))` + `SpendReadModel` and pass the six closures.
-- [x] Run `pnpm --filter @auto-claude/daemon typecheck` + the spend tests + `server.test.ts`.
+- [x] Run `pnpm --filter @runforge/daemon typecheck` + the spend tests + `server.test.ts`.
 - [x] Commit: `feat(spend): mount spend routes on the control plane`
 
 ### Task 7: Full verification
 
-- [x] `pnpm --filter @auto-claude/daemon test` (no NEW failures vs origin/main; daemon-boot load flake is documented pre-existing), `pnpm --filter @auto-claude/daemon typecheck`, lint, `node scripts/check-traceability-paths.mjs`.
+- [x] `pnpm --filter @runforge/daemon test` (no NEW failures vs origin/main; daemon-boot load flake is documented pre-existing), `pnpm --filter @runforge/daemon typecheck`, lint, `node scripts/check-traceability-paths.mjs`.
 - [x] Codex review round if available; fix P1s.
 - [x] Push + PR (`Closes #753`). Do not merge.

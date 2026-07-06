@@ -9,9 +9,9 @@ import type { DeploymentRegistry } from '../deployment-registry/registry.js';
 import {
   SanitizationPipeline,
   SanitizerRegistry,
-} from '@auto-claude/sanitization';
-import { createWithholdingFactory } from '@auto-claude/sanitizer-redaction';
-import type { ProtectedStore } from '@auto-claude/sanitizer-redaction';
+} from '@runforge/sanitization';
+import { createWithholdingFactory } from '@runforge/sanitizer-redaction';
+import type { ProtectedStore } from '@runforge/sanitizer-redaction';
 
 export interface BuildSanitizationPipelineOptions {
   /** The ledger's protected store; required when a profile activates withholding. */
@@ -43,7 +43,7 @@ export function buildSanitizationPipeline(
             'withholding sanitizer requires a ProtectedStore, but the decision index is disabled or unavailable',
           );
         },
-    '@auto-claude/sanitizer-redaction withholding sanitizer',
+    '@runforge/sanitizer-redaction withholding sanitizer',
   );
 
   return registry.build(profile?.sanitizers ?? []);

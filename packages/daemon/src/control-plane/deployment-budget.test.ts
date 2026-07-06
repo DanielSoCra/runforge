@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { DecisionRequestSchema } from '@auto-claude/decision-protocol';
+import { DecisionRequestSchema } from '@runforge/decision-protocol';
 import type { RunState } from '../types.js';
 import {
   checkDeploymentBudget,

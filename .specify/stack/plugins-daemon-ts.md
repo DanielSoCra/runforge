@@ -1,7 +1,7 @@
 ---
 id: STACK-AC-PLUGINS-DAEMON
 type: stack-specific
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 3
@@ -21,7 +21,7 @@ test_paths:
 
 ## Pattern
 
-**Startup-validated filesystem registry.** The plugin catalog is a `registry.json` file alongside plugin directories in `auto-claude/plugins/`. On daemon startup, the registry is loaded, each entry is cross-validated against the filesystem (directory exists, `manifest.json` present with required fields), and the result is cached in memory for the lifetime of the process. No database round trip is needed to serve the catalog — plugins are code-owned, not operator-configured.
+**Startup-validated filesystem registry.** The plugin catalog is a `registry.json` file alongside plugin directories in `runforge/plugins/`. On daemon startup, the registry is loaded, each entry is cross-validated against the filesystem (directory exists, `manifest.json` present with required fields), and the result is cached in memory for the lifetime of the process. No database round trip is needed to serve the catalog — plugins are code-owned, not operator-configured.
 
 **Ordered-merge CompositeContext assembly.** At session spawn time, active plugin identifiers (from cached repo config) are resolved against the in-memory registry. Content is merged in `activated_at` ascending order. Filename collisions resolve to first-activated. A token-budget guard truncates by priority (prompt-injection preserved, skills before agents, last-activated first) if the combined content exceeds 20,000 tokens.
 

@@ -18,7 +18,7 @@ const config: ConciergeConfig = {
   vaultPath: '/vault',
   watchedRepos: ['/repo'],
   operatorEmail: 'operator@example.com',
-  autoClaudeBaseUrl: 'http://127.0.0.1:3847',
+  runforgeBaseUrl: 'http://127.0.0.1:3847',
 };
 
 describe('concierge board process entrypoint', () => {

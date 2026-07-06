@@ -6,9 +6,9 @@ describe('repoCoordsFromDecisionSource', () => {
     expect(
       repoCoordsFromDecisionSource(
         'issue-841:integrate:1',
-        'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/issues/841',
+        'https://github.com/DANIELSOCRAHANDLEZZ/runforge/issues/841',
       ),
-    ).toEqual({ owner: 'DANIELSOCRAHANDLEZZ', repo: 'auto-claude', issueNumber: 841 });
+    ).toEqual({ owner: 'DANIELSOCRAHANDLEZZ', repo: 'runforge', issueNumber: 841 });
   });
 
   it('maps a legacy /pull/ reversal source URL back to the original run issue', () => {
@@ -18,9 +18,9 @@ describe('repoCoordsFromDecisionSource', () => {
     expect(
       repoCoordsFromDecisionSource(
         'issue-841:reversal-raised:1:abcdef12',
-        'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/pull/849',
+        'https://github.com/DANIELSOCRAHANDLEZZ/runforge/pull/849',
       ),
-    ).toEqual({ owner: 'DANIELSOCRAHANDLEZZ', repo: 'auto-claude', issueNumber: 841 });
+    ).toEqual({ owner: 'DANIELSOCRAHANDLEZZ', repo: 'runforge', issueNumber: 841 });
   });
 
   it('tolerates a trailing path/fragment/query after the number', () => {
@@ -42,13 +42,13 @@ describe('repoCoordsFromDecisionSource', () => {
     expect(
       repoCoordsFromDecisionSource(
         'issue-841:integrate:1',
-        'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/pull/849',
+        'https://github.com/DANIELSOCRAHANDLEZZ/runforge/pull/849',
       ),
     ).toBeNull();
     expect(
       repoCoordsFromDecisionSource(
         'issue-841:integrate:1',
-        'https://github.com/DANIELSOCRAHANDLEZZ/auto-claude/commit/abc',
+        'https://github.com/DANIELSOCRAHANDLEZZ/runforge/commit/abc',
       ),
     ).toBeNull();
     expect(

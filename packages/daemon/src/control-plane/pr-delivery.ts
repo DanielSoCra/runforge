@@ -80,7 +80,7 @@ export interface DeliverCodeChangeViaPRResult {
 }
 
 function proposalMarker(proposalKey: string): string {
-  return `<!-- auto-claude-proposal-key: ${proposalKey} -->`;
+  return `<!-- runforge-proposal-key: ${proposalKey} -->`;
 }
 
 function proposalTitle(issueNumber: number): string {

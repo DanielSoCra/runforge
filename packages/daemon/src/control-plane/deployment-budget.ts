@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import {
   DecisionRequestSchema,
   type DecisionRequest,
-} from '@auto-claude/decision-protocol';
+} from '@runforge/decision-protocol';
 import type { RunState } from '../types.js';
 import { readJsonSafe, writeJsonSafe } from '../lib/json-store.js';
 import type { DeploymentRegistry } from './deployment-registry/registry.js';

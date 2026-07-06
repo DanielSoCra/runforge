@@ -1,15 +1,15 @@
-# Running Auto-Claude
+# Running Runforge
 
 ## Architecture
 
-Auto-Claude consists of these runtime components:
+Runforge consists of these runtime components:
 
 - **daemon** (`packages/daemon`) — polls GitHub for issues, spawns Claude workers, manages state
 - **dashboard** (`packages/dashboard`) — Next.js web UI
 - **postgres** — project-owned operational store
 - **migrate** — one-shot job that applies app-owned database migrations before consumers start
 
-Auto-Claude now runs from the app-owned Postgres store. The dashboard uses Better Auth with application-owned authorization roles; the daemon, dashboard, and briefing summarizer all use direct Postgres-backed stores.
+Runforge now runs from the app-owned Postgres store. The dashboard uses Better Auth with application-owned authorization roles; the daemon, dashboard, and briefing summarizer all use direct Postgres-backed stores.
 
 ## Prerequisites
 
@@ -35,8 +35,8 @@ cp .env.prod.example .env.prod
 | `POSTGRES_USER` | Yes | Compose-managed Postgres user |
 | `POSTGRES_PASSWORD` | Yes | Compose-managed Postgres password |
 | `POSTGRES_PORT` | No | Host bind for native tools/daemon; defaults to `127.0.0.1:5432:5432` |
-| `AUTO_CLAUDE_DOCKER_DATABASE_URL` | Yes | Database URL used inside Docker services; host must be `postgres` |
-| `AUTO_CLAUDE_DATABASE_URL` | Mac native daemon only | Database URL used by a daemon running outside Docker; host is usually `127.0.0.1` |
+| `RUNFORGE_DOCKER_DATABASE_URL` | Yes | Database URL used inside Docker services; host must be `postgres` |
+| `RUNFORGE_DATABASE_URL` | Mac native daemon only | Database URL used by a daemon running outside Docker; host is usually `127.0.0.1` |
 | `DAEMON_DATA_BACKEND` | No | Must be `postgres`; unset defaults to `postgres` |
 | `BRIEFING_DATA_BACKEND` | No | Must be `postgres`; unset defaults to `postgres` |
 | `NEXT_PUBLIC_SITE_URL` | Yes | Full URL of the dashboard (for OAuth redirects) |
@@ -48,11 +48,11 @@ cp .env.prod.example .env.prod
 ### Daemon config
 
 ```bash
-cp auto-claude.config.example.json auto-claude.config.json
+cp runforge.config.example.json runforge.config.json
 # Edit: set repo.owner and repo.name at minimum
 ```
 
-Key fields in `auto-claude.config.json`:
+Key fields in `runforge.config.json`:
 
 | Field | Default | Description |
 |-------|---------|-------------|
@@ -137,7 +137,7 @@ Back up the Postgres database with `pg_dump` from the Compose service. Keep the 
 mkdir -p backups
 docker compose --env-file .env.prod exec -T postgres sh -c \
   'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' \
-  > "backups/autoclaude-$(date +%Y%m%d-%H%M%S).dump"
+  > "backups/runforge-$(date +%Y%m%d-%H%M%S).dump"
 ```
 
 For a Mac Mini deployment, use `.env.mac` in the command above.
@@ -149,7 +149,7 @@ docker compose --env-file .env.prod stop dashboard briefing-summarizer
 # If the daemon runs in Docker for this deployment:
 docker compose --env-file .env.prod --profile containerized-daemon stop daemon
 
-cat backups/autoclaude-YYYYMMDD-HHMMSS.dump | docker compose --env-file .env.prod exec -T postgres sh -c \
+cat backups/runforge-YYYYMMDD-HHMMSS.dump | docker compose --env-file .env.prod exec -T postgres sh -c \
   'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner'
 
 docker compose --env-file .env.prod up -d migrate dashboard briefing-summarizer
@@ -167,7 +167,7 @@ For a native Mac daemon, pause or unload launchd before restore, then reinstall 
 
 ## Daemon Mode
 
-The daemon control plane (`auto-claude start`) replaces the legacy shell scripts (`scripts/pipeline.sh`, `scripts/developer.sh`, `scripts/reviewer.sh`). A single process now handles all work detection modes:
+The daemon control plane (`runforge start`) replaces the legacy shell scripts (`scripts/pipeline.sh`, `scripts/developer.sh`, `scripts/reviewer.sh`). A single process now handles all work detection modes:
 
 | Legacy script | Daemon equivalent |
 |---------------|-------------------|
@@ -185,7 +185,7 @@ cd packages/daemon && pnpm start
 npx tsx packages/daemon/src/main.ts start
 
 # With custom config
-auto-claude start -c /path/to/auto-claude.config.json
+runforge start -c /path/to/runforge.config.json
 ```
 
 ### Process supervision (macOS)
@@ -197,19 +197,19 @@ On macOS, use the provided install script to set up a single launchd plist that 
 ./scripts/install-daemon.sh
 
 # Verify
-launchctl list | grep autoclaude
-# Should show: com.autoclaude.daemon (single entry)
+launchctl list | grep runforge
+# Should show: com.runforge.daemon (single entry)
 
 # Rollback (if needed)
 ./scripts/uninstall-daemon.sh
 ```
 
-The install script reads `.env.mac` for `GITHUB_TOKEN`, `AUTO_CLAUDE_DATABASE_URL`, `DAEMON_DATA_BACKEND`, and `ENCRYPTION_KEY`, then substitutes them into the plist template at `scripts/com.autoclaude.daemon.plist`.
+The install script reads `.env.mac` for `GITHUB_TOKEN`, `RUNFORGE_DATABASE_URL`, `DAEMON_DATA_BACKEND`, and `ENCRYPTION_KEY`, then substitutes them into the plist template at `scripts/com.runforge.daemon.plist`.
 
-> **Governed deployment requirement.** If your `auto-claude.config.json` contains a `deployment` block, the daemon will **refuse to boot at runtime** unless `AUTO_CLAUDE_DECISION_INDEX_ENABLED=1` is present in its environment — fail-closed by design. The install script does **not** wire this variable automatically from `.env.mac`; the plist template has no placeholder for it. For a governed launchd deployment, add it manually to the `EnvironmentVariables` dict in the generated plist (`~/Library/LaunchAgents/com.autoclaude.daemon.plist`) after running the install script, then reload:
+> **Governed deployment requirement.** If your `runforge.config.json` contains a `deployment` block, the daemon will **refuse to boot at runtime** unless `RUNFORGE_DECISION_INDEX_ENABLED=1` is present in its environment — fail-closed by design. The install script does **not** wire this variable automatically from `.env.mac`; the plist template has no placeholder for it. For a governed launchd deployment, add it manually to the `EnvironmentVariables` dict in the generated plist (`~/Library/LaunchAgents/com.runforge.daemon.plist`) after running the install script, then reload:
 > ```bash
-> launchctl unload ~/Library/LaunchAgents/com.autoclaude.daemon.plist
-> launchctl load  ~/Library/LaunchAgents/com.autoclaude.daemon.plist
+> launchctl unload ~/Library/LaunchAgents/com.runforge.daemon.plist
+> launchctl load  ~/Library/LaunchAgents/com.runforge.daemon.plist
 > ```
 > See [Self-hosting posture](#self-hosting-posture) for details on why this guard exists.
 
@@ -220,7 +220,7 @@ The daemon writes a heartbeat file to `~/logs/claude-daemon.heartbeat` on each p
 ```
 
 **Plist details:**
-- Label: `com.autoclaude.daemon`
+- Label: `com.runforge.daemon`
 - KeepAlive: `true` (restarts on crash)
 - ThrottleInterval: 30 seconds (prevents rapid restart loops)
 - Logs: `~/logs/claude-daemon.log`
@@ -281,7 +281,7 @@ The daemon provides several ways to stop or slow work. They differ in urgency an
 Use `/pause` when you want the daemon to stop picking up work but let current runs finish normally. Use `/halt` for an emergency stop: it parks runs immediately so they can resume later, kills workers that do not terminate gracefully within 5 seconds, and remains latched so late-settling runs cannot advance past the park. `/resume` clears the halt latch as well as the pause.
 
 ```bash
-# Emergency halt (requires X-Requested-By; Bearer token if AUTO_CLAUDE_CONTROL_TOKEN is set)
+# Emergency halt (requires X-Requested-By; Bearer token if RUNFORGE_CONTROL_TOKEN is set)
 curl -fsS -X POST localhost:3847/halt \
   -H 'X-Requested-By: operator' \
   -H 'Authorization: Bearer <token>'
@@ -298,12 +298,12 @@ A paused daemon also gates integrate entry: a run that reaches the `integrate` p
 The daemon exposes a control API on `localhost:3847`:
 
 ```bash
-auto-claude status          # Show active runs, daily cost, uptime
-auto-claude pause           # Stop claiming new work (active runs finish)
-auto-claude resume          # Resume claiming work
-auto-claude retry <issue>   # Re-run a stuck issue from the beginning
-auto-claude process <issue>  # Process a single issue (one-shot, no daemon)
-auto-claude health          # Health check (for process supervisors)
+runforge status          # Show active runs, daily cost, uptime
+runforge pause           # Stop claiming new work (active runs finish)
+runforge resume          # Resume claiming work
+runforge retry <issue>   # Re-run a stuck issue from the beginning
+runforge process <issue>  # Process a single issue (one-shot, no daemon)
+runforge health          # Health check (for process supervisors)
 ```
 
 ### Work detection modes
@@ -329,13 +329,13 @@ that safe:
 - **Self-changes land only as PRs.** The running tree is never mutated in-place.
   Implementation, review, and merge all happen in worktrees and feature branches.
 - **Operator-gated restart is the only self-update path.** Promotion of a new
-  auto-claude version is the restart: the operator runs the repository's
+  runforge version is the restart: the operator runs the repository's
   `release.sh` (the configured `landing.productionReleasePath`) and restarts the
   daemon from the fresh checkout. The daemon does not rewrite its own source or
   binary while running.
 - **Governed boot requires the decision index.** With a `deployment` block present,
   the daemon refuses to boot unless the decision index is available
-  (`AUTO_CLAUDE_DECISION_INDEX_ENABLED=1` + a reachable `AUTO_CLAUDE_DATABASE_URL`).
+  (`RUNFORGE_DECISION_INDEX_ENABLED=1` + a reachable `RUNFORGE_DATABASE_URL`).
   This is fail-closed by design: a governed deployment that cannot surface
   escalations to the Operator must not run silently ungoverned. Set both before
   starting the self-hosting daemon, or boot will refuse — loudly — rather than

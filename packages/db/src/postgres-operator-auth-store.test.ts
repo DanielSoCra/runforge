@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { AutoClaudeDb } from './client.js';
+import type { RunforgeDb } from './client.js';
 import { PostgresOperatorAuthStore } from './postgres-stores.js';
 import { authUsers, teamMembers } from './schema.js';
 import type { OperatorRole } from './stores.js';
@@ -126,7 +126,7 @@ function createFakeOperatorAuthDb(input: {
     ),
   };
 
-  return { db: db as unknown as AutoClaudeDb, state, tx };
+  return { db: db as unknown as RunforgeDb, state, tx };
 }
 
 function createFakeDbApi(state: FakeDbState) {

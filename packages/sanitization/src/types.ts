@@ -1,5 +1,5 @@
 /**
- * STACK-AC-SANITIZATION — the @auto-claude/sanitization port + value types.
+ * STACK-AC-SANITIZATION — the @runforge/sanitization port + value types.
  *
  * Domain-blind: this package knows nothing about phi/secret/pii. A Sanitizer is an
  * ordered transformer over opaque decision content; concrete recognition

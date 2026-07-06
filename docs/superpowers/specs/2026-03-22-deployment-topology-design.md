@@ -11,7 +11,7 @@ superseded_date: 2026-06-02
 
 ## Problem
 
-The auto-claude system assumes a single deployment target: co-located Docker containers on a Hetzner server. The L2 and L3 specs hardcode "internal container network" language. In practice, the system runs on a Mac Mini with native processes (launchd-managed shell scripts) and no dashboard deployed. The Hetzner configuration exists but is not actively used.
+The runforge system assumes a single deployment target: co-located Docker containers on a Hetzner server. The L2 and L3 specs hardcode "internal container network" language. In practice, the system runs on a Mac Mini with native processes (launchd-managed shell scripts) and no dashboard deployed. The Hetzner configuration exists but is not actively used.
 
 The system needs to run on the Mac Mini now (Docker Compose, local network access, no TLS, no auth) and on Hetzner later (Docker Compose, public access, TLS via Caddy, GitHub OAuth). Both environments should use the same compose file with minimal configuration differences.
 
@@ -134,12 +134,12 @@ The `AUTH_DISABLED` flag does not affect the daemon or briefing summarizer — t
 - All Dockerfiles (dashboard, daemon, briefing-summarizer) — no changes needed.
 - `Caddyfile` — unchanged, Caddy conditionally runs or not.
 - `infra/main.tf`, `infra/cloud-init.yml` — Hetzner provisioning unchanged.
-- `auto-claude.config.json` — unchanged.
+- `runforge.config.json` — unchanged.
 
 ### Unchanged on Mac Mini
 
-- `scripts/com.autoclaude.reviewer.plist` — daemon continues running natively on Mac Mini.
-- `scripts/com.autoclaude.developer.plist` — daemon continues running natively on Mac Mini.
+- `scripts/com.runforge.reviewer.plist` — daemon continues running natively on Mac Mini.
+- `scripts/com.runforge.developer.plist` — daemon continues running natively on Mac Mini.
 
 The daemon runs natively on the Mac Mini because it spawns Claude Code CLI sessions that require Max subscription OAuth tokens. These tokens expire and cannot be refreshed inside a Docker container (no interactive browser access). The launchd plists remain active.
 

@@ -4,7 +4,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Author the complete L0/L1/L2/L3 spec chain for the concierge subsystem additions, fix every code/test/prompt integration gap that the spec restructure exposes, and leave the auto-claude daemon in a state where it can pick up GitHub issues for each new spec and self-implement the concierge code in subsequent phases.
+**Goal:** Author the complete L0/L1/L2/L3 spec chain for the concierge subsystem additions, fix every code/test/prompt integration gap that the spec restructure exposes, and leave the runforge daemon in a state where it can pick up GitHub issues for each new spec and self-implement the concierge code in subsequent phases.
 
 **Architecture:** Multi-L0 spec layout (`L0-CONCIERGE-VISION` rewriting `L0-vision.md`, `L0-AC-VISION` extracted to `L0-ac-vision.md`, expressed-in-prose subsystem relationship; **no** L0-to-L0 `parent:` field). Five new L1, four new L2, two new L3 specs in lowercase descriptive filenames. All 14 existing `FUNC-AC-*` specs untouched. Code changes are minimal: spec-loader gains L0 scanning (~50 LOC + tests), prompts/comments/scaffold templates updated to be L0-agnostic, hardcoded L0-AC-VISION test fixtures parameterised.
 
@@ -24,7 +24,7 @@
 
 ## Daemon coexistence
 
-The auto-claude daemon is running on the Mac mini. Phase 0 only edits specs, prompts, traceability, and adds tests. **No production code under `packages/` is modified.** No daemon restart is required. After Phase 0 commits land on `dev`, the daemon will pick up the new traceability tree on its next config sync.
+The runforge daemon is running on the Mac mini. Phase 0 only edits specs, prompts, traceability, and adds tests. **No production code under `packages/` is modified.** No daemon restart is required. After Phase 0 commits land on `dev`, the daemon will pick up the new traceability tree on its next config sync.
 
 ---
 
@@ -68,7 +68,7 @@ describe('spec-loader multi-L0 support', () => {
     );
     await writeFile(
       join(specifyDir, 'L0-ac-vision.md'),
-      `---\nid: L0-AC-VISION\ntype: vision\nlayer: 0\n---\n# Auto-Claude L0\n`,
+      `---\nid: L0-AC-VISION\ntype: vision\nlayer: 0\n---\n# Runforge L0\n`,
     );
     await writeFile(
       join(specifyDir, 'functional/concierge.md'),
@@ -86,7 +86,7 @@ describe('spec-loader multi-L0 support', () => {
       join(root, '.specify'),
     );
     expect(content).toContain('Concierge L0');
-    expect(content).toContain('Auto-Claude L0');
+    expect(content).toContain('Runforge L0');
   });
 
   it('still loads subdir specs alongside L0 specs', async () => {
@@ -116,7 +116,7 @@ describe('spec-loader multi-L0 support', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-pnpm --filter @auto-claude/daemon exec vitest run src/infra/spec-loader.test.ts
+pnpm --filter @runforge/daemon exec vitest run src/infra/spec-loader.test.ts
 ```
 
 Expected: 3 failures — root-level L0 files are not scanned.
@@ -179,7 +179,7 @@ export async function loadSpecContent(
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
-pnpm --filter @auto-claude/daemon exec vitest run src/infra/spec-loader.test.ts
+pnpm --filter @runforge/daemon exec vitest run src/infra/spec-loader.test.ts
 ```
 
 Expected: 3 PASS.
@@ -187,7 +187,7 @@ Expected: 3 PASS.
 - [ ] **Step 5: Run full daemon test suite to confirm no regression**
 
 ```bash
-pnpm --filter @auto-claude/daemon test
+pnpm --filter @runforge/daemon test
 ```
 
 Expected: all green.
@@ -207,7 +207,7 @@ Required for the concierge spec restructure."
 
 ### Task 2: Extract current L0 content into `.specify/L0-ac-vision.md`
 
-**Why:** The current `L0-vision.md` content is the auto-claude subsystem vision. We preserve it verbatim under a new filename + new path so the rewritten `L0-vision.md` can hold the new product L0 (concierge).
+**Why:** The current `L0-vision.md` content is the runforge subsystem vision. We preserve it verbatim under a new filename + new path so the rewritten `L0-vision.md` can hold the new product L0 (concierge).
 
 **Files:**
 - Create: `.specify/L0-ac-vision.md`
@@ -233,7 +233,7 @@ head -10 .specify/L0-ac-vision.md
 Insert after the frontmatter `---` close (before the `# L0-AC-VISION` heading), one paragraph:
 
 ```markdown
-> **Note (2026-05-01):** This document is now the **subsystem L0 for `auto-claude`** within the broader concierge product. The product-level vision lives at `.specify/L0-vision.md` (id `L0-CONCIERGE-VISION`). The relationship between the two L0s is expressed in prose, not via a `parent:` field — see "Subsystem position" in the concierge L0.
+> **Note (2026-05-01):** This document is now the **subsystem L0 for `runforge`** within the broader concierge product. The product-level vision lives at `.specify/L0-vision.md` (id `L0-CONCIERGE-VISION`). The relationship between the two L0s is expressed in prose, not via a `parent:` field — see "Subsystem position" in the concierge L0.
 
 ```
 
@@ -241,7 +241,7 @@ Insert after the frontmatter `---` close (before the `# L0-AC-VISION` heading), 
 
 ```bash
 git add .specify/L0-ac-vision.md
-git commit -m "spec: extract current L0 to L0-ac-vision.md (auto-claude subsystem L0)
+git commit -m "spec: extract current L0 to L0-ac-vision.md (runforge subsystem L0)
 
 Verbatim copy of L0-vision.md under a new path. Adds a one-paragraph
 note explaining its new role as the subsystem L0. The L0-vision.md path
@@ -271,9 +271,9 @@ layer: 0
 
 # L0-CONCIERGE-VISION — Concierge
 
-**Concierge** is a single conversational entry point — a Slack DM with a bot, served from the Operator's Mac mini — that turns intent into action across all his tools. It is an LLM agent with a fixed toolbox (auto-claude, knowledge-vault Obsidian vault, Slack, calendar, email, GitHub, web, observer) and a single mobile-friendly triage board for the small set of items that genuinely need human judgment.
+**Concierge** is a single conversational entry point — a Slack DM with a bot, served from the Operator's Mac mini — that turns intent into action across all his tools. It is an LLM agent with a fixed toolbox (runforge, knowledge-vault Obsidian vault, Slack, calendar, email, GitHub, web, observer) and a single mobile-friendly triage board for the small set of items that genuinely need human judgment.
 
-**Why:** the Operator runs three workstreams in parallel — a B2B CTO role, a freelance product project, and church ministry — plus operates an autonomous software-development pipeline (auto-claude). Each surface (GitHub issues, Obsidian, Slack, email, calendar) demands its own context switch. The cost is not the individual tools; it is the routing decision he makes a hundred times a day: "where does this thing live, who needs to act on it, when do I get back to it?" The concierge collapses that routing to one chat.
+**Why:** the Operator runs three workstreams in parallel — a B2B CTO role, a freelance product project, and church ministry — plus operates an autonomous software-development pipeline (runforge). Each surface (GitHub issues, Obsidian, Slack, email, calendar) demands its own context switch. The cost is not the individual tools; it is the routing decision he makes a hundred times a day: "where does this thing live, who needs to act on it, when do I get back to it?" The concierge collapses that routing to one chat.
 
 **For:** the Operator, single-tenant. No multi-user mode. No team accounts.
 
@@ -303,9 +303,9 @@ layer: 0
 
 Everything else is autonomous. The concierge does not ask permission for routine reads, drafts, captures, or audited tool calls below the blast-radius gate.
 
-**Subsystem position of `auto-claude`:**
+**Subsystem position of `runforge`:**
 
-The existing `packages/daemon` (the GitHub-issue → PR pipeline) is one subsystem the concierge calls. Its governing L0 is `L0-AC-VISION` (this repository's `.specify/L0-ac-vision.md`); that subtree of 14 `FUNC-AC-*` specs is unchanged by this restructure. The relationship between `L0-CONCIERGE-VISION` and `L0-AC-VISION` is expressed in prose only — there is no `parent:` field in `traceability.yml` linking them. The concierge tree is **additive** to the auto-claude tree. Spec resolvers that walk children find them as siblings in `traceability.yml` and load both via the multi-L0-aware spec-loader.
+The existing `packages/daemon` (the GitHub-issue → PR pipeline) is one subsystem the concierge calls. Its governing L0 is `L0-AC-VISION` (this repository's `.specify/L0-ac-vision.md`); that subtree of 14 `FUNC-AC-*` specs is unchanged by this restructure. The relationship between `L0-CONCIERGE-VISION` and `L0-AC-VISION` is expressed in prose only — there is no `parent:` field in `traceability.yml` linking them. The concierge tree is **additive** to the runforge tree. Spec resolvers that walk children find them as siblings in `traceability.yml` and load both via the multi-L0-aware spec-loader.
 
 **Boundaries:**
 
@@ -314,7 +314,7 @@ The existing `packages/daemon` (the GitHub-issue → PR pipeline) is one subsyst
 - Never warns the Operator about his own manual coding sessions.
 - Never spawns parallel writer agents for one logical task (single-threaded linear agent per Cognition's "Don't Build Multi-Agents"). Subagents are spawned only for read-heavy noisy tools (gh log scans, web fetches, email triage) where they return a short summary instead of polluting the main loop.
 
-**Success:** On a typical Tuesday, the Operator sends ≤3 chat messages, glances at the board ≤2 times, and the system handles ≥80 % of routine coordination work — issue triage, draft replies, calendar prep, knowledge-vault captures, auto-claude babysitting — without further input.
+**Success:** On a typical Tuesday, the Operator sends ≤3 chat messages, glances at the board ≤2 times, and the system handles ≥80 % of routine coordination work — issue triage, draft replies, calendar prep, knowledge-vault captures, runforge babysitting — without further input.
 ```
 
 - [ ] **Step 2: Verify the file's frontmatter id is the new value**
@@ -365,7 +365,7 @@ the Operator needs one conversational surface that accepts intent in any form (a
 
 - **Operator** — the Operator. Single user.
 - **Concierge** — the LLM agent that owns the conversation.
-- **Tool** — a callable subsystem (auto-claude, knowledge-vault, Slack-send, calendar, email, gh, web, observer).
+- **Tool** — a callable subsystem (runforge, knowledge-vault, Slack-send, calendar, email, gh, web, observer).
 - **Confirmation Gate** — the mechanism that intercepts high-blast-radius tool calls and routes them to a Slack confirm message before execution.
 
 ## Behavior
@@ -393,7 +393,7 @@ the Operator needs one conversational surface that accepts intent in any form (a
 ### Tool calls
 
 **Scenario: Low-blast-radius action**
-- Given the concierge decides to call `auto_claude.status()` (read-only)
+- Given the concierge decides to call `runforge.status()` (read-only)
 - When the tool is invoked
 - Then the call executes immediately and the result feeds back to the LLM
 - And the call is recorded in the audit log
@@ -439,7 +439,7 @@ the Operator needs one conversational surface that accepts intent in any form (a
 ## Constraints
 
 - **Single-threaded agent.** One LLM loop per conversation. No parallel writer subagents. Read-heavy noisy tools (gh log scans, web fetch, email triage) MAY be dispatched to a subagent that returns a structured summary, never raw content. (Cognition "Don't Build Multi-Agents".)
-- **Tool naming convention.** Tools are namespaced by subsystem prefix: `ac_*` for auto-claude, `sb_*` for knowledge-vault, `gh_*` for GitHub, `cal_*` for calendar, `mail_*` for email, `slack_*` for Slack-send-elsewhere, `web_*` for web fetch, `obs_*` for observer. The LLM groups tools cognitively by prefix.
+- **Tool naming convention.** Tools are namespaced by subsystem prefix: `ac_*` for runforge, `sb_*` for knowledge-vault, `gh_*` for GitHub, `cal_*` for calendar, `mail_*` for email, `slack_*` for Slack-send-elsewhere, `web_*` for web fetch, `obs_*` for observer. The LLM groups tools cognitively by prefix.
 - **No timestamps or dynamic IDs in the prompt prefix.** Cache stability is critical (5 m TTL on rolling summary, 1 h TTL on system+tools). Timestamps in the prefix nuke cache hits.
 - **No autonomous external sends.** Email to anyone outside the Operator's own addresses, Slack messages to channels other than the operator DM, GitHub merges to `main`, and vault writes under `20-Areas/clients/` always go through the confirmation gate.
 - **No spec self-modification.** The concierge cannot edit `.specify/`, `prompts/`, or its own L0/L1.
@@ -639,9 +639,9 @@ The Slack DM is great for back-and-forth and natural language. But scanning "wha
 
 ## Boundary vs. `FUNC-AC-DASHBOARD`
 
-The auto-claude dashboard at `packages/dashboard/` (governed by `FUNC-AC-DASHBOARD`) remains the **operator's deep-control surface for the auto-claude subsystem** — repository config, API keys, run history, cost reports, briefings. the Operator uses it occasionally on a laptop to manage the auto-claude pipeline.
+The runforge dashboard at `packages/dashboard/` (governed by `FUNC-AC-DASHBOARD`) remains the **operator's deep-control surface for the runforge subsystem** — repository config, API keys, run history, cost reports, briefings. the Operator uses it occasionally on a laptop to manage the runforge pipeline.
 
-The concierge board is the **ambient mobile triage surface for the entire concierge** — across all subsystems, not just auto-claude. It does not duplicate dashboard responsibilities (no repo config, no API key management, no cost reports). It only surfaces actionable items.
+The concierge board is the **ambient mobile triage surface for the entire concierge** — across all subsystems, not just runforge. It does not duplicate dashboard responsibilities (no repo config, no API key management, no cost reports). It only surfaces actionable items.
 
 The two surfaces share no code, no schema, no auth provider. Cross-deep-link is allowed (a card may open the dashboard for richer context) but the board never embeds dashboard views.
 
@@ -679,9 +679,9 @@ The two surfaces share no code, no schema, no auth provider. Cross-deep-link is 
 ### In-flight monitor
 
 **Scenario: Concierge dispatches an autonomous tool call**
-- Given the concierge invokes `auto_claude.run(issue: 476)` (long-running)
+- Given the concierge invokes `runforge.run(issue: 476)` (long-running)
 - When the call returns "started, run_id: <id>"
-- Then a card is created with `status: in_flight`, source = auto-claude, label = "Running #476"
+- Then a card is created with `status: in_flight`, source = runforge, label = "Running #476"
 - And the card is updated by the observer's polling of daemon status (active phase, cost, ETA)
 - And on completion → card flips to `needs_you` if review is needed, or auto-dismisses to `done` if no human action required
 
@@ -886,7 +886,7 @@ layer: 1
 
 ## Problem Statement
 
-The concierge must coexist with manual coding sessions (Claude Code, Codex, pi.dev) and with the auto-claude daemon, both of which mutate the local filesystem and the daemon's own state continuously. The concierge needs to know "what is happening on this machine right now?" without becoming a nag, and without requiring the operator to teach it about each new branch or commit. The observer is a write-only event source that emits typed events; classification (surface card / DM / silent) is handled downstream by the event-bus.
+The concierge must coexist with manual coding sessions (Claude Code, Codex, pi.dev) and with the runforge daemon, both of which mutate the local filesystem and the daemon's own state continuously. The concierge needs to know "what is happening on this machine right now?" without becoming a nag, and without requiring the operator to teach it about each new branch or commit. The observer is a write-only event source that emits typed events; classification (surface card / DM / silent) is handled downstream by the event-bus.
 
 ## Actors
 
@@ -902,7 +902,7 @@ The concierge must coexist with manual coding sessions (Claude Code, Codex, pi.d
 - Given the observer process is launched by launchd
 - When it initialises
 - Then it reads its watch config from `~/Library/Application Support/concierge/observer.config.json`
-- And the config lists: an allow-list of repos to watch (default: just `~/code/auto-claude`), the daemon HTTP endpoint to poll, the polling interval (default 30 s), an ignore-list of paths inside any watched repo (default: `.env`, `secrets/`, `**/*.key`, dotfiles like `.DS_Store`)
+- And the config lists: an allow-list of repos to watch (default: just `~/code/runforge`), the daemon HTTP endpoint to poll, the polling interval (default 30 s), an ignore-list of paths inside any watched repo (default: `.env`, `secrets/`, `**/*.key`, dotfiles like `.DS_Store`)
 
 **Scenario: Watched repo gains a new worktree**
 - Given chokidar observes a new directory created at `<watched-repo>/workspaces/issue-N` or matching the worktree pattern
@@ -914,9 +914,9 @@ The concierge must coexist with manual coding sessions (Claude Code, Codex, pi.d
 - Given a `git commit` lands on any watched branch
 - When the post-commit watcher detects the new HEAD
 - Then the observer emits `{type: "manual_commit", repo, branch, sha, author, message, timestamp}`
-- And the message body is included only if the commit is on a non-daemon branch (anything not under `feature/issue-*` driven by the auto-claude daemon)
+- And the message body is included only if the commit is on a non-daemon branch (anything not under `feature/issue-*` driven by the runforge daemon)
 
-**Scenario: Auto-claude daemon status change**
+**Scenario: Runforge daemon status change**
 - Given the observer polls `http://127.0.0.1:3847/status` every 30 s
 - When the response shows a state diff (new active run, run completed, run stuck, paused, daily cost budget tripped)
 - Then the observer emits a typed event with the diff details
@@ -952,7 +952,7 @@ The concierge must coexist with manual coding sessions (Claude Code, Codex, pi.d
 ## Constraints
 
 - **WRITE-ONLY.** The observer never warns, never sends a Slack message of its own, never triggers tool calls, never mutates the filesystem or git state. Its only output is event records via the event-bus.
-- **Allow-list only.** No watching paths the operator has not explicitly added. Default is just the auto-claude repo.
+- **Allow-list only.** No watching paths the operator has not explicitly added. Default is just the runforge repo.
 - **Ignore-list enforced.** Sensitive patterns (`.env`, `secrets/`, `**/*.key`, dotfiles) are dropped before the event reaches the event-bus.
 - **Bounded cache.** The observer holds at most 1000 most-recent events in memory; older events are persisted to SQLite and queried on demand.
 - **No Git history mining.** The observer reads HEAD on each watched branch; it does not crawl history beyond what `git log -1` returns.
@@ -1015,7 +1015,7 @@ The concierge runtime is a single Node process (`concierge-core`) on the Mac min
 | `observer` (Node) | filesystem & daemon polling, event emission to event-bus |
 | `board-server` (Hono) | reads `cards`/`messages`/`tool_calls`; serves HTMX UI; SSE fan-out |
 | `cloudflared` | tunnel for Slack webhook + board URL |
-| (existing) `com.autoclaude.daemon` | unchanged, polled by observer |
+| (existing) `com.runforge.daemon` | unchanged, polled by observer |
 
 ## Storage
 
@@ -1112,14 +1112,14 @@ In-process. Uses `@slack/bolt`. Verifies signing secret on every event. Normalis
   "tunnelHostname": "concierge.<your-domain>",
   "boardHostname": "board.<your-domain>",
   "vaultPath": "~/code/knowledge-vault",
-  "watchedRepos": ["~/code/auto-claude"],
+  "watchedRepos": ["~/code/runforge"],
   "operatorEmail": "operator@example.com"
 }
 ```
 
 ## launchd
 
-`com.concierge.core`, `com.concierge.observer`, `com.concierge.board` plists. All three: `RunAtLoad: true`, `KeepAlive: true`, `WorkingDirectory: ~/code/auto-claude`, env loaded from `~/Library/Application Support/concierge/env`.
+`com.concierge.core`, `com.concierge.observer`, `com.concierge.board` plists. All three: `RunAtLoad: true`, `KeepAlive: true`, `WorkingDirectory: ~/code/runforge`, env loaded from `~/Library/Application Support/concierge/env`.
 
 ## Cloudflare Tunnel
 
@@ -1181,7 +1181,7 @@ The event-bus is a thin SQLite-backed in-process queue that decouples the observ
 CREATE TABLE events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   type TEXT NOT NULL,                    -- e.g. "daemon_stuck", "manual_commit"
-  source TEXT NOT NULL,                  -- "observer", "concierge", "auto-claude"
+  source TEXT NOT NULL,                  -- "observer", "concierge", "runforge"
   payload TEXT NOT NULL,                 -- JSON
   classified_outcome TEXT,               -- NULL until classified; then surface_card|slack_dm|silent_log
   created_at INTEGER NOT NULL,           -- unix ms
@@ -1283,7 +1283,7 @@ interface ToolEntry {
   blastRadius: BlastRadius;
   audit: 'always' | 'on_error_only';
   cacheable: boolean;                     // identity over args within 60 s
-  subsystem: string;                      // e.g. 'auto-claude', 'knowledge-vault'
+  subsystem: string;                      // e.g. 'runforge', 'knowledge-vault'
   governingSpecId: string | null;         // L1 spec governing the subsystem; null until spec authored
   status: 'enabled' | 'disabled' | 'experimental';
 }
@@ -1295,11 +1295,11 @@ These minimal entries live in `packages/concierge/src/tools/registry.ts` (TBD in
 
 | Name | Subsystem | Blast | Confirm? | Notes |
 |---|---|---|---|---|
-| `ac_run` | auto-claude | medium | no | `{issue: number}` → `{run_id: string}` |
-| `ac_status` | auto-claude | safe | no | `{}` → daemon status snapshot |
-| `ac_pause` | auto-claude | medium | no | pause daemon |
-| `ac_unstuck` | auto-claude | medium | no | `{issue: number}` |
-| `ac_merge_to_main` | auto-claude | high | yes | always confirm |
+| `ac_run` | runforge | medium | no | `{issue: number}` → `{run_id: string}` |
+| `ac_status` | runforge | safe | no | `{}` → daemon status snapshot |
+| `ac_pause` | runforge | medium | no | pause daemon |
+| `ac_unstuck` | runforge | medium | no | `{issue: number}` |
+| `ac_merge_to_main` | runforge | high | yes | always confirm |
 | `sb_read` | knowledge-vault | safe | no | `{path: string}` |
 | `sb_search` | knowledge-vault | safe | no | `{query: string}` |
 | `sb_append_inbox` | knowledge-vault | medium | no | `{slug, body}` → 00-inbox/ |
@@ -1328,7 +1328,7 @@ The operator can list all tools via the slash command `/tools` in Slack — the 
 
 ## Boundaries
 
-- This spec defines REGISTRY SHAPE, not subsystem behaviour. Each subsystem's behaviour lives in its own L1 (existing `FUNC-AC-*` for auto-claude; deferred for others until non-trivial behaviour emerges).
+- This spec defines REGISTRY SHAPE, not subsystem behaviour. Each subsystem's behaviour lives in its own L1 (existing `FUNC-AC-*` for runforge; deferred for others until non-trivial behaviour emerges).
 - Confirmation flow (how confirm messages are rendered, how taps are routed) lives in `ARCH-CONFIRMATION-LIFECYCLE`.
 - Skill files (Hermes-style distilled trajectories) are NOT tools in this registry. They are scripts the LLM calls via a special `run_skill` tool; the registry has one entry for `run_skill` that takes a skill-id arg.
 
@@ -1441,7 +1441,7 @@ The audit row carries the slack_message_ts for traceability.
 
 ## Board interaction
 
-If the same logical action also surfaces a board card (e.g. an "approve auto-claude L1 spec" card), the card and the confirmation share the same `confirmation_id`. Tapping the card's Approve button and the Slack confirm button are equivalent — both resolve the same confirmation. Only one client wins; the other is shown "already approved by you (other surface)".
+If the same logical action also surfaces a board card (e.g. an "approve runforge L1 spec" card), the card and the confirmation share the same `confirmation_id`. Tapping the card's Approve button and the Slack confirm button are equivalent — both resolve the same confirmation. Only one client wins; the other is shown "already approved by you (other surface)".
 
 ## Constraints
 
@@ -1515,7 +1515,7 @@ packages/concierge/
 │   │   └── compression.ts     # recoverable compression rules
 │   ├── tools/
 │   │   ├── registry.ts        # the canonical tool list
-│   │   ├── ac.ts              # auto-claude HTTP client
+│   │   ├── ac.ts              # runforge HTTP client
 │   │   ├── sb.ts              # knowledge-vault MCP wrapper
 │   │   ├── gh.ts              # gh CLI / Octokit
 │   │   ├── slack.ts           # cross-channel send
@@ -1595,7 +1595,7 @@ For `gh_log_scan`, `mail_triage`, `web_fetch_long`: the tool handler dispatches 
 `scripts/com.concierge.core.plist`, `.observer.plist`, `.board.plist`. All three:
 - `RunAtLoad: true`
 - `KeepAlive: true`
-- `WorkingDirectory: ~/code/auto-claude`
+- `WorkingDirectory: ~/code/runforge`
 - `StandardOutPath` and `StandardErrorPath` to `~/Library/Logs/concierge/<process>.log` with rotation
 - `EnvironmentVariables` loads from a single `~/Library/Application Support/concierge/env` file (so secrets stay out of plists)
 - `ProcessType: Background`
@@ -1807,7 +1807,7 @@ describe('concierge spec tree', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-pnpm --filter @auto-claude/daemon exec vitest run src/infra/traceability-paths.test.ts -t "concierge spec tree"
+pnpm --filter @runforge/daemon exec vitest run src/infra/traceability-paths.test.ts -t "concierge spec tree"
 ```
 
 Expected: FAIL — entries do not exist yet.
@@ -1894,7 +1894,7 @@ STACK-CONCIERGE-BOARD:
 - [ ] **Step 4: Run the traceability path validation test**
 
 ```bash
-pnpm --filter @auto-claude/daemon exec vitest run src/infra/traceability-paths.test.ts
+pnpm --filter @runforge/daemon exec vitest run src/infra/traceability-paths.test.ts
 ```
 
 Expected: the existing path-validation test will fail — `packages/concierge/` and `packages/concierge/src/board/` do not yet exist on disk. **This is intentional**; we want the daemon's spec-implementation phase to create those paths in Phase 1+. Mark the new entries' code_paths and test_paths as expected-missing in the test by extending the validator to skip paths under `packages/concierge/` until that package exists.
@@ -1917,7 +1917,7 @@ if (SKIP_UNTIL_IMPLEMENTED.has(path)) continue;
 - [ ] **Step 5: Run all tests**
 
 ```bash
-pnpm --filter @auto-claude/daemon exec vitest run src/infra/traceability-paths.test.ts
+pnpm --filter @runforge/daemon exec vitest run src/infra/traceability-paths.test.ts
 ```
 
 Expected: PASS — concierge entries exist; missing-paths skipped.
@@ -1958,7 +1958,7 @@ The existing test asserts behaviour under L0-AC-VISION. Duplicate the test, swap
 - [ ] **Step 3: Run**
 
 ```bash
-pnpm --filter @auto-claude/daemon exec vitest run src/coordination/product-owner/signal-analyzer.test.ts
+pnpm --filter @runforge/daemon exec vitest run src/coordination/product-owner/signal-analyzer.test.ts
 ```
 
 Expected: both cases pass.
@@ -1992,13 +1992,13 @@ Replace:
 with:
 ```
 // visible to the Operator without manual intervention. Per L0-AC-VISION
-// (the auto-claude subsystem L0; product-level vision lives at L0-CONCIERGE-VISION)
+// (the runforge subsystem L0; product-level vision lives at L0-CONCIERGE-VISION)
 ```
 
 - [ ] **Step 3: Verify file compiles**
 
 ```bash
-pnpm --filter @auto-claude/daemon exec tsc --noEmit
+pnpm --filter @runforge/daemon exec tsc --noEmit
 ```
 
 - [ ] **Step 4: Commit**
@@ -2036,7 +2036,7 @@ the relevant L0 (L0-CONCIERGE-VISION at .specify/L0-vision.md or L0-AC-VISION at
 
 Specifically `prompts/l2-designer.md:7`:
 ```
-1. **Read the spec chain.** L1 spec → the relevant L0 (`.specify/L0-vision.md` for concierge, `.specify/L0-ac-vision.md` for auto-claude) → existing L2 specs (for patterns) → AGENTS.md rules.
+1. **Read the spec chain.** L1 spec → the relevant L0 (`.specify/L0-vision.md` for concierge, `.specify/L0-ac-vision.md` for runforge) → existing L2 specs (for patterns) → AGENTS.md rules.
 ```
 
 Same pattern for `prompts/l3-generator.md:7` and `prompts/spec-implementer.md:7`.
@@ -2053,7 +2053,7 @@ git commit -m "prompts(L2/L3/impl): teach generators about multi-L0"
 ### Task 19: Update `spec-guardian` skill to teach concierge L1 patterns
 
 **Files:**
-- Modify: `plugins/auto-claude-dev/skills/spec-guardian.md` (or wherever the skill lives — verify path)
+- Modify: `plugins/runforge-dev/skills/spec-guardian.md` (or wherever the skill lives — verify path)
 
 - [ ] **Step 1: Locate the spec-guardian skill**
 
@@ -2069,7 +2069,7 @@ Add a brief note: "L1 specs may be subsystem-scoped (`FUNC-AC-*`) or product-sco
 - [ ] **Step 3: Commit**
 
 ```bash
-git add plugins/auto-claude-dev/skills/  # or correct path
+git add plugins/runforge-dev/skills/  # or correct path
 git commit -m "skills(spec-guardian): teach multi-L0 (AC vs concierge)"
 ```
 
@@ -2089,7 +2089,7 @@ grep -n "L0-vision" packages/dashboard/lib/scaffold-templates.ts packages/dashbo
 
 - [ ] **Step 2: Decide on policy**
 
-The dashboard scaffolds *new projects* — these are by definition new auto-claude-style spec-driven repos. They should still scaffold a single `L0-vision.md`. **No change to scaffold templates.** The only update is a comment clarifying that the scaffold creates an L0-AC-VISION-style L0 by default; new product-level L0s (like concierge) are special-cased one-offs that the dashboard does not need to handle.
+The dashboard scaffolds *new projects* — these are by definition new runforge-style spec-driven repos. They should still scaffold a single `L0-vision.md`. **No change to scaffold templates.** The only update is a comment clarifying that the scaffold creates an L0-AC-VISION-style L0 by default; new product-level L0s (like concierge) are special-cased one-offs that the dashboard does not need to handle.
 
 Add a one-line comment above the scaffold call:
 
@@ -2126,11 +2126,11 @@ Add to top of README (after the title, before any other content):
 ```markdown
 > ⚠️ **Deprecation in progress (2026-05-01).** This daemon's
 > responsibilities (Slack capture, daily briefing, agent routing) are
-> being absorbed by the concierge in `~/code/auto-claude/packages/concierge/`
-> per the design at `~/code/auto-claude/docs/superpowers/specs/2026-05-01-concierge-design.md`.
+> being absorbed by the concierge in `~/code/runforge/packages/concierge/`
+> per the design at `~/code/runforge/docs/superpowers/specs/2026-05-01-concierge-design.md`.
 > This daemon will keep running until the concierge reaches feature
 > parity (target: Phase 5 of that plan); then it is retired. Do not
-> add new features here — open issues against `~/code/auto-claude` instead.
+> add new features here — open issues against `~/code/runforge` instead.
 ```
 
 - [ ] **Step 2: Commit in that repo**
@@ -2140,10 +2140,10 @@ cd ~/code/knowledge-vault-slack-bot
 git add README.md
 git commit -m "docs: mark deprecated; concierge subsumes responsibilities
 
-See ~/code/auto-claude/docs/superpowers/specs/2026-05-01-concierge-design.md"
+See ~/code/runforge/docs/superpowers/specs/2026-05-01-concierge-design.md"
 ```
 
-(Cross-repo commit — not in auto-claude history. Just a heads-up.)
+(Cross-repo commit — not in runforge history. Just a heads-up.)
 
 ---
 
@@ -2154,7 +2154,7 @@ See ~/code/auto-claude/docs/superpowers/specs/2026-05-01-concierge-design.md"
 - [ ] **Step 1: Full daemon test suite**
 
 ```bash
-pnpm --filter @auto-claude/daemon test
+pnpm --filter @runforge/daemon test
 ```
 
 Expected: PASS.
@@ -2180,7 +2180,7 @@ Note any lint warnings introduced by Phase 0; address inline.
 The new test added in Task 15 asserts concierge entries exist. Run it again:
 
 ```bash
-pnpm --filter @auto-claude/daemon exec vitest run src/infra/traceability-paths.test.ts
+pnpm --filter @runforge/daemon exec vitest run src/infra/traceability-paths.test.ts
 ```
 
 Expected: PASS.
@@ -2241,7 +2241,7 @@ Repeat for `FUNC-CONCIERGE`, `FUNC-CONCIERGE-MEMORY`, `FUNC-OBSERVER`, `FUNC-CON
 Watch the daemon log:
 
 ```bash
-tail -f ~/Library/Logs/auto-claude/daemon.log | grep -E "(FUNC-CONCIERGE|concierge|spec-impl)"
+tail -f ~/Library/Logs/runforge/daemon.log | grep -E "(FUNC-CONCIERGE|concierge|spec-impl)"
 ```
 
 Expected: within one poll cycle, the daemon classifies the issue and starts a spec-implementation worker for it.
@@ -2279,7 +2279,7 @@ After this PR merges, opens 5 GitHub issues with `l1-approved,l2-approved,l3-app
 
 ## Test plan
 
-- [x] `pnpm --filter @auto-claude/daemon test` green
+- [x] `pnpm --filter @runforge/daemon test` green
 - [x] `pnpm -r typecheck` green
 - [x] `traceability-paths.test.ts` validates concierge subtree
 - [x] `spec-loader.test.ts` exercises multi-L0 scanning

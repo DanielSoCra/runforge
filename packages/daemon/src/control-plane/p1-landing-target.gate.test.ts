@@ -64,7 +64,7 @@ describe('G1 resolveLandingTarget', () => {
       value: { landsOn: 'main', productionReleasePath: { kind: 'platform-performs' } },
     });
 
-    const result = resolve({ registry, deploymentId: 'auto-claude', fallbackStaging: 'staging' });
+    const result = resolve({ registry, deploymentId: 'runforge', fallbackStaging: 'staging' });
 
     expect(result).toEqual({ kind: 'governed', landsOn: 'main' });
   });
@@ -73,7 +73,7 @@ describe('G1 resolveLandingTarget', () => {
     const resolve = await loadResolveLandingTarget();
     const registry = makeRegistry({ kind: 'not-found' });
 
-    const result = resolve({ registry, deploymentId: 'auto-claude', fallbackStaging: 'staging' });
+    const result = resolve({ registry, deploymentId: 'runforge', fallbackStaging: 'staging' });
 
     expect(result.kind).toBe('escalate');
     if (result.kind === 'escalate') {

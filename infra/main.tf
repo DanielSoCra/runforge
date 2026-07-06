@@ -29,15 +29,15 @@ variable "my_ipv4" {
 
 # --- SSH Key ---
 
-resource "hcloud_ssh_key" "auto_claude" {
-  name       = "auto-claude"
+resource "hcloud_ssh_key" "runforge" {
+  name       = "runforge"
   public_key = file(var.ssh_public_key_path)
 }
 
 # --- Firewall ---
 
-resource "hcloud_firewall" "auto_claude" {
-  name = "auto-claude"
+resource "hcloud_firewall" "runforge" {
+  name = "runforge"
 
   # SSH (restricted to operator IPs)
   rule {
@@ -95,20 +95,20 @@ resource "hcloud_firewall" "auto_claude" {
 
 # --- Server ---
 
-resource "hcloud_server" "auto_claude" {
-  name        = "auto-claude"
+resource "hcloud_server" "runforge" {
+  name        = "runforge"
   server_type = "ccx33"
   location    = "nbg1"
   image       = "ubuntu-24.04"
 
-  ssh_keys = [hcloud_ssh_key.auto_claude.id]
+  ssh_keys = [hcloud_ssh_key.runforge.id]
 
-  firewall_ids = [hcloud_firewall.auto_claude.id]
+  firewall_ids = [hcloud_firewall.runforge.id]
 
   user_data = file("${path.module}/cloud-init.yml")
 
   labels = {
-    purpose = "auto-claude"
+    purpose = "runforge"
     env     = "production"
   }
 }
@@ -116,13 +116,13 @@ resource "hcloud_server" "auto_claude" {
 # --- Outputs ---
 
 output "server_ip" {
-  value = hcloud_server.auto_claude.ipv4_address
+  value = hcloud_server.runforge.ipv4_address
 }
 
 output "server_ipv6" {
-  value = hcloud_server.auto_claude.ipv6_address
+  value = hcloud_server.runforge.ipv6_address
 }
 
 output "ssh_command" {
-  value = "ssh -i ~/.ssh/id_ed25519 root@${hcloud_server.auto_claude.ipv4_address}"
+  value = "ssh -i ~/.ssh/id_ed25519 root@${hcloud_server.runforge.ipv4_address}"
 }

@@ -27,7 +27,7 @@ describe('Dashboard Dockerfile', () => {
 
   it('should use build-only placeholders for server-only database secrets (#626)', () => {
     expect(DOCKERFILE).toContain(
-      'ENV AUTO_CLAUDE_DATABASE_URL=postgres://autoclaude:autoclaude@postgres:5432/autoclaude',
+      'ENV RUNFORGE_DATABASE_URL=postgres://runforge:runforge@postgres:5432/runforge',
     );
     expect(DOCKERFILE).toContain(
       'ENV ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000',

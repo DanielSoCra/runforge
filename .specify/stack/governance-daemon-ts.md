@@ -1,7 +1,7 @@
 ---
 id: STACK-AC-GOVERNANCE-DAEMON
 type: stack-specific
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 3

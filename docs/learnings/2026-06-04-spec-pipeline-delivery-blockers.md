@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-04
 **Context:** First sustained live drive of the spec-driven pipeline (L2→L3→…) on
-`DANIELSOCRAHANDLEZZ/auto-claude-example` through the pm-cockpit decision loop. The engine
+`DANIELSOCRAHANDLEZZ/runforge-example` through the pm-cockpit decision loop. The engine
 had a long history of runs going `stuck` at $0. Driving it live surfaced three
 *deterministic* engine bugs (each blocked every spec-authoring run) plus several
 operational gotchas. All three code fixes are TDD'd on `feat/company-os-phase0`.
@@ -70,7 +70,7 @@ When adding a new authoring phase, update prompt + `isAllowedArtifactPath` +
   rotating the shared refresh token). If the wall clock outlives the token, every
   worker gets `401 Invalid authentication credentials` → `No changed artifacts` →
   stuck. Re-sync before a run; install the creds-sync launchd job
-  (`scripts/com.autoclaude.creds-sync.plist`) for sustained operation. Verify with a
+  (`scripts/com.runforge.creds-sync.plist`) for sustained operation. Verify with a
   direct API call before blaming the pipeline.
 - **Default model matters.** With no `roleModels`, the headless CLI uses a weak-ish
   default; the l2-designer wrote `test` to README instead of a spec. Pinning roles to
@@ -85,7 +85,7 @@ When adding a new authoring phase, update prompt + `isAllowedArtifactPath` +
   `PM_PROTECTED_KEY` (32-byte base64; any valid key works since pilot decisions carry
   no PHI) and can't write the approve effect without `PM_GH_TOKEN`. Socket path + repos
   come from `~/.agents/pm/registry.yaml`.
-- **Two daemons.** A host launchd daemon (`com.autoclaude.daemon`, runs from
+- **Two daemons.** A host launchd daemon (`com.runforge.daemon`, runs from
   `.worktrees/runtime-current`) can coexist with the container daemon on :3847 — they
   may target different repos. Confirm which one owns your repo before reading
   `/api/runs` (the host one answered :3847 for me while the *container* ran the work).

@@ -8,7 +8,7 @@
 // next fetch" semantics hold.
 //
 // Launched by Playwright's webServer via:
-//   pnpm --filter @auto-claude/daemon exec tsx ../dashboard/e2e/real-daemon.mjs
+//   pnpm --filter @runforge/daemon exec tsx ../dashboard/e2e/real-daemon.mjs
 import { createServer } from 'node:http';
 import { createControlServer } from '../../daemon/src/control-plane/server.js';
 import {

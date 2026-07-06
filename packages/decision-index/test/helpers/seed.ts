@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION } from "@auto-claude/decision-protocol";
+import { PROTOCOL_VERSION } from "@runforge/decision-protocol";
 import type { Db } from "../../src/db.js";
 import { decisions } from "../../src/schema.js";
 import type { DecisionRow } from "../../src/ingest.js";

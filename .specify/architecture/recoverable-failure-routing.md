@@ -1,7 +1,7 @@
 ---
 id: ARCH-AC-RECOVERABLE-FAILURE-ROUTING
 type: architecture
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 2

@@ -4,7 +4,7 @@ import type {
   JsonValue,
   RunInsert,
   RunStore,
-} from '@auto-claude/db';
+} from '@runforge/db';
 
 import type { PipelineResult } from '../control-plane/pipeline.js';
 import type { SessionType } from '../types.js';

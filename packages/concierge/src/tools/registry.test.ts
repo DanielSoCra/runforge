@@ -13,7 +13,7 @@ const statusTool: ToolEntry = {
   blastRadius: 'safe',
   audit: 'always',
   cacheable: true,
-  subsystem: 'auto-claude',
+  subsystem: 'runforge',
   governingSpecId: 'FUNC-AC-CONTROL-PLANE',
   status: 'enabled',
 };

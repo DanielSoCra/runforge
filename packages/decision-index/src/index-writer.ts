@@ -5,21 +5,21 @@ import {
   type ItemStatus,
   type TransitionEvent,
   type EffectKind,
-} from "@auto-claude/decision-protocol";
+} from "@runforge/decision-protocol";
 import { eq } from "drizzle-orm";
 import type { Db, Sql } from "./db.js";
 import { withTx } from "./db.js";
 import { decisions, workerSessions } from "./schema.js";
 import { appendAudit, type WorkflowAuditEvent } from "./audit-log.js";
 import { ingest, type IngestDeps, type DecisionRow } from "./ingest.js";
-import type { ProtectedStore } from "@auto-claude/sanitizer-redaction";
+import type { ProtectedStore } from "@runforge/sanitizer-redaction";
 import type { Quarantine } from "./quarantine.js";
 import { apply, type ApplyCtx, type ApplyResult } from "./state-machine.js";
 import { Outbox, type RunEffectResult, type RunEffectOptions, type PendingEffect } from "./outbox.js";
 import { ReadModel, type DetailField } from "./read-model.js";
 import { openDb } from "./db.js";
 import { migrate } from "./migrate.js";
-import { ProtectedStore as ProtectedStoreImpl } from "@auto-claude/sanitizer-redaction";
+import { ProtectedStore as ProtectedStoreImpl } from "@runforge/sanitizer-redaction";
 import { PgQuarantine } from "./quarantine.js";
 import type { Notifier } from "./adapters/notifier.js";
 import type { SourceSink } from "./adapters/source-sink.js";

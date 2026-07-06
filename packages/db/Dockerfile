@@ -8,8 +8,8 @@ RUN corepack enable
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/db/package.json ./packages/db/package.json
 
-RUN pnpm install --frozen-lockfile --filter @auto-claude/db
+RUN pnpm install --frozen-lockfile --filter @runforge/db
 
 COPY packages/db/ ./packages/db/
 
-CMD ["pnpm", "--filter", "@auto-claude/db", "db:migrate"]
+CMD ["pnpm", "--filter", "@runforge/db", "db:migrate"]

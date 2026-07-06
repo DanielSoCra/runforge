@@ -19,7 +19,7 @@
 ```
 plugins/                                    # repo root — plugin catalog
   registry.json                             # flat index of all plugins
-  auto-claude-dev/
+  runforge-dev/
     manifest.json
     prompt-injection.md
     skills/
@@ -72,11 +72,11 @@ packages/dashboard/app/repos/[id]/
 
 **Files:**
 - Create: `plugins/registry.json`
-- Create: `plugins/auto-claude-dev/manifest.json`
-- Create: `plugins/auto-claude-dev/prompt-injection.md`
-- Create: `plugins/auto-claude-dev/skills/spec-guardian.md`
-- Create: `plugins/auto-claude-dev/skills/fsm-patterns.md`
-- Create: `plugins/auto-claude-dev/agents/spec-reviewer.md`
+- Create: `plugins/runforge-dev/manifest.json`
+- Create: `plugins/runforge-dev/prompt-injection.md`
+- Create: `plugins/runforge-dev/skills/spec-guardian.md`
+- Create: `plugins/runforge-dev/skills/fsm-patterns.md`
+- Create: `plugins/runforge-dev/agents/spec-reviewer.md`
 
 - [ ] **Step 1: Create `plugins/registry.json`**
 
@@ -85,38 +85,38 @@ packages/dashboard/app/repos/[id]/
   "version": 1,
   "plugins": [
     {
-      "id": "auto-claude-dev",
-      "name": "Auto-Claude Dev",
-      "description": "Skills and agents for developing the auto-claude daemon: spec-driven development, FSM patterns, traceability workflow.",
+      "id": "runforge-dev",
+      "name": "Runforge Dev",
+      "description": "Skills and agents for developing the runforge daemon: spec-driven development, FSM patterns, traceability workflow.",
       "tags": ["typescript", "daemon", "spec-driven", "fsm"]
     }
   ]
 }
 ```
 
-- [ ] **Step 2: Create `plugins/auto-claude-dev/manifest.json`**
+- [ ] **Step 2: Create `plugins/runforge-dev/manifest.json`**
 
 ```json
 {
-  "id": "auto-claude-dev",
-  "name": "Auto-Claude Dev",
+  "id": "runforge-dev",
+  "name": "Runforge Dev",
   "version": "1.0.0",
-  "description": "Skills and agents for developing the auto-claude daemon: spec-driven development, FSM patterns, traceability workflow.",
+  "description": "Skills and agents for developing the runforge daemon: spec-driven development, FSM patterns, traceability workflow.",
   "tags": ["typescript", "daemon", "spec-driven", "fsm"]
 }
 ```
 
-- [ ] **Step 3: Create `plugins/auto-claude-dev/prompt-injection.md`**
+- [ ] **Step 3: Create `plugins/runforge-dev/prompt-injection.md`**
 
 ```markdown
-You are working on the auto-claude daemon — a TypeScript process that spawns autonomous Claude Code sessions against GitHub repos.
+You are working on the runforge daemon — a TypeScript process that spawns autonomous Claude Code sessions against GitHub repos.
 
 Always check `.specify/traceability.yml` before editing any file to find the governing spec.
 Read specs before implementing: L3 (patterns) → L2 (architecture) → L1 (business context).
 Never implement a feature without a complete FUNC → ARCH → STACK spec chain.
 ```
 
-- [ ] **Step 4: Create `plugins/auto-claude-dev/skills/spec-guardian.md`**
+- [ ] **Step 4: Create `plugins/runforge-dev/skills/spec-guardian.md`**
 
 ```markdown
 # Spec Guardian Patterns
@@ -131,7 +131,7 @@ L2: system HOW — system names only, plain-language data model, six required se
 L3: pattern guide — named pattern + rationale, 3–5 line snippet, one concern per spec.
 ```
 
-- [ ] **Step 5: Create `plugins/auto-claude-dev/skills/fsm-patterns.md`**
+- [ ] **Step 5: Create `plugins/runforge-dev/skills/fsm-patterns.md`**
 
 ```markdown
 # FSM Patterns
@@ -142,10 +142,10 @@ Side effects happen in phase handlers, not in the FSM itself.
 Always write tests for every state transition before implementing the handler.
 ```
 
-- [ ] **Step 6: Create `plugins/auto-claude-dev/agents/spec-reviewer.md`**
+- [ ] **Step 6: Create `plugins/runforge-dev/agents/spec-reviewer.md`**
 
 ```markdown
-You are a spec reviewer for the auto-claude project.
+You are a spec reviewer for the runforge project.
 
 When reviewing a spec:
 1. Check that FUNC specs have no technology terms and use Given/When/Then.
@@ -159,7 +159,7 @@ When reviewing a spec:
 
 ```bash
 git add plugins/
-git commit -m "feat(plugins): add plugin directory structure and auto-claude-dev bootstrap plugin"
+git commit -m "feat(plugins): add plugin directory structure and runforge-dev bootstrap plugin"
 ```
 
 ---
@@ -235,7 +235,7 @@ describe('loadPluginRegistry', () => {
 - [ ] **Step 3: Run tests — verify they fail**
 
 ```bash
-cd ~/code/auto-claude
+cd ~/code/runforge
 pnpm vitest run packages/daemon/src/control-plane/plugin-registry.test.ts
 ```
 
@@ -868,7 +868,7 @@ describe('loadDashboardRegistry', () => {
 - [ ] **Step 2: Run tests — verify they fail**
 
 ```bash
-cd ~/code/auto-claude/packages/dashboard
+cd ~/code/runforge/packages/dashboard
 pnpm vitest run lib/plugins/registry.test.ts
 ```
 
@@ -928,7 +928,7 @@ git commit -m "feat(plugins): add dashboard registry reader"
 - [ ] **Step 1: Install dependency if needed**
 
 ```bash
-cd ~/code/auto-claude/packages/dashboard
+cd ~/code/runforge/packages/dashboard
 pnpm list @anthropic-ai/sdk 2>/dev/null || pnpm add @anthropic-ai/sdk
 ```
 
@@ -983,7 +983,7 @@ describe('enableAllSuggested', () => {
 - [ ] **Step 3: Run tests — verify they fail**
 
 ```bash
-cd ~/code/auto-claude/packages/dashboard
+cd ~/code/runforge/packages/dashboard
 pnpm vitest run actions/plugins.test.ts
 ```
 
@@ -1191,7 +1191,7 @@ export function PluginCard({
 - [ ] **Step 2: Install any missing shadcn components**
 
 ```bash
-cd ~/code/auto-claude/packages/dashboard
+cd ~/code/runforge/packages/dashboard
 pnpm dlx shadcn@latest add switch tooltip 2>/dev/null || true
 ```
 
@@ -1347,7 +1347,7 @@ Add `<RealtimeRefresh repoId={params.id} />` at the top of the PluginsPage serve
 - [ ] **Step 5: Run type check**
 
 ```bash
-cd ~/code/auto-claude/packages/dashboard
+cd ~/code/runforge/packages/dashboard
 pnpm tsc --noEmit
 ```
 
@@ -1356,7 +1356,7 @@ Expected: No errors.
 - [ ] **Step 6: Run full test suite**
 
 ```bash
-cd ~/code/auto-claude
+cd ~/code/runforge
 pnpm vitest run && pnpm tsc --noEmit
 ```
 
@@ -1376,7 +1376,7 @@ git commit -m "feat(plugins): add Plugins tab page with Realtime subscription"
 - [ ] **Run the full test suite one more time**
 
 ```bash
-cd ~/code/auto-claude
+cd ~/code/runforge
 pnpm vitest run
 pnpm tsc --noEmit
 ```
@@ -1394,7 +1394,7 @@ import('./packages/daemon/src/control-plane/plugin-registry.js').then(({ loadPlu
 );"
 ```
 
-Expected: `Loaded plugins: [ 'auto-claude-dev' ]`
+Expected: `Loaded plugins: [ 'runforge-dev' ]`
 
 - [ ] **Final commit**
 

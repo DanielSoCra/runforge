@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.autoclaude.daemon</string>
+  <string>com.runforge.daemon</string>
   <key>ProgramArguments</key>
   <array>
     <string>__NPX_PATH__</string>
@@ -29,8 +29,8 @@
     <string>__HOME__</string>
     <key>GITHUB_TOKEN</key>
     <string>__GITHUB_TOKEN__</string>
-    <key>AUTO_CLAUDE_DATABASE_URL</key>
-    <string>__AUTO_CLAUDE_DATABASE_URL__</string>
+    <key>RUNFORGE_DATABASE_URL</key>
+    <string>__RUNFORGE_DATABASE_URL__</string>
     <key>DAEMON_DATA_BACKEND</key>
     <string>__DAEMON_DATA_BACKEND__</string>
     <key>ENCRYPTION_KEY</key>

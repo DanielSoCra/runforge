@@ -15,7 +15,7 @@ superseded_date: 2026-06-02
 
 ## Problem
 
-The auto-claude daemon has all coordination components built and tested (PO agent, coordinator, merge agent, terminal server, batch manager, work claimer) but none are wired into the daemon's startup sequence. The daemon also carries multi-repo complexity (RepoManager, DB-mode vs legacy-mode, per-repo state namespacing) that is premature — a single-daemon-per-repo architecture is simpler, scales better to containers, and removes an entire abstraction layer. The dashboard has GitHub repo connection UI that is dead in the single-daemon model.
+The runforge daemon has all coordination components built and tested (PO agent, coordinator, merge agent, terminal server, batch manager, work claimer) but none are wired into the daemon's startup sequence. The daemon also carries multi-repo complexity (RepoManager, DB-mode vs legacy-mode, per-repo state namespacing) that is premature — a single-daemon-per-repo architecture is simpler, scales better to containers, and removes an entire abstraction layer. The dashboard has GitHub repo connection UI that is dead in the single-daemon model.
 
 The PO agent's `spawnPOSession()` is a stub — it needs a prompt template and MCP tools so it can analyze the codebase and generate proposals.
 
@@ -292,7 +292,7 @@ The current `detectBugFixWork()` in `work-detection.ts` auto-detects `review-fin
 
 The terminal server uses stdio MCP transport. It cannot share the daemon's stdout/stderr (contention with daemon logging). Two options:
 
-**(A) Separate entrypoint** — `auto-claude-terminal` binary that connects to the daemon's REST API. The terminal server is a thin CLI tool, not part of the daemon process. Simple but requires the daemon REST API to expose everything the terminal needs.
+**(A) Separate entrypoint** — `runforge-terminal` binary that connects to the daemon's REST API. The terminal server is a thin CLI tool, not part of the daemon process. Simple but requires the daemon REST API to expose everything the terminal needs.
 
 **(B) Child process** — Daemon spawns the terminal server as a child process with its own stdio. The child communicates with the daemon via IPC.
 

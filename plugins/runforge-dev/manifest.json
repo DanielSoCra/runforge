@@ -1,0 +1,7 @@
+{
+  "id": "runforge-dev",
+  "name": "Runforge Dev",
+  "version": "1.0.0",
+  "description": "Skills and agents for developing the runforge daemon: spec-driven development, FSM patterns, traceability workflow.",
+  "tags": ["typescript", "daemon", "spec-driven", "fsm"]
+}

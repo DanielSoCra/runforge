@@ -1,6 +1,6 @@
 > **🗄 HISTORICAL (2026-06-02).** Completed/superseded record, kept for provenance — superseded by the unified **L0-AC-VISION v5** (`.specify/L0-ac-vision.md`) + its L1 children. The canonical current specs live in `.specify/`. See `docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`. <!-- RECONCILIATION-LEDGER-BANNER -->
 
-# Auto-Claude Implementation Plan
+# Runforge Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -10,12 +10,12 @@
 
 **Tech Stack:** TypeScript (tsx runtime, no build step), Commander.js (CLI), js-yaml (config), Node built-in worker_threads (session isolation), Node built-in child_process (spawning claude within workers), Node built-in fs (state). No framework, no database.
 
-**Design Doc:** `docs/specs/2026-03-14-auto-claude-design.md`
+**Design Doc:** `docs/specs/2026-03-14-runforge-design.md`
 
 **Conventions:**
 - `$PROJECT_ROOT` refers to the repository root directory. All commands run from there.
-- Auto-Claude's own source code is not spec-governed (no entries in `traceability.yml`). Specs may be added later.
-- Runtime state lives at `~/.auto-claude/state/{project}/`. The `state/` dir in-repo is a symlink (created by `auto-claude init`).
+- Runforge's own source code is not spec-governed (no entries in `traceability.yml`). Specs may be added later.
+- Runtime state lives at `~/.runforge/state/{project}/`. The `state/` dir in-repo is a symlink (created by `runforge init`).
 
 ---
 
@@ -173,13 +173,13 @@ Note: `tsx` is a production dependency because the CLI entry point requires it a
 
 - [ ] **Step 4: Update .gitignore**
 
-Add `node_modules/`, `dist/`, `state/`, `.auto-claude/`, `.factory/` to existing `.gitignore`.
+Add `node_modules/`, `dist/`, `state/`, `.runforge/`, `.factory/` to existing `.gitignore`.
 
 - [ ] **Step 5: Add scripts to package.json**
 
 ```json
 {
-  "bin": { "auto-claude": "./bin/auto-claude.mjs" },
+  "bin": { "runforge": "./bin/runforge.mjs" },
   "scripts": {
     "dev": "tsx src/index.ts",
     "test": "vitest run",
@@ -190,7 +190,7 @@ Add `node_modules/`, `dist/`, `state/`, `.auto-claude/`, `.factory/` to existing
 
 - [ ] **Step 6: Create bin entry point**
 
-Create `bin/auto-claude.mjs`:
+Create `bin/runforge.mjs`:
 ```javascript
 #!/usr/bin/env tsx
 import '../src/index.ts';
@@ -2180,7 +2180,7 @@ import { Command } from "commander";
 
 const program = new Command();
 program
-  .name("auto-claude")
+  .name("runforge")
   .description("Autonomous agent orchestrator for spec-driven development")
   .version("0.1.0");
 
@@ -2240,7 +2240,7 @@ program.parse();
    - Verify configured repo exists: `gh repo view {config.project.repo}`.
    - Verify dev branch exists: `git rev-parse --verify {config.project.dev_branch}`.
    - Verify clean working tree (warn if dirty, but don't block).
-2. **Lock file** (`~/.auto-claude/state/{repo-path-hash}/daemon.lock`):
+2. **Lock file** (`~/.runforge/state/{repo-path-hash}/daemon.lock`):
    - Attempt exclusive create with `fs.writeFileSync(path, pid, { flag: 'wx' })`.
    - If exists: read PID, check liveness via `process.kill(pid, 0)`. If alive, refuse to start. If dead, remove stale lock and proceed.
 3. Write `daemon.json` with PID, startedAt, configPath.
@@ -2313,9 +2313,9 @@ git commit -m "feat: CLI with all commands (init, start, stop, status, logs, pau
 
 - [ ] **Step 1: Implement daemon.ts**
 
-`generateLaunchdPlist(config, binPath)` — returns XML string for `~/Library/LaunchAgents/com.auto-claude.{project}.plist` with KeepAlive, log paths.
+`generateLaunchdPlist(config, binPath)` — returns XML string for `~/Library/LaunchAgents/com.runforge.{project}.plist` with KeepAlive, log paths.
 
-`generateSystemdUnit(config, binPath)` — returns INI string for `~/.config/systemd/user/auto-claude-{project}.service` with Restart=always.
+`generateSystemdUnit(config, binPath)` — returns INI string for `~/.config/systemd/user/runforge-{project}.service` with Restart=always.
 
 `installDaemon(config)` — detects platform (`process.platform`), writes appropriate file, loads it (`launchctl load` or `systemctl --user enable --now`).
 
@@ -2458,12 +2458,12 @@ Configure `PreToolUse` hooks that block access to protected paths. Each hook is 
 }
 ```
 
-The `scripts/hook-deny-paths.py` script reads the tool input from stdin (JSON with `file_path` field), checks against a deny list (`.specify/scenarios/`, `.specify/methodology/`, `state/`, `.factory/`, `.auto-claude/`, `src/` for writes), and exits with code 2 + a reason message to block. Create `scripts/hook-deny-paths.py` as part of this task.
+The `scripts/hook-deny-paths.py` script reads the tool input from stdin (JSON with `file_path` field), checks against a deny list (`.specify/scenarios/`, `.specify/methodology/`, `state/`, `.factory/`, `.runforge/`, `src/` for writes), and exits with code 2 + a reason message to block. Create `scripts/hook-deny-paths.py` as part of this task.
 
 This provides deterministic enforcement at the tool boundary — works in ALL sessions, not just worktrees. Blocked paths:
 - Read on `.specify/scenarios/**` — holdout isolation
 - Write on `.specify/methodology/**` — methodology is immutable
-- Read/Write on `state/**`, `.factory/**`, `.auto-claude/**` — internal state isolation
+- Read/Write on `state/**`, `.factory/**`, `.runforge/**` — internal state isolation
 - Write on `src/**` — daemon source is read-only for workers
 
 - [ ] **Step 2: Commit**
@@ -2530,12 +2530,12 @@ git commit -m "feat: control plane HTTP interface with port-based locking"
 
 - [ ] **Step 1: Write the failing test**
 
-Test that `ResultsLedger.record(result)` appends a line to `~/.auto-claude/state/{project}/results.csv` and that the line matches the expected CSV format. Test: append a result, read back, verify CSV format.
+Test that `ResultsLedger.record(result)` appends a line to `~/.runforge/state/{project}/results.csv` and that the line matches the expected CSV format. Test: append a result, read back, verify CSV format.
 
 - [ ] **Step 2: Implement results-ledger.ts**
 
 `ResultsLedger` class:
-- `record(result)` — appends a CSV line to `~/.auto-claude/state/{project}/results.csv`.
+- `record(result)` — appends a CSV line to `~/.runforge/state/{project}/results.csv`.
 - Columns: `issue_number`, `started_at`, `completed_at`, `pipeline_variant`, `complexity`, `total_cost_usd`, `phases_run`, `fix_attempts`, `holdout_pass`, `outcome`.
 - Creates the CSV file with a header row if it does not exist.
 - Called by the runner after each issue completes (or gets stuck).
@@ -2578,7 +2578,7 @@ Ensure each prompt matches the design doc specifications. Use `{{variable}}` syn
 **Containment rules** — all worker and reviewer prompts MUST include:
 - "Never read or access files under `.specify/scenarios/`."
 - "Never modify files outside your worktree directory."
-- "Never modify files under `src/` of the auto-claude daemon itself."
+- "Never modify files under `src/` of the runforge daemon itself."
 
 **Gotcha emission** — `worker.md` and all reviewer prompts MUST include:
 - "When you discover a non-obvious pitfall, emit: `GOTCHA: {\"filePaths\": [\"<glob>\"], \"gotcha\": \"<description>\"}`"
@@ -2694,7 +2694,7 @@ git commit -m "test: end-to-end smoke test with mocked externals"
 
 - [ ] **Step 1: Write README**
 
-Brief README covering: what Auto-Claude is, prerequisites (node, claude CLI, gh CLI), quick start (`auto-claude init` → edit config → `auto-claude start`), link to design doc.
+Brief README covering: what Runforge is, prerequisites (node, claude CLI, gh CLI), quick start (`runforge init` → edit config → `runforge start`), link to design doc.
 
 - [ ] **Step 2: Final commit**
 

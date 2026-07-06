@@ -1,6 +1,6 @@
 # Running the daemon in Docker (always-on)
 
-How to run the auto-claude daemon as an always-on container against a target
+How to run the runforge daemon as an always-on container against a target
 repo, on a Mac that authenticates Claude via a Max/Pro **subscription** (no API
 key, no per-token cost). Covers the three things that make a container daemon
 actually work: the **workspace clone**, **subscription-auth that stays fresh**,
@@ -14,7 +14,7 @@ checkout of the target repo, so its cwd is that repo. A container's cwd
 (`/app/packages/daemon`) is the daemon's own code, not the target — so set:
 
 ```jsonc
-// auto-claude.config.json
+// runforge.config.json
 {
   "repo": { "owner": "you", "name": "your-target-repo" },
   "workspaceRoot": "/app/repo"   // daemon clones config.repo here on startup
@@ -56,17 +56,17 @@ inside the access-token lifetime — the container never needs to refresh itself
 
 ```bash
 # one-shot (also used to seed before first `up`)
-AUTO_CLAUDE_CREDS_DIR=/path/mounted/to/root/.claude \
+RUNFORGE_CREDS_DIR=/path/mounted/to/root/.claude \
   scripts/sync-claude-creds.sh
 
 # always-on: install the launchd agent (every 15 min, RunAtLoad)
 #   substitute __REPO_ROOT__, __CREDS_DIR__, __HOME__, __PATH__ in
-#   scripts/com.autoclaude.creds-sync.plist, then:
-launchctl load -w ~/Library/LaunchAgents/com.autoclaude.creds-sync.plist
+#   scripts/com.runforge.creds-sync.plist, then:
+launchctl load -w ~/Library/LaunchAgents/com.runforge.creds-sync.plist
 ```
 
 The subscription credential lives under Keychain account = your macOS username
-(service `Claude Code-credentials`). Override with `AUTO_CLAUDE_KEYCHAIN_ACCOUNT`
+(service `Claude Code-credentials`). Override with `RUNFORGE_KEYCHAIN_ACCOUNT`
 if needed. The script validates the credential and writes atomically; it never
 prints the secret.
 
@@ -117,12 +117,12 @@ docker compose --profile containerized-daemon build daemon
 # run (restart: unless-stopped keeps it always-on)
 docker compose --profile containerized-daemon up -d daemon
 # kill switch
-docker stop auto-claude-daemon-1
+docker stop runforge-daemon-1
 ```
 
 Verify the boot log shows the workspace line
 (`repoRoot … is a git checkout — using as-is`, or `cloning …`) and
-`Auto-Claude daemon started`. Health: `curl localhost:3847/health`.
+`Runforge daemon started`. Health: `curl localhost:3847/health`.
 
 ## Unattended 24/7
 
@@ -132,15 +132,15 @@ self-heals across crashes once the Docker engine is up.
 
 | Job | Installs via | Keeps alive |
 |-----|--------------|-------------|
-| `com.autoclaude.creds-sync` | `scripts/install-creds-sync.sh /private/tmp/pilot-claude` | refreshes the container's subscription token from the host Keychain every 15 min (token life ~1 h) — the #1 overnight killer |
+| `com.runforge.creds-sync` | `scripts/install-creds-sync.sh /private/tmp/pilot-claude` | refreshes the container's subscription token from the host Keychain every 15 min (token life ~1 h) — the #1 overnight killer |
 | `com.pmcockpit.watcher-pilot` | `pm-cockpit: packages/watcher/scripts/install-pilot-watcher.sh` | KeepAlive-restarts the watcher that owns the intent socket delivering gate approvals; secrets resolved at launch (`gh auth token` + `~/.agents/pm/.protected-key`), none in the plist; `/health` on `127.0.0.1:8799` |
-| `com.autoclaude.docker-autostart` | `cp scripts/com.autoclaude.docker-autostart.plist …` (sub `__HOME__`) + `launchctl load -w` | `open -g -a Docker` at login → the engine comes up → the `unless-stopped` container resurrects after a reboot |
+| `com.runforge.docker-autostart` | `cp scripts/com.runforge.docker-autostart.plist …` (sub `__HOME__`) + `launchctl load -w` | `open -g -a Docker` at login → the engine comes up → the `unless-stopped` container resurrects after a reboot |
 
 ```bash
 # verify all three are loaded
 launchctl list | grep -E 'creds-sync|watcher-pilot|docker-autostart'
 # token freshness inside the container (should stay > ~45 min)
-docker exec auto-claude-daemon-1 sh -c 'cat /root/.claude/.credentials.json' \
+docker exec runforge-daemon-1 sh -c 'cat /root/.claude/.credentials.json' \
   | python3 -c 'import sys,json,time; o=json.load(sys.stdin).get("claudeAiOauth",{}); print(round((o["expiresAt"]/1000-time.time())/60),"min")'
 # watcher health + creds-sync log
 curl -fsS 127.0.0.1:8799/health; tail ~/logs/claude-creds-sync.log
@@ -152,6 +152,6 @@ curl -fsS 127.0.0.1:8799/health; tail ~/logs/claude-creds-sync.log
 checked fail-closed by the install scripts.
 
 **Single canonical daemon.** Only the Docker container serves the pilot
-(`auto-claude-example`). The legacy host launchd daemon `com.autoclaude.daemon`
-(which polled the `auto-claude` repo itself and double-bound :3847) is unloaded —
+(`runforge-example`). The legacy host launchd daemon `com.runforge.daemon`
+(which polled the `runforge` repo itself and double-bound :3847) is unloaded —
 re-`launchctl load` its plist only if you deliberately self-host that repo.

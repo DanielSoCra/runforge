@@ -3,14 +3,14 @@ import { Command } from 'commander';
 export function createCli(): Command {
   const program = new Command();
   program
-    .name('auto-claude')
+    .name('runforge')
     .description('Autonomous spec implementation daemon')
     .version('0.1.0');
 
   program
     .command('start')
     .description('Start the daemon')
-    .option('-c, --config <path>', 'Config file path', 'auto-claude.config.json')
+    .option('-c, --config <path>', 'Config file path', 'runforge.config.json')
     .action(async (options) => {
       // Will be wired to daemon startup in Task 26
       console.log(`Starting daemon with config: ${options.config}`);

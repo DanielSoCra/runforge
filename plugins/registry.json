@@ -2,9 +2,9 @@
   "version": 1,
   "plugins": [
     {
-      "id": "auto-claude-dev",
-      "name": "Auto-Claude Dev",
-      "description": "Skills and agents for developing the auto-claude daemon: spec-driven development, FSM patterns, traceability workflow.",
+      "id": "runforge-dev",
+      "name": "Runforge Dev",
+      "description": "Skills and agents for developing the runforge daemon: spec-driven development, FSM patterns, traceability workflow.",
       "tags": ["typescript", "daemon", "spec-driven", "fsm"]
     },
     {

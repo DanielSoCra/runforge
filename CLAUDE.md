@@ -16,7 +16,7 @@ All rules in `AGENTS.md` apply. This file adds Claude Code-specific behavior.
 
 ## Autonomous Operating Mode
 
-This repo is auto-claude itself — an autonomous-by-design system. Per L0-AC-VISION and FUNC-AC-PIPELINE, the Operator's role is L1 spec authoring + production-release approval. **Everything below that is autonomous**, including:
+This repo is runforge itself — an autonomous-by-design system. Per L0-AC-VISION and FUNC-AC-PIPELINE, the Operator's role is L1 spec authoring + production-release approval. **Everything below that is autonomous**, including:
 
 - Pushing to any feature branch (`codex/*`, `feature/*`, etc.)
 - Opening PRs against `main` for visibility

@@ -23,7 +23,7 @@ const config: ConciergeConfig = {
   vaultPath: '/vault',
   watchedRepos: ['/repo'],
   operatorEmail: 'operator@example.com',
-  autoClaudeBaseUrl: 'http://127.0.0.1:3847',
+  runforgeBaseUrl: 'http://127.0.0.1:3847',
 };
 
 describe('process runtime clients', () => {
@@ -32,7 +32,7 @@ describe('process runtime clients', () => {
     const client = createSecondBrainFileClient({ vaultPath });
 
     await client.appendInbox({ slug: 'capture', body: 'remember this decision' });
-    await client.writeDecision(`${vaultPath}/10-projects/auto-claude/decision.md`);
+    await client.writeDecision(`${vaultPath}/10-projects/runforge/decision.md`);
     await client.writeClient(`${vaultPath}/20-Areas/clients/acme/note.md`);
 
     await expect(client.read(`${vaultPath}/00-inbox/capture.md`)).resolves.toEqual({
@@ -44,7 +44,7 @@ describe('process runtime clients', () => {
         { path: `${vaultPath}/00-inbox/capture.md`, preview: 'remember this decision' },
       ],
     });
-    await expect(readFile(`${vaultPath}/10-projects/auto-claude/decision.md`, 'utf-8'))
+    await expect(readFile(`${vaultPath}/10-projects/runforge/decision.md`, 'utf-8'))
       .resolves.toBe('');
     await expect(readFile(`${vaultPath}/20-Areas/clients/acme/note.md`, 'utf-8'))
       .resolves.toBe('');
@@ -88,7 +88,7 @@ describe('process runtime clients', () => {
   it('reads daemon state and recent git activity through the observer process client', async () => {
     const calls: Array<{ file: string; args: string[] }> = [];
     const client = createObserverProcessClient({
-      autoClaudeBaseUrl: 'http://127.0.0.1:3847',
+      runforgeBaseUrl: 'http://127.0.0.1:3847',
       watchedRepos: ['/repo/a', '/repo/b'],
       fetch: async (url) => new Response(JSON.stringify({ paused: true, url: String(url) }), { status: 200 }),
       execFile: async (file, args) => {
@@ -192,7 +192,7 @@ describe('process runtime clients', () => {
       },
     });
 
-    await expect(clients.github.search('repo:auto-claude')).resolves.toEqual({ items: [] });
+    await expect(clients.github.search('repo:runforge')).resolves.toEqual({ items: [] });
     await expect(clients.secondBrain.search('anything')).resolves.toEqual({ matches: [] });
     await expect(clients.mail.draft({ to: 'a@example.com', subject: 's', body: 'b' }))
       .resolves.toEqual({ draftId: 'draft-1' });

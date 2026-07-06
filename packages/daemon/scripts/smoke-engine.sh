@@ -27,9 +27,9 @@
 #   SMOKE_KEEP=1 bash .../smoke-engine.sh                   # leave the seeded issue in place
 #
 # Config (env, with pilot defaults):
-#   SMOKE_REPO         GitHub owner/name to run against   (default DANIELSOCRAHANDLEZZ/auto-claude-example)
+#   SMOKE_REPO         GitHub owner/name to run against   (default DANIELSOCRAHANDLEZZ/runforge-example)
 #   SMOKE_SPEC_KEY     L1 spec to ladder to L2            (default FUNC-NOTES-DIGEST)
-#   SMOKE_CONTAINER    daemon container name              (default auto-claude-daemon-1)
+#   SMOKE_CONTAINER    daemon container name              (default runforge-daemon-1)
 #   SMOKE_CONTROL_URL  control-plane base URL             (default http://localhost:3847)
 #   SMOKE_CREDS_DIR    host dir mounted to /root/.claude  (default /tmp/pilot-claude)
 #   SMOKE_SYNC_SCRIPT  optional creds re-sync script      (default scripts/sync-claude-creds.sh if present)
@@ -38,9 +38,9 @@
 #
 set -uo pipefail
 
-REPO="${SMOKE_REPO:-DANIELSOCRAHANDLEZZ/auto-claude-example}"
+REPO="${SMOKE_REPO:-DANIELSOCRAHANDLEZZ/runforge-example}"
 SPEC_KEY="${SMOKE_SPEC_KEY:-FUNC-NOTES-DIGEST}"
-CONTAINER="${SMOKE_CONTAINER:-auto-claude-daemon-1}"
+CONTAINER="${SMOKE_CONTAINER:-runforge-daemon-1}"
 CONTROL_URL="${SMOKE_CONTROL_URL:-http://localhost:3847}"
 CREDS_DIR="${SMOKE_CREDS_DIR:-/tmp/pilot-claude}"
 TIMEOUT="${SMOKE_TIMEOUT:-900}"
@@ -90,7 +90,7 @@ c_grn "container healthy, control-plane reachable"
 step "preflight: subscription token (re-sync + auth check)"
 if [ -x "$SYNC_SCRIPT" ]; then
   echo "re-syncing creds via $SYNC_SCRIPT"
-  AUTO_CLAUDE_CREDS_DIR="$CREDS_DIR" "$SYNC_SCRIPT" 2>&1 | tail -1 || c_ylw "sync script returned non-zero (continuing to auth check)"
+  RUNFORGE_CREDS_DIR="$CREDS_DIR" "$SYNC_SCRIPT" 2>&1 | tail -1 || c_ylw "sync script returned non-zero (continuing to auth check)"
 else
   c_ylw "no sync script at $SYNC_SCRIPT — relying on existing creds at $CREDS_DIR"
 fi

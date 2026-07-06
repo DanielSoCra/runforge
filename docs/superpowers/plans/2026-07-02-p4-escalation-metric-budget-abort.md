@@ -24,7 +24,7 @@
 - **Computation-pattern precedent:** `packages/daemon/src/coordination/tech-lead/metrics.ts:1-58` (`computeAndStoreMetrics`, deps-injected, 90d retention, flat-JSON time-series via `writeJsonSafe`/`readJsonSafe`). No HTTP exposure. (Check for a `metrics.test.ts` alongside — verifier saw none.)
 - **Endpoint seam:** the route-handler object literal in `daemon.ts` (~2190-2252) already closes over `decisionManager` + `deploymentRegistry` (siblings: `answerDecision` ~2190, `widenAutonomy` ~2241); add a sibling there + dispatch `GET /metrics/escalation` in `server.ts` next to `GET /decisions/pending` (~258-270).
 - **4.4:** `budget: z.number()` (`deployment-registry/schema.ts:138`), on the frozen profile (`types.ts:114`) — **zero `readDeclaredData(...,'budget')` callers**. Session/run caps are enforced by `CostTracker` (`cost.ts:31-45`, one-per-daemon-process, keyed by issueNumber, global `dailyCost`, gate at `runtime.ts:512`) — **no deployment scope**. FUNC-AC-FLEET (approved) owns `budget` as declared data — pure implementation gap.
-- **Test:** daemon `pnpm --filter @auto-claude/daemon test`; dashboard `pnpm --filter @auto-claude/dashboard test`; decision-index needs REAL_PG. Mirror: `lane-engine/earn-in.test.ts` (predicate boundaries), `deployment-registry/registry.test.ts`/`autonomy.test.ts`, `coordination/tech-lead/metrics.ts` (computation shape).
+- **Test:** daemon `pnpm --filter @runforge/daemon test`; dashboard `pnpm --filter @runforge/dashboard test`; decision-index needs REAL_PG. Mirror: `lane-engine/earn-in.test.ts` (predicate boundaries), `deployment-registry/registry.test.ts`/`autonomy.test.ts`, `coordination/tech-lead/metrics.ts` (computation shape).
 
 ## Design decisions (resolved up front)
 
@@ -90,7 +90,7 @@ No real Postgres in the gate (G2 uses an injected count source; G4 uses an injec
 ## Verify command
 
 ```
-pnpm --filter @auto-claude/daemon test <G1,G2,G4 paths> && pnpm --filter @auto-claude/dashboard test <G3 path> && pnpm --filter @auto-claude/daemon typecheck && pnpm --filter @auto-claude/dashboard typecheck
+pnpm --filter @runforge/daemon test <G1,G2,G4 paths> && pnpm --filter @runforge/dashboard test <G3 path> && pnpm --filter @runforge/daemon typecheck && pnpm --filter @runforge/dashboard typecheck
 ```
 
 ## Definition of done

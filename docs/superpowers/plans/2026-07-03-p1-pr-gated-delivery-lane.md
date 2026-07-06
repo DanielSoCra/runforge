@@ -91,7 +91,7 @@ No real GitHub; mock octokit + real-git-temp-dir for revert; no real Postgres; 3
 
 ## Verify command
 ```
-pnpm --filter @auto-claude/daemon test <gate paths> && pnpm --filter @auto-claude/daemon typecheck
+pnpm --filter @runforge/daemon test <gate paths> && pnpm --filter @runforge/daemon typecheck
 ```
 
 ## Definition of done (build phase, post-D2)

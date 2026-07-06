@@ -1,7 +1,7 @@
 ---
 id: STACK-AC-EARN-IN
 type: stack-specific
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 stack: typescript

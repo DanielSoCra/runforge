@@ -1,4 +1,4 @@
-# @auto-claude/concierge
+# @runforge/concierge
 
 Spec-governed concierge core package.
 
@@ -16,4 +16,4 @@ Implemented surfaces:
 
 External clients are intentionally injected or left as explicit not-configured
 handlers. The package does not silently pretend Slack, mail, vault, GitHub, or
-auto-claude clients exist before they are wired.
+runforge clients exist before they are wired.

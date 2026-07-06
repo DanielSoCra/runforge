@@ -267,7 +267,7 @@ describe('RLS policies', () => {
 - [ ] **Step 2: Run tests to verify they fail (no tables yet)**
 
 ```bash
-cd ~/code/auto-claude
+cd ~/code/runforge
 SUPABASE_URL=https://uqhnbvljzfwuexmwlzrn.supabase.co \
 SUPABASE_SERVICE_KEY=<service-role-key> \
 SUPABASE_ANON_KEY=<anon-key> \
@@ -550,7 +550,7 @@ Generate a strong key: `openssl rand -base64 32`
 - [ ] **Step 6: Run the RLS tests — verify they pass**
 
 ```bash
-cd ~/code/auto-claude
+cd ~/code/runforge
 SUPABASE_URL=https://uqhnbvljzfwuexmwlzrn.supabase.co \
 SUPABASE_SERVICE_KEY=<service-role-key> \
 SUPABASE_ANON_KEY=<anon-key> \
@@ -578,7 +578,7 @@ git commit -m "feat(dashboard): add Supabase schema with RLS, pgcrypto, and boot
 - [ ] **Step 1: Create Next.js 16 project in `dashboard/`**
 
 ```bash
-cd ~/code/auto-claude
+cd ~/code/runforge
 pnpm dlx create-next-app@latest dashboard \
   --typescript \
   --eslint \
@@ -952,7 +952,7 @@ export default async function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-background">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">Auto-Claude</CardTitle>
+          <CardTitle className="text-2xl">Runforge</CardTitle>
           <CardDescription>Sign in to access the dashboard</CardDescription>
         </CardHeader>
         <CardContent>
@@ -1200,7 +1200,7 @@ export function Sidebar() {
       <div className="px-6 py-5 border-b border-border">
         <div className="flex items-center gap-2">
           <Terminal className="h-5 w-5" />
-          <span className="font-semibold text-sm">Auto-Claude</span>
+          <span className="font-semibold text-sm">Runforge</span>
         </div>
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1">
@@ -1236,7 +1236,7 @@ import { GeistMono } from 'geist/font/mono';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Auto-Claude Dashboard',
+  title: 'Runforge Dashboard',
   description: 'Autonomous coding pipeline management',
 };
 

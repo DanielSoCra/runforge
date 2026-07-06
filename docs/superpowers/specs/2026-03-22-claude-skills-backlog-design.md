@@ -13,7 +13,7 @@ superseded_date: 2026-06-02
 **Status:** Approved
 **Related:** 2026-03-22-spec-driven-pipeline-design.md
 **Source:** Analysis of [alirezarezvani/claude-skills](https://github.com/alirezarezvani/claude-skills) (205 skills, v2.1.2)
-**Goal:** Capture adoptable patterns from the claude-skills repository as structured backlog items for auto-claude's Phase 1/2/3 evolution.
+**Goal:** Capture adoptable patterns from the claude-skills repository as structured backlog items for runforge's Phase 1/2/3 evolution.
 
 ## Context
 
@@ -30,7 +30,7 @@ A comprehensive review of the claude-skills repository identified 16 HIGH-value 
 ## Design Decisions
 
 1. **Phase 2/3 issues, not Phase 1 spec modifications.** Phase 1 validates the workflow; these patterns require the native control plane.
-2. **Grouped by auto-claude component.** Each issue maps to one L1 spec owner and one L2 architecture spec, keeping work coherent.
+2. **Grouped by runforge component.** Each issue maps to one L1 spec owner and one L2 architecture spec, keeping work coherent.
 3. **One Phase 1 exception.** Lightweight prompt-level improvements (evaluator immutability rule, structured review checklist) go into a separate Phase 1 issue since they require no architectural changes.
 
 ## Backlog Issues
@@ -66,7 +66,7 @@ A comprehensive review of the claude-skills repository identified 16 HIGH-value 
 
 **Inspiration:** autoresearch-agent strategy escalation, agent-workflow-designer handoff contracts
 
-**Note:** agent-workflow-designer's "workflow pattern selection" and "budget/timeout enforcement" patterns are not adopted here — auto-claude already covers these via pipeline variants in ARCH-AC-CONTROL-PLANE and cost tracking in ARCH-AC-SESSION-RUNTIME.
+**Note:** agent-workflow-designer's "workflow pattern selection" and "budget/timeout enforcement" patterns are not adopted here — runforge already covers these via pipeline variants in ARCH-AC-CONTROL-PLANE and cost tracking in ARCH-AC-SESSION-RUNTIME.
 
 ---
 
@@ -194,4 +194,4 @@ Issues within Phase 2 have ordering dependencies:
 
 These issues extend existing L1 specs — they do not create new functional areas. Each issue references its governing L1 and L2 specs. The pipeline will generate L3 specs and implement code through the normal L1→L2→L3→implement flow.
 
-The patterns adopted here are informed by external prior art (claude-skills repository) but implemented within auto-claude's own spec-driven architecture. No external code is imported — only design patterns and acceptance criteria.
+The patterns adopted here are informed by external prior art (claude-skills repository) but implemented within runforge's own spec-driven architecture. No external code is imported — only design patterns and acceptance criteria.

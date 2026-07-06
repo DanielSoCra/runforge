@@ -1,7 +1,7 @@
 import {
   DecisionRequestSchema,
   type DecisionRequest,
-} from "@auto-claude/decision-protocol";
+} from "@runforge/decision-protocol";
 import type { ReleaseProposal } from "./types.js";
 
 export function releaseDecisionId(

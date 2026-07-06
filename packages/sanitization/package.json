@@ -1,5 +1,5 @@
 {
-  "name": "@auto-claude/sanitization",
+  "name": "@runforge/sanitization",
   "version": "1.0.0",
   "private": true,
   "type": "module",

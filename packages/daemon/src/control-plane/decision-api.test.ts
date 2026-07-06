@@ -16,7 +16,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mkdtemp } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { RankedListItem, DetailView, ListRankedArgs } from '@auto-claude/decision-index';
+import type { RankedListItem, DetailView, ListRankedArgs } from '@runforge/decision-index';
 import type { InboxItem, RankedItem, RankingExplanation } from '../operator-learning/types.js';
 import { OperatorLearningService } from '../operator-learning/index.js';
 import {

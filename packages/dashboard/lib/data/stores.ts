@@ -479,7 +479,7 @@ export interface DashboardStores {
 
 type DashboardDb = ReturnType<typeof createDashboardDbClient>['db'];
 
-const OPERATOR_MEMBERSHIP_LOCK_NAME = 'auto_claude_operator_membership';
+const OPERATOR_MEMBERSHIP_LOCK_NAME = 'runforge_operator_membership';
 
 let dashboardStores: DashboardStores | undefined;
 

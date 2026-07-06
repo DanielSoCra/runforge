@@ -1,6 +1,6 @@
 # Self-Hosted GitHub Actions Runner (macOS)
 
-The workflows in `.github/workflows/` (`ci.yml`, `auto-claude.yml`) target `runs-on: self-hosted`. This doc covers running that runner on a macOS machine (tested on Apple Silicon) as a user-scope LaunchAgent that starts on login.
+The workflows in `.github/workflows/` (`ci.yml`, `runforge.yml`) target `runs-on: self-hosted`. This doc covers running that runner on a macOS machine (tested on Apple Silicon) as a user-scope LaunchAgent that starts on login.
 
 ## Prerequisites
 
@@ -88,4 +88,4 @@ cd ~ && rm -rf ~/actions-runner
 - **Trust model:** the runner executes workflow code as the logged-in user with access to the keychain, SSH keys, and all files that user can read. Only grant write access to the repo to people you trust to run code on this machine.
 - **Minutes billing:** self-hosted runners do NOT consume the GitHub Actions minutes quota. Queue time on a self-hosted runner does not bill either; however, with no runner online, jobs sit queued until the 24h timeout.
 - **Concurrent jobs:** the runner processes one job at a time. Multiple queued jobs drain sequentially. If parallel CI matters, register additional runners.
-- **Local daemon coexistence:** `auto-claude.yml` fires on `ready` label and runs the daemon's `process` command via Claude API (using `ANTHROPIC_API_KEY` secret). If a local daemon is also polling the same repo, both will try to process the same issue. Gate one of them — typically by disabling `auto-claude.yml` when the local daemon is authoritative.
+- **Local daemon coexistence:** `runforge.yml` fires on `ready` label and runs the daemon's `process` command via Claude API (using `ANTHROPIC_API_KEY` secret). If a local daemon is also polling the same repo, both will try to process the same issue. Gate one of them — typically by disabling `runforge.yml` when the local daemon is authoritative.

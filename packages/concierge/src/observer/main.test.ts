@@ -19,7 +19,7 @@ const config: ConciergeConfig = {
   vaultPath: '/vault',
   watchedRepos: ['/repo'],
   operatorEmail: 'operator@example.com',
-  autoClaudeBaseUrl: 'http://daemon.local',
+  runforgeBaseUrl: 'http://daemon.local',
 };
 
 describe('concierge observer process entrypoint', () => {

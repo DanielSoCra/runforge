@@ -4,7 +4,7 @@ export function getDashboardHtml(): string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Auto-Claude Dashboard</title>
+<title>Runforge Dashboard</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #0d1117; color: #c9d1d9; font-family: 'Courier New', Courier, monospace; padding: 24px; }
@@ -26,7 +26,7 @@ export function getDashboardHtml(): string {
 </style>
 </head>
 <body>
-<h1>Auto-Claude Dashboard</h1>
+<h1>Runforge Dashboard</h1>
 <div class="cards" id="cards">
   <div class="card"><div class="card-label">Status</div><div class="card-value" id="card-status">—</div></div>
   <div class="card"><div class="card-label">Active Runs</div><div class="card-value" id="card-active">—</div></div>

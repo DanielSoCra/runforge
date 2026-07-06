@@ -1,7 +1,7 @@
 ---
 id: ARCH-AC-KNOWLEDGE-SYNC
 type: architecture
-domain: auto-claude
+domain: runforge
 status: draft
 version: 2
 layer: 2
@@ -12,13 +12,13 @@ references: FUNC-AC-LEARNING
 
 ## Overview
 
-The Knowledge Sync Service imports insights from an external knowledge-vault vault (a directory of Markdown files) into auto-claude's internal Knowledge Service (ARCH-AC-KNOWLEDGE). Sync is **one-directional and read-only from auto-claude's perspective** — auto-claude never writes to the vault. The set of vault locations to read (e.g. Mistakes, Patterns, or others) is not hardcoded in auto-claude; instead, auto-claude reads a vault-local **access manifest** — a known-named instructions file maintained inside the vault itself — that declares which relative paths to ingest and how to map each into KnowledgeRecord types. When the vault's internal structure changes, the manifest inside the vault changes with it and auto-claude adapts on the next sync cycle without a code or config change. Sync runs on a configurable schedule (never real-time). A content-hash deduplication registry prevents the same insight from being re-imported across cycles.
+The Knowledge Sync Service imports insights from an external knowledge-vault vault (a directory of Markdown files) into runforge's internal Knowledge Service (ARCH-AC-KNOWLEDGE). Sync is **one-directional and read-only from runforge's perspective** — runforge never writes to the vault. The set of vault locations to read (e.g. Mistakes, Patterns, or others) is not hardcoded in runforge; instead, runforge reads a vault-local **access manifest** — a known-named instructions file maintained inside the vault itself — that declares which relative paths to ingest and how to map each into KnowledgeRecord types. When the vault's internal structure changes, the manifest inside the vault changes with it and runforge adapts on the next sync cycle without a code or config change. Sync runs on a configurable schedule (never real-time). A content-hash deduplication registry prevents the same insight from being re-imported across cycles.
 
 ## Data Model
 
 **SyncConfig** holds the repo-side, operator-configurable sync parameters. It contains: `enabled` (boolean — when false, the sync process does not run), `vaultPath` (the root location of the knowledge-vault vault in File Storage), and `syncIntervalMinutes` (default 60). The repo config identifies WHICH vault to sync from; it does not describe the vault's internal layout.
 
-**VaultAccessManifest** is the in-vault contract that tells auto-claude what to read. It is a structured document read from a well-known relative path within the vault root (the exact filename and path is fixed at the L3 pattern layer, not here). Its content declares a list of **ImportSource** entries, each with: a `name` (stable identifier used in source attribution, e.g. `mistakes`, `patterns`), a `relativePath` (directory within the vault root to enumerate), a `recordType` (how to map documents into KnowledgeRecord — e.g. `technical_pitfall`), and a `recursion` policy (either `top-level-only` or `recursive`). The manifest may also declare a default `confidence` and default `artifact_patterns` to apply when documents omit those frontmatter fields. The manifest is read fresh on every sync cycle — changes take effect at the next scheduled trigger.
+**VaultAccessManifest** is the in-vault contract that tells runforge what to read. It is a structured document read from a well-known relative path within the vault root (the exact filename and path is fixed at the L3 pattern layer, not here). Its content declares a list of **ImportSource** entries, each with: a `name` (stable identifier used in source attribution, e.g. `mistakes`, `patterns`), a `relativePath` (directory within the vault root to enumerate), a `recordType` (how to map documents into KnowledgeRecord — e.g. `technical_pitfall`), and a `recursion` policy (either `top-level-only` or `recursive`). The manifest may also declare a default `confidence` and default `artifact_patterns` to apply when documents omit those frontmatter fields. The manifest is read fresh on every sync cycle — changes take effect at the next scheduled trigger.
 
 **SyncHashRegistry** is the deduplication store. It is a structured append-only log; each entry contains: a unique identifier, a `contentHash` (deterministic hash of the normalized record content: artifact patterns sorted and concatenated with the description), the `sourceName` (which ImportSource the document came from), a `vaultDocumentReference` (stable identifier within the vault), and a `syncedAt` timestamp. Before importing, the sync process checks the registry for an existing entry with the same content hash. If found, the document is skipped. If not found, a new entry is appended after the import succeeds.
 
@@ -39,7 +39,7 @@ The Knowledge Sync Service does not expose an HTTP API. It is invoked procedural
 - Knowledge Sync Service OWNS: SyncHashRegistry, SyncRun history, the SyncConfig reader, and the VaultAccessManifest parser.
 - Knowledge Sync Service READS: File Storage (the vault's access manifest, and the Markdown files at relative paths declared in that manifest).
 - Knowledge Sync Service WRITES: Knowledge Service only (records are submitted via the documented store-record API with origin type `autonomous` and lifecycle status `active`).
-- Knowledge Sync Service NEVER writes to the vault. The vault is read-only from auto-claude's perspective.
+- Knowledge Sync Service NEVER writes to the vault. The vault is read-only from runforge's perspective.
 - Knowledge Sync Service NEVER encodes vault-internal structure (directory names, layout conventions). All vault structure knowledge comes from the VaultAccessManifest read fresh on each cycle.
 - Daemon Control Plane TRIGGERS the sync cycle on schedule and surfaces sync history to the operator.
 - Knowledge Service OWNS the canonical knowledge store. The Knowledge Sync Service never reads or writes the knowledge store's underlying file directly — it uses only the Knowledge Service's documented API.
@@ -69,7 +69,7 @@ The Knowledge Sync Service does not expose an HTTP API. It is invoked procedural
 
 **SyncConfig missing or malformed:** If the `knowledgeSync` section is absent from the repo config, the sync service treats `enabled` as false and returns a no-op SyncRun. No error is raised — sync is opt-in.
 
-**VaultAccessManifest missing or unparseable:** The entire sync cycle fails with an error recorded in the SyncRun (status `failed`, zero records processed). Loud failure is intentional — auto-claude does not assume vault layouts. The operator must place or repair the manifest inside the vault.
+**VaultAccessManifest missing or unparseable:** The entire sync cycle fails with an error recorded in the SyncRun (status `failed`, zero records processed). Loud failure is intentional — runforge does not assume vault layouts. The operator must place or repair the manifest inside the vault.
 
 **Vault not found or not readable:** The sync cycle fails with status `failed` and a descriptive error. The next scheduled cycle will retry.
 

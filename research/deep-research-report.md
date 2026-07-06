@@ -12,7 +12,7 @@ Taken together, the four references show a convergent design pattern for “walk
 
 **Superpowers** is the strongest “methodology layer” of the four: it encodes software engineering discipline as composable “skills” (plan-writing, worktree usage, test-driven development, systematic debugging, code review, completion gates), and it emphasises chunking work into small, verifiable units with explicit commands. It explicitly describes a workflow: tease out a spec, show it in readable chunks, write an implementation plan with TDD + YAGNI + DRY, then run a subagent-driven process with two-stage review. citeturn21view0turn22view0turn22view1turn23view0turn24view2turn25view0
 
-A key practical implication for your Auto-Claude design is that you do not need to “invent” all of the primitives yourself: modern Claude Code already provides **headless programmatic execution (`-p/--print`)**, **validated structured outputs (`--json-schema`)**, **worktree isolation (`--worktree`)**, **skills (AgentSkills)**, **subagents**, **hooks**, **permissions allow/ask/deny**, and **sandboxing controls**—all of which map almost directly onto what your draft spec calls a “daemon” plus “pipeline”. citeturn32view0turn32view1turn32view2turn30view3turn30view2turn33search0turn33search1turn32view3
+A key practical implication for your Runforge design is that you do not need to “invent” all of the primitives yourself: modern Claude Code already provides **headless programmatic execution (`-p/--print`)**, **validated structured outputs (`--json-schema`)**, **worktree isolation (`--worktree`)**, **skills (AgentSkills)**, **subagents**, **hooks**, **permissions allow/ask/deny**, and **sandboxing controls**—all of which map almost directly onto what your draft spec calls a “daemon” plus “pipeline”. citeturn32view0turn32view1turn32view2turn30view3turn30view2turn33search0turn33search1turn32view3
 
 ## Pattern library you should copy, with provenance
 
@@ -26,7 +26,7 @@ Claude Code’s own “common workflows” documentation reinforces the same cor
 
 Aperant’s README makes the “all changes happen in git worktrees” claim a primary selling point, and it advertises “up to 12” parallel agent terminals, which implicitly means it has solved a large amount of coordination and isolation plumbing you can emulate. citeturn11view2turn8view0
 
-**Design takeaway for Auto-Claude:** make “worktree hygiene” a first-class phase (create, initialise dependencies, verify baseline tests, allocate ports, track lifecycle, cleanup policy). Treat it as deterministic machinery, not an LLM decision.
+**Design takeaway for Runforge:** make “worktree hygiene” a first-class phase (create, initialise dependencies, verify baseline tests, allocate ports, track lifecycle, cleanup policy). Treat it as deterministic machinery, not an LLM decision.
 
 ### Skills as the unit of operationalised methodology
 
@@ -36,7 +36,7 @@ Claude Code’s skills documentation similarly treats skills as the modern repla
 
 Superpowers shows what “skills as methodology” looks like in practice: `writing-plans` mandates bite-sized tasks (2–5 minutes each) with exact file paths and commands, and `subagent-driven-development` codifies a two-stage review loop (spec compliance first, then code quality). citeturn22view0turn22view1
 
-**Design takeaway for Auto-Claude:** your `prompts/*.md` folder is already “skills shaped”. Make it fully AgentSkills-compatible so you can:  
+**Design takeaway for Runforge:** your `prompts/*.md` folder is already “skills shaped”. Make it fully AgentSkills-compatible so you can:
 1) load it into Claude Code sessions in a standard way, and 2) reuse the same skill pack in both “interactive spec authoring” (Workflow A) and “autonomous factory runs” (Workflow B). citeturn17view1turn30view3turn22view0
 
 ### Control plane / operator ergonomics as stability multipliers
@@ -48,7 +48,7 @@ Two details are especially transferable to your daemon:
 * **Locking by port binding rather than PID files.** OpenClaw’s “Gateway Lock” explains a robust mechanism: bind the control socket early; if another process holds the port, fail fast; the OS releases locks on crash without stale files. citeturn19view0  
 * **Background process management as a tool primitive.** The `exec`/`process` tool split (run commands, auto-background, poll logs later) is directly analogous to “deploy-dev then poll health checks”. citeturn19view1
 
-**Design takeaway for Auto-Claude:** treat the daemon as a control plane with explicit “operator verbs” (status, logs, retry, resume, drain, lock) rather than a cron script. Your spec already gestures at this; OpenClaw provides a proven shape. citeturn16view0turn19view0turn19view1
+**Design takeaway for Runforge:** treat the daemon as a control plane with explicit “operator verbs” (status, logs, retry, resume, drain, lock) rather than a cron script. Your spec already gestures at this; OpenClaw provides a proven shape. citeturn16view0turn19view0turn19view1
 
 ### Secrets and permission boundaries are not optional for autonomous agents
 
@@ -60,7 +60,7 @@ Aperant documents a three-layer security model (OS sandbox, filesystem restricti
 
 OpenClaw extends this with an ecosystem-level approach: it describes deterministic packaging, hashing, and VirusTotal scanning (including Code Insight) for skills published to its marketplace, plus ongoing re-scans. citeturn18view0
 
-**Design takeaway for Auto-Claude:** make secrets + permissions + sandboxing part of the base architecture, not a phase you “add later”. The moment you autopoll issues and run code unattended, your threat model becomes real. citeturn20view2turn33search1turn18view0turn11view2
+**Design takeaway for Runforge:** make secrets + permissions + sandboxing part of the base architecture, not a phase you “add later”. The moment you autopoll issues and run code unattended, your threat model becomes real. citeturn20view2turn33search1turn18view0turn11view2
 
 ### The “immutable harness + mutable target + metric” pattern is directly reusable for SDD
 
@@ -76,9 +76,9 @@ For your scenario, the analogues are:
 * Mutable target: the codebase changes produced for an issue’s feature branch/worktrees.
 * Metric(s): holdout scenarios, tests, lint/typecheck, deployment health.
 
-**Design takeaway for Auto-Claude:** treat every issue as an “experiment run” with a recorded state, deterministic verification outputs, and explicit keep/discard/escalate transitions—just like autoresearch, but in software delivery terms. citeturn26view0turn6view0turn25view0
+**Design takeaway for Runforge:** treat every issue as an “experiment run” with a recorded state, deterministic verification outputs, and explicit keep/discard/escalate transitions—just like autoresearch, but in software delivery terms. citeturn26view0turn6view0turn25view0
 
-## A concrete Auto-Claude architecture that aligns with your draft and the evidence
+## A concrete Runforge architecture that aligns with your draft and the evidence
 
 Your draft describes “TypeScript daemon + Claude-as-coordinator”, with GitHub Issues as the queue and a multi-phase pipeline that ends in a dev deploy and a PR to `main`. That architecture is compatible with the strongest patterns above, but you can sharpen it by using **Claude Code’s own programmatic interface** as the execution substrate and keeping TypeScript focused on orchestration, state, and I/O. citeturn32view1turn32view0turn30view0turn11view2
 
@@ -158,7 +158,7 @@ This triple approach ensures the guarantee is not “trust the agent”, but “
 
 OpenClaw’s security write-up is explicit that skills are code running in the agent’s context and could exfiltrate data or execute payloads. citeturn18view0turn17view1
 
-If your Auto-Claude uses prompt packs, scripts, hooks, or plugins, you have a similar supply-chain problem. OpenClaw’s marketplace pipeline (deterministic packaging → hash → VirusTotal scanning → block/flag) is a strong template, even if you implement it locally rather than through a public marketplace. citeturn18view0
+If your Runforge uses prompt packs, scripts, hooks, or plugins, you have a similar supply-chain problem. OpenClaw’s marketplace pipeline (deterministic packaging → hash → VirusTotal scanning → block/flag) is a strong template, even if you implement it locally rather than through a public marketplace. citeturn18view0
 
 Claude Code also supports managed settings and marketplace restriction controls (e.g., restricting plugin sources) and documents configuration scopes (managed/user/project/local), which you can repurpose as “factory policies” that cannot be overridden by workers. citeturn30view1turn33search6turn33search22
 
@@ -168,7 +168,7 @@ Claude Code documentation describes bypass-permissions mode as equivalent to `--
 
 Aperant’s README and OpenClaw’s docs both reflect a philosophy of defence-in-depth rather than blind trust. citeturn8view0turn18view0turn16view0
 
-**Recommendation:** design Auto-Claude so that unattended runs happen inside a constrained environment (container, VM, or Claude Code’s sandbox mode with filesystem/network restrictions), and make the “permissions bypass” a last resort rather than the default. citeturn33search1turn33search4turn8view0
+**Recommendation:** design Runforge so that unattended runs happen inside a constrained environment (container, VM, or Claude Code’s sandbox mode with filesystem/network restrictions), and make the “permissions bypass” a last resort rather than the default. citeturn33search1turn33search4turn8view0
 
 ## Implementation roadmap shaped by the proven primitives
 
@@ -208,7 +208,7 @@ Your draft command snippets will work better if aligned with the current CLI con
 
 These adjustments reduce “drift risk” between your orchestrator and the underlying tool you’re orchestrating.
 
-## Closing synthesis: the “Auto-Claude” you are describing is a composition of proven building blocks
+## Closing synthesis: the “Runforge” you are describing is a composition of proven building blocks
 
 Your current draft is directionally consistent with what the ecosystem’s strongest implementations already do:
 

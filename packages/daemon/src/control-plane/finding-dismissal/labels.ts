@@ -16,7 +16,7 @@
  * `uncategorized` class).
  */
 import type { ReviewCategory } from '../../coordination/review-scheduler.js';
-import { RISK_CLASSES, type RiskClass } from '@auto-claude/decision-protocol';
+import { RISK_CLASSES, type RiskClass } from '@runforge/decision-protocol';
 
 /**
  * The fixed review-category set. Kept in lockstep with `ReviewCategory`

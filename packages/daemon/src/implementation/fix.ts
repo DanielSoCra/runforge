@@ -47,7 +47,7 @@ export async function fix(
       '- **For code changes that affect runtime behavior**: regression-test-first.',
       '  Write a failing test that exercises the bug, fix the code, confirm the test passes.',
       '- **For spec, prompt, config, or documentation changes** (e.g., findings citing',
-      '  `prompts/*.md`, `.specify/**`, `auto-claude.config.json`, `*.md` docs): edit the',
+      '  `prompts/*.md`, `.specify/**`, `runforge.config.json`, `*.md` docs): edit the',
       '  file directly. No regression test is required for prose or template edits — rely',
       '  on the static checks (`tsc --noEmit`, `pnpm test`, `prettier --check`) to confirm',
       '  nothing else broke.',

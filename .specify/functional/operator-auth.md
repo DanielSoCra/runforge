@@ -1,7 +1,7 @@
 ---
 id: FUNC-AC-OPERATOR-AUTH
 type: functional
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 1
@@ -11,11 +11,11 @@ layer: 1
 
 ## Problem Statement
 
-Auto-Claude's dashboard relies on an external hosted provider to sign operators in and on a storage-layer policy mechanism to decide who may change what. It also has a single blunt switch that disables all sign-in entirely, used for single-operator deployments. This couples the project's access control to an outside provider, makes authorization depend on where data happens to be stored rather than on the application's own rules, and the all-or-nothing bypass is easy to leave on by mistake in a real deployment. Until the project owns operator identity and authorization, it cannot guarantee that only authorized operators change critical settings, cannot evolve its access rules independently, and risks weakening security during the move to self-hosted operation.
+Runforge's dashboard relies on an external hosted provider to sign operators in and on a storage-layer policy mechanism to decide who may change what. It also has a single blunt switch that disables all sign-in entirely, used for single-operator deployments. This couples the project's access control to an outside provider, makes authorization depend on where data happens to be stored rather than on the application's own rules, and the all-or-nothing bypass is easy to leave on by mistake in a real deployment. Until the project owns operator identity and authorization, it cannot guarantee that only authorized operators change critical settings, cannot evolve its access rules independently, and risks weakening security during the move to self-hosted operation.
 
 ## Actors
 
-- **Operator** — the person who runs and maintains an Auto-Claude deployment.
+- **Operator** — the person who runs and maintains an Runforge deployment.
 - **Administrator** — an operator with full control: repositories, credentials, team, daemon controls, and settings.
 - **Viewer** — an operator with read-only visibility and no ability to change anything.
 

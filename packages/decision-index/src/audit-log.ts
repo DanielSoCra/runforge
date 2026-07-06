@@ -1,6 +1,6 @@
 import type { Db } from "./db.js";
 import { auditLog } from "./schema.js";
-import type { ItemStatus, TransitionEvent } from "@auto-claude/decision-protocol";
+import type { ItemStatus, TransitionEvent } from "@runforge/decision-protocol";
 
 /**
  * Slice-4 guarded view-state ops (pin/mute/defer/need_more_context). These are

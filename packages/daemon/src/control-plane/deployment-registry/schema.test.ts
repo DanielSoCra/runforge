@@ -10,7 +10,7 @@ import { parseProfile, parseFleetCapacity } from './schema.js';
 
 /** A structurally valid raw deployment profile (envelope + a valid lane set). */
 const validProfile = {
-  repositories: [{ owner: 'acme', name: 'auto-claude' }],
+  repositories: [{ owner: 'acme', name: 'runforge' }],
   riskPathMap: [{ paths: ['infra/**'], minLevel: 'orange' }],
   defaultMinLevel: 'green',
   laneSet: {

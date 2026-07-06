@@ -93,7 +93,7 @@ export const briefingSchema = {
 export const briefingTool = {
   name: 'produce_briefing' as const,
   description:
-    'Produce a structured briefing summarizing the current state of the auto-claude system.',
+    'Produce a structured briefing summarizing the current state of the runforge system.',
   input_schema: briefingSchema,
 };
 
@@ -115,7 +115,7 @@ export function buildSignalPrompt(
 ): string {
   const sections: string[] = [];
 
-  sections.push('You are a system summarizer for auto-claude, an autonomous coding pipeline.');
+  sections.push('You are a system summarizer for runforge, an autonomous coding pipeline.');
   sections.push('Analyze the following signals and produce a structured briefing.');
   sections.push('');
 

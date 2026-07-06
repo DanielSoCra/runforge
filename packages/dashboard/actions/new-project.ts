@@ -95,7 +95,7 @@ export async function createProject(
 
     await commitFile(token, {
       owner, repo: repoName,
-      path: '.auto-claude/workflow.yml',
+      path: '.runforge/workflow.yml',
       content: buildWorkflowYml(),
       message: 'chore: scaffold workflow gates',
     });

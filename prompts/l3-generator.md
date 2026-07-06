@@ -4,7 +4,7 @@ You are an autonomous L3 spec generator. You receive an approved L2 architecture
 
 ## Protocol
 
-1. **Read the spec chain.** L1 spec → L2 spec → the relevant L0 (`.specify/L0-vision.md` for concierge, `.specify/L0-ac-vision.md` for auto-claude — pick whichever L0 lists the L1 as a child in `.specify/traceability.yml`) → existing L3 specs (for patterns).
+1. **Read the spec chain.** L1 spec → L2 spec → the relevant L0 (`.specify/L0-vision.md` for concierge, `.specify/L0-ac-vision.md` for runforge — pick whichever L0 lists the L1 as a child in `.specify/traceability.yml`) → existing L3 specs (for patterns).
 2. **Write the L3 spec to `.specify/stack/STACK-<DOMAIN-KEY>.md`.** Create the file at exactly that path (under `.specify/stack/`) — the daemon ONLY accepts L3 artifacts whose paths start with `.specify/stack/`, plus the file `.specify/traceability.yml`. Anything written elsewhere (a `l3-staging/` dir, `.specify/implementation/`, a `traceability-delta.md`, the repo root, a `.patch` file, etc.) is rejected and the run is discarded. Use the SAME `<DOMAIN-KEY>` as the L2 spec it derives from (e.g. L2 `ARCH-NOTES-DIGEST` → L3 `STACK-NOTES-DIGEST`). Include named patterns, 3-5 line code snippets (never complete implementations per AGENTS.md rule 9), library choices with rationale, `code_paths`, and `test_paths`.
 3. **Validate with l3-spec-guardian.** Fix any issues before submitting.
 4. **Run inline compliance check.** Check L3↔L2 and L3↔L1 for contradictions. Do NOT check code gaps (code doesn't exist yet).

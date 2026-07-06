@@ -6,12 +6,12 @@ Spec refs: FUNC-AC-SAFETY, FUNC-AC-DATA-PLATFORM, ARCH-AC-OPERATIONAL-SAFETY, AR
 
 ## Goal
 
-The auto-claude daemon should survive a transient operational-data outage (Postgres unreachable) without exiting the process, surface the underlying cause of dependency failures in operator-readable form, and still fail loudly on permanent misconfiguration (schema/auth/permission errors).
+The runforge daemon should survive a transient operational-data outage (Postgres unreachable) without exiting the process, surface the underlying cause of dependency failures in operator-readable form, and still fail loudly on permanent misconfiguration (schema/auth/permission errors).
 
 ## Current State
 
 - `packages/daemon/src/control-plane/daemon.ts:201` calls `await configReader.start()`, which calls `await this.fetch()` once in `packages/daemon/src/data/config-reader.ts:38`. Any throw bubbles to `main.ts:18`, which `process.exit(1)`s.
-- launchd (`scripts/com.autoclaude.daemon.plist`) keeps the process alive via `KeepAlive` + `ThrottleInterval=30`. Result: a Postgres outage produces an opaque crash-loop with no `/health` reachable.
+- launchd (`scripts/com.runforge.daemon.plist`) keeps the process alive via `KeepAlive` + `ThrottleInterval=30`. Result: a Postgres outage produces an opaque crash-loop with no `/health` reachable.
 - Today's incident: Docker was stopped; the heartbeat went stale; the log filled with `Failed to start: [config-reader] global settings fetch failed: Failed query: select "id", ... from "global_settings"` — no indication that the actual cause was `ECONNREFUSED`.
 - `unavailableOnThrow()` in `packages/db/src/postgres-stores.ts:861` catches every Drizzle error and reduces it to `error.message`. `postgres-js` wraps connection errors so the `message` is the SQL only; the underlying `cause` (`ECONNREFUSED`, `28P01`, `42P01`) is dropped on the floor.
 - The control HTTP server (`createControlServer` in `packages/daemon/src/control-plane/server.ts:180`) does not bind until step 6 of `startDaemon` — *after* the failing step-2 config fetch. The observability surface is unavailable exactly when it would be most useful.
@@ -64,7 +64,7 @@ Sparring with codex picked option E over: A (bounded retry then exit), B (last-k
 
 **Explicitly unchanged**
 
-- `scripts/com.autoclaude.daemon.plist` — `KeepAlive` + `ThrottleInterval=30` stay as backstop for true crashes (process death, OOM). Not the primary recovery mechanism anymore.
+- `scripts/com.runforge.daemon.plist` — `KeepAlive` + `ThrottleInterval=30` stay as backstop for true crashes (process death, OOM). Not the primary recovery mechanism anymore.
 - The entire `startDaemon` body from current line ~201 onward (services, repoManager, crash resumption, heartbeat, parked-run resume, signal handlers, real control server) — runs unchanged after config loads.
 
 ### Test strategy
@@ -73,7 +73,7 @@ Sparring with codex picked option E over: A (bounded retry then exit), B (last-k
 - **Unit, `startup-retry`.** Inject fake `tryFetch` that fails `unreachable` N times then succeeds; assert max attempts, backoff sequence, flag transitions. Inject `rejected` failure on attempt 1; assert short-circuit.
 - **Unit, `config-reader` degraded poll.** Fake clock; assert flag clearing on first success, escalation counter increment + notification one-shot while degraded, and `console.warn`-only behavior once recovered.
 - **Integration, daemon.test.ts.** Mock data layer to return `unreachable` for first N polls; assert `/health` reports degraded, `tryClaimWork` returns refused, then asserts recovery once the mock starts returning ok.
-- **End-to-end (Phase 9, manual).** `docker stop auto-claude-postgres-1`; observe `[daemon] startup config fetch failed (attempt 1/5, unreachable, ECONNREFUSED): connect ECONNREFUSED 127.0.0.1:5432` in the log; observe `/health` returns `{ ok: true, degraded: true, lastConfigError: { ... } }`; `docker start auto-claude-postgres-1`; observe degraded clears within one poll interval, no process restart.
+- **End-to-end (Phase 9, manual).** `docker stop runforge-postgres-1`; observe `[daemon] startup config fetch failed (attempt 1/5, unreachable, ECONNREFUSED): connect ECONNREFUSED 127.0.0.1:5432` in the log; observe `/health` returns `{ ok: true, degraded: true, lastConfigError: { ... } }`; `docker start runforge-postgres-1`; observe degraded clears within one poll interval, no process restart.
 
 ### Risks
 

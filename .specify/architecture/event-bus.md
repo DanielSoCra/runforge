@@ -20,7 +20,7 @@ The event-bus is a thin local relational queue that decouples the observer's eve
 CREATE TABLE events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   type TEXT NOT NULL,                    -- e.g. "daemon_stuck", "manual_commit"
-  source TEXT NOT NULL,                  -- "observer", "concierge", "auto-claude"
+  source TEXT NOT NULL,                  -- "observer", "concierge", "runforge"
   payload TEXT NOT NULL,                 -- JSON
   classified_outcome TEXT,               -- NULL until classified; then surface_card|slack_dm|silent_log
   created_at INTEGER NOT NULL,           -- unix ms

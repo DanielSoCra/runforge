@@ -1,5 +1,5 @@
 import { eq, and, gte, sql } from "drizzle-orm";
-import type { ItemStatus, Reversibility } from "@auto-claude/decision-protocol";
+import type { ItemStatus, Reversibility } from "@runforge/decision-protocol";
 import type { Db } from "./db.js";
 import { decisions, auditLog, decisionResponses, protectedRefs } from "./schema.js";
 import { score, type FocusContext } from "./priority.js";

@@ -34,7 +34,7 @@ describe('POST /auth/login', () => {
         status: 200,
         headers: {
           'content-type': 'application/json',
-          'set-cookie': 'auto-claude.oauth_state=state; Path=/; HttpOnly',
+          'set-cookie': 'runforge.oauth_state=state; Path=/; HttpOnly',
         },
       },
     );
@@ -48,7 +48,7 @@ describe('POST /auth/login', () => {
       'https://github.com/login/oauth/authorize',
     );
     expect(response.headers.get('set-cookie')).toContain(
-      'auto-claude.oauth_state=state',
+      'runforge.oauth_state=state',
     );
     expect(mocks.handler).toHaveBeenCalledTimes(1);
     const authRequest = mocks.handler.mock.calls[0]?.[0] as Request;

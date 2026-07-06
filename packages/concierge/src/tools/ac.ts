@@ -3,14 +3,14 @@ import { readNumberArg } from './args.js';
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
-export interface AutoClaudeToolOptions {
+export interface RunforgeToolOptions {
   baseUrl: string;
   requestedBy?: string;
   fetch?: FetchLike;
 }
 
-export function createAutoClaudeToolHandlers(
-  options: AutoClaudeToolOptions,
+export function createRunforgeToolHandlers(
+  options: RunforgeToolOptions,
 ): Record<'ac_status' | 'ac_pause' | 'ac_unstuck' | 'ac_run' | 'ac_merge_to_main', ToolEntry['handler']> {
   const fetchImpl = options.fetch ?? fetch;
   const requestedBy = options.requestedBy ?? 'concierge';
@@ -21,7 +21,7 @@ export function createAutoClaudeToolHandlers(
     const body = await readResponseBody(response);
     if (!response.ok) {
       const message = readErrorMessage(body);
-      throw new Error(`auto-claude request failed ${response.status}: ${message}`);
+      throw new Error(`runforge request failed ${response.status}: ${message}`);
     }
     return body;
   };

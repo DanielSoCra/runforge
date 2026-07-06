@@ -28,7 +28,7 @@ export function createProcessRuntimeClients(
     github: createGitHubCliClient({ execFile }),
     calendar: createCalendarAppleScriptClient({ execFile }),
     observer: createObserverProcessClient({
-      autoClaudeBaseUrl: config.autoClaudeBaseUrl,
+      runforgeBaseUrl: config.runforgeBaseUrl,
       watchedRepos: config.watchedRepos,
       fetch: fetchImpl,
       execFile,
@@ -69,7 +69,7 @@ export function createGitHubCliClient(options: { execFile: ExecFile }): Concierg
 }
 
 export function createObserverProcessClient(options: {
-  autoClaudeBaseUrl: string;
+  runforgeBaseUrl: string;
   watchedRepos: string[];
   fetch: typeof fetch;
   execFile: ExecFile;
@@ -97,7 +97,7 @@ export function createObserverProcessClient(options: {
     },
 
     daemonState: async () => {
-      const response = await options.fetch(`${options.autoClaudeBaseUrl.replace(/\/+$/, '')}/status`, {
+      const response = await options.fetch(`${options.runforgeBaseUrl.replace(/\/+$/, '')}/status`, {
         method: 'GET',
       });
       return readJsonBody(response);

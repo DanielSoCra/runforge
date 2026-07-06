@@ -141,8 +141,8 @@ describe('POST /api/daemon/halt', () => {
     );
   });
 
-  it('forwards Authorization: Bearer from AUTO_CLAUDE_CONTROL_TOKEN when configured', async () => {
-    vi.stubEnv('AUTO_CLAUDE_CONTROL_TOKEN', 'dashboard-secret');
+  it('forwards Authorization: Bearer from RUNFORGE_CONTROL_TOKEN when configured', async () => {
+    vi.stubEnv('RUNFORGE_CONTROL_TOKEN', 'dashboard-secret');
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ halted: true }), { status: 200 }),
     );
@@ -157,7 +157,7 @@ describe('POST /api/daemon/halt', () => {
     );
   });
 
-  it('omits Authorization when AUTO_CLAUDE_CONTROL_TOKEN is unset', async () => {
+  it('omits Authorization when RUNFORGE_CONTROL_TOKEN is unset', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ halted: true }), { status: 200 }),
     );

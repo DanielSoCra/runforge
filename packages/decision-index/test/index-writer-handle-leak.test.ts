@@ -19,12 +19,12 @@ import { FakeResumeDispatcher } from "../src/adapters/fakes/fake-resume-dispatch
  * exercises exactly that window.
  *
  * Opening a real postgres-js connection requires a real Postgres, so this is gated
- * on AUTO_CLAUDE_TEST_DATABASE_URL (set in CI). The leak guard is the factory's
+ * on RUNFORGE_TEST_DATABASE_URL (set in CI). The leak guard is the factory's
  * `catch { await sql.end() }`; here we assert the throw surfaces AND a subsequent
  * healthy writer still constructs + closes (the broken path freed its connection
  * rather than wedging the writer).
  */
-const DB_URL = process.env.AUTO_CLAUDE_TEST_DATABASE_URL;
+const DB_URL = process.env.RUNFORGE_TEST_DATABASE_URL;
 
 // Serialize the real-PG-gated files (shared decision_index schema) across forks.
 const SERIALIZE_LOCK = 982_451_653;

@@ -24,7 +24,7 @@ afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, f
 
 function makeProfile() {
   return {
-    repositories: [{ owner: 'acme', name: 'auto-claude' }],
+    repositories: [{ owner: 'acme', name: 'runforge' }],
     riskPathMap: [{ paths: ['infra/**'], minLevel: 'orange' }],
     defaultMinLevel: 'green',
     laneSet: {

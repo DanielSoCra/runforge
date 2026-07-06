@@ -477,7 +477,7 @@ exists). This is the ONLY traceability mutation in the batch.
 error inside `startDaemon` (`daemon.ts:180`):
 - `GITHUB_TOKEN` — hard-required at **daemon.ts:184–194** (step 0, BEFORE config
   load): `startDaemon` returns `err` if it is `undefined`/empty.
-- `createDbClient()` at **daemon.ts:363** → reads `AUTO_CLAUDE_DATABASE_URL`
+- `createDbClient()` at **daemon.ts:363** → reads `RUNFORGE_DATABASE_URL`
   (`packages/db/src/env.ts:18–21` throws if invalid).
 - `readCredentialKey()` at **daemon.ts:365** → reads `ENCRYPTION_KEY`
   (`packages/db/src/credential-crypto.ts:19–21` throws if absent).
@@ -486,12 +486,12 @@ error inside `startDaemon` (`daemon.ts:180`):
 `readDaemonDataBackendKind()` (`data/backend-kind.ts:11`) treats
 `undefined`/empty/`'postgres'` as `'postgres'` and only throws on a *wrong*
 non-postgres value. So the genuinely-required boot vars are **`GITHUB_TOKEN`,
-`AUTO_CLAUDE_DATABASE_URL`, `ENCRYPTION_KEY`** (not `DAEMON_DATA_BACKEND`).
+`RUNFORGE_DATABASE_URL`, `ENCRYPTION_KEY`** (not `DAEMON_DATA_BACKEND`).
 
 `formatStartupError` (main.ts:87) walks `.cause`, but the operator still sees ONE
 missing var at a time (fix one, hit the next: GITHUB_TOKEN → DB URL → key).
 `dotenv@17.3.1` is present in the pnpm store (transitive) but is NOT a direct
-`@auto-claude/daemon` dependency.
+`@runforge/daemon` dependency.
 
 ### Chosen fix
 
@@ -506,7 +506,7 @@ missing var at a time (fix one, hit the next: GITHUB_TOKEN → DB URL → key).
    `packages/daemon/src/config.ts` (governed by `STACK-AC-CONVENTIONS`, tested by
    `config.test.ts`): `validateRequiredBootEnv(env): { ok: true } | { ok: false;
    missing: string[] }` collects ALL missing required vars — **`GITHUB_TOKEN`,
-   `AUTO_CLAUDE_DATABASE_URL`, `ENCRYPTION_KEY`** (NOT `DAEMON_DATA_BACKEND`,
+   `RUNFORGE_DATABASE_URL`, `ENCRYPTION_KEY`** (NOT `DAEMON_DATA_BACKEND`,
    which defaults to postgres; `workspaceRoot`/optional vars excluded) — and
    reports them in one message. `startDaemon` calls it FIRST (at step 0,
    **replacing** the existing scattered `GITHUB_TOKEN` block at daemon.ts:184–194)
@@ -571,8 +571,8 @@ to `conventions-ts.md` to keep the spec accurate (documents the new convention:
 ## Test strategy
 
 Per-fix unit tests; run the affected spec's `test_paths`. All daemon tests run
-via `pnpm --filter @auto-claude/daemon test` (vitest); typecheck via
-`pnpm --filter @auto-claude/daemon typecheck`.
+via `pnpm --filter @runforge/daemon test` (vitest); typecheck via
+`pnpm --filter @runforge/daemon typecheck`.
 
 - **#3:** `cli.test.ts` — add: `total_cost_usd` parsed as `cost` with
   `costEstimated: false`; `total_cost_usd` wins over `cost_usd`/`cost`;
@@ -610,7 +610,7 @@ via `pnpm --filter @auto-claude/daemon test` (vitest); typecheck via
   before `onDetectSettled`). Specs: `STACK-AC-CONTROL-PLANE`,
   `STACK-AC-RECOVERABLE-FAILURE-ROUTING` test_paths.
 - **#7:** `config.test.ts` — `validateRequiredBootEnv` returns ALL missing of
-  `{GITHUB_TOKEN, AUTO_CLAUDE_DATABASE_URL, ENCRYPTION_KEY}` at once; passes when
+  `{GITHUB_TOKEN, RUNFORGE_DATABASE_URL, ENCRYPTION_KEY}` at once; passes when
   all present; ignores `DAEMON_DATA_BACKEND` and other optional vars.
   **Existing-test impact (codex plan-review):** `daemon.test.ts` mocks
   `../config.js` to expose only `loadConfig` (line ~343) and sets only
@@ -619,14 +619,14 @@ via `pnpm --filter @auto-claude/daemon test` (vitest); typecheck via
   REQUIRES: (1) the `../config.js` mock to also expose `validateRequiredBootEnv`
   (use `vi.mock('../config.js', async (importOriginal) => ({ ...(await
   importOriginal()), loadConfig: ... }))` to keep the REAL function), and (2) the
-  test env setup to also set `AUTO_CLAUDE_DATABASE_URL` + `ENCRYPTION_KEY` so the
+  test env setup to also set `RUNFORGE_DATABASE_URL` + `ENCRYPTION_KEY` so the
   happy-path `startDaemon` tests pass. The existing GITHUB_TOKEN-missing test then
   still passes (the consolidated error string contains `GITHUB_TOKEN`). `main.ts`
   load is a thin call; dotenv no-override is exercised indirectly. Specs:
   `STACK-AC-CONVENTIONS` (+ `daemon.test.ts` under the daemon glob).
 
-Full regression gate before commit: `pnpm --filter @auto-claude/daemon typecheck`
-+ `pnpm --filter @auto-claude/daemon test` + `pnpm --filter @auto-claude/daemon lint`.
+Full regression gate before commit: `pnpm --filter @runforge/daemon typecheck`
++ `pnpm --filter @runforge/daemon test` + `pnpm --filter @runforge/daemon lint`.
 
 ## Risks (carrying codex's flags forward)
 
@@ -682,7 +682,7 @@ Full regression gate before commit: `pnpm --filter @auto-claude/daemon typecheck
    resolving the L3-spec-vs-code divergence (add the field everywhere, or amend
    the spec) is a separate task. Parked.
 3. **Process-wide vs cross-process detect serialization (gap #6).** The gate (and
-   the pre-existing `repoGitLock`) are in-process only; `auto-claude process
+   the pre-existing `repoGitLock`) are in-process only; `runforge process
    <issue>` running concurrently with the daemon is not serialized. Pre-existing
    condition, not introduced here — flagged for awareness.
 

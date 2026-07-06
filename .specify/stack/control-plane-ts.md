@@ -1,7 +1,7 @@
 ---
 id: STACK-AC-CONTROL-PLANE
 type: stack-specific
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 3
@@ -41,7 +41,7 @@ test_paths:
 
 **Results ledger: JSONL file.** Append-only `state/results.jsonl`. One JSON object per completed run. Query by reading + filtering. Simple, crash-safe, no database.
 
-**CLI: Commander.js.** `auto-claude start`, `auto-claude status`, `auto-claude pause`, `auto-claude resume`, `auto-claude retry <issue>`, `auto-claude release`, `auto-claude logs [issue]`, `auto-claude proposals`. The CLI commands call the HTTP control API — the daemon is always the server, the CLI is always the client.
+**CLI: Commander.js.** `runforge start`, `runforge status`, `runforge pause`, `runforge resume`, `runforge retry <issue>`, `runforge release`, `runforge logs [issue]`, `runforge proposals`. The CLI commands call the HTTP control API — the daemon is always the server, the CLI is always the client.
 
 **Concurrent runs: Semaphore pattern.** A simple counter tracks active runs. The polling loop checks `activeRuns < config.maxConcurrentRuns` before claiming a new issue. When the limit is reached, new issues stay in "ready" state until a slot opens. No external semaphore library — a plain variable suffices for single-process Node.js.
 
@@ -49,7 +49,7 @@ test_paths:
 
 **Integration flow: Lock + rebase + PR.** Acquire an in-memory mutex (single-process, so a boolean flag suffices). Rebase the feature branch onto the latest staging branch via `git rebase staging`. If rebase conflicts: delegate to Implementation Coordinator's conflict resolver. Create an integration PR via `octokit.pulls.create()` from feature branch to staging. Delegate diff review to Validation Service. On review pass: auto-merge via `octokit.pulls.merge()`. On review fail: route findings to fix cycle, release lock, re-acquire when ready.
 
-**Release proposal: Staging-to-production PR.** On `auto-claude release`: create a PR from staging to production branch via Octokit. Aggregate release notes from the results ledger (filter completed runs since last release). The PR body contains the aggregated notes. The system does NOT auto-merge — the Operator reviews and merges manually.
+**Release proposal: Staging-to-production PR.** On `runforge release`: create a PR from staging to production branch via Octokit. Aggregate release notes from the results ledger (filter completed runs since last release). The PR body contains the aggregated notes. The system does NOT auto-merge — the Operator reviews and merges manually.
 
 **Circular fix detection: Error hash tracking.** Normalize errors by stripping timestamps, line numbers, and resource-specific identifiers (regex patterns). Hash the normalized error string via `crypto.createHash('sha256')`. Store error hashes with counts in `RunState.errorHashes: Record<string, number>`. If any hash reaches 3, transition to stuck immediately.
 
@@ -107,6 +107,6 @@ async function saveRunState(run: RunState): Promise<void> {
 - Port-based locking: if the daemon crashes without closing the port, the OS may hold the port in TIME_WAIT for 60 seconds. Set `SO_REUSEADDR` on the server socket.
 - Default the control API bind address to `127.0.0.1`. The control API has no authentication and must only be accessible locally. On a Hetzner server with a public IP, binding to all interfaces exposes pause/resume/retry to the internet. Exception: in Docker multi-container deployments where the daemon has no host-exposed ports, `0.0.0.0` is acceptable because the Docker bridge network provides the isolation boundary. Use `DAEMON_HOST` env var or `controlHost` config field to override.
 - JSON state files: on crash recovery, a partially written file is invalid JSON. The atomic write pattern (temp + rename) prevents this, but the code must still handle the case where the temp file exists but the rename didn't happen. On startup: clean up any `.tmp` files in `state/`.
-- Commander.js: the CLI binary should be the same entry point as the daemon (`auto-claude start` runs the daemon, other subcommands hit the HTTP API). This avoids having two binaries.
+- Commander.js: the CLI binary should be the same entry point as the daemon (`runforge start` runs the daemon, other subcommands hit the HTTP API). This avoids having two binaries.
 - Integration lock is an in-memory boolean. If the daemon crashes while holding it, the lock is automatically released on restart. No stale lock problem.
 - Cross-run rebase conflicts: if `git rebase staging` fails, spawn a Conflict Resolver session via Implementation Coordinator with the conflicting diff and spec intent. This is the same resolver used for unit-level conflicts.

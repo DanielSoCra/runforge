@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.autoclaude.docker-autostart</string>
+  <string>com.runforge.docker-autostart</string>
   <!-- Launch Docker Desktop (in the background) at login so the pilot daemon
        container (restart:unless-stopped) resurrects after a reboot. One-shot:
        `open` returns immediately and Docker starts its VM/engine asynchronously;

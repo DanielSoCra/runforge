@@ -26,7 +26,7 @@ beforeEach(() => {
   mocks.listOwnerOptions.mockReset();
   mocks.listOwnerOptions.mockResolvedValue({
     ok: true,
-    value: ['auto-claude', 'octocat'],
+    value: ['runforge', 'octocat'],
   });
 });
 
@@ -36,7 +36,7 @@ describe('NewProjectPage', () => {
 
     render(await NewProjectPage());
 
-    expect(screen.getByText('owners: auto-claude, octocat')).toBeInTheDocument();
+    expect(screen.getByText('owners: runforge, octocat')).toBeInTheDocument();
     expect(mocks.listOwnerOptions).toHaveBeenCalledTimes(1);
   });
 

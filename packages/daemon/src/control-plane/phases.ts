@@ -74,8 +74,8 @@ import { buildMergeDecisionRequest,
 } from './merge-decision/index.js';
 import { alertOnNotifyApplied, type DecisionRaisedAlert } from './decision-alert.js';
 import { ReleaseLedgerManager } from './release/release-ledger-manager.js';
-import type { DecisionRequest } from '@auto-claude/decision-protocol';
-import { SanitizationPipeline } from '@auto-claude/sanitization';
+import type { DecisionRequest } from '@runforge/decision-protocol';
+import { SanitizationPipeline } from '@runforge/sanitization';
 import { applyDecisionSanitization } from './decision-escalation/sanitize-request.js';
 import {
   assignLane,

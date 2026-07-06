@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { describe, it, expect, vi, type Mock } from 'vitest';
 import AjvModule from 'ajv';
-import { DecisionRequestSchema } from '@auto-claude/decision-protocol';
+import { DecisionRequestSchema } from '@runforge/decision-protocol';
 import {
   BLOCK_START,
   BLOCK_END,
@@ -29,7 +29,7 @@ import {
   GitHubBlockPublisher,
   type OctokitLike,
 } from './github-block-notifier.js';
-import type { DecisionRequest } from '@auto-claude/decision-protocol';
+import type { DecisionRequest } from '@runforge/decision-protocol';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 

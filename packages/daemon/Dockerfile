@@ -3,7 +3,7 @@ FROM node:22-slim
 # corepack reads the pinned version from root package.json (pnpm@10.32.1)
 RUN corepack enable
 # python3/make/g++ are the native toolchain for building better-sqlite3 ^12
-# (pulled in via @auto-claude/decision-index, listed in onlyBuiltDependencies)
+# (pulled in via @runforge/decision-index, listed in onlyBuiltDependencies)
 RUN apt-get update && apt-get install -y git curl python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 # Install Claude CLI
@@ -22,7 +22,7 @@ COPY packages/decision-protocol/package.json ./packages/decision-protocol/packag
 # Dashboard package.json needed for pnpm workspace lockfile validation,
 # but --filter ensures only daemon dependencies are actually installed (#189)
 COPY packages/dashboard/package.json ./packages/dashboard/package.json
-RUN pnpm install --frozen-lockfile --filter @auto-claude/daemon...
+RUN pnpm install --frozen-lockfile --filter @runforge/daemon...
 
 # Copy daemon source only
 COPY packages/db/ ./packages/db/
@@ -62,5 +62,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
 EXPOSE 3847
 
 # CMD (not ENTRYPOINT) so docker-compose command: can override in dev
-# WORKDIR is /app/packages/daemon — default config path auto-claude.config.json resolves there
+# WORKDIR is /app/packages/daemon — default config path runforge.config.json resolves there
 CMD ["pnpm", "start"]

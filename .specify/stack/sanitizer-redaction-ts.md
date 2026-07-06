@@ -1,7 +1,7 @@
 ---
 id: STACK-AC-SANITIZER-REDACTION
 type: stack-specific
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 3
@@ -21,7 +21,7 @@ test_paths:
 
 ## Pattern
 
-**A concrete `Sanitizer` plugin, not registered by default.** `@auto-claude/sanitizer-redaction` is the first real sanitizer for the `@auto-claude/sanitization` pipeline (STACK-AC-SANITIZATION): `createWithholdingSanitizer({ fields, marker?, store })` returns a `Sanitizer` that, for each configured field, encrypts the value into a `ProtectedStore` and replaces it with a `Withholding` (field + marker + `protected://` ref). The `ProtectedStore` (moved out of decision-index) owns AES-256-GCM-at-rest + HMAC integrity + the `protected_refs` table. This is the deployment-specific *policy* that the domain-blind core never carries — a acme/regulated deployment registers it; generic auto-claude registers nothing.
+**A concrete `Sanitizer` plugin, not registered by default.** `@runforge/sanitizer-redaction` is the first real sanitizer for the `@runforge/sanitization` pipeline (STACK-AC-SANITIZATION): `createWithholdingSanitizer({ fields, marker?, store })` returns a `Sanitizer` that, for each configured field, encrypts the value into a `ProtectedStore` and replaces it with a `Withholding` (field + marker + `protected://` ref). The `ProtectedStore` (moved out of decision-index) owns AES-256-GCM-at-rest + HMAC integrity + the `protected_refs` table. This is the deployment-specific *policy* that the domain-blind core never carries — a acme/regulated deployment registers it; generic runforge registers nothing.
 
 ## Key Decisions
 

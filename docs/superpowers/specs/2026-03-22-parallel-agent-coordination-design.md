@@ -231,7 +231,7 @@ The operator interacts with the system through three surfaces:
 
 **Claude Code terminal (any directory) — conversational interface:**
 - A PO skill enables natural conversation: "I want a feature that does X" → PO refines, creates draft.
-- An MCP server exposes auto-claude operations as tools:
+- An MCP server exposes runforge operations as tools:
   - `list_proposals` — PO's outbox (pending approval).
   - `submit_idea` — write to PO's inbox (operator → PO).
   - `approve_proposal` / `reject_proposal` — act on a proposal.
@@ -352,7 +352,7 @@ This design extends the existing spec chain:
 - **FUNC-AC-PIPELINE** — Extended with parallel execution, planner role, and merge agent behavior.
 - **ARCH-AC-CONTROL-PLANE** — Integration lock replaced by Merge Agent. Worker pool, work claiming, and planner coordination added. Existing worktree isolation patterns reused. See Migration Plan for details.
 - **New: FUNC-AC-COORDINATION** — L1 spec for the planner, PO, merge agent, and parallel execution model. Covers: batch creation scenarios, continuous re-planning, dependency ordering, merge conflict resolution, operator override.
-- **New: MCP Server** — New component exposing auto-claude operations for Claude Code terminal access. API contract defined at L2.
+- **New: MCP Server** — New component exposing runforge operations for Claude Code terminal access. API contract defined at L2.
 
 ## Open Questions
 

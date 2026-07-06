@@ -32,7 +32,7 @@
 import {
   DecisionRequestSchema,
   type DecisionRequest,
-} from '@auto-claude/decision-protocol';
+} from '@runforge/decision-protocol';
 import type { RunState } from '../../types.js';
 import type { MergeDecision } from './types.js';
 // toDecisionRiskClass is the lane-RiskLevel → P0..P3 mapping; the body MUST use

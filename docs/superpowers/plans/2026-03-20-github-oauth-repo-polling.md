@@ -192,7 +192,7 @@ CREATE INDEX idx_repos_connection_id ON repos (connection_id) WHERE connection_i
 - [ ] **Step 2: Apply and verify**
 
 ```bash
-cd ~/code/auto-claude
+cd ~/code/runforge
 supabase db push
 ```
 
@@ -846,7 +846,7 @@ export async function startDaemon(configPath: string): Promise<Result<void>> {
     return serverResult;
   }
 
-  console.log(`Auto-Claude daemon started on port ${config.controlPort}`);
+  console.log(`Runforge daemon started on port ${config.controlPort}`);
 
   // 7. Legacy polling loop (only used when repoManager is null)
   let legacyPoller: ReturnType<typeof setInterval> | null = null;

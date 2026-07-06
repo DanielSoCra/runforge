@@ -13,7 +13,7 @@ export interface ConciergeConfig {
   vaultPath: string;
   watchedRepos: string[];
   operatorEmail: string;
-  autoClaudeBaseUrl: string;
+  runforgeBaseUrl: string;
 }
 
 export interface LoadConfigOptions {
@@ -40,7 +40,7 @@ export async function loadConciergeConfig(options: LoadConfigOptions = {}): Prom
     vaultPath: env.CONCIERGE_VAULT_PATH ?? readString(parsed, 'vaultPath'),
     watchedRepos: readStringArray(parsed, 'watchedRepos'),
     operatorEmail: env.CONCIERGE_OPERATOR_EMAIL ?? readString(parsed, 'operatorEmail'),
-    autoClaudeBaseUrl: env.CONCIERGE_AUTO_CLAUDE_BASE_URL ?? readOptionalString(parsed, 'autoClaudeBaseUrl') ?? 'http://127.0.0.1:3847',
+    runforgeBaseUrl: env.CONCIERGE_RUNFORGE_BASE_URL ?? readOptionalString(parsed, 'runforgeBaseUrl') ?? 'http://127.0.0.1:3847',
   };
   return config;
 }

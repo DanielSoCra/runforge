@@ -9,16 +9,16 @@ const DatabaseUrl = z
   }, 'must use postgres:// or postgresql://');
 
 export interface DatabaseEnv {
-  AUTO_CLAUDE_DATABASE_URL?: string;
+  RUNFORGE_DATABASE_URL?: string;
 }
 
 export function readDatabaseUrl(
   env: DatabaseEnv = process.env as DatabaseEnv,
 ): string {
-  const parsed = DatabaseUrl.safeParse(env.AUTO_CLAUDE_DATABASE_URL);
+  const parsed = DatabaseUrl.safeParse(env.RUNFORGE_DATABASE_URL);
   if (!parsed.success) {
     throw new Error(
-      'AUTO_CLAUDE_DATABASE_URL must be a valid URL before opening the project-owned Postgres store',
+      'RUNFORGE_DATABASE_URL must be a valid URL before opening the project-owned Postgres store',
     );
   }
   return parsed.data;

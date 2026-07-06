@@ -16,7 +16,7 @@
 import {
   DecisionRequestSchema,
   type DecisionRequest,
-} from '@auto-claude/decision-protocol';
+} from '@runforge/decision-protocol';
 import type { RunState } from '../../types.js';
 
 /** The phase this builder emits for. */

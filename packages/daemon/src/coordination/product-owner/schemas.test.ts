@@ -109,7 +109,7 @@ describe('SignalSnapshotSchema', () => {
     const result = SignalSnapshotSchema.safeParse({
       cycleTimestamp: new Date().toISOString(),
       specPipeline: [{ specId: 'FUNC-AC-LEARNING', hasL1: true, hasL2: false, hasL3: false, isImplemented: false }],
-      deliverySummary: [{ repo: 'auto-claude', passRate: 0.85, completionCount: 12 }],
+      deliverySummary: [{ repo: 'runforge', passRate: 0.85, completionCount: 12 }],
       backlog: [{ issueNumber: 42, title: 'Test', labels: ['bug'], ageDays: 5, isStale: false }],
       activeProposals: [{ id: 'p1', title: 'Test', status: 'proposed', proposalType: 'spec_advancement' }],
       proposalHistory: [{ id: 'p0', title: 'Old', status: 'approved', proposalType: 'spec_advancement', outcome: 'approved', operatorReason: null }],

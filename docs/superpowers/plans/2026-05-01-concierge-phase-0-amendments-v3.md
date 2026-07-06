@@ -61,7 +61,7 @@ Replacement Task 23 structure:
 - [ ] **Step 4: Verify daemon pickup**
 
   ```bash
-  tail -f ~/Library/Logs/auto-claude/daemon.log | grep -E "(FUNC-CONCIERGE|concierge|spec-impl)"
+  tail -f ~/Library/Logs/runforge/daemon.log | grep -E "(FUNC-CONCIERGE|concierge|spec-impl)"
   ```
 
   Expected within ≤2 poll cycles: daemon classifies the issue and starts a
@@ -106,7 +106,7 @@ The v2 amendment said "no existing production code under `packages/daemon/` or `
 ```markdown
 ## Daemon coexistence
 
-The auto-claude daemon is running on the Mac mini. Phase 0 makes:
+The runforge daemon is running on the Mac mini. Phase 0 makes:
 
 - A small additive change to `packages/daemon/src/infra/spec-loader.ts`
   (multi-L0 root scan, ~50 LOC) and its tests. Backward-compatible — the

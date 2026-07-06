@@ -10,7 +10,7 @@
 // pass against real zod (the gate-author handoff state).
 
 import { z } from 'zod';
-import { SanitizerConfigSchema } from '@auto-claude/sanitization';
+import { SanitizerConfigSchema } from '@runforge/sanitization';
 import { ComplianceReviewVerdictSchema } from '../../compliance/schemas.js';
 import type {
   DeploymentProfile,

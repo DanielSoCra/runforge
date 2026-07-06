@@ -1,7 +1,7 @@
 ---
 id: FUNC-AC-ENRICHED-COMMITS
 type: functional
-domain: auto-claude
+domain: runforge
 status: deprecated
 deprecated_by: FUNC-AC-LEARNING
 deprecation_reason: "Merged into FUNC-AC-LEARNING v2 (Knowledge from Implementation Records)"

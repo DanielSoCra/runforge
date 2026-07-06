@@ -1,7 +1,7 @@
 ---
 id: FUNC-AC-VERIFIER-GATE
 type: functional
-domain: auto-claude
+domain: runforge
 status: approved
 version: 1
 layer: 1

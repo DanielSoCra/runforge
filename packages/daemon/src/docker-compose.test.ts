@@ -33,7 +33,7 @@ describe('docker-compose self-hosted Postgres runtime (#626)', () => {
     expect(raw).toContain('migrate:');
     expect(raw).toContain('dockerfile: packages/db/Dockerfile');
     expect(raw).toContain(
-      'AUTO_CLAUDE_DATABASE_URL: ${AUTO_CLAUDE_DOCKER_DATABASE_URL:',
+      'RUNFORGE_DATABASE_URL: ${RUNFORGE_DOCKER_DATABASE_URL:',
     );
     expect(raw).toMatch(/postgres:\n\s+condition: service_healthy/);
   });
@@ -67,23 +67,23 @@ describe('native daemon launchd installer (#626)', () => {
       'DAEMON_DATA_BACKEND_VALUE="${DAEMON_DATA_BACKEND:-postgres}"',
     );
     expect(raw).toContain(
-      'AUTO_CLAUDE_DATABASE_URL_VALUE="${AUTO_CLAUDE_DATABASE_URL:-}"',
+      'RUNFORGE_DATABASE_URL_VALUE="${RUNFORGE_DATABASE_URL:-}"',
     );
     expect(raw).toContain('ENCRYPTION_KEY_VALUE="${ENCRYPTION_KEY:-}"');
   });
 
   it('requires the project-owned database for daemon startup', () => {
-    expect(raw).toContain('require_env AUTO_CLAUDE_DATABASE_URL');
+    expect(raw).toContain('require_env RUNFORGE_DATABASE_URL');
     expect(raw).toContain('require_env ENCRYPTION_KEY');
     expect(raw).not.toContain('SUPABASE_SERVICE_ROLE_KEY');
     expect(raw).not.toContain(
-      '-e "s|__AUTO_CLAUDE_DATABASE_URL__|${AUTO_CLAUDE_DATABASE_URL}|g"',
+      '-e "s|__RUNFORGE_DATABASE_URL__|${RUNFORGE_DATABASE_URL}|g"',
     );
   });
 
   it('writes resolved backend values into the plist template', () => {
     expect(raw).toContain(
-      '-e "s|__AUTO_CLAUDE_DATABASE_URL__|${AUTO_CLAUDE_DATABASE_URL_VALUE}|g"',
+      '-e "s|__RUNFORGE_DATABASE_URL__|${RUNFORGE_DATABASE_URL_VALUE}|g"',
     );
     expect(raw).toContain(
       '-e "s|__DAEMON_DATA_BACKEND__|${DAEMON_DATA_BACKEND_VALUE}|g"',

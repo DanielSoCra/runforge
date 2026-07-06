@@ -22,7 +22,7 @@ vault_decision_record: "knowledge-vault: 10-Projects/side-project/decisions/2026
 
 ## TL;DR
 
-auto-claude's L0 widens from *"autonomous **software-development** platform"* to *"the Operator's single **operations** cockpit — one steering surface over all his AI-assisted work across his ventures; software is one lane-type among ops, knowledge-work, client-delivery, biz-dev."* Adopted as the **north-star**, executed **narrow-first**. The widening is gated by one new non-configurable invariant — **verifier-gated autonomy** — which resolves the core risk surfaced in sparring: most non-software work has no oracle, while the platform's entire trust machinery assumes one.
+runforge's L0 widens from *"autonomous **software-development** platform"* to *"the Operator's single **operations** cockpit — one steering surface over all his AI-assisted work across his ventures; software is one lane-type among ops, knowledge-work, client-delivery, biz-dev."* Adopted as the **north-star**, executed **narrow-first**. The widening is gated by one new non-configurable invariant — **verifier-gated autonomy** — which resolves the core risk surfaced in sparring: most non-software work has no oracle, while the platform's entire trust machinery assumes one.
 
 ## The new invariant: verifier-gated autonomy
 
@@ -38,7 +38,7 @@ This is *"no verification = no merge"* generalized to *"no verifier = no autonom
 1. **Mandate → operations-org *north-star* (new Delta H).** The *surface* unifies across all domains; *execution* stays gated by the verifier invariant. Software is one lane-type, not the point.
 2. **side-project/hermes → absorb the *surface*, federate the *execution*.** side-project's decisions flow into the one inbox (the single pane is real); side-project keeps running as a *no-oracle domain executor behind* the cockpit (assist-only). It is **not** fused into the oracle-gated factory — that would be a category error (degrades both: factory loses rigor, secretary drowns in governance).
 3. **Surface → surface-agnostic core as a *boundary*, one front-end as the *deliverable*.** Build the decision/state core with a clean seam so a second front-end is *possible* later; ship **one** front-end first. (YAGNI on web+Slack+mobile peers before the core is proven.)
-4. **First proving ground → auto-claude itself, instrumented.** The software lane proves the stability bar; the first no-oracle lane is the Operator's own personal-ops (side-project), assist-only, with attention measured against a baseline.
+4. **First proving ground → runforge itself, instrumented.** The software lane proves the stability bar; the first no-oracle lane is the Operator's own personal-ops (side-project), assist-only, with attention measured against a baseline.
 
 ## Delta F guard (personal leverage, not a product)
 
@@ -58,7 +58,7 @@ The adversary's only job was to *kill* the lean against the rubric, not to valid
 
 ## Kill-conditions (carried out loud)
 
-1. **No no-oracle lane earns autonomous execution** until auto-claude shows **30–60 days of software-lane stability**: declining human interventions + reliable verification gates + *measured* attention reduction.
+1. **No no-oracle lane earns autonomous execution** until runforge shows **30–60 days of software-lane stability**: declining human interventions + reliable verification gates + *measured* attention reduction.
 2. **After 30 days of the first assist-only personal-ops lane:** if escalations/day are *rising* (not flat/declining) or measured attention-load *exceeds* the pre-cockpit baseline → halt expansion, fall back to federation-only.
 3. **If Delta H + the first slice becomes a config/spec project eating >2 weeks** before any lane runs → setup-as-procrastination; ship the thinnest dogfood slice instead.
 

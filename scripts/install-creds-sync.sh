@@ -9,24 +9,24 @@
 #
 # Usage:
 #   install-creds-sync.sh <CREDS_DIR>
-#   AUTO_CLAUDE_CREDS_DIR=/private/tmp/pilot-claude install-creds-sync.sh
+#   RUNFORGE_CREDS_DIR=/private/tmp/pilot-claude install-creds-sync.sh
 #
 # CREDS_DIR is the host dir bind-mounted to /root/.claude in the daemon
 # container (for the pilot: /private/tmp/pilot-claude).
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PLIST_SRC="$REPO_ROOT/scripts/com.autoclaude.creds-sync.plist"
-PLIST_DST="$HOME/Library/LaunchAgents/com.autoclaude.creds-sync.plist"
-LABEL="com.autoclaude.creds-sync"
-CREDS_DIR="${1:-${AUTO_CLAUDE_CREDS_DIR:-}}"
+PLIST_SRC="$REPO_ROOT/scripts/com.runforge.creds-sync.plist"
+PLIST_DST="$HOME/Library/LaunchAgents/com.runforge.creds-sync.plist"
+LABEL="com.runforge.creds-sync"
+CREDS_DIR="${1:-${RUNFORGE_CREDS_DIR:-}}"
 # PATH the launchd job runs with: must reach security, python3, mktemp, id, date.
 JOB_PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
 if [ -z "$CREDS_DIR" ]; then
-  echo "ERROR: CREDS_DIR required (arg 1 or AUTO_CLAUDE_CREDS_DIR)." >&2
+  echo "ERROR: CREDS_DIR required (arg 1 or RUNFORGE_CREDS_DIR)." >&2
   echo "  e.g. $0 /private/tmp/pilot-claude" >&2
   exit 2
 fi

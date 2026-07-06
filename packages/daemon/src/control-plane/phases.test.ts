@@ -1359,7 +1359,7 @@ describe('createPhaseHandlers', () => {
                 severity: 'critical',
                 location: 'pnpm test',
                 description:
-                  'gate1 command "pnpm --filter @auto-claude/daemon run test" failed: 1 test failed',
+                  'gate1 command "pnpm --filter @runforge/daemon run test" failed: 1 test failed',
               },
             ],
           },

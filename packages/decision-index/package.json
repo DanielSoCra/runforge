@@ -1,5 +1,5 @@
 {
-  "name": "@auto-claude/decision-index",
+  "name": "@runforge/decision-index",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -17,8 +17,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@auto-claude/decision-protocol": "workspace:*",
-    "@auto-claude/sanitizer-redaction": "workspace:*",
+    "@runforge/decision-protocol": "workspace:*",
+    "@runforge/sanitizer-redaction": "workspace:*",
     "ajv": "^8.20.0",
     "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.9",

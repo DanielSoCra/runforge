@@ -118,7 +118,7 @@ export function createPhaseLabelMirror(
             repo,
             name: label,
             color: PHASE_LABEL_COLOR,
-            description: `Auto-Claude FSM ${label}`,
+            description: `Runforge FSM ${label}`,
           });
         } catch (error) {
           if (statusOf(error) !== 422) {

@@ -2,8 +2,8 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PROTOCOL_VERSION } from '@auto-claude/decision-protocol';
-import * as decisionIndex from '@auto-claude/decision-index';
+import { PROTOCOL_VERSION } from '@runforge/decision-protocol';
+import * as decisionIndex from '@runforge/decision-index';
 import {
   DecisionIndexManager,
   withGovernedDecisionMarking,

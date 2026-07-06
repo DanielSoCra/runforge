@@ -206,7 +206,7 @@ Existing single-repo deployments that keep `repo` in their config require no oth
 - Unit: 401 response → connection status update; poller stops; other connections unaffected.
 
 ### Backwards compatibility
-- Integration: daemon starts with `auto-claude.config.json` `repo` key → repo upserted into DB → poller starts normally.
+- Integration: daemon starts with `runforge.config.json` `repo` key → repo upserted into DB → poller starts normally.
 
 ### Existing repos page
 - E2e: manually-added repos still display correctly; polling toggle still works.

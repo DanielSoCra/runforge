@@ -31,7 +31,7 @@ describe('Briefing-summarizer Dockerfile', () => {
 
   it('should scope pnpm install to briefing-summarizer package only', () => {
     expect(DOCKERFILE).toMatch(
-      /pnpm install.*--filter.*@auto-claude\/briefing-summarizer/,
+      /pnpm install.*--filter.*@runforge\/briefing-summarizer/,
     );
   });
 

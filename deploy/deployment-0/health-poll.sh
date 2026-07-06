@@ -7,7 +7,7 @@
 #   logs/alerts.log and fires a macOS notification.
 set -u
 
-OPS=~/code/auto-claude-ops
+OPS=~/code/runforge-ops
 STATE_FILE="$OPS/logs/.health-state"
 TS="$(date '+%Y-%m-%d %H:%M:%S')"
 BODY_FILE="$(mktemp)"
@@ -36,5 +36,5 @@ PREV="$(cat "$STATE_FILE" 2>/dev/null || echo unknown)"
 if [ "$STATE" != "$PREV" ]; then
   echo "$STATE" > "$STATE_FILE"
   echo "$TS TRANSITION $PREV -> $STATE http=$HTTP_CODE ${BODY:-no-body}" >> "$OPS/logs/alerts.log"
-  /usr/bin/osascript -e "display notification \"auto-claude daemon0: $PREV -> $STATE\" with title \"auto-claude health\"" 2>/dev/null || true
+  /usr/bin/osascript -e "display notification \"runforge daemon0: $PREV -> $STATE\" with title \"runforge health\"" 2>/dev/null || true
 fi

@@ -48,7 +48,7 @@ export async function ensureBuildArtifactExcludes(repoRoot: string): Promise<voi
   const prefix = current.length > 0 && !current.endsWith('\n') ? '\n' : '';
   writeFileSync(
     excludePath,
-    `${current}${prefix}# auto-claude: build artifacts (never deliverables)\n${missing.join('\n')}\n`,
+    `${current}${prefix}# runforge: build artifacts (never deliverables)\n${missing.join('\n')}\n`,
   );
 }
 

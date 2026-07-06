@@ -31,7 +31,7 @@ import {
   DecisionRequestSchema,
   type DecisionRequest,
   type RiskClass,
-} from '@auto-claude/decision-protocol';
+} from '@runforge/decision-protocol';
 import type { ReviewCategory } from '../../coordination/review-scheduler.js';
 import { isReviewCategory } from './labels.js';
 

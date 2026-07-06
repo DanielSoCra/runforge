@@ -88,8 +88,8 @@ function makeConfig(overrides: Partial<Config> = {}): Config {
     branches: { staging: 'staging', production: 'main' },
     webhooks: [],
     validation: {
-      // The exact real-world gate1 command that runs auto-claude's own suite.
-      gate1Commands: ['pnpm --filter @auto-claude/daemon run test'],
+      // The exact real-world gate1 command that runs runforge's own suite.
+      gate1Commands: ['pnpm --filter @runforge/daemon run test'],
       maxFixCycles: 4,
       staticAnalysis: {
         maxComplexity: 15,

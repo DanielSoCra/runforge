@@ -17,7 +17,7 @@ function tool(overrides: Partial<ToolEntry> = {}): ToolEntry {
     blastRadius: 'safe',
     audit: 'always',
     cacheable: false,
-    subsystem: 'auto-claude',
+    subsystem: 'runforge',
     governingSpecId: 'FUNC-AC-CONTROL-PLANE',
     status: 'enabled',
     ...overrides,

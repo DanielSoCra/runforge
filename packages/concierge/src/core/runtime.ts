@@ -17,7 +17,7 @@ import type { Migration, MigrationStore } from '../memory/sqlite.js';
 import { createConciergeStateStores, type ConciergeStateStores } from '../memory/state-stores.js';
 import { runForwardOnlyMigrations } from '../memory/sqlite.js';
 import type { ConfirmationAction, NormalizedSlackMessage } from '../slack/adapter.js';
-import { createAutoClaudeToolHandlers, type FetchLike } from '../tools/ac.js';
+import { createRunforgeToolHandlers, type FetchLike } from '../tools/ac.js';
 import { readNumberArg } from '../tools/args.js';
 import { createCalendarToolHandlers, type CalendarClient } from '../tools/cal.js';
 import { createDefaultToolRegistry } from '../tools/default-tools.js';
@@ -37,7 +37,7 @@ import {
 import { createConciergeCore, type ConciergeCore, type ConciergePlanner } from './concierge.js';
 import type { ConciergeConfig } from './config.js';
 
-export interface AutoClaudeClient {
+export interface RunforgeClient {
   status(): Promise<unknown>;
   pause(): Promise<unknown>;
   run(issue: number): Promise<unknown>;
@@ -56,7 +56,7 @@ export interface ConciergeRuntimeClients {
   calendar: CalendarClient;
   observer: ObserverClient;
   secondBrain: SecondBrainClient;
-  autoClaude?: AutoClaudeClient;
+  runforge?: RunforgeClient;
   web?: WebClient;
 }
 
@@ -131,7 +131,7 @@ export function createConciergeRuntime(options: ConciergeRuntimeOptions): Concie
     createId: options.createId,
   });
   const registry = createDefaultToolRegistry({
-    ...createConfiguredAutoClaudeHandlers(options),
+    ...createConfiguredRunforgeHandlers(options),
     ...createWebToolHandlers({ fetch: options.clients.web?.fetch }),
     ...createSlackToolHandlers({
       operatorUserId: options.config.operatorSlackUserId,
@@ -276,17 +276,17 @@ export function createConciergeRuntime(options: ConciergeRuntimeOptions): Concie
   return runtime;
 }
 
-function createConfiguredAutoClaudeHandlers(
+function createConfiguredRunforgeHandlers(
   options: ConciergeRuntimeOptions,
-): ReturnType<typeof createAutoClaudeToolHandlers> {
-  if (!options.clients.autoClaude) {
-    return createAutoClaudeToolHandlers({
-      baseUrl: options.config.autoClaudeBaseUrl,
+): ReturnType<typeof createRunforgeToolHandlers> {
+  if (!options.clients.runforge) {
+    return createRunforgeToolHandlers({
+      baseUrl: options.config.runforgeBaseUrl,
       requestedBy: 'concierge',
     });
   }
 
-  const client = options.clients.autoClaude;
+  const client = options.clients.runforge;
   return {
     ac_status: async () => client.status(),
     ac_pause: async () => client.pause(),

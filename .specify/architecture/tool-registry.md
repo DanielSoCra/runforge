@@ -27,7 +27,7 @@ interface ToolEntry {
   blastRadius: BlastRadius;
   audit: 'always' | 'on_error_only';
   cacheable: boolean;                     // identity over args within 60 s
-  subsystem: string;                      // e.g. 'auto-claude', 'knowledge-vault'
+  subsystem: string;                      // e.g. 'runforge', 'knowledge-vault'
   governingSpecId: string | null;         // L1 spec governing the subsystem; null until spec authored
   status: 'enabled' | 'disabled' | 'experimental';
 }
@@ -39,11 +39,11 @@ These minimal entries live in `packages/concierge/src/tools/registry.ts` (Phase 
 
 | Name | Subsystem | Blast | Confirm? | Notes |
 |---|---|---|---|---|
-| `ac_run` | auto-claude | medium | no | `{issue: number}` → `{run_id: string}` |
-| `ac_status` | auto-claude | safe | no | `{}` → daemon status snapshot |
-| `ac_pause` | auto-claude | medium | no | pause daemon |
-| `ac_unstuck` | auto-claude | medium | no | `{issue: number}` |
-| `ac_merge_to_main` | auto-claude | high | yes | always confirm |
+| `ac_run` | runforge | medium | no | `{issue: number}` → `{run_id: string}` |
+| `ac_status` | runforge | safe | no | `{}` → daemon status snapshot |
+| `ac_pause` | runforge | medium | no | pause daemon |
+| `ac_unstuck` | runforge | medium | no | `{issue: number}` |
+| `ac_merge_to_main` | runforge | high | yes | always confirm |
 | `sb_read` | knowledge-vault | safe | no | `{path: string}` |
 | `sb_search` | knowledge-vault | safe | no | `{query: string}` |
 | `sb_append_inbox` | knowledge-vault | medium | no | `{slug, body}` → 00-inbox/ |
@@ -72,7 +72,7 @@ The operator can list all tools via the slash command `/tools` in Slack — the 
 
 ## Boundaries
 
-- This spec defines REGISTRY SHAPE, not subsystem behaviour. Each subsystem's behaviour lives in its own L1 (existing `FUNC-AC-*` for auto-claude; deferred for others until non-trivial behaviour emerges).
+- This spec defines REGISTRY SHAPE, not subsystem behaviour. Each subsystem's behaviour lives in its own L1 (existing `FUNC-AC-*` for runforge; deferred for others until non-trivial behaviour emerges).
 - Confirmation flow (how confirm messages are rendered, how taps are routed) lives in `ARCH-CONFIRMATION-LIFECYCLE`.
 - Skill files (Hermes-style distilled trajectories) are NOT tools in this registry. They are scripts the LLM calls via a special `run_skill` tool; the registry has one entry for `run_skill` that takes a skill-id arg.
 

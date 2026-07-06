@@ -256,7 +256,7 @@ The conversation channel is good for back-and-forth. It is bad for "what needs m
 
 ## Boundary vs. existing operator dashboard
 
-The auto-claude operator dashboard (governed by `FUNC-AC-DASHBOARD`) remains the deep-control surface for the auto-claude subsystem (configuration, run history, cost reports). The triage surface defined here is the at-a-glance cross-subsystem surface for items that need attention or are in flight. The two surfaces have distinct scopes; they may cross-link, but they share no governing data and have no overlapping responsibilities.
+The runforge operator dashboard (governed by `FUNC-AC-DASHBOARD`) remains the deep-control surface for the runforge subsystem (configuration, run history, cost reports). The triage surface defined here is the at-a-glance cross-subsystem surface for items that need attention or are in flight. The two surfaces have distinct scopes; they may cross-link, but they share no governing data and have no overlapping responsibilities.
 
 ## Behavior
 
@@ -545,7 +545,7 @@ touch packages/concierge/.gitkeep packages/concierge/src/board/.gitkeep
 
 cat > packages/concierge/package.json <<'EOF'
 {
-  "name": "@auto-claude/concierge",
+  "name": "@runforge/concierge",
   "version": "0.0.0",
   "private": true,
   "description": "Placeholder; concierge implementation lands in Phase 1.",
@@ -558,7 +558,7 @@ cat > packages/concierge/package.json <<'EOF'
 EOF
 
 cat > packages/concierge/README.md <<'EOF'
-# @auto-claude/concierge
+# @runforge/concierge
 
 Placeholder. Phase 1+ of the concierge plan adds real source.
 See `docs/superpowers/specs/2026-05-01-concierge-design.md` and

@@ -111,7 +111,7 @@ describe('extractStructuredOutput', () => {
 - [ ] **Step 2: Run test — expect FAIL**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/lib/structured-output.test.ts
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/lib/structured-output.test.ts
 ```
 Expected: cannot resolve `./structured-output.js`.
 
@@ -142,7 +142,7 @@ export function extractStructuredOutput(structuredData: unknown): unknown {
 - [ ] **Step 4: Run test — expect PASS**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/lib/structured-output.test.ts
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/lib/structured-output.test.ts
 ```
 
 - [ ] **Step 5: Replace duplicate logic in classifier.ts**
@@ -197,7 +197,7 @@ The local `extractStructuredOutput(session)` keeps its existing call sites; only
 - [ ] **Step 7: Run full daemon tests**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run
+pnpm --filter @runforge/daemon vitest run
 ```
 Expected: PASS. No regressions in classifier or diagnostician.
 
@@ -281,7 +281,7 @@ describe('renderTemplate rejectUnused option', () => {
 - [ ] **Step 3: Run test — expect FAIL**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/knowledge/templates.test.ts
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/knowledge/templates.test.ts
 ```
 
 - [ ] **Step 4: Implement `findUnusedVariables` and extend `renderTemplate`**
@@ -339,7 +339,7 @@ export function renderTemplate(
 - [ ] **Step 5: Run test — expect PASS**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/knowledge/templates.test.ts
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/knowledge/templates.test.ts
 ```
 
 - [ ] **Step 6: Commit**
@@ -589,7 +589,7 @@ describe('validatePromptContracts', () => {
 - [ ] **Step 2: Run test — expect FAIL (file does not exist)**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/knowledge/prompt-contracts.test.ts
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/knowledge/prompt-contracts.test.ts
 ```
 
 - [ ] **Step 3: Implement registry, `assertContract`, `validatePromptContracts`**
@@ -710,7 +710,7 @@ export async function validatePromptContracts(
 - [ ] **Step 4: Run test — expect PASS (all suites)**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/knowledge/prompt-contracts.test.ts
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/knowledge/prompt-contracts.test.ts
 ```
 
 Disk-equality tests pass because Task 3 already aligned the templates.
@@ -783,7 +783,7 @@ it('leaves unregistered prompts unchanged (legacy behavior)', async () => {
 - [ ] **Step 2: Run test — expect FAIL**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/session-runtime/runtime.test.ts -t loadPromptTemplate
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/session-runtime/runtime.test.ts -t loadPromptTemplate
 ```
 
 - [ ] **Step 3: Wire `assertContract` into `loadPromptTemplate`**
@@ -839,13 +839,13 @@ export async function loadPromptTemplate(
 - [ ] **Step 4: Run test — expect PASS**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/session-runtime/runtime.test.ts -t loadPromptTemplate
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/session-runtime/runtime.test.ts -t loadPromptTemplate
 ```
 
 - [ ] **Step 5: Run full daemon test suite (regression check)**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run
+pnpm --filter @runforge/daemon vitest run
 ```
 Expected: PASS. Existing l2-designer/l3-generator/compliance-reviewer call sites already pass the correct variable set (verified in design research); they should not regress.
 
@@ -930,7 +930,7 @@ describe('prompt contract validation at startup', () => {
 - [ ] **Step 4: Run test — expect FAIL**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/control-plane/daemon.test.ts -t "prompt contract"
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/control-plane/daemon.test.ts -t "prompt contract"
 ```
 
 - [ ] **Step 5: Wire validation into boot path**
@@ -956,13 +956,13 @@ The exact placement in the existing `startDaemon` body: insert immediately after
 - [ ] **Step 6: Run test — expect PASS**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/control-plane/daemon.test.ts -t "prompt contract"
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/control-plane/daemon.test.ts -t "prompt contract"
 ```
 
 - [ ] **Step 7: Run full daemon test (regression)**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/control-plane/daemon.test.ts
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/control-plane/daemon.test.ts
 ```
 Expected: PASS. The default `mockValidatePromptContracts.mockResolvedValue(ok(...))` keeps existing tests working.
 
@@ -1040,7 +1040,7 @@ export const complianceReportJsonSchema = {
 - [ ] **Step 3: Run typecheck — expect PASS**
 
 ```bash
-pnpm --filter @auto-claude/daemon typecheck
+pnpm --filter @runforge/daemon typecheck
 ```
 
 - [ ] **Step 4: Commit (foundation only — wired in next tasks)**
@@ -1150,7 +1150,7 @@ it('returns success and clears compliance counter when compliant', async () => {
 - [ ] **Step 2: Run tests — expect FAIL**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/control-plane/phases.test.ts -t "l3-compliance"
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/control-plane/phases.test.ts -t "l3-compliance"
 ```
 
 - [ ] **Step 3: Refactor `l3-compliance` handler in phases.ts**
@@ -1241,13 +1241,13 @@ The exact `spawnSession` argument shape: the existing call at phases.ts:298 curr
 - [ ] **Step 4: Run tests — expect PASS**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/control-plane/phases.test.ts -t "l3-compliance"
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/control-plane/phases.test.ts -t "l3-compliance"
 ```
 
 - [ ] **Step 5: Run full daemon tests (regression)**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run
+pnpm --filter @runforge/daemon vitest run
 ```
 Expected: PASS.
 
@@ -1366,8 +1366,8 @@ it('passes run.l3Feedback as feedback variable and clears it after spawn', async
 - [ ] **Step 4: Run tests — expect PASS**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/control-plane/phases.test.ts -t "l3-generate"
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/control-plane/spec-pipeline/variant.test.ts
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/control-plane/phases.test.ts -t "l3-generate"
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/control-plane/spec-pipeline/variant.test.ts
 ```
 
 - [ ] **Step 5: Commit**
@@ -1455,7 +1455,7 @@ describe('l3-compliance ↔ l3-generate cross-phase loop is capped (#437)', () =
 - [ ] **Step 3: Run test — expect PASS**
 
 ```bash
-pnpm --filter @auto-claude/daemon vitest run packages/daemon/src/control-plane/pipeline.test.ts -t "cross-phase loop"
+pnpm --filter @runforge/daemon vitest run packages/daemon/src/control-plane/pipeline.test.ts -t "cross-phase loop"
 ```
 
 - [ ] **Step 4: Commit**
@@ -1613,8 +1613,8 @@ pnpm -r lint 2>&1 | tail -20
 ```bash
 scripts/stop-daemon.sh
 scripts/start-daemon.sh
-# Tail the log path declared in scripts/com.autoclaude.daemon.plist (StandardOutPath/StandardErrorPath):
-tail -f $(plutil -extract StandardOutPath raw scripts/com.autoclaude.daemon.plist 2>/dev/null || echo /dev/null)
+# Tail the log path declared in scripts/com.runforge.daemon.plist (StandardOutPath/StandardErrorPath):
+tail -f $(plutil -extract StandardOutPath raw scripts/com.runforge.daemon.plist 2>/dev/null || echo /dev/null)
 ```
 
 Confirm:

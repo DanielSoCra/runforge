@@ -12,13 +12,13 @@ import { decisions, quarantineEvents } from "../src/schema.js";
 import { FakeNotifier } from "../src/adapters/fakes/fake-notifier.js";
 import { FakeSourceSink } from "../src/adapters/fakes/fake-source-sink.js";
 import { FakeResumeDispatcher } from "../src/adapters/fakes/fake-resume-dispatcher.js";
-import { PROTOCOL_VERSION } from "@auto-claude/decision-protocol";
+import { PROTOCOL_VERSION } from "@runforge/decision-protocol";
 
 // openDb / openReadOnlyDb / createIndexWriter all open postgres-js connections to
 // a REAL Postgres (the read-only session + the writer connection cannot be modeled
 // by the in-process PGlite backend). Gate this suite on a real Postgres URL; CI
-// sets AUTO_CLAUDE_TEST_DATABASE_URL so it runs there.
-const DB_URL = process.env.AUTO_CLAUDE_TEST_DATABASE_URL;
+// sets RUNFORGE_TEST_DATABASE_URL so it runs there.
+const DB_URL = process.env.RUNFORGE_TEST_DATABASE_URL;
 
 // Serialize the real-PG-gated files (they share the decision_index schema) so
 // parallel CI forks never DROP/migrate each other's schema mid-test.

@@ -11,7 +11,7 @@
  *   - any other throw → 503 fail-safe
  */
 import { describe, it, expect } from 'vitest';
-import { RevealRefNotFoundError } from '@auto-claude/decision-index';
+import { RevealRefNotFoundError } from '@runforge/decision-index';
 import { revealProtected } from './decision-api.js';
 
 function fakeReveal(

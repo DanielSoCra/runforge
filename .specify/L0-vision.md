@@ -13,9 +13,9 @@ layer: 0
 
 # L0-CONCIERGE-VISION — Concierge
 
-**Concierge** is a single conversational entry point — a Slack DM with a bot, served from the Operator's Mac mini — that turns intent into action across all his tools. It is an LLM agent with a fixed toolbox (auto-claude, knowledge-vault Obsidian vault, Slack, calendar, email, GitHub, web, observer) and a single mobile-friendly triage board for the small set of items that genuinely need human judgment.
+**Concierge** is a single conversational entry point — a Slack DM with a bot, served from the Operator's Mac mini — that turns intent into action across all his tools. It is an LLM agent with a fixed toolbox (runforge, knowledge-vault Obsidian vault, Slack, calendar, email, GitHub, web, observer) and a single mobile-friendly triage board for the small set of items that genuinely need human judgment.
 
-**Why:** the Operator runs three workstreams in parallel — a B2B CTO role, a freelance product project, and church ministry — plus operates an autonomous software-development pipeline (auto-claude). Each surface (GitHub issues, Obsidian, Slack, email, calendar) demands its own context switch. The cost is not the individual tools; it is the routing decision he makes a hundred times a day: "where does this thing live, who needs to act on it, when do I get back to it?" The concierge collapses that routing to one chat.
+**Why:** the Operator runs three workstreams in parallel — a B2B CTO role, a freelance product project, and church ministry — plus operates an autonomous software-development pipeline (runforge). Each surface (GitHub issues, Obsidian, Slack, email, calendar) demands its own context switch. The cost is not the individual tools; it is the routing decision he makes a hundred times a day: "where does this thing live, who needs to act on it, when do I get back to it?" The concierge collapses that routing to one chat.
 
 **For:** the Operator, single-tenant. No multi-user mode. No team accounts.
 
@@ -45,9 +45,9 @@ layer: 0
 
 Everything else is autonomous. The concierge does not ask permission for routine reads, drafts, captures, or audited tool calls below the blast-radius gate.
 
-**Subsystem position of `auto-claude`:**
+**Subsystem position of `runforge`:**
 
-The existing `packages/daemon` (the GitHub-issue → PR pipeline) is one subsystem the concierge calls. Its governing L0 is `L0-AC-VISION` (this repository's `.specify/L0-ac-vision.md`); that subtree of 14 `FUNC-AC-*` specs is unchanged by this restructure. The relationship between `L0-CONCIERGE-VISION` and `L0-AC-VISION` is expressed in prose only — there is no `parent:` field in `traceability.yml` linking them. The concierge tree is **additive** to the auto-claude tree. Spec resolvers that walk children find them as siblings in `traceability.yml` and load both via the multi-L0-aware spec-loader.
+The existing `packages/daemon` (the GitHub-issue → PR pipeline) is one subsystem the concierge calls. Its governing L0 is `L0-AC-VISION` (this repository's `.specify/L0-ac-vision.md`); that subtree of 14 `FUNC-AC-*` specs is unchanged by this restructure. The relationship between `L0-CONCIERGE-VISION` and `L0-AC-VISION` is expressed in prose only — there is no `parent:` field in `traceability.yml` linking them. The concierge tree is **additive** to the runforge tree. Spec resolvers that walk children find them as siblings in `traceability.yml` and load both via the multi-L0-aware spec-loader.
 
 **Boundaries:**
 
@@ -56,4 +56,4 @@ The existing `packages/daemon` (the GitHub-issue → PR pipeline) is one subsyst
 - Never warns the Operator about his own manual coding sessions.
 - Never spawns parallel writer agents for one logical task (single-threaded linear agent per Cognition's "Don't Build Multi-Agents"). Subagents are spawned only for read-heavy noisy tools (gh log scans, web fetches, email triage) where they return a short summary instead of polluting the main loop.
 
-**Success:** On a typical Tuesday, the Operator sends ≤3 chat messages, glances at the board ≤2 times, and the system handles ≥80 % of routine coordination work — issue triage, draft replies, calendar prep, knowledge-vault captures, auto-claude babysitting — without further input.
+**Success:** On a typical Tuesday, the Operator sends ≤3 chat messages, glances at the board ≤2 times, and the system handles ≥80 % of routine coordination work — issue triage, draft replies, calendar prep, knowledge-vault captures, runforge babysitting — without further input.

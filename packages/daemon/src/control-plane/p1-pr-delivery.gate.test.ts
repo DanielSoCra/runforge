@@ -129,7 +129,7 @@ function makeOctokit(options: { existingPulls?: PullRequestSummary[]; prNumber?:
 
 function makeArgs(overrides: Partial<DeliveryArgs> = {}): DeliveryArgs {
   const owner = 'octo-org';
-  const repo = 'auto-claude';
+  const repo = 'runforge';
   const featureBranch = 'feature/p1-pr-delivery';
   const landsOn = 'staging';
 
@@ -179,7 +179,7 @@ describe('G2 deliverCodeChangeViaPR', () => {
     expect(octokit.pulls.list).toHaveBeenCalledWith(
       expect.objectContaining({
         owner: 'octo-org',
-        repo: 'auto-claude',
+        repo: 'runforge',
         state: 'open',
         head: 'octo-org:feature/p1-pr-delivery',
       }),
@@ -190,7 +190,7 @@ describe('G2 deliverCodeChangeViaPR', () => {
     expect(pushFeatureBranch).toHaveBeenCalledWith(
       expect.objectContaining({
         owner: 'octo-org',
-        repo: 'auto-claude',
+        repo: 'runforge',
         featureBranch: 'feature/p1-pr-delivery',
         landsOn: 'staging',
       }),
@@ -198,7 +198,7 @@ describe('G2 deliverCodeChangeViaPR', () => {
     expect(octokit.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({
         owner: 'octo-org',
-        repo: 'auto-claude',
+        repo: 'runforge',
         base: 'staging',
         head: 'feature/p1-pr-delivery',
       }),
@@ -206,7 +206,7 @@ describe('G2 deliverCodeChangeViaPR', () => {
     expect(awaitRequiredChecks).toHaveBeenCalledWith(
       expect.objectContaining({
         owner: 'octo-org',
-        repo: 'auto-claude',
+        repo: 'runforge',
         ref: 'feature/p1-pr-delivery',
         requiredChecks: ['daemon / test', 'daemon / typecheck'],
       }),
@@ -214,7 +214,7 @@ describe('G2 deliverCodeChangeViaPR', () => {
     expect(octokit.pulls.merge).toHaveBeenCalledWith(
       expect.objectContaining({
         owner: 'octo-org',
-        repo: 'auto-claude',
+        repo: 'runforge',
         pull_number: 101,
         merge_method: 'squash',
       }),

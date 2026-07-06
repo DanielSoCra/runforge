@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Convert the auto-claude repo from a single root package to a pnpm workspace monorepo with `packages/daemon` and `packages/dashboard`, all within the `feature/dashboard` worktree before merging to main.
+**Goal:** Convert the runforge repo from a single root package to a pnpm workspace monorepo with `packages/daemon` and `packages/dashboard`, all within the `feature/dashboard` worktree before merging to main.
 
 **Architecture:** Move daemon source (`src/`, `Dockerfile`, config files) into `packages/daemon/` and the existing `dashboard/` into `packages/dashboard/` using `git mv` to preserve history. Create a workspace root `package.json` + `pnpm-workspace.yaml`. Both Dockerfiles are rewritten to use the repo root as build context (required for access to the unified lockfile). The daemon's `WORKDIR` inside the container shifts to `/app/packages/daemon` so `process.cwd()` resolves `state/`, `prompts/`, and `fitness/` correctly.
 
 **Tech Stack:** pnpm 10.32.1 workspaces, Docker multi-stage builds, `corepack`, `git mv`
 
-**Working directory:** All commands run in `~/code/auto-claude/.worktrees/feature/dashboard` unless stated otherwise.
+**Working directory:** All commands run in `~/code/runforge/.worktrees/feature/dashboard` unless stated otherwise.
 
 **Spec:** `docs/superpowers/specs/2026-03-19-pnpm-monorepo-design.md`
 
@@ -111,15 +111,15 @@ Expected output includes: `app  actions  components  Dockerfile  lib  next.confi
 ```bash
 cat > package.json << 'EOF'
 {
-  "name": "auto-claude",
+  "name": "runforge",
   "version": "1.0.0",
   "private": true,
   "packageManager": "pnpm@10.32.1",
   "scripts": {
-    "dev:dashboard": "pnpm --filter @auto-claude/dashboard dev",
+    "dev:dashboard": "pnpm --filter @runforge/dashboard dev",
     "test": "pnpm -r test",
-    "test:daemon": "pnpm --filter @auto-claude/daemon test",
-    "test:dashboard": "pnpm --filter @auto-claude/dashboard test",
+    "test:daemon": "pnpm --filter @runforge/daemon test",
+    "test:dashboard": "pnpm --filter @runforge/dashboard test",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck"
   }
@@ -187,23 +187,23 @@ Expected: file includes `node_modules`, `state`, `.git`, `packages/dashboard/.ne
 
 In `packages/daemon/package.json`, change:
 ```json
-"name": "auto-claude-mvp",
+"name": "runforge-mvp",
 ```
 to:
 ```json
-"name": "@auto-claude/daemon",
+"name": "@runforge/daemon",
 ```
 
 Use sed:
 ```bash
-sed -i '' 's/"name": "auto-claude-mvp"/"name": "@auto-claude\/daemon"/' packages/daemon/package.json
+sed -i '' 's/"name": "runforge-mvp"/"name": "@runforge\/daemon"/' packages/daemon/package.json
 ```
 
 Verify:
 ```bash
 grep '"name"' packages/daemon/package.json
 ```
-Expected: `"name": "@auto-claude/daemon",`
+Expected: `"name": "@runforge/daemon",`
 
 - [ ] **Step 2: Update dashboard package name**
 
@@ -213,18 +213,18 @@ In `packages/dashboard/package.json`, change:
 ```
 to:
 ```json
-"name": "@auto-claude/dashboard",
+"name": "@runforge/dashboard",
 ```
 
 ```bash
-sed -i '' 's/"name": "dashboard"/"name": "@auto-claude\/dashboard"/' packages/dashboard/package.json
+sed -i '' 's/"name": "dashboard"/"name": "@runforge\/dashboard"/' packages/dashboard/package.json
 ```
 
 Verify:
 ```bash
 grep '"name"' packages/dashboard/package.json
 ```
-Expected: `"name": "@auto-claude/dashboard",`
+Expected: `"name": "@runforge/dashboard",`
 
 - [ ] **Step 3: Remove dashboard-level workspace files (superseded by root)**
 
@@ -283,7 +283,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
 EXPOSE 3847
 
 # CMD (not ENTRYPOINT) so docker-compose command: can override in dev
-CMD ["pnpm", "start", "--", "-c", "/app/packages/daemon/auto-claude.config.json"]
+CMD ["pnpm", "start", "--", "-c", "/app/packages/daemon/runforge.config.json"]
 ```
 
 - [ ] **Step 2: Verify the file looks correct**
@@ -293,7 +293,7 @@ head -5 packages/daemon/Dockerfile && echo "..." && tail -5 packages/daemon/Dock
 ```
 
 Expected first line: `FROM node:22-slim`
-Expected last line: `CMD ["pnpm", "start", "--", "-c", "/app/packages/daemon/auto-claude.config.json"]`
+Expected last line: `CMD ["pnpm", "start", "--", "-c", "/app/packages/daemon/runforge.config.json"]`
 
 ---
 
@@ -366,7 +366,7 @@ Expected last line: `CMD ["node", "server.js"]`
 Changes:
 - Build context: `.` with explicit `dockerfile: packages/daemon/Dockerfile`
 - Volume mounts: updated to `/app/packages/daemon/*` to match the new `WORKDIR`
-- Config path in `command:`: updated to `/app/packages/daemon/auto-claude.config.json`
+- Config path in `command:`: updated to `/app/packages/daemon/runforge.config.json`
 
 - [ ] **Step 1: Rewrite `docker-compose.yml`**
 
@@ -378,7 +378,7 @@ services:
     build:
       context: .
       dockerfile: packages/daemon/Dockerfile
-    container_name: auto-claude-daemon
+    container_name: runforge-daemon
     restart: unless-stopped
     ports:
       - "3847:3847"
@@ -388,8 +388,8 @@ services:
     volumes:
       # Persist state across restarts
       - daemon-state:/app/packages/daemon/state
-      # Mount config (edit auto-claude.config.json before starting)
-      - ./auto-claude.config.json:/app/packages/daemon/auto-claude.config.json:ro
+      # Mount config (edit runforge.config.json before starting)
+      - ./runforge.config.json:/app/packages/daemon/runforge.config.json:ro
       # Mount prompts (so you can edit without rebuilding)
       - ./prompts:/app/packages/daemon/prompts:ro
       # Mount fitness scripts
@@ -397,9 +397,9 @@ services:
     # Git needs a user identity for commits
     command: >
       sh -c "
-        git config --global user.name 'Auto-Claude' &&
-        git config --global user.email 'auto-claude@localhost' &&
-        pnpm start -- -c /app/packages/daemon/auto-claude.config.json
+        git config --global user.name 'Runforge' &&
+        git config --global user.email 'runforge@localhost' &&
+        pnpm start -- -c /app/packages/daemon/runforge.config.json
       "
 
 volumes:
@@ -417,7 +417,7 @@ Expected output includes:
       context: .
       dockerfile: packages/daemon/Dockerfile
       - daemon-state:/app/packages/daemon/state
-      - ./auto-claude.config.json:/app/packages/daemon/auto-claude.config.json:ro
+      - ./runforge.config.json:/app/packages/daemon/runforge.config.json:ro
       - ./prompts:/app/packages/daemon/prompts:ro
       - ./fitness:/app/packages/daemon/fitness:ro
 ```
@@ -483,7 +483,7 @@ services:
     volumes:
       - ./prompts:/app/packages/daemon/prompts:ro
       - ./fitness:/app/packages/daemon/fitness:ro
-      - ./auto-claude.config.json:/app/packages/daemon/auto-claude.config.json:ro
+      - ./runforge.config.json:/app/packages/daemon/runforge.config.json:ro
       - daemon-state:/app/packages/daemon/state
     networks:
       - app
@@ -588,7 +588,7 @@ This is the validation step. If `pnpm install` or `pnpm test` fails, investigate
 pnpm install
 ```
 
-Expected: pnpm resolves both `@auto-claude/daemon` and `@auto-claude/dashboard`, creates `pnpm-lock.yaml` at repo root, creates `node_modules/` at repo root with hoisted dependencies.
+Expected: pnpm resolves both `@runforge/daemon` and `@runforge/dashboard`, creates `pnpm-lock.yaml` at repo root, creates `node_modules/` at repo root with hoisted dependencies.
 
 If it fails with "frozen-lockfile" errors: you are not using `--frozen-lockfile` here (correct), so this should not happen. If it fails with workspace resolution errors, check that both `packages/daemon/package.json` and `packages/dashboard/package.json` are present and correctly named.
 
@@ -643,9 +643,9 @@ Move daemon source to packages/daemon/ and dashboard to packages/dashboard/.
 Unified pnpm-lock.yaml at repo root replaces per-package lockfiles.
 
 - packages/daemon/: src/, Dockerfile, tsconfig.json, vitest.config.ts,
-  eslint.config.js, package.json (name: @auto-claude/daemon)
+  eslint.config.js, package.json (name: @runforge/daemon)
 - packages/dashboard/: app/, actions/, components/, lib/, Dockerfile,
-  package.json (name: @auto-claude/dashboard)
+  package.json (name: @runforge/dashboard)
 - Root workspace: package.json + pnpm-workspace.yaml
 - Both Dockerfiles use context: . (repo root) so unified lockfile is
   accessible; daemon runs from WORKDIR /app/packages/daemon
@@ -666,7 +666,7 @@ EOF
 
 - [ ] **Step 1: Switch to main and merge**
 
-Run from the repo root (`~/code/auto-claude`):
+Run from the repo root (`~/code/runforge`):
 
 ```bash
 git checkout main

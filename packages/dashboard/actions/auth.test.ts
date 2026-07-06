@@ -33,7 +33,7 @@ describe('signOut', () => {
     });
     mocks.signOut.mockResolvedValue({ success: true });
     mocks.headers.mockResolvedValue(
-      new Headers({ cookie: 'auto-claude.session_token=token' }),
+      new Headers({ cookie: 'runforge.session_token=token' }),
     );
   });
 
@@ -45,6 +45,6 @@ describe('signOut', () => {
     expect(mocks.getDashboardAuth).toHaveBeenCalledTimes(1);
     expect(mocks.signOut).toHaveBeenCalledTimes(1);
     const input = mocks.signOut.mock.calls[0]?.[0] as { headers: Headers };
-    expect(input.headers.get('cookie')).toBe('auto-claude.session_token=token');
+    expect(input.headers.get('cookie')).toBe('runforge.session_token=token');
   });
 });

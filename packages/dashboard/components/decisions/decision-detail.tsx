@@ -42,7 +42,7 @@ export interface DetailOption {
 /**
  * The decision detail the drawer renders, mirroring the daemon `DetailView` wire
  * shape (the subset the surface shows). Dashboard-local — the boundary is JSON over
- * HTTP, never a dependency on `@auto-claude/decision-index`.
+ * HTTP, never a dependency on `@runforge/decision-index`.
  */
 export interface DecisionDetailData {
   decision_id: string;

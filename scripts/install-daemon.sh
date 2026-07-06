@@ -3,8 +3,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PLIST_SRC="$REPO_ROOT/scripts/com.autoclaude.daemon.plist"
-PLIST_DST="$HOME/Library/LaunchAgents/com.autoclaude.daemon.plist"
+PLIST_SRC="$REPO_ROOT/scripts/com.runforge.daemon.plist"
+PLIST_DST="$HOME/Library/LaunchAgents/com.runforge.daemon.plist"
 ENV_FILE="$REPO_ROOT/.env.mac"
 LOG_DIR="$HOME/logs"
 NPX_PATH="$(which npx)"
@@ -23,7 +23,7 @@ require_env() {
 
 # 1. Unload old plists
 log "Unloading legacy plists..."
-for label in com.autoclaude.pipeline com.autoclaude.developer com.autoclaude.reviewer; do
+for label in com.runforge.pipeline com.runforge.developer com.runforge.reviewer; do
   old_plist="$HOME/Library/LaunchAgents/${label}.plist"
   if launchctl list "$label" &>/dev/null; then
     launchctl unload "$old_plist" 2>/dev/null && log "  Unloaded $label" || log "  WARN: Could not unload $label"
@@ -49,7 +49,7 @@ source "$ENV_FILE"
 set +a
 
 DAEMON_DATA_BACKEND_VALUE="${DAEMON_DATA_BACKEND:-postgres}"
-AUTO_CLAUDE_DATABASE_URL_VALUE="${AUTO_CLAUDE_DATABASE_URL:-}"
+RUNFORGE_DATABASE_URL_VALUE="${RUNFORGE_DATABASE_URL:-}"
 ENCRYPTION_KEY_VALUE="${ENCRYPTION_KEY:-}"
 
 case "$DAEMON_DATA_BACKEND_VALUE" in
@@ -61,7 +61,7 @@ case "$DAEMON_DATA_BACKEND_VALUE" in
 esac
 
 require_env GITHUB_TOKEN
-require_env AUTO_CLAUDE_DATABASE_URL
+require_env RUNFORGE_DATABASE_URL
 require_env ENCRYPTION_KEY
 
 log "Installing daemon plist..."
@@ -75,7 +75,7 @@ sed \
   -e "s|__HOME__|${HOME}|g" \
   -e "s|__PATH__|${CURRENT_PATH}|g" \
   -e "s|__GITHUB_TOKEN__|${GITHUB_TOKEN}|g" \
-  -e "s|__AUTO_CLAUDE_DATABASE_URL__|${AUTO_CLAUDE_DATABASE_URL_VALUE}|g" \
+  -e "s|__RUNFORGE_DATABASE_URL__|${RUNFORGE_DATABASE_URL_VALUE}|g" \
   -e "s|__DAEMON_DATA_BACKEND__|${DAEMON_DATA_BACKEND_VALUE}|g" \
   -e "s|__ENCRYPTION_KEY__|${ENCRYPTION_KEY_VALUE}|g" \
   "$PLIST_SRC" > "$PLIST_TMP"
@@ -85,6 +85,6 @@ mv "$PLIST_TMP" "$PLIST_DST"
 log "Loading daemon plist..."
 launchctl load "$PLIST_DST"
 
-log "Done. Verify with: launchctl list | grep autoclaude"
+log "Done. Verify with: launchctl list | grep runforge"
 log "Logs: tail -f $LOG_DIR/claude-daemon.log"
 log "Health: $REPO_ROOT/scripts/health.sh"

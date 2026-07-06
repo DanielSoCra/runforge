@@ -4,7 +4,7 @@ import { DecisionRequestSchema } from "./decision-request.js";
 /**
  * Generate the canonical JSON Schema artifact for DecisionRequest. The committed
  * copy under schema/decision-request.schema.json must equal this output (a test
- * regenerates-and-diffs). Cross-language consumers (auto-claude #685) validate
+ * regenerates-and-diffs). Cross-language consumers (runforge #685) validate
  * against the committed artifact.
  *
  * zod4 port note: the original package used `zod-to-json-schema`, but that library

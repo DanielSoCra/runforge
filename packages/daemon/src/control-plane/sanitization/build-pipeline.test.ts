@@ -8,13 +8,13 @@
 //    (a misconfigured deployment must never silently pass sensitive content through).
 //  - an unknown sanitizer name throws.
 import { describe, it, expect } from 'vitest';
-import type { PutArgs, ProtectedStore } from '@auto-claude/sanitizer-redaction';
+import type { PutArgs, ProtectedStore } from '@runforge/sanitizer-redaction';
 import { buildSanitizationPipeline } from './build-pipeline.js';
 import type { DeploymentProfile } from '../deployment-registry/types.js';
 
 const baseProfile: DeploymentProfile = {
   id: 'dep-a',
-  repositories: [{ owner: 'acme', name: 'auto-claude' }],
+  repositories: [{ owner: 'acme', name: 'runforge' }],
   riskPathMap: [{ paths: ['infra/**'], minLevel: 'orange' }],
   defaultMinLevel: 'green',
   laneSet: {

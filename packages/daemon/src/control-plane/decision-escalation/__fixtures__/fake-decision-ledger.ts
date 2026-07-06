@@ -30,8 +30,8 @@ import type {
   ReadModel,
   ProtectedStore,
   DecisionView,
-} from '@auto-claude/decision-index';
-import type { ResumeMode } from '@auto-claude/decision-protocol';
+} from '@runforge/decision-index';
+import type { ResumeMode } from '@runforge/decision-protocol';
 import type { DecisionLedger, NotifyResult, AnswerResult } from '../ledger.js';
 import type { DecisionIndexManager, RuntimeDegradable } from '../manager.js';
 

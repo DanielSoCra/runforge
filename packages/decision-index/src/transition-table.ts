@@ -1,4 +1,4 @@
-import { TERMINAL_STATUSES, type ItemStatus, type TransitionEvent, type EffectKind } from "@auto-claude/decision-protocol";
+import { TERMINAL_STATUSES, type ItemStatus, type TransitionEvent, type EffectKind } from "@runforge/decision-protocol";
 
 export class IllegalTransitionError extends Error {
   readonly from: ItemStatus;

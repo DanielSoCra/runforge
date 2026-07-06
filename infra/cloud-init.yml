@@ -26,21 +26,21 @@ runcmd:
   # Claude CLI — pin version to match packages/daemon/Dockerfile
   - npm install -g @anthropic-ai/claude-code@2.1.81
 
-  # Create auto-claude user
-  - useradd -m -s /bin/bash autoclaude
-  - usermod -aG docker autoclaude
-  - mkdir -p /home/autoclaude/.ssh
-  - cp /root/.ssh/authorized_keys /home/autoclaude/.ssh/authorized_keys
-  - chown -R autoclaude:autoclaude /home/autoclaude/.ssh
-  - chmod 700 /home/autoclaude/.ssh
-  - chmod 600 /home/autoclaude/.ssh/authorized_keys
+  # Create runforge user
+  - useradd -m -s /bin/bash runforge
+  - usermod -aG docker runforge
+  - mkdir -p /home/runforge/.ssh
+  - cp /root/.ssh/authorized_keys /home/runforge/.ssh/authorized_keys
+  - chown -R runforge:runforge /home/runforge/.ssh
+  - chmod 700 /home/runforge/.ssh
+  - chmod 600 /home/runforge/.ssh/authorized_keys
 
   # Clone the repo
-  - su - autoclaude -c "git clone https://github.com/DANIELSOCRAHANDLEZZ/auto-claude.git /home/autoclaude/auto-claude"
-  - su - autoclaude -c "cd /home/autoclaude/auto-claude && pnpm install"
+  - su - runforge -c "git clone https://github.com/DANIELSOCRAHANDLEZZ/runforge.git /home/runforge/runforge"
+  - su - runforge -c "cd /home/runforge/runforge && pnpm install"
 
   # Create state directory
-  - su - autoclaude -c "mkdir -p /home/autoclaude/auto-claude/state/runs"
+  - su - runforge -c "mkdir -p /home/runforge/runforge/state/runs"
 
   # Write a ready marker
-  - echo "auto-claude server ready" > /root/READY
+  - echo "runforge server ready" > /root/READY

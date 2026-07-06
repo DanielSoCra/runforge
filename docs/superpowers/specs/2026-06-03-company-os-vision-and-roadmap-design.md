@@ -1,7 +1,7 @@
 ---
 date: 2026-06-03
 status: north-star-input
-authority: NOT execution-canonical — docs/superpowers/specs/2026-06-11-auto-claude-vnext-masterplan-design.md (masterplan v2.1) is the sole execution-canonical roadmap
+authority: NOT execution-canonical — docs/superpowers/specs/2026-06-11-runforge-vnext-masterplan-design.md (masterplan v2.1) is the sole execution-canonical roadmap
 decision: Operator decision 2026-06-11 (sparring-hardened cleanup slate, card 5)
 ---
 
@@ -14,7 +14,7 @@ Visual overview: `pm-cockpit/docs/integration/2026-06-03-company-os-vision-overv
 Cockpit prototype: `pm-cockpit/docs/integration/2026-06-03-cockpit-redesign-prototype.html`
 
 ## 1. Context & problem
-Six overlapping projects (auto-claude, pm-cockpit, product, local-product, plus OSS side-project & Archon) are secretly **one system sliced differently** — each reinvents agents/roles, goals, workflows, gates, specs. Months of work, no convergence. This spec converges them into **one product** and a phased roadmap, starting with a sharp first wedge.
+Six overlapping projects (runforge, pm-cockpit, product, local-product, plus OSS side-project & Archon) are secretly **one system sliced differently** — each reinvents agents/roles, goals, workflows, gates, specs. Months of work, no convergence. This spec converges them into **one product** and a phased roadmap, starting with a sharp first wedge.
 
 Existing reality to reconcile: the Operator already runs a **side-project "Dental-PVS" company for the billing/ops side** (team CEO+CPO+Engineer; roadmap CLA-10, board-approved; engine M0–M4 done, only live KZV send missing). The company OS must *integrate with / grow from* that, not ignore it (see §8 integration point).
 
@@ -22,22 +22,22 @@ Existing reality to reconcile: the Operator already runs a **side-project "Denta
 | # | Decision | Choice |
 |---|---|---|
 | Shape | What is it? | **(a) Autonomous COMPANY OS** — CEO over multiple orgs, agents across all functions |
-| Depth | The crown jewel | **Software development at auto-claude's L0→L3 depth** — a first-class deep department, NOT a generic "agent does a task" |
+| Depth | The crown jewel | **Software development at runforge's L0→L3 depth** — a first-class deep department, NOT a generic "agent does a task" |
 | Wedge | First proof | **Depth-first on acme** (the hardest real case) |
 | Multiplayer | Who's in the room | **(b) Humans + agents, first-class** — assign/claim, @-mention, threads, presence |
 | Reach | Owner | **Internal-first, sellable eventually** → multi-tenant + polish baked in |
-| Spine | Foundation | **(a) Own it — copy side-project's shape, add product + auto-claude** |
-| Dropped | ~~PHI/PII~~ | **Out of scope** — customer data lives on customers' own servers; auto-claude never touches it |
+| Spine | Foundation | **(a) Own it — copy side-project's shape, add product + runforge** |
+| Dropped | ~~PHI/PII~~ | **Out of scope** — customer data lives on customers' own servers; runforge never touches it |
 
 ## 3. Architecture — the backbone
 **Org → Department → Goal → Work.**
 - **Org** = tenant (acme, ava, agency) with an **org chart** of **Departments** (teams of agent roles + humans).
 - **Goal** = the steering primitive a human sets (multiple, concurrent, prioritized).
-- **Work** = the unit a department executes. **The unifying trick:** for **engineering**, a Work item *is* the full auto-claude L0→L3 pipeline (gates + deterministic resume). For other departments, a Work item is a lighter **workflow** (product recipes / Archon). Same abstraction, variable depth → SWE depth stays first-class; others stay light.
+- **Work** = the unit a department executes. **The unifying trick:** for **engineering**, a Work item *is* the full runforge L0→L3 pipeline (gates + deterministic resume). For other departments, a Work item is a lighter **workflow** (product recipes / Archon). Same abstraction, variable depth → SWE depth stays first-class; others stay light.
 - **Gates** surface to the **shared room** (the cockpit) → humans/agents decide → Work resumes.
 
 ### Convergence map (every project → a layer)
-- **auto-claude** → the engineering engine (keep, widen).
+- **runforge** → the engineering engine (keep, widen).
 - **pm-cockpit** → the shared-room cockpit / front-end (keep).
 - **product** → the ops + workflow layer for non-eng departments (keep).
 - **local-product** → the goal-loop / goals primitive (keep).
@@ -81,7 +81,7 @@ Scope:
 1. **Consolidate:** `/deep-review` then merge #709, #710, #711, pm-cockpit#7 (resolve conflicts). One green main per repo.
 2. **Fix #49 (livelock):** an approved `l2-gate` must advance (l2-approved → l3-generate → … → merged), not re-park; remove the duplicate handler/double-resume. SDD: failing test that reproduces the re-park, then the fix.
 3. **Complete the pipeline past the gate:** l3-generate → l3-compliance → implement → review → integrate on the example repo, ending in a merged PR (push/credentials must work in-container — fold gap-8 #43 into the daemon boot).
-4. **Tests:** unit (the resume/gate state machine), integration (driver→GitHub effect→resume), **e2e** (a real run L0→L3→merged on `auto-claude-example`, asserted), **smoke** (`pnpm smoke:engine` = boot daemon → seed an L1 issue → drive to merged → assert).
+4. **Tests:** unit (the resume/gate state machine), integration (driver→GitHub effect→resume), **e2e** (a real run L0→L3→merged on `runforge-example`, asserted), **smoke** (`pnpm smoke:engine` = boot daemon → seed an L1 issue → drive to merged → assert).
 
 Acceptance:
 - A single command takes a fresh L1 issue to a merged PR autonomously, and the operator can approve the l2-gate from the cockpit and watch it complete.

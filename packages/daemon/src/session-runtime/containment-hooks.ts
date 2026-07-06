@@ -283,7 +283,7 @@ export const DEFAULT_POLICY: ContainmentPolicy = {
     '.claude/**',
     'CLAUDE.md',
     'AGENTS.md',
-    'auto-claude.config.json',
+    'runforge.config.json',
   ],
 };
 

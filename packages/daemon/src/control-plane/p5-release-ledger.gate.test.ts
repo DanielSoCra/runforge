@@ -1,7 +1,7 @@
 // P5 release-lane IMMOVABLE acceptance gate — PGlite (real in-process Postgres)
 // criteria 21–24. These exercise the append-only Release Ledger store directly.
 //
-// Authored RED against HEAD: the `@auto-claude/release-ledger` package does not
+// Authored RED against HEAD: the `@runforge/release-ledger` package does not
 // exist yet. Each test dynamic-imports the package's own PGlite test harness
 // (`test/helpers/temp-db.ts` → `makeTempLedger()`, the shape the plan mandates)
 // through a `string`-widened specifier so tsc never resolves it (no TS2307) and
@@ -58,7 +58,7 @@ async function openLedger(): Promise<LedgerWriterLike> {
     record = (await import(p)) as Record<string, unknown>;
   } catch (err) {
     throw new Error(
-      `gate: @auto-claude/release-ledger test helper (${p}) must exist and export makeTempLedger — ${(err as Error).message}`,
+      `gate: @runforge/release-ledger test helper (${p}) must exist and export makeTempLedger — ${(err as Error).message}`,
     );
   }
   const make = record['makeTempLedger'];

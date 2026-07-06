@@ -39,7 +39,7 @@ packages/concierge/
 │   │   └── compression.ts     # recoverable compression rules
 │   ├── tools/
 │   │   ├── registry.ts        # the canonical tool list
-│   │   ├── ac.ts              # auto-claude HTTP client
+│   │   ├── ac.ts              # runforge HTTP client
 │   │   ├── sb.ts              # knowledge-vault MCP wrapper
 │   │   ├── gh.ts              # gh CLI / Octokit
 │   │   ├── slack.ts           # cross-channel send
@@ -119,7 +119,7 @@ For `gh_log_scan`, `mail_triage`, `web_fetch_long`: the tool handler dispatches 
 `scripts/com.concierge.core.plist`, `.observer.plist`, `.board.plist`. All three:
 - `RunAtLoad: true`
 - `KeepAlive: true`
-- `WorkingDirectory: ~/code/auto-claude`
+- `WorkingDirectory: ~/code/runforge`
 - `StandardOutPath` and `StandardErrorPath` to `~/Library/Logs/concierge/<process>.log` with rotation
 - `EnvironmentVariables` loads from a single `~/Library/Application Support/concierge/env` file (so secrets stay out of plists)
 - `ProcessType: Background`

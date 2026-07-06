@@ -5,7 +5,7 @@ import { join, isAbsolute } from 'node:path';
 import { readDecisionIndexConfig } from './config.js';
 
 /**
- * The decision-escalation env reader is the ONE place AUTO_CLAUDE_DECISION_* env
+ * The decision-escalation env reader is the ONE place RUNFORGE_DECISION_* env
  * vars are parsed. It resolves an absolute db path and defaults the protected
  * dir. Fail-closed invariant: when the flag is OFF it touches NOTHING on disk —
  * the protected key is generated/persisted lazily by DecisionIndexManager.init()
@@ -18,12 +18,12 @@ describe('readDecisionIndexConfig', () => {
 
   beforeEach(() => {
     stateDir = mkdtempSync(join(tmpdir(), 'dec-cfg-'));
-    delete process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED;
-    delete process.env.AUTO_CLAUDE_DECISION_INDEX_PATH;
-    delete process.env.AUTO_CLAUDE_DECISION_PROTECTED_KEY;
-    delete process.env.AUTO_CLAUDE_DECISION_PROTECTED_DIR;
-    delete process.env.AUTO_CLAUDE_DATABASE_URL;
-    delete process.env.AUTO_CLAUDE_DECISION_INDEX_CUTOVER_ACK;
+    delete process.env.RUNFORGE_DECISION_INDEX_ENABLED;
+    delete process.env.RUNFORGE_DECISION_INDEX_PATH;
+    delete process.env.RUNFORGE_DECISION_PROTECTED_KEY;
+    delete process.env.RUNFORGE_DECISION_PROTECTED_DIR;
+    delete process.env.RUNFORGE_DATABASE_URL;
+    delete process.env.RUNFORGE_DECISION_INDEX_CUTOVER_ACK;
   });
 
   afterEach(() => {
@@ -38,33 +38,33 @@ describe('readDecisionIndexConfig', () => {
 
   it('parses truthy enabled flag (case/whitespace tolerant)', () => {
     for (const v of ['true', '1', 'TRUE', ' true ', 'yes']) {
-      process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED = v;
+      process.env.RUNFORGE_DECISION_INDEX_ENABLED = v;
       expect(readDecisionIndexConfig(stateDir).enabled).toBe(true);
     }
     for (const v of ['false', '0', '', 'no', 'off']) {
-      process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED = v;
+      process.env.RUNFORGE_DECISION_INDEX_ENABLED = v;
       expect(readDecisionIndexConfig(stateDir).enabled).toBe(false);
     }
   });
 
   it('returns an empty databaseUrl when disabled (no Postgres URL read when flag OFF)', () => {
-    // Even with AUTO_CLAUDE_DATABASE_URL set, a disabled daemon does ZERO extra
+    // Even with RUNFORGE_DATABASE_URL set, a disabled daemon does ZERO extra
     // work and never surfaces the connection string.
-    process.env.AUTO_CLAUDE_DATABASE_URL = 'postgres://user:pw@localhost:5432/ac';
+    process.env.RUNFORGE_DATABASE_URL = 'postgres://user:pw@localhost:5432/ac';
     const cfg = readDecisionIndexConfig(stateDir);
     expect(cfg.enabled).toBe(false);
     expect(cfg.databaseUrl).toBe('');
   });
 
-  it('reads databaseUrl from AUTO_CLAUDE_DATABASE_URL when enabled', () => {
-    process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED = 'true';
-    process.env.AUTO_CLAUDE_DATABASE_URL = 'postgres://user:pw@localhost:5432/ac';
+  it('reads databaseUrl from RUNFORGE_DATABASE_URL when enabled', () => {
+    process.env.RUNFORGE_DECISION_INDEX_ENABLED = 'true';
+    process.env.RUNFORGE_DATABASE_URL = 'postgres://user:pw@localhost:5432/ac';
     const cfg = readDecisionIndexConfig(stateDir);
     expect(cfg.databaseUrl).toBe('postgres://user:pw@localhost:5432/ac');
   });
 
-  it('returns an empty databaseUrl when enabled but AUTO_CLAUDE_DATABASE_URL is unset', () => {
-    process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED = 'true';
+  it('returns an empty databaseUrl when enabled but RUNFORGE_DATABASE_URL is unset', () => {
+    process.env.RUNFORGE_DECISION_INDEX_ENABLED = 'true';
     const cfg = readDecisionIndexConfig(stateDir);
     expect(cfg.enabled).toBe(true);
     expect(cfg.databaseUrl).toBe('');
@@ -80,7 +80,7 @@ describe('readDecisionIndexConfig', () => {
   // (The legacy sqlite db path is gone — the store lives in Postgres now — so the
   //  surviving stateDir-relative path is the protected dir.)
   it('bare example names resolve directly under stateDir (the fixed .env.example values)', () => {
-    process.env.AUTO_CLAUDE_DECISION_PROTECTED_DIR = 'decision-protected/';
+    process.env.RUNFORGE_DECISION_PROTECTED_DIR = 'decision-protected/';
     const cfg = readDecisionIndexConfig(stateDir);
     expect(cfg.protectedDir).toBe(join(stateDir, 'decision-protected'));
     // NOT double-prefixed.
@@ -90,7 +90,7 @@ describe('readDecisionIndexConfig', () => {
   it('a leading state/ prefix double-resolves to state/state/… (why bare names are required)', () => {
     // stateDir basename is `state` so a `state/…` value resolves to `state/state/…`.
     const stateLike = join(tmpdir(), 'state');
-    process.env.AUTO_CLAUDE_DECISION_PROTECTED_DIR = 'state/decision-protected';
+    process.env.RUNFORGE_DECISION_PROTECTED_DIR = 'state/decision-protected';
     const cfg = readDecisionIndexConfig(stateLike);
     expect(cfg.protectedDir).toBe(join(stateLike, 'state', 'decision-protected'));
     expect(cfg.protectedDir).toContain(join('state', 'state'));
@@ -123,7 +123,7 @@ describe('readDecisionIndexConfig', () => {
   });
 
   it('writes NOTHING to stateDir when the flag is explicitly false', () => {
-    process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED = 'false';
+    process.env.RUNFORGE_DECISION_INDEX_ENABLED = 'false';
     const cfg = readDecisionIndexConfig(stateDir);
     expect(cfg.enabled).toBe(false);
     expect(existsSync(join(stateDir, 'decision-protected.key'))).toBe(false);
@@ -133,7 +133,7 @@ describe('readDecisionIndexConfig', () => {
   });
 
   it('generates a 32-byte base64 key and persists it when ENABLED and unset', () => {
-    process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED = 'true';
+    process.env.RUNFORGE_DECISION_INDEX_ENABLED = 'true';
     const cfg = readDecisionIndexConfig(stateDir);
     const keyFile = join(stateDir, 'decision-protected.key');
     expect(existsSync(keyFile)).toBe(true);
@@ -144,16 +144,16 @@ describe('readDecisionIndexConfig', () => {
   });
 
   it('reuses the persisted key across calls when ENABLED (does not regenerate)', () => {
-    process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED = 'true';
+    process.env.RUNFORGE_DECISION_INDEX_ENABLED = 'true';
     const first = readDecisionIndexConfig(stateDir);
     const second = readDecisionIndexConfig(stateDir);
     expect(second.protectedKey).toBe(first.protectedKey);
   });
 
-  it('uses an explicit AUTO_CLAUDE_DECISION_PROTECTED_KEY without persisting (when enabled)', () => {
-    process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED = 'true';
+  it('uses an explicit RUNFORGE_DECISION_PROTECTED_KEY without persisting (when enabled)', () => {
+    process.env.RUNFORGE_DECISION_INDEX_ENABLED = 'true';
     const explicit = Buffer.alloc(32, 7).toString('base64');
-    process.env.AUTO_CLAUDE_DECISION_PROTECTED_KEY = explicit;
+    process.env.RUNFORGE_DECISION_PROTECTED_KEY = explicit;
     const cfg = readDecisionIndexConfig(stateDir);
     expect(cfg.protectedKey).toBe(explicit);
     // no key file written when an explicit key is supplied
@@ -166,15 +166,15 @@ describe('readDecisionIndexConfig', () => {
   // unless the operator acknowledges the cutover. The check is a pure
   // fs.existsSync — it NEVER opens the sqlite file (no better-sqlite3 native load).
   it('throws an actionable cutover error when ENABLED and a legacy sqlite store exists without ack', () => {
-    process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED = 'true';
+    process.env.RUNFORGE_DECISION_INDEX_ENABLED = 'true';
     // A legacy store sitting at the default path that the operator never ack'd.
     writeFileSync(join(stateDir, 'decision-index.sqlite'), '');
     expect(() => readDecisionIndexConfig(stateDir)).toThrow(/legacy sqlite/i);
   });
 
   it('proceeds (no throw) when the cutover is acknowledged despite a legacy sqlite store', () => {
-    process.env.AUTO_CLAUDE_DECISION_INDEX_ENABLED = 'true';
-    process.env.AUTO_CLAUDE_DECISION_INDEX_CUTOVER_ACK = '1';
+    process.env.RUNFORGE_DECISION_INDEX_ENABLED = 'true';
+    process.env.RUNFORGE_DECISION_INDEX_CUTOVER_ACK = '1';
     writeFileSync(join(stateDir, 'decision-index.sqlite'), '');
     expect(() => readDecisionIndexConfig(stateDir)).not.toThrow();
   });

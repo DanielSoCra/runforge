@@ -8,7 +8,7 @@ function makeDeps(overrides: Partial<SnapshotDeps> = {}): SnapshotDeps {
       { specId: 'FUNC-AC-LEARNING', hasL1: true, hasL2: false, hasL3: false, isImplemented: false },
     ],
     getDeliverySummary: async () => [
-      { repo: 'auto-claude', passRate: 0.85, completionCount: 12 },
+      { repo: 'runforge', passRate: 0.85, completionCount: 12 },
     ],
     getBacklog: async () => [
       { issueNumber: 42, title: 'Fix bug', labels: ['bug'], ageDays: 3, isStale: false },
@@ -134,7 +134,7 @@ STACK-AC-CONTROL-PLANE:
     expect(computeSpecGaps('')).toEqual([]);
   });
 
-  it('resolves the concierge L0 tree symmetrically with the auto-claude L0 tree', () => {
+  it('resolves the concierge L0 tree symmetrically with the runforge L0 tree', () => {
     // Proves spec resolution is L0-agnostic. Either the AC tree or the
     // concierge tree must walk equivalently when the operator queries gaps.
     const traceabilityContent = `

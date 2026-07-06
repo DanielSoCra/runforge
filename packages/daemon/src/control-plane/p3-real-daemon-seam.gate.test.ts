@@ -13,8 +13,8 @@ import type {
   ListOption,
   ListRankedArgs,
   RankedListItem,
-} from '@auto-claude/decision-index';
-import type { ItemStatus } from '@auto-claude/decision-protocol';
+} from '@runforge/decision-index';
+import type { ItemStatus } from '@runforge/decision-protocol';
 import { createControlServer, type ControlHandlers } from './server.js';
 import {
   answerDecision,
@@ -283,6 +283,6 @@ describe('G2 real daemon seam acceptance gate', () => {
     const repoRoot = repoRootFromImportMeta();
     const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
 
-    expect(ci).toMatch(/playwright|@auto-claude\/dashboard\s+e2e|dashboard.*e2e/i);
+    expect(ci).toMatch(/playwright|@runforge\/dashboard\s+e2e|dashboard.*e2e/i);
   });
 });

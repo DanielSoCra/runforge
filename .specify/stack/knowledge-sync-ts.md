@@ -1,7 +1,7 @@
 ---
 id: STACK-AC-KNOWLEDGE-SYNC
 type: stack-specific
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 3
@@ -25,7 +25,7 @@ test_paths: []  # planned: packages/daemon/src/knowledge-sync/**/*.test.ts
 
 ## Key Decisions
 
-**Manifest file: `00-Meta/auto-claude-sync.md` within the vault root.** Chosen as a Markdown file to be a first-class vault note (discoverable and editable in Obsidian). The YAML frontmatter carries the structured `importSources` array; the body may contain human-readable notes and is ignored by the sync service.
+**Manifest file: `00-Meta/runforge-sync.md` within the vault root.** Chosen as a Markdown file to be a first-class vault note (discoverable and editable in Obsidian). The YAML frontmatter carries the structured `importSources` array; the body may contain human-readable notes and is ignored by the sync service.
 
 **Frontmatter parsing: `gray-matter`.** Chosen over manual regex (fragile on multi-line YAML values) and `js-yaml` alone (doesn't strip the Markdown body). The manifest is parsed once per cycle; parsing cost is negligible.
 

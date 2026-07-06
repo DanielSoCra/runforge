@@ -33,7 +33,7 @@ services:
       dockerfile: packages/db/Dockerfile
     restart: "no"
     environment:
-      AUTO_CLAUDE_DATABASE_URL: ${AUTO_CLAUDE_DOCKER_DATABASE_URL:?set AUTO_CLAUDE_DOCKER_DATABASE_URL in the selected env file}
+      RUNFORGE_DATABASE_URL: ${RUNFORGE_DOCKER_DATABASE_URL:?set RUNFORGE_DOCKER_DATABASE_URL in the selected env file}
     depends_on:
       postgres:
         condition: service_healthy
@@ -63,7 +63,7 @@ services:
     restart: unless-stopped
     env_file: ${ENV_FILE:-.env.prod}
     environment:
-      AUTO_CLAUDE_DATABASE_URL: ${AUTO_CLAUDE_DOCKER_DATABASE_URL:?set AUTO_CLAUDE_DOCKER_DATABASE_URL in the selected env file}
+      RUNFORGE_DATABASE_URL: ${RUNFORGE_DOCKER_DATABASE_URL:?set RUNFORGE_DOCKER_DATABASE_URL in the selected env file}
       NODE_ENV: production
       PLUGINS_DIR: /app/plugins
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in the selected env file}
@@ -89,7 +89,7 @@ services:
     profiles: ["containerized-daemon"]
     env_file: ${ENV_FILE:-.env.prod}
     environment:
-      AUTO_CLAUDE_DATABASE_URL: ${AUTO_CLAUDE_DOCKER_DATABASE_URL:?set AUTO_CLAUDE_DOCKER_DATABASE_URL in the selected env file}
+      RUNFORGE_DATABASE_URL: ${RUNFORGE_DOCKER_DATABASE_URL:?set RUNFORGE_DOCKER_DATABASE_URL in the selected env file}
       DAEMON_HOST: "0.0.0.0"
       DAEMON_DATA_BACKEND: ${DAEMON_DATA_BACKEND:-postgres}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in the selected env file}
@@ -97,7 +97,7 @@ services:
       # --dangerously-skip-permissions to clear the CLI "Workspace not trusted"
       # gate on dynamic worktree cwds. The daemon's PreToolUse containment hooks
       # still gate every tool call. Override to 0 only for a non-autonomous run.
-      AUTO_CLAUDE_SKIP_PERMISSIONS: ${AUTO_CLAUDE_SKIP_PERMISSIONS:-1}
+      RUNFORGE_SKIP_PERMISSIONS: ${RUNFORGE_SKIP_PERMISSIONS:-1}
       # Subscription-auth home: the CLI reads creds from $HOME/.claude and the
       # onboarding/trust config from $HOME/.claude.json (both operator-mounted).
       HOME: /root
@@ -107,26 +107,26 @@ services:
     ports: []
     command: >
       sh -c "
-        git config --global user.name 'Auto-Claude' &&
-        git config --global user.email 'auto-claude@localhost' &&
+        git config --global user.name 'Runforge' &&
+        git config --global user.email 'runforge@localhost' &&
         pnpm start
       "
     # WHAT THE IMAGE BAKES (no mount needed): prompts/, FACTORY_RULES.md,
     # fitness/ — see packages/daemon/Dockerfile. PROMPTS_DIR is baked too.
     # WHAT THE OPERATOR MOUNTS:
-    #   - the pilot config (auto-claude.config.json)
+    #   - the pilot config (runforge.config.json)
     #   - plugins/ (optional)
     #   - subscription creds: an ISOLATED COPY of ~/.claude mounted WRITABLE at
     #     /root/.claude (the CLI refreshes the OAuth token and needs write; :ro
     #     401s), plus ~/.claude.json -> /root/.claude.json for onboarding/trust.
     #     Creds are secret -> operator-mounted, NEVER baked. Set them via:
-    #       AUTO_CLAUDE_CLAUDE_CREDS_DIR=/tmp/pilot-claude
-    #       AUTO_CLAUDE_CLAUDE_JSON=$HOME/.claude.json
+    #       RUNFORGE_CLAUDE_CREDS_DIR=/tmp/pilot-claude
+    #       RUNFORGE_CLAUDE_JSON=$HOME/.claude.json
     volumes:
       - ./plugins:/app/plugins:ro
-      - ${AUTO_CLAUDE_CONFIG_FILE:-./auto-claude.config.json}:/app/packages/daemon/auto-claude.config.json:ro
-      - ${AUTO_CLAUDE_CLAUDE_CREDS_DIR:-./.docker-noop-claude}:/root/.claude
-      - ${AUTO_CLAUDE_CLAUDE_JSON:-./.docker-noop-claude.json}:/root/.claude.json
+      - ${RUNFORGE_CONFIG_FILE:-./runforge.config.json}:/app/packages/daemon/runforge.config.json:ro
+      - ${RUNFORGE_CLAUDE_CREDS_DIR:-./.docker-noop-claude}:/root/.claude
+      - ${RUNFORGE_CLAUDE_JSON:-./.docker-noop-claude.json}:/root/.claude.json
       - daemon-state:/app/packages/daemon/state
     networks:
       - app
@@ -138,7 +138,7 @@ services:
     restart: unless-stopped
     env_file: ${ENV_FILE:-.env.prod}
     environment:
-      AUTO_CLAUDE_DATABASE_URL: ${AUTO_CLAUDE_DOCKER_DATABASE_URL:?set AUTO_CLAUDE_DOCKER_DATABASE_URL in the selected env file}
+      RUNFORGE_DATABASE_URL: ${RUNFORGE_DOCKER_DATABASE_URL:?set RUNFORGE_DOCKER_DATABASE_URL in the selected env file}
       BRIEFING_DATA_BACKEND: ${BRIEFING_DATA_BACKEND:-postgres}
       NODE_ENV: production
       GIT_REPO_PATH: /repo

@@ -157,7 +157,7 @@ The design doc at `docs/superpowers/specs/2026-05-01-concierge-design.md` refere
 
 ### Prompts and skills (Tasks 18, 19)
 
-⚙ Search prompts under `prompts/` and skills under `plugins/auto-claude-dev/skills/` for the old IDs and replace with the new IDs.
+⚙ Search prompts under `prompts/` and skills under `plugins/runforge-dev/skills/` for the old IDs and replace with the new IDs.
 
 ---
 
@@ -178,7 +178,7 @@ console.log('OK: all five concierge L1 IDs are regex-safe.');
 "
 
 # 2. Confirm traceability yields the full chain from FUNC-CONCIERGE-CORE.
-pnpm --filter @auto-claude/daemon exec vitest run \
+pnpm --filter @runforge/daemon exec vitest run \
   src/infra/traceability-paths.test.ts -t "concierge spec tree"
 ```
 
@@ -203,7 +203,7 @@ Before pushing the Phase 0 PR, run the regex verification snippet from this v4 a
 
 ```bash
 node -e "..."   # see Verification block above
-pnpm --filter @auto-claude/daemon exec vitest run src/infra/traceability-paths.test.ts
+pnpm --filter @runforge/daemon exec vitest run src/infra/traceability-paths.test.ts
 ```
 
 Both green → proceed to PR. Either red → fix before pushing.

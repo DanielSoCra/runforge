@@ -3,11 +3,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makePgliteDb, type PgliteTestDb, TEST_PROTECTED_KEY } from "./helpers/temp-db.js";
-import { ProtectedStore } from "@auto-claude/sanitizer-redaction";
+import { ProtectedStore } from "@runforge/sanitizer-redaction";
 import { PgQuarantine } from "../src/quarantine.js";
 import { ingest, NotAdmittedError } from "../src/ingest.js";
 import { decisions, quarantineEvents } from "../src/schema.js";
-import { PROTOCOL_VERSION } from "@auto-claude/decision-protocol";
+import { PROTOCOL_VERSION } from "@runforge/decision-protocol";
 
 function rawRequest(overrides: Partial<Record<string, unknown>> = {}): any {
   return {

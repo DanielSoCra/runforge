@@ -1,7 +1,7 @@
 ---
 id: FUNC-AC-LEARNING
 type: functional
-domain: auto-claude
+domain: runforge
 status: draft
 version: 3
 layer: 1

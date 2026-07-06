@@ -18,7 +18,7 @@ COPY packages/daemon/package.json packages/daemon/
 COPY packages/dashboard/package.json packages/dashboard/
 
 # Install dependencies
-RUN pnpm install --frozen-lockfile --filter @auto-claude/briefing-summarizer
+RUN pnpm install --frozen-lockfile --filter @runforge/briefing-summarizer
 
 # Copy source
 COPY packages/db/ packages/db/

@@ -1,7 +1,7 @@
 // finding-dismissal/emit.test.ts — the bounded trigger + raise→publish→notify.
 // Pure: a ledger fake + a publisher fake + an injected issue list. No GitHub/PG.
 import { describe, it, expect } from 'vitest';
-import type { DecisionRequest } from '@auto-claude/decision-protocol';
+import type { DecisionRequest } from '@runforge/decision-protocol';
 import type { OctokitLike as PublisherOctokit } from '../decision-escalation/github-block-notifier.js';
 import { FakeFindingLedger } from './__fixtures__/fake-ledger.js';
 import {

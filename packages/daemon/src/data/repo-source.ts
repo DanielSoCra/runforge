@@ -1,4 +1,4 @@
-import type { CredentialStore, RepoStore, StoreResult } from '@auto-claude/db';
+import type { CredentialStore, RepoStore, StoreResult } from '@runforge/db';
 
 import { err, ok, type Result } from '../lib/result.js';
 

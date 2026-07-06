@@ -310,7 +310,7 @@ vi.mock('./runtime-source.js', () => ({
   validateRuntimeSource: (...args: unknown[]) =>
     mockValidateRuntimeSource(...args),
 }));
-vi.mock('@auto-claude/db', () => ({
+vi.mock('@runforge/db', () => ({
   createDbClient: () => ({ db: {}, sql: { end: mockDbSqlEnd } }),
   createPostgresStores: () => ({
     settings: {},
@@ -694,7 +694,7 @@ describe('daemon', () => {
     vi.useFakeTimers();
     // Ensure all required boot env vars are set for happy-path tests (gap #7)
     process.env.GITHUB_TOKEN = 'ghp_test_token';
-    process.env.AUTO_CLAUDE_DATABASE_URL = 'postgres://test';
+    process.env.RUNFORGE_DATABASE_URL = 'postgres://test';
     process.env.ENCRYPTION_KEY = Buffer.alloc(32).toString('base64url');
     // Capture signal handlers.
     vi.spyOn(process, 'on').mockImplementation(((
@@ -1163,33 +1163,33 @@ describe('daemon', () => {
 
     // --- gap #7 tests: consolidated env validation at startDaemon ---
     it('startDaemon validates all required boot env vars and reports all missing at once', async () => {
-      const originalDb = process.env.AUTO_CLAUDE_DATABASE_URL;
+      const originalDb = process.env.RUNFORGE_DATABASE_URL;
       const originalKey = process.env.ENCRYPTION_KEY;
-      delete process.env.AUTO_CLAUDE_DATABASE_URL;
+      delete process.env.RUNFORGE_DATABASE_URL;
       delete process.env.ENCRYPTION_KEY;
       try {
         const { startDaemon } = await loadDaemon();
         const result = await startDaemon('config.json');
         expect(result.ok).toBe(false);
         if (!result.ok) {
-          expect(result.error.message).toContain('AUTO_CLAUDE_DATABASE_URL');
+          expect(result.error.message).toContain('RUNFORGE_DATABASE_URL');
           expect(result.error.message).toContain('ENCRYPTION_KEY');
         }
         // Env validation runs before config load (step 0)
         expect(mockLoadConfig).not.toHaveBeenCalled();
         expect(mockServerStart).not.toHaveBeenCalled();
       } finally {
-        process.env.AUTO_CLAUDE_DATABASE_URL = originalDb;
+        process.env.RUNFORGE_DATABASE_URL = originalDb;
         process.env.ENCRYPTION_KEY = originalKey;
       }
     });
 
     it('startDaemon reports all three required vars when all are missing', async () => {
       const origToken = process.env.GITHUB_TOKEN;
-      const origDb = process.env.AUTO_CLAUDE_DATABASE_URL;
+      const origDb = process.env.RUNFORGE_DATABASE_URL;
       const origKey = process.env.ENCRYPTION_KEY;
       delete process.env.GITHUB_TOKEN;
-      delete process.env.AUTO_CLAUDE_DATABASE_URL;
+      delete process.env.RUNFORGE_DATABASE_URL;
       delete process.env.ENCRYPTION_KEY;
       try {
         const { startDaemon } = await loadDaemon();
@@ -1197,14 +1197,14 @@ describe('daemon', () => {
         expect(result.ok).toBe(false);
         if (!result.ok) {
           expect(result.error.message).toContain('GITHUB_TOKEN');
-          expect(result.error.message).toContain('AUTO_CLAUDE_DATABASE_URL');
+          expect(result.error.message).toContain('RUNFORGE_DATABASE_URL');
           expect(result.error.message).toContain('ENCRYPTION_KEY');
         }
         expect(mockLoadConfig).not.toHaveBeenCalled();
         expect(mockServerStart).not.toHaveBeenCalled();
       } finally {
         process.env.GITHUB_TOKEN = origToken;
-        process.env.AUTO_CLAUDE_DATABASE_URL = origDb;
+        process.env.RUNFORGE_DATABASE_URL = origDb;
         process.env.ENCRYPTION_KEY = origKey;
       }
     });

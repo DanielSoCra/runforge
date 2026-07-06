@@ -1,6 +1,6 @@
 > **🗄 HISTORICAL (2026-06-02).** Completed/superseded record, kept for provenance — superseded by the unified **L0-AC-VISION v5** (`.specify/L0-ac-vision.md`) + its L1 children. The canonical current specs live in `.specify/`. See `docs/superpowers/specs/2026-05-29-spec-reconciliation-ledger.md`. <!-- RECONCILIATION-LEDGER-BANNER -->
 
-# Auto-Claude Implementation Plan
+# Runforge Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -87,7 +87,7 @@ Add `state/` directory creation to startup.
     "typecheck": "tsc --noEmit",
     "format": "prettier --check src/"
   },
-  "bin": { "auto-claude": "./node_modules/.bin/tsx src/main.ts" }
+  "bin": { "runforge": "./node_modules/.bin/tsx src/main.ts" }
 }
 ```
 
@@ -494,7 +494,7 @@ git commit -m "feat: add shared type definitions from L2 data models"
 **Files:**
 - Create: `src/config.ts`
 - Create: `src/config.test.ts`
-- Create: `auto-claude.config.example.json`
+- Create: `runforge.config.example.json`
 
 - [ ] **Step 1: Write failing test**
 
@@ -507,7 +507,7 @@ Config schema includes: `repo` (owner/name), `controlPort`, `pollIntervalMs`, `m
 - [ ] **Step 3: Run test, verify pass, commit**
 
 ```bash
-git add src/config.ts src/config.test.ts auto-claude.config.example.json
+git add src/config.ts src/config.test.ts runforge.config.example.json
 git commit -m "feat: add configuration loading with Zod validation"
 ```
 
@@ -716,7 +716,7 @@ git commit -m "feat: add HTTP control server with instance lock"
 
 - [ ] **Step 1: Implement CLI commands**
 
-`auto-claude start` — launches daemon. `auto-claude status/pause/resume/retry/logs` — HTTP calls to control server.
+`runforge start` — launches daemon. `runforge status/pause/resume/retry/logs` — HTTP calls to control server.
 
 - [ ] **Step 2: Wire main.ts as entry point**
 

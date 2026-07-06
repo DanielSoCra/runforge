@@ -7,7 +7,7 @@
  * single-writer + read-only-session guarantees cannot be modelled by an
  * in-process backend). Every daemon test that builds a real writer therefore:
  *
- *   1. is GATED on a real Postgres URL (`AUTO_CLAUDE_TEST_DATABASE_URL`, set by
+ *   1. is GATED on a real Postgres URL (`RUNFORGE_TEST_DATABASE_URL`, set by
  *      CI; locally the suite skips), and
  *   2. holds ONE shared session-level advisory lock for the whole file so that,
  *      under parallel CI vitest forks, no two writer-backed files DROP/migrate
@@ -21,7 +21,7 @@
 import postgres from 'postgres';
 
 /** Real Postgres URL the gated suites connect to; undefined → skip the suite. */
-export const DECISION_DB_URL = process.env.AUTO_CLAUDE_TEST_DATABASE_URL;
+export const DECISION_DB_URL = process.env.RUNFORGE_TEST_DATABASE_URL;
 
 /** True when a real Postgres is configured (drives `describe.skipIf(!REAL_PG)`). */
 export const REAL_PG = Boolean(DECISION_DB_URL);

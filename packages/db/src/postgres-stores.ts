@@ -12,7 +12,7 @@ import {
   sql,
 } from 'drizzle-orm';
 
-import type { AutoClaudeDb } from './client.js';
+import type { RunforgeDb } from './client.js';
 import {
   decryptCredential,
   encryptCredential,
@@ -54,7 +54,7 @@ import type {
   StoreResult,
 } from './stores.js';
 
-export interface AutoClaudeStores {
+export interface RunforgeStores {
   repos: RepoStore;
   runs: RunStore;
   costs: CostEventStore;
@@ -71,9 +71,9 @@ export interface PostgresStoreOptions {
 }
 
 export function createPostgresStores(
-  db: AutoClaudeDb,
+  db: RunforgeDb,
   options: PostgresStoreOptions = {},
-): AutoClaudeStores {
+): RunforgeStores {
   const credentialKey = () => options.credentialKey ?? readCredentialKey();
 
   return {
@@ -89,10 +89,10 @@ export function createPostgresStores(
   };
 }
 
-const OPERATOR_MEMBERSHIP_LOCK_NAME = 'auto_claude_operator_membership';
+const OPERATOR_MEMBERSHIP_LOCK_NAME = 'runforge_operator_membership';
 
 export class PostgresRepoStore implements RepoStore {
-  constructor(private readonly db: AutoClaudeDb) {}
+  constructor(private readonly db: RunforgeDb) {}
 
   async listEnabledRepositories() {
     return unavailableOnThrow(async () => {
@@ -157,7 +157,7 @@ export class PostgresRepoStore implements RepoStore {
 }
 
 export class PostgresRunStore implements RunStore {
-  constructor(private readonly db: AutoClaudeDb) {}
+  constructor(private readonly db: RunforgeDb) {}
 
   async insertRun(run: typeof runs.$inferInsert) {
     return unavailableOnThrow(async () => {
@@ -242,7 +242,7 @@ export class PostgresRunStore implements RunStore {
 }
 
 export class PostgresCostEventStore implements CostEventStore {
-  constructor(private readonly db: AutoClaudeDb) {}
+  constructor(private readonly db: RunforgeDb) {}
 
   async recordCostEvent(
     runId: string,
@@ -288,7 +288,7 @@ export class PostgresCostEventStore implements CostEventStore {
 
 export class PostgresCredentialStore implements CredentialStore {
   constructor(
-    private readonly db: AutoClaudeDb,
+    private readonly db: RunforgeDb,
     private readonly credentialKey: () => Buffer,
   ) {}
 
@@ -437,7 +437,7 @@ export class PostgresCredentialStore implements CredentialStore {
 }
 
 export class PostgresPluginStore implements PluginStore {
-  constructor(private readonly db: AutoClaudeDb) {}
+  constructor(private readonly db: RunforgeDb) {}
 
   async listActivePlugins(repositoryId: string) {
     return unavailableOnThrow(async () => {
@@ -639,7 +639,7 @@ export class PostgresPluginStore implements PluginStore {
 }
 
 export class PostgresBriefingStore implements BriefingStore {
-  constructor(private readonly db: AutoClaudeDb) {}
+  constructor(private readonly db: RunforgeDb) {}
 
   async readLatestBriefing() {
     return unavailableOnThrow(async () => {
@@ -700,7 +700,7 @@ export class PostgresBriefingStore implements BriefingStore {
 }
 
 export class PostgresSettingsAccess implements SettingsAccess {
-  constructor(private readonly db: AutoClaudeDb) {}
+  constructor(private readonly db: RunforgeDb) {}
 
   async readGlobalSettings() {
     return unavailableOnThrow(async () => {
@@ -733,7 +733,7 @@ export class PostgresSettingsAccess implements SettingsAccess {
 }
 
 export class PostgresGitHubConnectionStore implements GitHubConnectionStore {
-  constructor(private readonly db: AutoClaudeDb) {}
+  constructor(private readonly db: RunforgeDb) {}
 
   async listOrganizations(connectionId: string) {
     return unavailableOnThrow(async () => {
@@ -752,7 +752,7 @@ export class PostgresGitHubConnectionStore implements GitHubConnectionStore {
 }
 
 export class PostgresOperatorAuthStore implements OperatorAuthStore {
-  constructor(private readonly db: AutoClaudeDb) {}
+  constructor(private readonly db: RunforgeDb) {}
 
   async readMembership(userId: string) {
     return unavailableOnThrow(async () => {
@@ -879,7 +879,7 @@ function repoCredentialAad(
 }
 
 async function repositoryExists(
-  db: AutoClaudeDb,
+  db: RunforgeDb,
   repositoryId: string,
 ): Promise<boolean> {
   const [row] = await db
@@ -890,7 +890,7 @@ async function repositoryExists(
   return Boolean(row);
 }
 
-async function runExists(db: AutoClaudeDb, runId: string): Promise<boolean> {
+async function runExists(db: RunforgeDb, runId: string): Promise<boolean> {
   const [row] = await db
     .select({ id: runs.id })
     .from(runs)
@@ -900,7 +900,7 @@ async function runExists(db: AutoClaudeDb, runId: string): Promise<boolean> {
 }
 
 async function connectionExists(
-  db: AutoClaudeDb,
+  db: RunforgeDb,
   connectionId: string,
 ): Promise<boolean> {
   const [row] = await db

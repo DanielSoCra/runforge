@@ -35,32 +35,32 @@
 - [ ] **Step 1: Create all pipeline labels via `gh` CLI**
 
 ```bash
-# Run from auto-claude repo directory. Uses || true for idempotency (safe to re-run).
-gh label create "feature-pipeline" --color "1D76DB" --description "Spec-driven pipeline work" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
-gh label create "l1-approved" --color "0E8A16" --description "L1 spec approved by Operator" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
-gh label create "l2-in-progress" --color "FBCA04" --description "Agent generating L2 spec" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
-gh label create "l2-review" --color "D93F0B" --description "L2 spec ready for Operator review" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
-gh label create "l2-approved" --color "0E8A16" --description "Operator approved L2 spec" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
-gh label create "l3-in-progress" --color "FBCA04" --description "Agent generating L3 spec" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
-gh label create "l3-review" --color "D93F0B" --description "L3 spec under automated review" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
-gh label create "l3-approved" --color "0E8A16" --description "L3 spec passed compliance" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
-gh label create "ready-to-implement" --color "0E8A16" --description "Spec chain complete, ready for implementation" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
-gh label create "implementing" --color "FBCA04" --description "Implementation in progress" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
-gh label create "spec-change-suggested" --color "E4E669" --description "Agent suggests spec change" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
-gh label create "l1-suggestion" --color "E4E669" --description "Suggested change to L1 spec" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
-gh label create "l2-suggestion" --color "E4E669" --description "Suggested change to L2 spec" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
-gh label create "self-modification-suggestion" --color "B60205" --description "Pipeline suggests change to own specs" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
-gh label create "phase-2" --color "C5DEF5" --description "Earmarked for Phase 2" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
-gh label create "phase-3" --color "C5DEF5" --description "Earmarked for Phase 3" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+# Run from runforge repo directory. Uses || true for idempotency (safe to re-run).
+gh label create "feature-pipeline" --color "1D76DB" --description "Spec-driven pipeline work" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
+gh label create "l1-approved" --color "0E8A16" --description "L1 spec approved by Operator" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
+gh label create "l2-in-progress" --color "FBCA04" --description "Agent generating L2 spec" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
+gh label create "l2-review" --color "D93F0B" --description "L2 spec ready for Operator review" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
+gh label create "l2-approved" --color "0E8A16" --description "Operator approved L2 spec" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
+gh label create "l3-in-progress" --color "FBCA04" --description "Agent generating L3 spec" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
+gh label create "l3-review" --color "D93F0B" --description "L3 spec under automated review" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
+gh label create "l3-approved" --color "0E8A16" --description "L3 spec passed compliance" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
+gh label create "ready-to-implement" --color "0E8A16" --description "Spec chain complete, ready for implementation" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
+gh label create "implementing" --color "FBCA04" --description "Implementation in progress" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
+gh label create "spec-change-suggested" --color "E4E669" --description "Agent suggests spec change" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
+gh label create "l1-suggestion" --color "E4E669" --description "Suggested change to L1 spec" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
+gh label create "l2-suggestion" --color "E4E669" --description "Suggested change to L2 spec" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
+gh label create "self-modification-suggestion" --color "B60205" --description "Pipeline suggests change to own specs" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
+gh label create "phase-2" --color "C5DEF5" --description "Earmarked for Phase 2" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
+gh label create "phase-3" --color "C5DEF5" --description "Earmarked for Phase 3" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
 # Note: `blocked` label already exists on the repo and is reused by the pipeline.
 # Update its description to reflect pipeline use:
-gh label edit "blocked" --description "Needs human input (maintenance + pipeline)" --repo DANIELSOCRAHANDLEZZ/auto-claude 2>/dev/null || true
+gh label edit "blocked" --description "Needs human input (maintenance + pipeline)" --repo DANIELSOCRAHANDLEZZ/runforge 2>/dev/null || true
 ```
 
 - [ ] **Step 2: Verify labels exist (including pre-existing `blocked`)**
 
 ```bash
-LABELS=$(gh label list --repo DANIELSOCRAHANDLEZZ/auto-claude --json name --jq '.[].name')
+LABELS=$(gh label list --repo DANIELSOCRAHANDLEZZ/runforge --json name --jq '.[].name')
 for label in feature-pipeline l1-approved l2-in-progress l2-review l2-approved l3-in-progress l3-review l3-approved ready-to-implement implementing spec-change-suggested l1-suggestion l2-suggestion self-modification-suggestion phase-2 phase-3 blocked; do
   echo "$LABELS" | grep -q "^${label}$" && echo "✓ $label" || echo "✗ $label MISSING"
 done
@@ -116,7 +116,7 @@ write the L2 spec, and submit for Operator review via PR.
 
 1. **Claim the issue**
    ```bash
-   gh issue edit <N> --remove-label "l1-approved" --add-label "l2-in-progress" --repo DANIELSOCRAHANDLEZZ/auto-claude
+   gh issue edit <N> --remove-label "l1-approved" --add-label "l2-in-progress" --repo DANIELSOCRAHANDLEZZ/runforge
    ```
 
 2. **Read the spec chain**
@@ -143,13 +143,13 @@ write the L2 spec, and submit for Operator review via PR.
    git add .specify/
    git commit -m "spec(l2): add <spec-id> architecture spec for issue #<N>"
    git push origin spec/l2/<issue-number>-<short-name>
-   gh pr create --title "L2: <spec title>" --body "Part of #<N> (L2 phase)\n\n## Design Summary\n<3-5 bullets>" --repo DANIELSOCRAHANDLEZZ/auto-claude
+   gh pr create --title "L2: <spec title>" --body "Part of #<N> (L2 phase)\n\n## Design Summary\n<3-5 bullets>" --repo DANIELSOCRAHANDLEZZ/runforge
    ```
 
 6. **Submit for review**
    ```bash
-   gh issue comment <N> --body "## L2 Design Summary\n\n<3-5 bullet points of key decisions + reasoning>\n\nPR: <PR-URL>" --repo DANIELSOCRAHANDLEZZ/auto-claude
-   gh issue edit <N> --remove-label "l2-in-progress" --add-label "l2-review" --repo DANIELSOCRAHANDLEZZ/auto-claude
+   gh issue comment <N> --body "## L2 Design Summary\n\n<3-5 bullet points of key decisions + reasoning>\n\nPR: <PR-URL>" --repo DANIELSOCRAHANDLEZZ/runforge
+   gh issue edit <N> --remove-label "l2-in-progress" --add-label "l2-review" --repo DANIELSOCRAHANDLEZZ/runforge
    ```
 
 7. **Exit cleanly** — Operator reviews asynchronously
@@ -171,8 +171,8 @@ write the L2 spec, and submit for Operator review via PR.
    git add .specify/
    git commit -m "spec(l2): address feedback on <spec-id> for issue #<N>"
    git push origin spec/l2/<issue-number>-<short-name>
-   gh issue comment <N> --body "Updated L2 spec based on feedback:\n\n<summary of changes>" --repo DANIELSOCRAHANDLEZZ/auto-claude
-   gh issue edit <N> --remove-label "l2-in-progress" --add-label "l2-review" --repo DANIELSOCRAHANDLEZZ/auto-claude
+   gh issue comment <N> --body "Updated L2 spec based on feedback:\n\n<summary of changes>" --repo DANIELSOCRAHANDLEZZ/runforge
+   gh issue edit <N> --remove-label "l2-in-progress" --add-label "l2-review" --repo DANIELSOCRAHANDLEZZ/runforge
    ```
 
 4. **Exit cleanly**
@@ -186,7 +186,7 @@ If during brainstorming you discover that the L1 spec makes implementation **imp
    gh issue create --title "L1 suggestion: <description>" \
      --label "spec-change-suggested,l1-suggestion" \
      --body "## BLOCKING_REASON\n\n<proof that L1 makes implementation impossible>\n\nRelated to #<parent-issue>" \
-     --repo DANIELSOCRAHANDLEZZ/auto-claude
+     --repo DANIELSOCRAHANDLEZZ/runforge
    # If self-targeting: gh issue edit <new-issue> --add-label "self-modification-suggestion"
    ```
 3. Do NOT modify the L1 spec yourself.
@@ -248,7 +248,7 @@ upstream specs, and auto-promote to implementation if everything checks out.
 
 1. **Claim the issue**
    ```bash
-   gh issue edit <N> --remove-label "l2-approved" --add-label "l3-in-progress" --repo DANIELSOCRAHANDLEZZ/auto-claude
+   gh issue edit <N> --remove-label "l2-approved" --add-label "l3-in-progress" --repo DANIELSOCRAHANDLEZZ/runforge
    ```
 
 2. **Read the spec chain**
@@ -279,9 +279,9 @@ upstream specs, and auto-promote to implementation if everything checks out.
      gh issue create --title "L2 suggestion: <description>" \
        --label "spec-change-suggested,l2-suggestion" \
        --body "## EVIDENCE\n\n<concrete code/test output proving L2 doesn't work>\n\nBlocks #<N>" \
-       --repo DANIELSOCRAHANDLEZZ/auto-claude
-     gh issue edit <N> --add-label "blocked" --remove-label "l3-in-progress" --repo DANIELSOCRAHANDLEZZ/auto-claude
-     gh issue comment <N> --body "Blocked: L2 change needed. See #<suggestion-number>" --repo DANIELSOCRAHANDLEZZ/auto-claude
+       --repo DANIELSOCRAHANDLEZZ/runforge
+     gh issue edit <N> --add-label "blocked" --remove-label "l3-in-progress" --repo DANIELSOCRAHANDLEZZ/runforge
+     gh issue comment <N> --body "Blocked: L2 change needed. See #<suggestion-number>" --repo DANIELSOCRAHANDLEZZ/runforge
      ```
      Then exit.
 
@@ -290,24 +290,24 @@ upstream specs, and auto-promote to implementation if everything checks out.
    git add .specify/
    git commit -m "spec(l3): add <spec-id> stack spec for issue #<N>"
    git push origin spec/l3/<issue-number>-<short-name>
-   gh pr create --title "L3: <spec title>" --body "Part of #<N>\n\nL3 stack spec generated from L2." --repo DANIELSOCRAHANDLEZZ/auto-claude
-   gh issue edit <N> --remove-label "l3-in-progress" --add-label "l3-review" --repo DANIELSOCRAHANDLEZZ/auto-claude
+   gh pr create --title "L3: <spec title>" --body "Part of #<N>\n\nL3 stack spec generated from L2." --repo DANIELSOCRAHANDLEZZ/runforge
+   gh issue edit <N> --remove-label "l3-in-progress" --add-label "l3-review" --repo DANIELSOCRAHANDLEZZ/runforge
    ```
 
 7. **Run compliance review**
    - Dispatch a subagent (general-purpose Agent) with the spec-document-reviewer prompt to review L3 quality
    - If review passes:
      ```bash
-     gh pr merge <PR-NUMBER> --squash --repo DANIELSOCRAHANDLEZZ/auto-claude
+     gh pr merge <PR-NUMBER> --squash --repo DANIELSOCRAHANDLEZZ/runforge
      git checkout dev && git pull --ff-only
-     gh issue edit <N> --remove-label "l3-review" --add-label "l3-approved" --add-label "ready-to-implement" --repo DANIELSOCRAHANDLEZZ/auto-claude
-     gh issue comment <N> --body "L3 spec approved and merged. Ready for implementation." --repo DANIELSOCRAHANDLEZZ/auto-claude
+     gh issue edit <N> --remove-label "l3-review" --add-label "l3-approved" --add-label "ready-to-implement" --repo DANIELSOCRAHANDLEZZ/runforge
+     gh issue comment <N> --body "L3 spec approved and merged. Ready for implementation." --repo DANIELSOCRAHANDLEZZ/runforge
      ```
    - If review fails: fix issues, re-push, re-review (max 3 iterations)
    - If 3 failures:
      ```bash
-     gh issue edit <N> --add-label "blocked" --remove-label "l3-review" --repo DANIELSOCRAHANDLEZZ/auto-claude
-     gh issue comment <N> --body "BLOCKED: L3 compliance review failed 3 times. Needs Operator review." --repo DANIELSOCRAHANDLEZZ/auto-claude
+     gh issue edit <N> --add-label "blocked" --remove-label "l3-review" --repo DANIELSOCRAHANDLEZZ/runforge
+     gh issue comment <N> --body "BLOCKED: L3 compliance review failed 3 times. Needs Operator review." --repo DANIELSOCRAHANDLEZZ/runforge
      ```
 
 ## Guard Rails
@@ -390,14 +390,14 @@ When invoked without a specific file (audit the whole repo):
      gh issue create --title "Implementation gap: <description>" \
        --label "feature-pipeline,ready-to-implement" \
        --body "**L3 Spec:** <spec-id>\n**Gap:** <what's missing>\n**Code path:** <file>" \
-       --repo DANIELSOCRAHANDLEZZ/auto-claude
+       --repo DANIELSOCRAHANDLEZZ/runforge
      ```
    - Spec contradictions → create suggestion issues:
      ```bash
      gh issue create --title "L2 suggestion: <description>" \
        --label "spec-change-suggested,l2-suggestion" \
        --body "## EVIDENCE\n\n<contradiction details>" \
-       --repo DANIELSOCRAHANDLEZZ/auto-claude
+       --repo DANIELSOCRAHANDLEZZ/runforge
      ```
    - Traceability gaps → log warning, create issue if significant
 
@@ -406,7 +406,7 @@ When invoked without a specific file (audit the whole repo):
 - Never read `.specify/scenarios/`
 - Check for duplicate issues before creating new ones:
   ```bash
-  gh issue list --label "feature-pipeline" --state open --json title --repo DANIELSOCRAHANDLEZZ/auto-claude | jq '.[].title'
+  gh issue list --label "feature-pipeline" --state open --json title --repo DANIELSOCRAHANDLEZZ/runforge | jq '.[].title'
   ```
 ```
 
@@ -454,7 +454,7 @@ write tests first (TDD), implement, get code review, merge to dev, and close the
 
 1. **Claim the issue**
    ```bash
-   gh issue edit <N> --remove-label "ready-to-implement" --add-label "implementing" --repo DANIELSOCRAHANDLEZZ/auto-claude
+   gh issue edit <N> --remove-label "ready-to-implement" --add-label "implementing" --repo DANIELSOCRAHANDLEZZ/runforge
    ```
 
 2. **Read the spec chain** (L3→L2→L1→L0 per CLAUDE.md)
@@ -468,12 +468,12 @@ write tests first (TDD), implement, get code review, merge to dev, and close the
 3. **Plan the implementation**
    - Post plan as issue comment:
      ```bash
-     gh issue comment <N> --body "## Implementation Plan\n\n<numbered steps>\n\n**Files:** <list>\n**Tests:** <list>" --repo DANIELSOCRAHANDLEZZ/auto-claude
+     gh issue comment <N> --body "## Implementation Plan\n\n<numbered steps>\n\n**Files:** <list>\n**Tests:** <list>" --repo DANIELSOCRAHANDLEZZ/runforge
      ```
    - **Scope guard:** If plan has >20 steps or touches >10 files:
      ```bash
-     gh issue edit <N> --add-label "blocked" --remove-label "implementing" --repo DANIELSOCRAHANDLEZZ/auto-claude
-     gh issue comment <N> --body "BLOCKED: Scope too large (>20 steps or >10 files). Needs Operator decomposition." --repo DANIELSOCRAHANDLEZZ/auto-claude
+     gh issue edit <N> --add-label "blocked" --remove-label "implementing" --repo DANIELSOCRAHANDLEZZ/runforge
+     gh issue comment <N> --body "BLOCKED: Scope too large (>20 steps or >10 files). Needs Operator decomposition." --repo DANIELSOCRAHANDLEZZ/runforge
      ```
      Then exit.
 
@@ -514,8 +514,8 @@ write tests first (TDD), implement, get code review, merge to dev, and close the
    - If review fails: fix issues, re-test, re-review
    - Max 3 attempts. If all fail:
      ```bash
-     gh issue edit <N> --add-label "blocked" --remove-label "implementing" --repo DANIELSOCRAHANDLEZZ/auto-claude
-     gh issue comment <N> --body "BLOCKED: Code review failed 3 times.\n\n<review feedback>" --repo DANIELSOCRAHANDLEZZ/auto-claude
+     gh issue edit <N> --add-label "blocked" --remove-label "implementing" --repo DANIELSOCRAHANDLEZZ/runforge
+     gh issue comment <N> --body "BLOCKED: Code review failed 3 times.\n\n<review feedback>" --repo DANIELSOCRAHANDLEZZ/runforge
      ```
      Then exit.
 
@@ -541,8 +541,8 @@ write tests first (TDD), implement, get code review, merge to dev, and close the
 11. **Close the issue**
     ```bash
     COMMIT_SHA=$(git rev-parse --short HEAD)
-    gh issue edit <N> --remove-label "implementing" --repo DANIELSOCRAHANDLEZZ/auto-claude
-    gh issue close <N> --comment "Implemented in commit $COMMIT_SHA on dev. Tests pass. Code review passed." --repo DANIELSOCRAHANDLEZZ/auto-claude
+    gh issue edit <N> --remove-label "implementing" --repo DANIELSOCRAHANDLEZZ/runforge
+    gh issue close <N> --comment "Implemented in commit $COMMIT_SHA on dev. Tests pass. Code review passed." --repo DANIELSOCRAHANDLEZZ/runforge
     ```
 
 ## Spec Change Suggestions
@@ -591,8 +591,8 @@ Copy the script exactly from the spec: `docs/superpowers/specs/2026-03-22-spec-d
 
 ```bash
 #!/bin/bash
-cd ~/code/auto-claude
-REPO="DANIELSOCRAHANDLEZZ/auto-claude"
+cd ~/code/runforge
+REPO="DANIELSOCRAHANDLEZZ/runforge"
 FAIL_COUNT=0
 MAX_BACKOFF=3600
 
@@ -741,11 +741,11 @@ To: `for role in reviewer developer pipeline; do`
 ```bash
 echo ""
 echo "=== Pipeline Status ==="
-gh issue list --label "feature-pipeline" --state open --repo DANIELSOCRAHANDLEZZ/auto-claude --json number,title,labels --template '{{range .}}#{{.number}} [{{range .labels}}{{.name}} {{end}}] {{.title}}{{"\n"}}{{end}}'
+gh issue list --label "feature-pipeline" --state open --repo DANIELSOCRAHANDLEZZ/runforge --json number,title,labels --template '{{range .}}#{{.number}} [{{range .labels}}{{.name}} {{end}}] {{.title}}{{"\n"}}{{end}}'
 echo ""
 echo "=== Stale Pipeline Issues (>1hr) ==="
 for label in l3-in-progress l3-review implementing; do
-  STALE=$(gh issue list --repo DANIELSOCRAHANDLEZZ/auto-claude \
+  STALE=$(gh issue list --repo DANIELSOCRAHANDLEZZ/runforge \
     --label "feature-pipeline,$label" \
     --state open --json number,title,updatedAt \
     --jq "[.[] | select((.updatedAt | fromdateiso8601) < (now - 3600))]" 2>/dev/null)
@@ -792,15 +792,15 @@ gh issue create \
   --title "TEST: Pipeline smoke test — FUNC-AC-PIPELINE L2 generation" \
   --label "feature-pipeline,l1-approved" \
   --body "## L1 Spec Reference\n\n\`.specify/functional/pipeline-orchestration.md\` (FUNC-AC-PIPELINE)\n\n## Acceptance Criteria\n\n- L2 architecture spec generated for pipeline orchestration\n- Spec passes l2-spec-guardian validation\n- PR opened for Operator review\n\n**This is a smoke test issue.**" \
-  --repo DANIELSOCRAHANDLEZZ/auto-claude
+  --repo DANIELSOCRAHANDLEZZ/runforge
 ```
 
 - [ ] **Step 3: Verify the orchestrator finds it**
 
 ```bash
-cd ~/code/auto-claude
+cd ~/code/runforge
 # Quick check without sourcing the full script
-ELIGIBLE=$(gh issue list --repo DANIELSOCRAHANDLEZZ/auto-claude --label "feature-pipeline,l1-approved" --state open --json number,title 2>/dev/null)
+ELIGIBLE=$(gh issue list --repo DANIELSOCRAHANDLEZZ/runforge --label "feature-pipeline,l1-approved" --state open --json number,title 2>/dev/null)
 echo "$ELIGIBLE" | jq '.[0] | "Found: issue #\(.number) → \(.title)"'
 ```
 
@@ -809,7 +809,7 @@ Expected: Shows the test issue number.
 - [ ] **Step 4: Run one pipeline cycle**
 
 ```bash
-cd ~/code/auto-claude
+cd ~/code/runforge
 bash scripts/pipeline.sh  # Ctrl+C after first cycle completes
 ```
 
@@ -823,7 +823,7 @@ Watch for:
 - [ ] **Step 5: Verify issue state changed**
 
 ```bash
-gh issue view <N> --json labels --jq '.labels[].name' --repo DANIELSOCRAHANDLEZZ/auto-claude
+gh issue view <N> --json labels --jq '.labels[].name' --repo DANIELSOCRAHANDLEZZ/runforge
 ```
 
 Expected: `feature-pipeline`, `l2-review` (not `l1-approved`)
@@ -845,8 +845,8 @@ The smoke test only validates L2 pickup. Leave the issue open to continue throug
 
 Review the PR created by the smoke test. If acceptable:
 ```bash
-gh issue edit <N> --remove-label "l2-review" --add-label "l2-approved" --repo DANIELSOCRAHANDLEZZ/auto-claude
-gh pr merge <PR-NUMBER> --squash --repo DANIELSOCRAHANDLEZZ/auto-claude
+gh issue edit <N> --remove-label "l2-review" --add-label "l2-approved" --repo DANIELSOCRAHANDLEZZ/runforge
+gh pr merge <PR-NUMBER> --squash --repo DANIELSOCRAHANDLEZZ/runforge
 ```
 
 - [ ] **Step 2: Run pipeline again — should pick up L3 generation**
@@ -868,7 +868,7 @@ Watch for: Issue moves from `ready-to-implement` → `implementing` → closed w
 - [ ] **Step 4: Verify end-to-end success**
 
 ```bash
-gh issue view <N> --json state,labels,comments --repo DANIELSOCRAHANDLEZZ/auto-claude
+gh issue view <N> --json state,labels,comments --repo DANIELSOCRAHANDLEZZ/runforge
 ```
 
 Expected: Issue is closed. Comments show L2 summary, L3 approval, implementation plan, and commit SHA.
@@ -893,16 +893,16 @@ Expected: All tests pass. New code from the pipeline is on `dev`.
 
 ```bash
 gh issue create \
-  --title "Phase 2: Migrate pipeline.sh to native auto-claude control plane FSM" \
+  --title "Phase 2: Migrate pipeline.sh to native runforge control plane FSM" \
   --label "feature-pipeline,phase-2" \
-  --body "The spec-driven pipeline should run as a native auto-claude pipeline variant (\`spec-driven\`) instead of shell scripts.\n\nSee: \`docs/superpowers/specs/2026-03-22-spec-driven-pipeline-design.md\` Phase 2 section.\n\n**Not active until Phase 1 proves stable.**" \
-  --repo DANIELSOCRAHANDLEZZ/auto-claude
+  --body "The spec-driven pipeline should run as a native runforge pipeline variant (\`spec-driven\`) instead of shell scripts.\n\nSee: \`docs/superpowers/specs/2026-03-22-spec-driven-pipeline-design.md\` Phase 2 section.\n\n**Not active until Phase 1 proves stable.**" \
+  --repo DANIELSOCRAHANDLEZZ/runforge
 
 gh issue create \
   --title "Phase 2: Use CLI adapter from session runtime instead of direct claude invocation" \
   --label "feature-pipeline,phase-2" \
   --body "Sessions should use the CLI adapter from session runtime instead of direct \`claude\` invocation.\n\nSee: \`docs/superpowers/specs/2026-03-22-spec-driven-pipeline-design.md\` Translation map.\n\n**Not active until Phase 1 proves stable.**" \
-  --repo DANIELSOCRAHANDLEZZ/auto-claude
+  --repo DANIELSOCRAHANDLEZZ/runforge
 ```
 
 - [ ] **Step 2: Create Phase 3 issues**
@@ -912,19 +912,19 @@ gh issue create \
   --title "Phase 3: Migrate reviewer/developer to native pipeline variants" \
   --label "feature-pipeline,phase-3" \
   --body "The reviewer/developer maintenance loop should run as pipeline variants (\`review\`, \`fix\`).\n\nSee: \`docs/superpowers/specs/2026-03-22-spec-driven-pipeline-design.md\` Phase 3 section.\n\n**Not active until Phase 2 proves stable.**" \
-  --repo DANIELSOCRAHANDLEZZ/auto-claude
+  --repo DANIELSOCRAHANDLEZZ/runforge
 
 gh issue create \
   --title "Phase 3: Dashboard shows all pipeline tracks with live status" \
   --label "feature-pipeline,phase-3" \
   --body "Dashboard should show all pipeline tracks (feature, review, fix) with live status.\n\nSee: \`docs/superpowers/specs/2026-03-22-spec-driven-pipeline-design.md\` Phase 3 section.\n\n**Not active until Phase 2 proves stable.**" \
-  --repo DANIELSOCRAHANDLEZZ/auto-claude
+  --repo DANIELSOCRAHANDLEZZ/runforge
 ```
 
 - [ ] **Step 3: Verify issues created**
 
 ```bash
-gh issue list --label "feature-pipeline" --repo DANIELSOCRAHANDLEZZ/auto-claude --json number,title,labels
+gh issue list --label "feature-pipeline" --repo DANIELSOCRAHANDLEZZ/runforge --json number,title,labels
 ```
 
 Expected: Test issue + 4 placeholder issues visible.
@@ -969,7 +969,7 @@ Expected: `OK`
 - [ ] **Step 4: Verify all labels exist (single API call)**
 
 ```bash
-LABELS=$(gh label list --repo DANIELSOCRAHANDLEZZ/auto-claude --json name --jq '.[].name')
+LABELS=$(gh label list --repo DANIELSOCRAHANDLEZZ/runforge --json name --jq '.[].name')
 for label in feature-pipeline l1-approved l2-in-progress l2-review l2-approved l3-in-progress l3-review l3-approved ready-to-implement implementing spec-change-suggested l1-suggestion l2-suggestion self-modification-suggestion phase-2 phase-3 blocked; do
   echo "$LABELS" | grep -q "^${label}$" && echo "✓ $label" || echo "✗ $label MISSING"
 done

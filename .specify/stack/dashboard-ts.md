@@ -1,7 +1,7 @@
 ---
 id: STACK-AC-DASHBOARD
 type: stack-specific
-domain: auto-claude
+domain: runforge
 status: draft
 version: 3
 layer: 3
@@ -24,7 +24,7 @@ test_paths:
 
 **Supabase as backend.** Supabase provides: Postgres database, GitHub OAuth via Supabase Auth, Row Level Security for access control, Realtime subscriptions for live updates, and encrypted column support for API keys. Server Actions replace REST API routes for all database mutations — no custom API layer needed for Supabase operations.
 
-**Docker Compose for deployment.** Three services: Caddy (reverse proxy + HTTPS), Next.js dashboard, Auto-Claude daemon. All three run on a shared Docker network. Caddy routes `app.example.com` to the Next.js container. The dashboard reaches the daemon via Docker service name resolution (e.g., `http://daemon:3847`).
+**Docker Compose for deployment.** Three services: Caddy (reverse proxy + HTTPS), Next.js dashboard, Runforge daemon. All three run on a shared Docker network. Caddy routes `app.example.com` to the Next.js container. The dashboard reaches the daemon via Docker service name resolution (e.g., `http://daemon:3847`).
 
 ## Key Decisions
 

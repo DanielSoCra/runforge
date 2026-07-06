@@ -15,11 +15,11 @@ superseded_date: 2026-06-02
 
 ## Problem
 
-The auto-claude operator loop detects infrastructure and pipeline failures but cannot fix code-level bugs autonomously. When the briefing-summarizer queries a nonexistent column, when the dashboard crashes due to a null guard, or when the daemon's phase handlers are missing — a human must intervene. This slows iteration during the early development/testing phase.
+The runforge operator loop detects infrastructure and pipeline failures but cannot fix code-level bugs autonomously. When the briefing-summarizer queries a nonexistent column, when the dashboard crashes due to a null guard, or when the daemon's phase handlers are missing — a human must intervene. This slows iteration during the early development/testing phase.
 
 ## Solution
 
-Add Check 8 (Self-Healing) to the `auto-claude-operator` skill (renumber old Check 8 "Status Summary" to Check 9). The operator reads system signals, diagnoses issues, classifies risk, and applies fixes — including daemon source code changes. Safety comes from automated testing, deploy-then-verify with automatic rollback, and rate limiting.
+Add Check 8 (Self-Healing) to the `runforge-operator` skill (renumber old Check 8 "Status Summary" to Check 9). The operator reads system signals, diagnoses issues, classifies risk, and applies fixes — including daemon source code changes. Safety comes from automated testing, deploy-then-verify with automatic rollback, and rate limiting.
 
 ## Signal Collection
 
@@ -32,8 +32,8 @@ Check 8 runs after Check 7 (dashboard verification) in each operator loop cycle.
 - Stuck run patterns: same issue stuck 3+ times indicates a systemic bug
 
 **Hourly throttle (expensive):**
-- Test suite: `pnpm --filter @auto-claude/daemon test`
-- TypeScript check: `pnpm --filter @auto-claude/daemon typecheck`
+- Test suite: `pnpm --filter @runforge/daemon test`
+- TypeScript check: `pnpm --filter @runforge/daemon typecheck`
 - Tracked via timestamp file: `~/logs/operator-last-test-run` (single timestamp, overwritten each run)
 
 ## Diagnosis Flow
@@ -65,7 +65,7 @@ Before applying any fix:
 3. **Daily limit:** If 5 or more fixes have been applied today, skip self-healing and log a warning.
 4. **Path guard:** Verify no changed file matches forbidden paths. If any match, abort the fix. Forbidden paths:
    - `.specify/functional/` — L1 specs
-   - `~/.claude/skills/auto-claude-operator/` — operator skill
+   - `~/.claude/skills/runforge-operator/` — operator skill
    - `.env.mac`, `.env.prod` — secrets
    - `package.json`, `*/package.json` — dependency manifests
    - `pnpm-lock.yaml`, `pnpm-workspace.yaml` — lockfile and workspace config
@@ -88,7 +88,7 @@ Before applying any fix:
 1. `curl -X POST http://127.0.0.1:3847/pause -H "X-Requested-By: cli"`
 2. Wait for `activeRuns == 0` (poll every 5s, max 5 min). **If drain times out: abort fix, resume daemon, log, release lock.** Do not force-proceed. Track consecutive drain timeouts — after 3 in a row, open GitHub Issue tagged `needs-human` and stop attempting daemon-restart fixes until resolved.
 3. Apply fix and commit: `git add <files> && git commit -m "fix(self-heal): <description>"`
-4. Run: `pnpm --filter @auto-claude/daemon test`
+4. Run: `pnpm --filter @runforge/daemon test`
 5. **If tests FAIL:**
    - `git checkout dev` (return to dev, fix stays on branch)
    - Resume daemon: `POST /resume`
@@ -98,7 +98,7 @@ Before applying any fix:
    - Release lock
 6. **If tests PASS:**
    - `git checkout dev && git merge self-heal/<timestamp>` (merge fix to dev — branch kept until verified)
-   - Restart daemon: `launchctl unload ~/Library/LaunchAgents/com.autoclaude.daemon.plist 2>/dev/null; launchctl load ~/Library/LaunchAgents/com.autoclaude.daemon.plist`
+   - Restart daemon: `launchctl unload ~/Library/LaunchAgents/com.runforge.daemon.plist 2>/dev/null; launchctl load ~/Library/LaunchAgents/com.runforge.daemon.plist`
    - Wait 30s
    - Verify: `curl -s http://127.0.0.1:3847/status` — check `activeRuns` responds, `paused` is false, no immediate crash in logs
 7. **If health check FAILS:**
@@ -123,7 +123,7 @@ Before applying any fix:
 5. **2-cycle cooldown after any fix.** Skip self-healing for 2 cycles after applying a fix to let signals stabilize. (At 10-min intervals = 20 min cooldown.)
 6. **Concurrency lock.** Acquire `~/logs/operator-self-heal.lock` before any fix. If held, skip.
 7. **Never modify L1 specs** (`.specify/functional/`). Source of truth for business requirements.
-8. **Never modify the operator skill itself** (`~/.claude/skills/auto-claude-operator/`). Enforced by path guard in preamble.
+8. **Never modify the operator skill itself** (`~/.claude/skills/runforge-operator/`). Enforced by path guard in preamble.
 9. **Never modify `.env.mac` secrets.** Tokens, keys, and encryption keys are human-managed.
 10. **Never `git push --force`.** All pushes are normal pushes.
 11. **Never delete branches with unmerged work.**
@@ -183,7 +183,7 @@ Hard caps on daemon activity to reserve quota for interactive use:
 |-------|-------|-----------|
 | Max runs per hour | 3 | Each run spawns 2-5 sessions. 3 runs ≈ 10-15 sessions/hr. |
 | Max runs per day | 15 | Leaves ~50% of daily quota for interactive use. |
-| Max concurrent runs | 1 | Already configured in `auto-claude.config.json`. |
+| Max concurrent runs | 1 | Already configured in `runforge.config.json`. |
 
 **Implementation:**
 - The operator tracks run count by parsing daemon status and Supabase runs table
@@ -225,6 +225,6 @@ When a Claude Code session (operator or daemon worker) hits the subscription lim
 
 ## Integration
 
-Self-healing is added to the `auto-claude-operator` skill as **Check 8**. The existing status summary becomes **Check 9**. The operator loop prompt is updated to include Check 8.
+Self-healing is added to the `runforge-operator` skill as **Check 8**. The existing status summary becomes **Check 9**. The operator loop prompt is updated to include Check 8.
 
 The check runs every cycle but expensive signals (tests, typecheck) are throttled to once per hour. A typical cycle with no issues adds ~5s of signal collection. A cycle with a fix adds 1-5 minutes depending on whether daemon restart is needed.

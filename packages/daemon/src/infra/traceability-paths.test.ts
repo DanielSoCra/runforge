@@ -116,8 +116,8 @@ describe('traceability.yml path validation', () => {
   });
 });
 
-describe('Auto-Claude traceability tree', () => {
-  it('all active Auto-Claude L1 specs are listed under L0-AC-VISION', () => {
+describe('Runforge traceability tree', () => {
+  it('all active Runforge L1 specs are listed under L0-AC-VISION', () => {
     const raw = readFileSync(resolve(ROOT, '.specify/traceability.yml'), 'utf-8');
     const entries = extractEntries(raw);
     const root = entries.get('L0-AC-VISION');
@@ -130,7 +130,7 @@ describe('Auto-Claude traceability tree', () => {
       .sort();
     const missing = activeFunctionalSpecs.filter((id) => !root!.children.includes(id));
 
-    expect(missing, `Active Auto-Claude L1 specs missing from L0-AC-VISION:\n${missing.join('\n')}`).toEqual(
+    expect(missing, `Active Runforge L1 specs missing from L0-AC-VISION:\n${missing.join('\n')}`).toEqual(
       [],
     );
   });

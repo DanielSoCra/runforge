@@ -1,7 +1,7 @@
 /**
  * DecisionIndexManager — the daemon-owned lifecycle owner for the optional
  * decision-escalation index. It is the ONLY place the daemon loads the native
- * `@auto-claude/decision-index` package, and it does so via a DYNAMIC import
+ * `@runforge/decision-index` package, and it does so via a DYNAMIC import
  * INSIDE the enabled branch only. A disabled deployment therefore never loads the
  * package's native (better-sqlite3) code — `init()` returns immediately.
  *
@@ -18,13 +18,13 @@
  */
 import { DecisionLedger } from './ledger.js';
 import { LogNotifier, RecordingSourceSink, AckResumeDispatcher } from './adapters.js';
-import type { IndexWriter, ProtectedStore } from '@auto-claude/decision-index';
+import type { IndexWriter, ProtectedStore } from '@runforge/decision-index';
 
-type DecisionIndexModule = typeof import('@auto-claude/decision-index');
+type DecisionIndexModule = typeof import('@runforge/decision-index');
 
 export interface DecisionIndexManagerOptions {
   enabled: boolean;
-  /** Postgres URL the writer connects to (AUTO_CLAUDE_DATABASE_URL). */
+  /** Postgres URL the writer connects to (RUNFORGE_DATABASE_URL). */
   databaseUrl: string;
   protectedKey: string;
   protectedDir: string;
@@ -93,7 +93,7 @@ export class DecisionIndexManager {
     if (!this.#enabled) return;
     try {
       const mod = await (this.#opts.importer ??
-        (() => import('@auto-claude/decision-index')))();
+        (() => import('@runforge/decision-index')))();
       const writer = await mod.createIndexWriter({
         databaseUrl: this.#opts.databaseUrl,
         protectedKey: this.#opts.protectedKey,

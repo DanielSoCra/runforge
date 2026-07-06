@@ -4,7 +4,7 @@ import { getDashboardHtml } from './dashboard.js';
 import { readResults } from './results.js';
 import type { ProposeResult } from './release/executor.js';
 import type { PreviewResult } from './release/types.js';
-import type { ListRankedArgs, ListFilters, RankedListItem, DetailView } from '@auto-claude/decision-index';
+import type { ListRankedArgs, ListFilters, RankedListItem, DetailView } from '@runforge/decision-index';
 import type { HandlerResult, ErrorBody, AnswerBody, RevealBody } from './decision-api.js';
 import type { RiskClass, AutonomyLevel, WideningOutcome } from './deployment-registry/types.js';
 
@@ -145,11 +145,11 @@ export function createControlServer(
       handlers.pause();
       json(res, 200, { paused: true });
     } else if (method === 'POST' && url.pathname === '/halt') {
-      // P0.5 emergency halt. When AUTO_CLAUDE_CONTROL_TOKEN is set, require a
+      // P0.5 emergency halt. When RUNFORGE_CONTROL_TOKEN is set, require a
       // valid Bearer token in addition to the CSRF header. Halting is the safe
       // direction, so the token being UNSET does not block the emergency stop
       // locally — but production deployments should always configure it.
-      const controlToken = process.env.AUTO_CLAUDE_CONTROL_TOKEN;
+      const controlToken = process.env.RUNFORGE_CONTROL_TOKEN;
       if (controlToken !== undefined && controlToken !== '') {
         const authHeader = Array.isArray(req.headers.authorization)
           ? req.headers.authorization[0]

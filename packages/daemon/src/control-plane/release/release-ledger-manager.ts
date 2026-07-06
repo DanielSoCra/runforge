@@ -1,7 +1,7 @@
 import {
   createReleaseLedger,
   type ReleaseLedgerWriter,
-} from "@auto-claude/release-ledger";
+} from "@runforge/release-ledger";
 
 export interface ReleaseLedgerManagerOptions {
   enabled: boolean;

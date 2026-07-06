@@ -30,4 +30,4 @@ export async function closeDbClient(): Promise<void> {
   singleton = undefined;
 }
 
-export type AutoClaudeDb = ReturnType<typeof createDbClient>['db'];
+export type RunforgeDb = ReturnType<typeof createDbClient>['db'];

@@ -77,7 +77,7 @@ Focused `operator-retry.test.ts` (+ `server.test.ts`), injected octokit + state 
 - octokit removeLabel 404 for an absent label → tolerated.
 - double retry → second call 404.
 - `server.test.ts`: `POST /retry/:issue` emits the handler's **status** (200/404/409/503, not hardcoded 404), 400 NaN, 403 without `x-requested-by`; async/await + thrown-error → 500.
-- Run: `pnpm --filter @auto-claude/daemon exec vitest run src/control-plane/operator-retry.test.ts src/control-plane/daemon.test.ts src/control-plane/server.test.ts src/control-plane/work-detection.test.ts src/infra/traceability-paths.test.ts` + lint + typecheck.
+- Run: `pnpm --filter @runforge/daemon exec vitest run src/control-plane/operator-retry.test.ts src/control-plane/daemon.test.ts src/control-plane/server.test.ts src/control-plane/work-detection.test.ts src/infra/traceability-paths.test.ts` + lint + typecheck.
 
 ## E2E (Phase 9, on the demo)
 Induce a stuck item, then operator-retry it: seed a feature that goes stuck (e.g. a change that fails review past its retry budget, or reuse a conflict path), confirm it carries `stuck` and is NOT re-picked; `curl -X POST /retry/:issue -H "x-requested-by: op"` → 200; confirm `stuck` removed + the item re-detected and re-run from scratch. (If inducing a natural stuck is hard live, at minimum manually label an issue `stuck` and prove `/retry` clears it + re-admits.)

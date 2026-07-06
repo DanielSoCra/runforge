@@ -347,7 +347,7 @@ describe('spec-loader multi-L0 root scanning', () => {
     );
     await writeFile(
       join(specifyRoot, 'L0-ac-vision.md'),
-      '---\nid: L0-AC-VISION\ntype: vision\nlayer: 0\n---\n# Auto-Claude L0\n',
+      '---\nid: L0-AC-VISION\ntype: vision\nlayer: 0\n---\n# Runforge L0\n',
     );
     await writeFile(
       join(specifyRoot, 'functional', 'concierge-core.md'),
@@ -365,7 +365,7 @@ describe('spec-loader multi-L0 root scanning', () => {
       specifyRoot,
     );
     expect(content).toContain('Concierge L0');
-    expect(content).toContain('Auto-Claude L0');
+    expect(content).toContain('Runforge L0');
   });
 
   it('loads subdir specs alongside L0 specs', async () => {

@@ -1,5 +1,5 @@
 {
-  "name": "@auto-claude/sanitizer-redaction",
+  "name": "@runforge/sanitizer-redaction",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@auto-claude/sanitization": "workspace:*",
+    "@runforge/sanitization": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.9",
     "ulid": "^2.3.0",

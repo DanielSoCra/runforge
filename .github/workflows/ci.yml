@@ -83,14 +83,14 @@ jobs:
           CONTAINER="ci-pg-${{ github.run_id }}"
           docker rm -f "$CONTAINER" 2>/dev/null || true
           docker run -d --name "$CONTAINER" \
-            -e POSTGRES_DB=auto_claude_ci -e POSTGRES_USER=auto_claude -e POSTGRES_PASSWORD=auto_claude \
+            -e POSTGRES_DB=runforge_ci -e POSTGRES_USER=runforge -e POSTGRES_PASSWORD=runforge \
             -p 127.0.0.1::5432 postgres:18-alpine
           # Wait for readiness and FAIL FAST if it never comes: otherwise the loop
           # falls through silently and PG_URL points at a non-ready DB, surfacing as
           # opaque connection errors deep in the decision-index suite instead of here.
           ready=""
           for i in $(seq 1 30); do
-            if docker exec "$CONTAINER" pg_isready -U auto_claude -d auto_claude_ci >/dev/null 2>&1; then
+            if docker exec "$CONTAINER" pg_isready -U runforge -d runforge_ci >/dev/null 2>&1; then
               ready=1
               break
             fi
@@ -107,7 +107,7 @@ jobs:
             docker logs "$CONTAINER" 2>&1 | tail -50 || true
             exit 1
           fi
-          echo "PG_URL=postgres://auto_claude:auto_claude@127.0.0.1:${PORT}/auto_claude_ci" >> "$GITHUB_ENV"
+          echo "PG_URL=postgres://runforge:runforge@127.0.0.1:${PORT}/runforge_ci" >> "$GITHUB_ENV"
 
       - name: Lint
         run: pnpm lint
@@ -123,8 +123,8 @@ jobs:
         env:
           # Makes the decision-index real-Postgres integration suite REQUIRED
           # (not skipped). Points at the docker Postgres started above.
-          AUTO_CLAUDE_TEST_DATABASE_URL: ${{ env.PG_URL }}
-          AUTO_CLAUDE_DATABASE_URL: ${{ env.PG_URL }}
+          RUNFORGE_TEST_DATABASE_URL: ${{ env.PG_URL }}
+          RUNFORGE_DATABASE_URL: ${{ env.PG_URL }}
 
       # Flaky-test visibility (NON-MASKING). Runs ONLY when the Test step itself
       # failed (not when an earlier lint/typecheck step did — that would re-run
@@ -137,8 +137,8 @@ jobs:
       - name: Flaky-test probe
         if: ${{ failure() && steps.test.outcome == 'failure' }}
         env:
-          AUTO_CLAUDE_TEST_DATABASE_URL: ${{ env.PG_URL }}
-          AUTO_CLAUDE_DATABASE_URL: ${{ env.PG_URL }}
+          RUNFORGE_TEST_DATABASE_URL: ${{ env.PG_URL }}
+          RUNFORGE_DATABASE_URL: ${{ env.PG_URL }}
         run: |
           set -u
           echo "## Flaky-test probe" >> "$GITHUB_STEP_SUMMARY"
@@ -170,10 +170,10 @@ jobs:
           retention-days: 14
 
       - name: Install Playwright Chromium
-        run: pnpm --filter @auto-claude/dashboard exec playwright install chromium
+        run: pnpm --filter @runforge/dashboard exec playwright install chromium
 
       - name: Dashboard E2E (desktop)
-        run: pnpm --filter @auto-claude/dashboard e2e --project=desktop
+        run: pnpm --filter @runforge/dashboard e2e --project=desktop
 
       - name: Build
         run: pnpm build

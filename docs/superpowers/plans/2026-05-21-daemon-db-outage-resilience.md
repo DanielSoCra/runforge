@@ -20,7 +20,7 @@
 - The control server binds at `daemon.ts:934` (`createControlServer(...).start()`); instance lock = the port `listen()` at `server.ts:180`. `/health`→`{ok:true}` (server.ts:51).
 - DB-dependent startup steps (fail if Postgres down): `configReader.start()` (201), `runMaintenance.markInProgressRunsStuck()` (212), `repoManager.initialize()` (925). In E′ these are unchanged and all run after config load.
 - Tests: per-package, `cd packages/<pkg> && pnpm vitest run <path>`. Root `pnpm -r run {typecheck,lint,test}`. `pnpm install` required in worktree first.
-- The Mac Mini daemon runs under launchd (`scripts/com.autoclaude.daemon.plist`, `KeepAlive`+`ThrottleInterval=30`). Plist is NOT changed.
+- The Mac Mini daemon runs under launchd (`scripts/com.runforge.daemon.plist`, `KeepAlive`+`ThrottleInterval=30`). Plist is NOT changed.
 
 ---
 
@@ -268,7 +268,7 @@
 
 - [ ] **Step 1.** Add `formatStartupError(error: Error): string` printing `Failed to start: <message>` + up to 5 `  caused by: [<code>] <message>` lines walking `error.cause`.
 - [ ] **Step 2.** Use in the `start` `!result.ok` branch; wrap `program.parseAsync()` so top-level throws format the same way before `process.exit(1)`.
-- [ ] **Step 3.** Smoke: `GITHUB_TOKEN=dummy AUTO_CLAUDE_DATABASE_URL='postgres://bad:bad@127.0.0.1:1/none' DAEMON_STARTUP_RETRY_MAX_ATTEMPTS=2 DAEMON_STARTUP_RETRY_BASE_MS=200 pnpm tsx src/main.ts start 2>&1 | head -12` from `packages/daemon`. Expect the inline-retry `unreachable` log lines (with `ECONNREFUSED`) then the `entering startup-degraded mode` line; the process then blocks polling at the 60s default cadence — Ctrl-C after confirming the lines appear. (This also exercises Task 6's degraded path.) Capture output in the commit message. Note: a clean `caused by:` chain from `formatStartupError` is observable on the *rejected* path; to see it, point at a DB that auth-fails instead (harder to reproduce locally) — the smoke above is sufficient to confirm the inline + degraded logging.
+- [ ] **Step 3.** Smoke: `GITHUB_TOKEN=dummy RUNFORGE_DATABASE_URL='postgres://bad:bad@127.0.0.1:1/none' DAEMON_STARTUP_RETRY_MAX_ATTEMPTS=2 DAEMON_STARTUP_RETRY_BASE_MS=200 pnpm tsx src/main.ts start 2>&1 | head -12` from `packages/daemon`. Expect the inline-retry `unreachable` log lines (with `ECONNREFUSED`) then the `entering startup-degraded mode` line; the process then blocks polling at the 60s default cadence — Ctrl-C after confirming the lines appear. (This also exercises Task 6's degraded path.) Capture output in the commit message. Note: a clean `caused by:` chain from `formatStartupError` is observable on the *rejected* path; to see it, point at a DB that auth-fails instead (harder to reproduce locally) — the smoke above is sufficient to confirm the inline + degraded logging.
 
 **Commit:** `daemon(main): print error.cause chain on startup failure`
 
@@ -321,4 +321,4 @@ Persisted last-known-good cache (option B); runtime (post-load) DB-outage resili
 
 - One PR against `dev`: `daemon: survive transient DB outages with degraded mode + bounded retry`.
 - CI green (no merge over red).
-- Phase 9: `docker stop auto-claude-postgres-1` → observe `[daemon] startup config fetch failed (... ECONNREFUSED)` + `curl /health` → `{ ok:true, degraded:true, lastConfigError:{...} }` → `docker start ...` → observe normal startup proceeds, real `/health` returns `degraded:false`, no process restart. Capture in an execution-log PR.
+- Phase 9: `docker stop runforge-postgres-1` → observe `[daemon] startup config fetch failed (... ECONNREFUSED)` + `curl /health` → `{ ok:true, degraded:true, lastConfigError:{...} }` → `docker start ...` → observe normal startup proceeds, real `/health` returns `degraded:false`, no process restart. Capture in an execution-log PR.

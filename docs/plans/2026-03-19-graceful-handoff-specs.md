@@ -39,7 +39,7 @@ Write `.specify/functional/graceful-handoff.md` with exactly this content:
 ---
 id: FUNC-AC-HANDOFF
 type: functional
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 1
@@ -100,7 +100,7 @@ If anything fails the checklist, fix it before proceeding.
 
 - [ ] **Step 3: Add traceability entry**
 
-Add to `.specify/traceability.yml` under the Auto-Claude L1 section:
+Add to `.specify/traceability.yml` under the Runforge L1 section:
 
 ```yaml
 FUNC-AC-HANDOFF:
@@ -132,7 +132,7 @@ Write `.specify/architecture/graceful-handoff.md` with exactly this content:
 ---
 id: ARCH-AC-HANDOFF
 type: architecture
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 2
@@ -201,7 +201,7 @@ If anything fails, fix it before proceeding.
 
 - [ ] **Step 3: Update traceability**
 
-Add to `.specify/traceability.yml` under the Auto-Claude L2 section:
+Add to `.specify/traceability.yml` under the Runforge L2 section:
 
 ```yaml
 ARCH-AC-HANDOFF:
@@ -232,7 +232,7 @@ Write `.specify/stack/handoff-session-runtime-ts.md` with exactly this content:
 ---
 id: STACK-AC-HANDOFF-RUNTIME
 type: stack-specific
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 3
@@ -308,7 +308,7 @@ Verify all of the following:
 
 - [ ] **Step 3: Update traceability**
 
-Add to `.specify/traceability.yml` under the Auto-Claude L3 section:
+Add to `.specify/traceability.yml` under the Runforge L3 section:
 
 ```yaml
 STACK-AC-HANDOFF-RUNTIME:
@@ -346,7 +346,7 @@ Write `.specify/stack/handoff-coordinator-ts.md` with exactly this content:
 ---
 id: STACK-AC-HANDOFF-COORDINATOR
 type: stack-specific
-domain: auto-claude
+domain: runforge
 status: draft
 version: 1
 layer: 3

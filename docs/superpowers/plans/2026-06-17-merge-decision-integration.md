@@ -73,5 +73,5 @@ real compliance-gate dispatch (complianceForced is a boolean input here); real v
 dispatch (steering slice #6).
 
 ## Verify
-Pure: `pnpm --filter @auto-claude/daemon exec vitest run src/control-plane/merge-decision` + lane-engine schema tests.
+Pure: `pnpm --filter @runforge/daemon exec vitest run src/control-plane/merge-decision` + lane-engine schema tests.
 Live (5b): tsc + the integrate integration test + flag-OFF byte-identity + boot smoke.

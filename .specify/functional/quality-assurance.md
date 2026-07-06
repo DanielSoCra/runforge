@@ -1,7 +1,7 @@
 ---
 id: FUNC-AC-QUALITY
 type: functional
-domain: auto-claude
+domain: runforge
 status: draft
 version: 4
 layer: 1

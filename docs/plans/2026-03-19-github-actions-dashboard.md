@@ -10,7 +10,7 @@
 
 - **`src/control-plane/dashboard.ts`** — Self-contained HTML dashboard. Dark-themed (`#0d1117`), auto-refreshes every 5 seconds via `fetch` to `/status` and `/api/runs`. Uses safe DOM APIs only (no innerHTML).
 
-- **`.github/workflows/auto-claude.yml`** — GitHub Actions workflow triggered on `issues.labeled` with the `ready` label. Runs on a self-hosted runner, sets up Node 22 + pnpm, installs deps, and calls `npx tsx src/main.ts process "$ISSUE_NUMBER" -c auto-claude.config.json`.
+- **`.github/workflows/runforge.yml`** — GitHub Actions workflow triggered on `issues.labeled` with the `ready` label. Runs on a self-hosted runner, sets up Node 22 + pnpm, installs deps, and calls `npx tsx src/main.ts process "$ISSUE_NUMBER" -c runforge.config.json`.
 
 - **`src/main.ts`** (modified) — Replaced with Commander-based CLI that includes `start`, `process <issue>`, `status`, `pause`, `resume`, `retry <issue>`, and `health` commands.
 
@@ -20,4 +20,4 @@
 
 ## Motivation
 
-The GitHub Actions integration allows Auto-Claude to be triggered on-demand by labeling an issue `ready`, without requiring the polling daemon to be running. This is useful for lower-volume repos or ephemeral CI environments. The dashboard provides visibility into running/completed work without requiring external tooling.
+The GitHub Actions integration allows Runforge to be triggered on-demand by labeling an issue `ready`, without requiring the polling daemon to be running. This is useful for lower-volume repos or ephemeral CI environments. The dashboard provides visibility into running/completed work without requiring external tooling.

@@ -2,8 +2,8 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { resolveLocalAuthBypass } from '../auth/src/local-bypass';
 
 const BETTER_AUTH_SESSION_COOKIES = [
-  'auto-claude.session_token',
-  '__Secure-auto-claude.session_token',
+  'runforge.session_token',
+  '__Secure-runforge.session_token',
 ];
 
 export async function proxy(request: NextRequest) {

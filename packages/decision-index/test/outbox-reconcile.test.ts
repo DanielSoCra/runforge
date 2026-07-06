@@ -4,7 +4,7 @@ import { makePgliteDb, type PgliteTestDb } from "./helpers/temp-db.js";
 import { seedDecision } from "./helpers/seed.js";
 import { makeOutbox, answerItem, FIXED_NOW } from "./helpers/effect-driver.js";
 import { outbox as outboxTable, decisions } from "../src/schema.js";
-import type { EffectKind } from "@auto-claude/decision-protocol";
+import type { EffectKind } from "@runforge/decision-protocol";
 
 describe("two-phase outbox", () => {
   let t: PgliteTestDb;

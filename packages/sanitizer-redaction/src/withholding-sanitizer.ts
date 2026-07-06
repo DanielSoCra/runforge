@@ -4,7 +4,7 @@ import type {
   SanitizationResult,
   Sanitizer,
   Withholding,
-} from "@auto-claude/sanitization";
+} from "@runforge/sanitization";
 import { z } from "zod";
 import type { ProtectedStore } from "./protected-store.js";
 

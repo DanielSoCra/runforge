@@ -11,7 +11,7 @@ cancellations, benign). The real signal is **flaky tests under concurrent load**
 shared self-hosted runner runs multiple branch CIs + the autonomous daemon's own `pnpm test`
 gate simultaneously.
 
-Reproduction: 4× concurrent `pnpm --filter @auto-claude/daemon test`.
+Reproduction: 4× concurrent `pnpm --filter @runforge/daemon test`.
 Idle = 3132/3132 green. Under 4× load = **112 failures across 3 files, 2 root causes**:
 
 | Root cause | Files (reproduced + latent) | Mechanism |

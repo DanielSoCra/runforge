@@ -1,7 +1,7 @@
 ---
 id: ARCH-AC-RELEASE
 type: architecture
-domain: auto-claude
+domain: runforge
 status: draft
 version: 2
 layer: 2

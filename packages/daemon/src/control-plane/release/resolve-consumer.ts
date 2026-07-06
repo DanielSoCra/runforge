@@ -1,5 +1,5 @@
 import type { ReleaseLane } from "./executor.js";
-import type { ReleaseLedgerReader } from "@auto-claude/release-ledger";
+import type { ReleaseLedgerReader } from "@runforge/release-ledger";
 
 export interface ResolveAnsweredReleasesDeps {
   lane: Pick<ReleaseLane, "resolveRelease">;
