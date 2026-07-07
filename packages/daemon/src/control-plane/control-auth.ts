@@ -39,7 +39,7 @@ export function checkAuthorization(
   }
 
   const parts = header.split(' ');
-  if (parts[0] !== 'Bearer' || parts.length !== 2) {
+  if (parts[0]?.toLowerCase() !== 'bearer' || parts.length !== 2) {
     return { ok: false, status: 403, error: 'Invalid control token' };
   }
 

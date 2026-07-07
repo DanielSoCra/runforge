@@ -63,6 +63,11 @@ describe('checkAuthorization', () => {
     expect(checkAuthorization('Bearer secrettoken', token)).toEqual({ ok: true });
   });
 
+  it('accepts bearer scheme case-insensitively (RFC 7235)', () => {
+    expect(checkAuthorization('bearer secrettoken', token)).toEqual({ ok: true });
+    expect(checkAuthorization('BEARER secrettoken', token)).toEqual({ ok: true });
+  });
+
   it('returns 403 for a same-length wrong token', () => {
     expect(checkAuthorization('Bearer wrongtoken1', token)).toEqual({
       ok: false,
