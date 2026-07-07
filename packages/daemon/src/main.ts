@@ -1,11 +1,10 @@
 import { fileURLToPath } from 'node:url';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 
 import { Command } from 'commander';
 import { config as loadDotenv } from 'dotenv';
 import { startDaemon } from './control-plane/daemon.js';
 import { processSingleIssue } from './control-plane/process-single.js';
+import { resolveControlToken } from './control-plane/resolve-control-token.js';
 
 const program = new Command();
 program
@@ -124,26 +123,6 @@ function causeMessage(value: unknown): string {
     if (typeof message === 'string') return message;
   }
   return String(value);
-}
-
-function resolveControlToken(): string | undefined {
-  const envToken = process.env.RUNFORGE_CONTROL_TOKEN;
-  if (envToken !== undefined && envToken !== '') return envToken;
-
-  try {
-    const envPath = resolve(process.cwd(), '.env.mac');
-    const contents = readFileSync(envPath, 'utf-8');
-    for (const line of contents.split(/\r?\n/)) {
-      const match = line.match(/^RUNFORGE_CONTROL_TOKEN=(.+)$/);
-      if (match) {
-        const value = match[1]?.trim();
-        if (value !== undefined && value.length > 0) return value;
-      }
-    }
-  } catch {
-    // .env.mac missing or unreadable — fine; /health works tokenless either way.
-  }
-  return undefined;
 }
 
 // Only parse argv when run as the CLI entrypoint, not when imported (tests).
