@@ -11,9 +11,9 @@ superseded_date: 2026-06-02
 
 ## Problem
 
-The runforge system assumes a single deployment target: co-located Docker containers on a Hetzner server. The L2 and L3 specs hardcode "internal container network" language. In practice, the system runs on a Mac Mini with native processes (launchd-managed shell scripts) and no dashboard deployed. The Hetzner configuration exists but is not actively used.
+The runforge system assumes a single deployment target: co-located Docker containers on a Hetzner server. The L2 and L3 specs hardcode "internal container network" language. In practice, the system runs on a macOS host with native processes (launchd-managed shell scripts) and no dashboard deployed. The Hetzner configuration exists but is not actively used.
 
-The system needs to run on the Mac Mini now (Docker Compose, local network access, no TLS, no auth) and on Hetzner later (Docker Compose, public access, TLS via Caddy, GitHub OAuth). Both environments should use the same compose file with minimal configuration differences.
+The system needs to run on the macOS host now (Docker Compose, local network access, no TLS, no auth) and on Hetzner later (Docker Compose, public access, TLS via Caddy, GitHub OAuth). Both environments should use the same compose file with minimal configuration differences.
 
 ## Approach
 
@@ -21,13 +21,13 @@ Single `docker-compose.yml` with Docker Compose profiles and environment-driven 
 
 ## Compose File
 
-One `docker-compose.yml` replaces the current `docker-compose.prod.yml`. The daemon runs in Docker only on Hetzner (where `ANTHROPIC_API_KEY` provides headless auth). On Mac Mini, the daemon runs natively to preserve Max subscription OAuth access — Docker containers cannot refresh expired OAuth tokens interactively.
+One `docker-compose.yml` replaces the current `docker-compose.prod.yml`. The daemon runs in Docker only on Hetzner (where `ANTHROPIC_API_KEY` provides headless auth). On the macOS host, the daemon runs natively to preserve Max subscription OAuth access — Docker containers cannot refresh expired OAuth tokens interactively.
 
-**dashboard** — Next.js standalone, always runs in Docker. Port binding controlled by `DASHBOARD_PORT` env var. On the Mac Mini, exposed on all interfaces for LAN access (`0.0.0.0:3000:3000`). On Hetzner, bound to loopback only (`127.0.0.1:3000:3000`) so only Caddy can reach it. Uses `extra_hosts` to resolve `host.docker.internal` for reaching the native daemon on Mac Mini.
+**dashboard** — Next.js standalone, always runs in Docker. Port binding controlled by `DASHBOARD_PORT` env var. On the macOS host, exposed on all interfaces for LAN access (`0.0.0.0:3000:3000`). On Hetzner, bound to loopback only (`127.0.0.1:3000:3000`) so only Caddy can reach it. Uses `extra_hosts` to resolve `host.docker.internal` for reaching the native daemon on the macOS host.
 
-**daemon** — Gated behind Docker Compose profile `containerized-daemon`. On Mac Mini, the daemon runs natively (via launchd or direct process) and the dashboard reaches it via `http://host.docker.internal:3847`. On Hetzner, the daemon runs in Docker (activated with `--profile containerized-daemon`) and the dashboard reaches it via `http://daemon:3847`.
+**daemon** — Gated behind Docker Compose profile `containerized-daemon`. On the macOS host, the daemon runs natively (via launchd or direct process) and the dashboard reaches it via `http://host.docker.internal:3847`. On Hetzner, the daemon runs in Docker (activated with `--profile containerized-daemon`) and the dashboard reaches it via `http://daemon:3847`.
 
-**briefing-summarizer** — Always runs in Docker, no exposed ports. Connects to daemon via `DAEMON_URL` from the env file (either `host.docker.internal:3847` on Mac Mini or `daemon:3847` on Hetzner). Writes to Supabase.
+**briefing-summarizer** — Always runs in Docker, no exposed ports. Connects to daemon via `DAEMON_URL` from the env file (either `host.docker.internal:3847` on the macOS host or `daemon:3847` on Hetzner). Writes to Supabase.
 
 **caddy** — Gated behind Docker Compose profile `public`. Only starts on Hetzner. Handles TLS termination and reverse proxies to the dashboard container. Uses automatic ACME certificate provisioning.
 
@@ -50,7 +50,7 @@ services:
 ### Starting the stack
 
 ```bash
-# Mac Mini — dashboard + briefing-summarizer in Docker, daemon runs natively
+# macOS host — dashboard + briefing-summarizer in Docker, daemon runs natively
 ENV_FILE=.env.mac docker compose --env-file .env.mac up -d
 
 # Hetzner — all services in Docker, public access via Caddy
@@ -64,7 +64,7 @@ The `ENV_FILE` shell variable controls which env file is loaded into containers.
 ### .env.mac
 
 - `DASHBOARD_PORT=0.0.0.0:3000:3000` — dashboard accessible on LAN
-- `NEXT_PUBLIC_SITE_URL=http://localhost:3000`
+- `NEXT_PUBLIC_SITE_URL=http://macos-host.local:3000`
 - `AUTH_DISABLED=true` — bypasses Supabase Auth (private network, single operator)
 - `DAEMON_URL=http://daemon:3847` — Docker service name resolution
 - Supabase, GitHub, and Anthropic credentials (same keys, potentially different values from prod)
@@ -83,9 +83,9 @@ The `ENV_FILE` shell variable controls which env file is loaded into containers.
 
 ## Authentication
 
-On Hetzner, the dashboard uses Supabase Auth with GitHub OAuth. On the Mac Mini, auth is disabled via `AUTH_DISABLED=true`.
+On Hetzner, the dashboard uses Supabase Auth with GitHub OAuth. On the macOS host, auth is disabled via `AUTH_DISABLED=true`.
 
-This avoids the OAuth callback URL problem — GitHub OAuth requires HTTPS or localhost, and `http://localhost:3000` qualifies as neither. Since the Mac Mini is on a private network with a single operator, auth adds no value.
+This avoids the OAuth callback URL problem — GitHub OAuth requires HTTPS or localhost, and `http://macos-host.local:3000` qualifies as neither. Since the macOS host is on a private network with a single operator, auth adds no value.
 
 ### AUTH_DISABLED behavior (end-to-end)
 
@@ -101,12 +101,12 @@ The `AUTH_DISABLED` flag does not affect the daemon or briefing summarizer — t
 
 ## Configuration Differences Summary
 
-| Concern | Mac Mini (.env.mac) | Hetzner (.env.prod) |
+| Concern | macOS host (.env.mac) | Hetzner (.env.prod) |
 |---|---|---|
 | Dashboard access | `0.0.0.0:3000` on LAN | `127.0.0.1:3000` + Caddy on 443 |
 | TLS | None | Caddy ACME |
 | Authentication | Disabled | Supabase + GitHub OAuth |
-| Site URL | `http://localhost:3000` | `https://app.example.com` |
+| Site URL | `http://macos-host.local:3000` | `https://app.example.com` |
 | Caddy | Not started | Started via `--profile public` |
 | Daemon access | Docker internal network | Docker internal network |
 | Database | Supabase (hosted) | Supabase (hosted) |
@@ -123,7 +123,7 @@ The `AUTH_DISABLED` flag does not affect the daemon or briefing summarizer — t
 
 ### New
 
-- `.env.mac.example` — template for Mac Mini environment.
+- `.env.mac.example` — template for macOS host environment.
 
 ### Removed
 
@@ -136,14 +136,14 @@ The `AUTH_DISABLED` flag does not affect the daemon or briefing summarizer — t
 - `infra/main.tf`, `infra/cloud-init.yml` — Hetzner provisioning unchanged.
 - `runforge.config.json` — unchanged.
 
-### Unchanged on Mac Mini
+### Unchanged on the macOS host
 
-- `scripts/com.runforge.reviewer.plist` — daemon continues running natively on Mac Mini.
-- `scripts/com.runforge.developer.plist` — daemon continues running natively on Mac Mini.
+- `scripts/com.runforge.reviewer.plist` — daemon continues running natively on the macOS host.
+- `scripts/com.runforge.developer.plist` — daemon continues running natively on the macOS host.
 
-The daemon runs natively on the Mac Mini because it spawns Claude Code CLI sessions that require Max subscription OAuth tokens. These tokens expire and cannot be refreshed inside a Docker container (no interactive browser access). The launchd plists remain active.
+The daemon runs natively on the macOS host because it spawns Claude Code CLI sessions that require Max subscription OAuth tokens. These tokens expire and cannot be refreshed inside a Docker container (no interactive browser access). The launchd plists remain active.
 
-**Mac Mini startup sequence:**
+**macOS host startup sequence:**
 
 1. Ensure daemon is running natively (via launchd or `cd packages/daemon && pnpm start`)
 2. Start Docker stack: `ENV_FILE=.env.mac docker compose --env-file .env.mac up -d`

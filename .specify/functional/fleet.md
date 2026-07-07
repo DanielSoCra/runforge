@@ -17,7 +17,7 @@ layer: 1
 
 ## Problem Statement
 
-The platform now runs more than one project at once, and the projects are not alike. One is a regulated platform where almost nothing may ship without a human; another is a product site where nearly everything is safe to automate; a third is a small content website with no regulated paths at all. Today the platform behaves as though there is one project shaped like the first one — its risk rules, its compliance reviewers, its budget, and its honest map of what cannot be automated are baked into the platform itself. Adding a project means forking the platform.
+The platform now runs more than one project at once, and the projects are not alike. One is a regulated platform where almost nothing may ship without a human; another is a lower-risk product site where nearly everything is safe to automate; a third is a small static website with no regulated paths at all. Today the platform behaves as though there is one project shaped like the first one — its risk rules, its compliance reviewers, its budget, and its honest map of what cannot be automated are baked into the platform itself. Adding a project means forking the platform.
 
 Two failures follow from this. First, there is no single place that says, per project, *which* repositories it owns, *how* its changes are classified by risk, *which* domain reviewers gate it, *what* it can and cannot automate, *how much* it may spend, and *by what path* its changes are released to production. Without that per-project record, the platform cannot widen autonomy on one project without widening it everywhere, and the Operator cannot see why a given project behaves the way it does.
 

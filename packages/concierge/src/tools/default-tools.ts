@@ -85,24 +85,24 @@ const DEFAULT_TOOL_SPECS: DefaultToolSpec[] = [
   },
   {
     name: 'sb_read',
-    description: 'Read an allowed knowledge-vault note',
-    subsystem: 'knowledge-vault',
+    description: 'Read an allowed knowledge-base note',
+    subsystem: 'knowledge-base',
     blastRadius: 'safe',
     governingSpecId: null,
     argsSchema: PATH_SCHEMA,
   },
   {
     name: 'sb_search',
-    description: 'Search the knowledge-vault vault',
-    subsystem: 'knowledge-vault',
+    description: 'Search the knowledge vault',
+    subsystem: 'knowledge-base',
     blastRadius: 'safe',
     governingSpecId: null,
     argsSchema: QUERY_SCHEMA,
   },
   {
     name: 'sb_append_inbox',
-    description: 'Append a note to the knowledge-vault inbox',
-    subsystem: 'knowledge-vault',
+    description: 'Append a note to the knowledge-base inbox',
+    subsystem: 'knowledge-base',
     blastRadius: 'medium',
     governingSpecId: null,
     argsSchema: {
@@ -118,7 +118,7 @@ const DEFAULT_TOOL_SPECS: DefaultToolSpec[] = [
   {
     name: 'sb_write_decision',
     description: 'Write a project decision note',
-    subsystem: 'knowledge-vault',
+    subsystem: 'knowledge-base',
     blastRadius: 'medium',
     governingSpecId: null,
     argsSchema: PATH_SCHEMA,
@@ -126,7 +126,7 @@ const DEFAULT_TOOL_SPECS: DefaultToolSpec[] = [
   {
     name: 'sb_write_client',
     description: 'Write a client-folder note after confirmation',
-    subsystem: 'knowledge-vault',
+    subsystem: 'knowledge-base',
     blastRadius: 'high',
     governingSpecId: null,
     argsSchema: PATH_SCHEMA,

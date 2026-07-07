@@ -1,6 +1,6 @@
 # P3 (partial) — Operator Surface to Production Grade: Task-Level Plan (3.1/3.2/3.3/3.6)
 
-> Expansion of program-plan Phase 3 (`docs/superpowers/plans/2026-07-02-first-production-deployment-regulated-full-l0.md`), **approved-L1-governed subset only**: FUNC-AC-DASHBOARD v4 + FUNC-AC-OPERATOR-SURFACE v1 (both `approved`) govern all four tasks. **Excluded pending D1 batch 1 (FUNC-AC-OPERATOR-AUTH is draft):** 3.4 remote-access topology, 3.5 daemon-API shared-secret hardening. Branch: `plan/p3-operator-surface` (off main at a0aad17, includes Phase 0); build branch: `codex/p3-operator-surface-build`.
+> Expansion of program-plan Phase 3 (`docs/superpowers/plans/2026-07-02-first-production-deployment-full-l0.md`), **approved-L1-governed subset only**: FUNC-AC-DASHBOARD v4 + FUNC-AC-OPERATOR-SURFACE v1 (both `approved`) govern all four tasks. **Excluded pending D1 batch 1 (FUNC-AC-OPERATOR-AUTH is draft):** 3.4 remote-access topology, 3.5 daemon-API shared-secret hardening. Branch: `plan/p3-operator-surface` (off main at a0aad17, includes Phase 0); build branch: `codex/p3-operator-surface-build`.
 >
 > **Line anchors verified 2026-07-02 at origin/main a0aad17 — grep for symbols, never trust line numbers.**
 
@@ -44,7 +44,7 @@
 
 1. **Alert iff the notify transition APPLIED (codex-corrected idempotency):** `ledger.notify()` can no-op when the decision is already past `raised` (fake-ledger `:222` models this; finding-dismissal `emit.ts:351-361` calls it unconditionally and ignores `applied`). Fire the alert ONLY when the notify result reports `applied: true` — that is the exactly-once seam; retries of the surrounding flow then cannot duplicate the alert. Check the real notify return shape (grep the decision-index writer's notify) and thread accordingly.
 2. **Payload must fit `NotificationPayload` (codex-verified: `notify.ts:5` requires `{event, issueNumber, message}` + optional `phase`):** extend the schema with a new event value `'decision-raised'` and optional `decisionId`/`url` fields (update its type + any payload tests), OR compose within the existing shape (`issueNumber` from the decision's issue, `message` = sanitized title + deep link). Prefer the minimal schema extension — spec it explicitly; the plan's earlier freeform payload does not typecheck.
-3. Payload hygiene: decision id + sanitized title + optional deep link (`dashboardBaseUrl` config, omit link when unset) — no decision body/PHI-class content (withholding sanitizer is P7 scope).
+3. Payload hygiene: decision id + sanitized title + optional deep link (`dashboardBaseUrl` config, omit link when unset) — no decision body/sensitive regulated content (withholding sanitizer is P7 scope).
 4. Failure isolation: alert failure must never fail the raise path (fire-and-forget with the existing notify retry; log a warning). `notifyOperator` already warns-when-unconfigured — decision-raised joins the same warning surface (`daemon.ts` ~465-467 list may need updating).
 5. Thread `notifyOperator` (or a narrow callback) into all three seams the way phases.ts already receives daemon-scoped callbacks (no globals).
 

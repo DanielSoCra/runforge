@@ -5,16 +5,22 @@
 # - Appends every probe to logs/health.log
 # - On a state TRANSITION (ok<->degraded<->unhealthy/down) appends to
 #   logs/alerts.log and fires a macOS notification.
+#
+# Coordinates come from deployment0.env next to this script.
 set -u
 
-OPS=~/code/runforge-ops
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+[ -f "$HERE/deployment0.env" ] && source "$HERE/deployment0.env"
+OPS="${RUNFORGE_OPS:-$HERE}"
+PORT="${RUNFORGE_CONTROL_PORT:-3847}"
 STATE_FILE="$OPS/logs/.health-state"
 TS="$(date '+%Y-%m-%d %H:%M:%S')"
 BODY_FILE="$(mktemp)"
 
 mkdir -p "$OPS/logs"
 
-HTTP_CODE="$(curl -sS -m 10 -o "$BODY_FILE" -w '%{http_code}' localhost:3847/health 2>/dev/null)" && CURL_OK=1 || CURL_OK=0
+HTTP_CODE="$(curl -sS -m 10 -o "$BODY_FILE" -w '%{http_code}' "localhost:$PORT/health" 2>/dev/null)" && CURL_OK=1 || CURL_OK=0
 BODY="$(cat "$BODY_FILE" 2>/dev/null || true)"
 rm -f "$BODY_FILE"
 
@@ -36,5 +42,5 @@ PREV="$(cat "$STATE_FILE" 2>/dev/null || echo unknown)"
 if [ "$STATE" != "$PREV" ]; then
   echo "$STATE" > "$STATE_FILE"
   echo "$TS TRANSITION $PREV -> $STATE http=$HTTP_CODE ${BODY:-no-body}" >> "$OPS/logs/alerts.log"
-  /usr/bin/osascript -e "display notification \"runforge daemon0: $PREV -> $STATE\" with title \"runforge health\"" 2>/dev/null || true
+  /usr/bin/osascript -e "display notification \"runforge daemon: $PREV -> $STATE\" with title \"runforge health\"" 2>/dev/null || true
 fi

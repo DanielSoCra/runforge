@@ -23,7 +23,7 @@ test_paths:
 
 ## Pattern
 
-**Strangler Fig + Store-adapter seam over Drizzle-managed Postgres 18, container-orchestrated with Docker Compose.** Modeled on the `acme/apps/ops` shape (Compose-managed `postgres:18-alpine`, `drizzle.config.ts` + forward-only `drizzle/` SQL migrations, pooled `postgres-js` clients with lazy per-pool env validation, a `run-migrations.ts` invoked before app start).
+**Strangler Fig + Store-adapter seam over Drizzle-managed Postgres 18, container-orchestrated with Docker Compose.** Modeled on the regulated pilot deployment's ops-app shape (Compose-managed `postgres:18-alpine`, `drizzle.config.ts` + forward-only `drizzle/` SQL migrations, pooled `postgres-js` clients with lazy per-pool env validation, a `run-migrations.ts` invoked before app start).
 
 Chosen over a big-bang rewrite (unacceptable blast radius on a live system) and over keeping any hosted database (the issue mandates self-hosted ownership). The strangler seam lets each caller swap from the `@supabase/*` client to a typed Store while the hosted provider stays authoritative until an explicit cutover, satisfying the staged FUNC-AC-DATA-PLATFORM behavior.
 

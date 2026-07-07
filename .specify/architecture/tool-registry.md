@@ -46,9 +46,9 @@ These minimal entries live in `packages/concierge/src/tools/registry.ts` (Phase 
 | `ac_merge_to_main` | runforge | high | yes | always confirm |
 | `sb_read` | knowledge-vault | safe | no | `{path: string}` |
 | `sb_search` | knowledge-vault | safe | no | `{query: string}` |
-| `sb_append_inbox` | knowledge-vault | medium | no | `{slug, body}` → 00-inbox/ |
+| `sb_append_inbox` | knowledge-vault | medium | no | `{slug, body}` → the capture inbox |
 | `sb_write_decision` | knowledge-vault | medium | no | project notes only |
-| `sb_write_client` | knowledge-vault | high | yes | always confirm (20-Areas/clients/) |
+| `sb_write_client` | knowledge-vault | high | yes | always confirm (the client notes area) |
 | `gh_search` | gh | safe | no | read-only query |
 | `gh_comment` | gh | medium | no | non-issue comments below |
 | `cal_read` | calendar | safe | no | read events |

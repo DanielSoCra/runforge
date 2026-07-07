@@ -275,7 +275,7 @@ function assertInsideVault(vaultRoot: string, path: string): string {
   const resolved = resolve(path);
   const rel = relative(vaultRoot, resolved);
   if (rel.startsWith('..') || rel === '..' || resolve(vaultRoot, rel) !== resolved) {
-    throw new Error('path is outside the configured knowledge-vault vault');
+    throw new Error('path is outside the configured knowledge vault');
   }
   return resolved;
 }

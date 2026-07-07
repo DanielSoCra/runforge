@@ -34,14 +34,14 @@ describe('revealProtected', () => {
       fakeReveal({ field: 'context', value: 'TOP-SECRET' }),
       'd-1',
       { ref: 'protected://01H' },
-      'admin@example.com',
+      'admin@acme.de',
     );
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ field: 'context', value: 'TOP-SECRET' });
   });
 
   it('returns 400 when ref is missing', async () => {
-    const res = await revealProtected(fakeReveal({ field: '', value: '' }), 'd-1', {}, 'admin@example.com');
+    const res = await revealProtected(fakeReveal({ field: '', value: '' }), 'd-1', {}, 'admin@acme.de');
     expect(res.status).toBe(400);
     expect((res.body as { error: string }).error).toMatch(/ref/);
   });
@@ -51,7 +51,7 @@ describe('revealProtected', () => {
       fakeReveal({ field: '', value: '' }),
       'd-1',
       { ref: '' },
-      'admin@example.com',
+      'admin@acme.de',
     );
     expect(res.status).toBe(400);
   });
@@ -61,7 +61,7 @@ describe('revealProtected', () => {
       fakeReveal({ field: '', value: '' }),
       'd-1',
       null as unknown as { ref?: string },
-      'admin@example.com',
+      'admin@acme.de',
     );
     expect(res.status).toBe(400);
   });
@@ -71,7 +71,7 @@ describe('revealProtected', () => {
       throwingReveal(new RevealRefNotFoundError('d-1', 'protected://nope')),
       'd-1',
       { ref: 'protected://nope' },
-      'admin@example.com',
+      'admin@acme.de',
     );
     expect(res.status).toBe(404);
     expect((res.body as { error: string }).error).toMatch(/ref not found/);
@@ -82,7 +82,7 @@ describe('revealProtected', () => {
       throwingReveal(new Error('decision not found')),
       'd-1',
       { ref: 'protected://nope' },
-      'admin@example.com',
+      'admin@acme.de',
     );
     expect(res.status).toBe(404);
   });
@@ -95,7 +95,7 @@ describe('revealProtected', () => {
           throwingReveal(new Error('store corrupt')),
           'd-1',
           { ref: 'protected://01H' },
-          'admin@example.com',
+          'admin@acme.de',
         );
       })(),
     ).resolves.toBeUndefined();

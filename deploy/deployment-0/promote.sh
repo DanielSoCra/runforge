@@ -1,17 +1,33 @@
 #!/usr/bin/env bash
 # Promote deployment #0 to the current origin/main and (re)start under launchd.
 # This is the documented "operator-gated restart" self-update path.
+#
+# All host-specific coordinates come from deployment0.env (see
+# deployment0.env.example) sourced from this script's own directory.
 set -euo pipefail
 
-OPS=~/code/runforge-ops
-RUNTIME=~/code/runforge-runtime
-ENV_MAC=~/code/runforge/.env.mac
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+[ -f "$HERE/deployment0.env" ] && source "$HERE/deployment0.env"
+
+OPS="${RUNFORGE_OPS:-$HERE}"
+RUNTIME="${RUNFORGE_RUNTIME:?set RUNFORGE_RUNTIME in deployment0.env}"
+ENV_FILE="${RUNFORGE_ENV_FILE:?set RUNFORGE_ENV_FILE in deployment0.env}"
+DB_ROLE="${RUNFORGE_DB_ROLE:?set RUNFORGE_DB_ROLE in deployment0.env}"
+DB_NAME="${RUNFORGE_DB_NAME:?set RUNFORGE_DB_NAME in deployment0.env}"
+DB_HOST="${RUNFORGE_DB_HOST:-127.0.0.1}"
+DB_PORT="${RUNFORGE_DB_PORT:-5432}"
+PG_CONTAINER="${RUNFORGE_PG_CONTAINER:?set RUNFORGE_PG_CONTAINER in deployment0.env}"
+PORT="${RUNFORGE_CONTROL_PORT:-3847}"
+DAEMON_LABEL="${RUNFORGE_DAEMON_LABEL:-com.runforge.daemon0}"
+HEALTH_LABEL="${RUNFORGE_HEALTH_LABEL:-com.runforge.health0}"
+
 LOG_DIR="$OPS/logs"
-DAEMON_PLIST_SRC="$OPS/com.runforge.daemon0.plist"
-DAEMON_PLIST_DST="$HOME/Library/LaunchAgents/com.runforge.daemon0.plist"
-HEALTH_PLIST_SRC="$OPS/com.runforge.health0.plist"
-HEALTH_PLIST_DST="$HOME/Library/LaunchAgents/com.runforge.health0.plist"
-[ -d "$RUNTIME" ] || { echo "ERROR: $RUNTIME missing — run the one-time cutover in deploy/deployment-0/README.md first." >&2; exit 1; }
+DAEMON_PLIST_SRC="$OPS/${DAEMON_LABEL}.plist"
+DAEMON_PLIST_DST="$HOME/Library/LaunchAgents/${DAEMON_LABEL}.plist"
+HEALTH_PLIST_SRC="$OPS/${HEALTH_LABEL}.plist"
+HEALTH_PLIST_DST="$HOME/Library/LaunchAgents/${HEALTH_LABEL}.plist"
+[ -d "$RUNTIME" ] || { echo "ERROR: $RUNTIME missing — set RUNFORGE_RUNTIME / run the one-time setup in README.md first." >&2; exit 1; }
 OLD_REV="$(git -C "$RUNTIME" rev-parse HEAD)"
 DAEMON_STOPPED=0
 DB_BACKUP=""
@@ -20,13 +36,22 @@ mkdir -p "$LOG_DIR"
 
 set -a
 # shellcheck disable=SC1090
-source "$ENV_MAC"
+source "$ENV_FILE"
 set +a
-export RUNFORGE_DATABASE_URL="postgres://autoclaude:${POSTGRES_PASSWORD}@127.0.0.1:45432/runforge_prod0"
+export RUNFORGE_DATABASE_URL="postgres://${DB_ROLE}:${POSTGRES_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
+
+# Render a launchd plist template (placeholders → real paths) into LaunchAgents.
+render_plist() {
+  sed \
+    -e "s|__OPS_DIR__|${OPS}|g" \
+    -e "s|__HOME__|${RUNFORGE_HOME:-$HOME}|g" \
+    -e "s|__PATH__|${RUNFORGE_PATH:-$PATH}|g" \
+    "$1" > "$2"
+}
 
 start_supervision() {
-  cp "$DAEMON_PLIST_SRC" "$DAEMON_PLIST_DST"
-  cp "$HEALTH_PLIST_SRC" "$HEALTH_PLIST_DST"
+  render_plist "$DAEMON_PLIST_SRC" "$DAEMON_PLIST_DST"
+  render_plist "$HEALTH_PLIST_SRC" "$HEALTH_PLIST_DST"
   launchctl load "$DAEMON_PLIST_DST"
   launchctl load "$HEALTH_PLIST_DST"
 }
@@ -53,7 +78,7 @@ rollback_on_failure() {
   launchctl unload "$HEALTH_PLIST_DST" 2>/dev/null || true
   launchctl unload "$DAEMON_PLIST_DST" 2>/dev/null || true
   if [ -n "$DB_BACKUP" ]; then
-    if ! docker exec -i auto-claude-postgres-1 pg_restore --clean --if-exists --no-owner -U autoclaude -d runforge_prod0 < "$DB_BACKUP"; then
+    if ! docker exec -i "$PG_CONTAINER" pg_restore --clean --if-exists --no-owner -U "$DB_ROLE" -d "$DB_NAME" < "$DB_BACKUP"; then
       echo "[promote] DB restore failed; leaving supervision stopped for manual recovery from $DB_BACKUP" >&2
       return "$status"
     fi
@@ -79,8 +104,7 @@ rollback_on_failure() {
 }
 trap 'rollback_on_failure "$?"' EXIT
 
-docker exec auto-claude-postgres-1 pg_dump --version >/dev/null || { echo "[promote] container pg_dump unavailable (host pg_dump 17 vs server 18 — always dump in-container)"; exit 1; }
-command -v pg_restore >/dev/null || { echo "[promote] pg_restore is required for rollback-safe migrations"; exit 1; }
+docker exec "$PG_CONTAINER" pg_dump --version >/dev/null || { echo "[promote] container pg_dump unavailable (dump/restore always run in-container to avoid host/server version mismatch)"; exit 1; }
 command -v jq >/dev/null || { echo "[promote] jq is required to verify non-degraded health"; exit 1; }
 
 echo "[promote] stopping supervision + daemon..."
@@ -88,12 +112,12 @@ launchctl unload "$HEALTH_PLIST_DST" 2>/dev/null || true
 launchctl unload "$DAEMON_PLIST_DST" 2>/dev/null || true
 DAEMON_STOPPED=1
 for _ in $(seq 1 40); do
-  PID="$(lsof -ti :3847 || true)"
+  PID="$(lsof -ti ":$PORT" || true)"
   [ -z "$PID" ] && break
   sleep 1
 done
 if [ -n "${PID:-}" ]; then
-  echo "[promote] port 3847 is still in use after launchd unload by PID(s): $PID; refusing to kill an unknown process"
+  echo "[promote] port $PORT is still in use after launchd unload by PID(s): $PID; refusing to kill an unknown process"
   exit 1
 fi
 
@@ -105,9 +129,9 @@ clean_runtime_source
 (cd "$RUNTIME" && pnpm install --frozen-lockfile --prefer-offline | tail -1)
 git -C "$RUNTIME" log --oneline -1
 
-DB_BACKUP="$(mktemp -t runforge-prod0-backup.XXXXXX.dump)"
-echo "[promote] backing up quiesced prod0 database..."
-if ! docker exec -i auto-claude-postgres-1 pg_dump --format=custom -U autoclaude runforge_prod0 > "$DB_BACKUP"; then
+DB_BACKUP="$(mktemp -t runforge-prod-backup.XXXXXX.dump)"
+echo "[promote] backing up quiesced database..."
+if ! docker exec -i "$PG_CONTAINER" pg_dump --format=custom -U "$DB_ROLE" "$DB_NAME" > "$DB_BACKUP"; then
   rm -f "$DB_BACKUP"
   DB_BACKUP=""
   exit 1
@@ -121,7 +145,7 @@ start_supervision
 
 for _ in $(seq 1 30); do
   sleep 2
-  if OUT="$(curl -sS -m 5 localhost:3847/health 2>/dev/null)"; then
+  if OUT="$(curl -sS -m 5 "localhost:$PORT/health" 2>/dev/null)"; then
     if printf '%s' "$OUT" | jq -e '.ok == true and (.degraded == false or .reason == "alert-channel-degraded")' >/dev/null; then
       echo "[promote] health: $OUT"
       exit 0
@@ -129,5 +153,5 @@ for _ in $(seq 1 30); do
     echo "[promote] health not ready: $OUT"
   fi
 done
-echo "[promote] daemon did not become healthy in 60s — check $OPS/logs/daemon0.log"
+echo "[promote] daemon did not become healthy in 60s — check $LOG_DIR/daemon0.log"
 exit 1

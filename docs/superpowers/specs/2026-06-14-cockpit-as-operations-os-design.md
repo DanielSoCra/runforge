@@ -13,7 +13,7 @@ related:
   - .specify/functional/plugins.md              # FUNC-AC-PLUGINS — config packs
   - .specify/functional/runtime-adapters.md     # FUNC-AC-RUNTIME-ADAPTERS — the executor contract
   - .specify/architecture/lane-engine.md        # ARCH-AC-LANE-ENGINE — lanes
-vault_decision_record: "knowledge-vault: 10-Projects/side-project/decisions/2026-06-14-cockpit-convergence-decision.md"
+vault_decision_record: "the knowledge vault: decisions/2026-06-14-cockpit-convergence-decision.md"
 ---
 
 # Cockpit as Operations-OS — Direction Design + L0 Delta H Proposal
@@ -22,7 +22,7 @@ vault_decision_record: "knowledge-vault: 10-Projects/side-project/decisions/2026
 
 ## TL;DR
 
-runforge's L0 widens from *"autonomous **software-development** platform"* to *"the Operator's single **operations** cockpit — one steering surface over all his AI-assisted work across his ventures; software is one lane-type among ops, knowledge-work, client-delivery, biz-dev."* Adopted as the **north-star**, executed **narrow-first**. The widening is gated by one new non-configurable invariant — **verifier-gated autonomy** — which resolves the core risk surfaced in sparring: most non-software work has no oracle, while the platform's entire trust machinery assumes one.
+runforge's L0 widens from *"autonomous **software-development** platform"* to *"the Operator's single **operations** cockpit — one steering surface over all the Operator's AI-assisted work across multiple parallel workstreams; software is one lane-type among ops, knowledge-work, client-delivery, biz-dev."* Adopted as the **north-star**, executed **narrow-first**. The widening is gated by one new non-configurable invariant — **verifier-gated autonomy** — which resolves the core risk surfaced in sparring: most non-software work has no oracle, while the platform's entire trust machinery assumes one.
 
 ## The new invariant: verifier-gated autonomy
 
@@ -36,20 +36,20 @@ This is *"no verification = no merge"* generalized to *"no verifier = no autonom
 ## The four direction forks, resolved
 
 1. **Mandate → operations-org *north-star* (new Delta H).** The *surface* unifies across all domains; *execution* stays gated by the verifier invariant. Software is one lane-type, not the point.
-2. **side-project/hermes → absorb the *surface*, federate the *execution*.** side-project's decisions flow into the one inbox (the single pane is real); side-project keeps running as a *no-oracle domain executor behind* the cockpit (assist-only). It is **not** fused into the oracle-gated factory — that would be a category error (degrades both: factory loses rigor, secretary drowns in governance).
+2. **The personal-ops assistant → absorb the *surface*, federate the *execution*.** The personal-ops assistant's decisions flow into the one inbox (the single pane is real); it keeps running as a *no-oracle domain executor behind* the cockpit (assist-only). It is **not** fused into the oracle-gated factory — that would be a category error (degrades both: factory loses rigor, secretary drowns in governance).
 3. **Surface → surface-agnostic core as a *boundary*, one front-end as the *deliverable*.** Build the decision/state core with a clean seam so a second front-end is *possible* later; ship **one** front-end first. (YAGNI on web+Slack+mobile peers before the core is proven.)
-4. **First proving ground → runforge itself, instrumented.** The software lane proves the stability bar; the first no-oracle lane is the Operator's own personal-ops (side-project), assist-only, with attention measured against a baseline.
+4. **First proving ground → runforge itself, instrumented.** The software lane proves the stability bar; the first no-oracle lane is the Operator's own personal-ops (the personal-ops assistant), assist-only, with attention measured against a baseline.
 
 ## Delta F guard (personal leverage, not a product)
 
-The L0 framing stays *"my personal operating system,"* explicitly **not** a horizontal product. The AI-consulting venture sells *outcomes built with the leverage*, never the platform itself. The word "cockpit"/"operations-OS" must not drift into product positioning — that collision was flagged in sparring.
+The L0 framing stays *"my personal operating system,"* explicitly **not** a horizontal product. One of the Operator's workstreams sells *outcomes built with the leverage*, never the platform itself. The word "cockpit"/"operations-OS" must not drift into product positioning — that collision was flagged in sparring.
 
 ## Sparring summary (codex GPT-5.5 xhigh — different model family)
 
 The adversary's only job was to *kill* the lean against the rubric, not to validate it. It did **not** overturn the vision; it overturned the literal *"autonomous execution across all domains"* reading.
 
 - **Oracle problem (the load-bearing hit):** trust machinery assumes a verifiable oracle; non-software work mostly lacks one → without the verifier invariant, "earned trust" collapses into fake confidence or review-everything. → resolved by verifier-gated autonomy.
-- **"side-project as a lane" = category error** → resolved by surface-absorb / execution-federate.
+- **"The personal-ops assistant as a lane" = category error** → resolved by surface-absorb / execution-federate.
 - **"A single control plane reduces attention" is not automatic** → must be *measured*, not assumed (kill-condition #2).
 - **Surface-agnostic core is premature as a deliverable** → one front-end first.
 - **Config-packs must not encode trust** → verifier invariant is non-configurable.
@@ -71,12 +71,12 @@ The adversary's only job was to *kill* the lean against the rubric, not to valid
 ## Decomposition roadmap
 
 - **P0 (now):** Operator authors **L0 Delta H + the verifier-gate boundary**; Operator decides pending deltas A–G; clear #720 CI blocker (#723 — in flight).
-- **P1 — first slice (dogfood, → writing-plans next):** generalize the lane/executor/inbox contract to accept a **no-oracle domain executor**; enforce the verifier-gate (assist-only when no verifier is declared); wire **side-project as the first** such executor, surfaced into the one inbox; build **attention instrumentation** (escalations/day, decision-weight mix, time-to-decide, vs. a captured pre-cockpit baseline). Small, reversible, proves the multi-domain surface without fusing execution or risking a client.
+- **P1 — first slice (dogfood, → writing-plans next):** generalize the lane/executor/inbox contract to accept a **no-oracle domain executor**; enforce the verifier-gate (assist-only when no verifier is declared); wire **the personal-ops assistant as the first** such executor, surfaced into the one inbox; build **attention instrumentation** (escalations/day, decision-weight mix, time-to-decide, vs. a captured pre-cockpit baseline). Small, reversible, proves the multi-domain surface without fusing execution or risking a client.
 - **P2:** prove kill-condition #1 on the software lane; add a second no-oracle lane only after.
-- **P3+:** client/revenue domains (product intake → build → delivery; consulting) — only past the kill-conditions; each must declare its verifier or stay assist-only.
+- **P3+:** client/revenue domains (client-delivery intake → build → delivery; consulting) — only past the kill-conditions; each must declare its verifier or stay assist-only.
 
 ## Open questions for the Operator
 
-1. **One front-end first:** start with the already-specced **web cockpit** (richer decision inbox; Slack becomes a notification edge), or invert to **Slack-first** (you live in Slack for side-project today)? Recommendation: web cockpit for the decision inbox, Slack as the edge — but this is your call.
-2. **side-project `_overview` (vault):** update its project status to *"surface absorbed / execution federated, assist-only"*? I'll do it on your nod.
+1. **One front-end first:** start with the already-specced **web cockpit** (richer decision inbox; Slack becomes a notification edge), or invert to **Slack-first** (you live in Slack for the personal-ops assistant today)? Recommendation: web cockpit for the decision inbox, Slack as the edge — but this is your call.
+2. **The personal-ops assistant `_overview` (the knowledge vault):** update its project status to *"surface absorbed / execution federated, assist-only"*? I'll do it on your nod.
 3. **First ops-lane verifier:** is there *any* cheap oracle for a personal-ops task (e.g. "calendar event created == checkable", "draft saved == checkable")? If yes, that lane could earn limited autonomy sooner; if no, it stays assist-only by design.

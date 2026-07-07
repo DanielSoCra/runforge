@@ -27,7 +27,7 @@ const config: ConciergeConfig = {
 };
 
 describe('process runtime clients', () => {
-  it('creates a knowledge-vault file client for vault reads, search, inbox append, and writes', async () => {
+  it('creates a knowledge-base file client for vault reads, search, inbox append, and writes', async () => {
     const vaultPath = await mkdtemp(join(tmpdir(), 'concierge-vault-'));
     const client = createSecondBrainFileClient({ vaultPath });
 
@@ -50,7 +50,7 @@ describe('process runtime clients', () => {
       .resolves.toBe('');
   });
 
-  it('rejects unsafe knowledge-vault inbox slugs before writing', async () => {
+  it('rejects unsafe knowledge-base inbox slugs before writing', async () => {
     const vaultPath = await mkdtemp(join(tmpdir(), 'concierge-vault-'));
     const client = createSecondBrainFileClient({ vaultPath });
 

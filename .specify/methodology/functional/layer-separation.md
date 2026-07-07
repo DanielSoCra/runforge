@@ -53,4 +53,4 @@ The model follows Sinek's Golden Circle: WHY (business purpose) → HOW (system 
 
 - L1 (WHY) is the most durable and important layer; L3 (WHAT) is the most disposable
 - This is counterintuitive: "what" sounds important, but in SDD the business intent (why) outlasts any implementation choice (what)
-- Without explicit separation, specs naturally drift toward code (the Example-Project lesson)
+- Without explicit separation, specs naturally drift toward code (a hard-won lesson from a prior project)

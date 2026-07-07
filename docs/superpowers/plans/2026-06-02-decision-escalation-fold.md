@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans, task-by-task. Apply superpowers:test-driven-development to all new code. **Work in the worktree `~/code/runforge-wt-decision-emitter` on branch `codex/phase2-decision-escalation-impl` — `cd` there first in every task.**
 
-**Goal:** Fold pm-cockpit's `@pm/protocol` + `@pm/index` into runforge as `@runforge/decision-protocol` + `@runforge/decision-index`, and wire an additive l2-gate DecisionRequest emitter into the daemon control-plane, realizing FUNC-AC-DECISION-ESCALATION (#685).
+**Goal:** Fold the external cockpit consumer's `@pm/protocol` + `@pm/index` into runforge as `@runforge/decision-protocol` + `@runforge/decision-index`, and wire an additive l2-gate DecisionRequest emitter into the daemon control-plane, realizing FUNC-AC-DECISION-ESCALATION (#685).
 
 **Architecture:** P1 (port onto zod4/drizzle0.45/better-sqlite3^12, preserve shape/behavior/tests) + S2 (decision-index = durable ledger + pending source; the existing GitHub-label requeue stays the v1 executor; mid_run/notifier-delivery/source-of-truth/PHI deferred). See `docs/superpowers/specs/2026-06-02-decision-escalation-fold-design.md` (codex-CLEAN) and the L1/L2/L3 specs.
 
 **Tech Stack:** TypeScript ES2022/Node16/strict, pnpm workspace, zod ^4.3.6, zod-to-json-schema ^3.25.1, drizzle-orm ^0.45.2, better-sqlite3 ^12, ajv ^8, ulid ^2, vitest ^3.2.4.
 
-**Port source of truth:** `~/code/pm-cockpit/packages/protocol` and `~/code/pm-cockpit/packages/index`. Port = copy `src/` **and `test/`** (+ protocol `schema/`, + index `drizzle.config.ts`, + each package's `vitest.config.ts`/`tsconfig.json`), rename scope `@pm/*` → `@runforge/decision-*`, upgrade deps, fix only what the version bump breaks. **A failing ported test is a porting bug, not a spec change.**
+**Port source of truth:** `~/code/cockpit-consumer/packages/protocol` and `~/code/cockpit-consumer/packages/index`. Port = copy `src/` **and `test/`** (+ protocol `schema/`, + index `drizzle.config.ts`, + each package's `vitest.config.ts`/`tsconfig.json`), rename scope `@pm/*` → `@runforge/decision-*`, upgrade deps, fix only what the version bump breaks. **A failing ported test is a porting bug, not a spec change.**
 
 **Real package API (verified — build against THIS, do not invent methods):**
 - Factory: `createIndexWriter({ dbPath, protectedKey, protectedDir, notifier, sourceSink, resumeDispatcher, clock, channel?, maxAttempts?, skipMigrate?, generation? }): IndexWriter` — opens the single writable connection AND runs `migrate()` internally.
@@ -16,21 +16,21 @@
 - `DecisionRequestSchema` (all required unless `?`): `decision_id, protocol_version(=PROTOCOL_VERSION), source_url, source_etag?, source_event_id?, deployment, run_id, worker_session_id, phase, risk_class∈P0..P3, question, context, options[≥1]{id,label,detail?}, recommended_option?, consequence_of_no_answer, reversibility∈{reversible,hard_to_reverse,external_effect}, expires_at, answer_schema{kind:'option'|'json'}, resume_mode∈{mid_run,requeue}, idempotency_key, trace_id?, agent_version?, skill_version?, field_sensitivity(complete map — validated by assertFullyClassified())`.
 - Adapter contracts (`Notifier`/`SourceSink`/`ResumeDispatcher`) are injected at construction — v1 supplies daemon-owned no-op/log implementations.
 
-**Pre-flight:** read the spec; read `~/code/pm-cockpit/packages/{protocol,index}` fully incl. `test/`, `package.json`, `vitest.config.ts`, `drizzle.config.ts`, `src/index.ts`, `src/index-writer.ts`, `src/sensitivity.ts`, `src/decision-request.ts`; read in the worktree `packages/db/{package.json,tsconfig.json}` (sibling pattern), and `packages/daemon/src/control-plane/{daemon.ts (resumeParkedRuns),phases.ts (createPhaseHandlers + l2-gate),state.ts,types.ts,main.ts,config*.ts}`. **Line numbers drift — re-grep before every edit.**
+**Pre-flight:** read the spec; read `~/code/cockpit-consumer/packages/{protocol,index}` fully incl. `test/`, `package.json`, `vitest.config.ts`, `drizzle.config.ts`, `src/index.ts`, `src/index-writer.ts`, `src/sensitivity.ts`, `src/decision-request.ts`; read in the worktree `packages/db/{package.json,tsconfig.json}` (sibling pattern), and `packages/daemon/src/control-plane/{daemon.ts (resumeParkedRuns),phases.ts (createPhaseHandlers + l2-gate),state.ts,types.ts,main.ts,config*.ts}`. **Line numbers drift — re-grep before every edit.**
 
 ---
 
 ## Task 1: Port `@pm/protocol` → `@runforge/decision-protocol` (zod4)
 
-**Files:** Create `packages/decision-protocol/{package.json,tsconfig.json,vitest.config.ts}`, `packages/decision-protocol/src/**`, `packages/decision-protocol/test/**`, `packages/decision-protocol/schema/decision-request.schema.json` (all copied from `~/code/pm-cockpit/packages/protocol`).
+**Files:** Create `packages/decision-protocol/{package.json,tsconfig.json,vitest.config.ts}`, `packages/decision-protocol/src/**`, `packages/decision-protocol/test/**`, `packages/decision-protocol/schema/decision-request.schema.json` (all copied from `~/code/cockpit-consumer/packages/protocol`).
 
 - [ ] **Step 1: Copy src/, test/, schema/, configs**
 ```bash
 cd ~/code/runforge-wt-decision-emitter && mkdir -p packages/decision-protocol
-cp -R ~/code/pm-cockpit/packages/protocol/src   packages/decision-protocol/src
-cp -R ~/code/pm-cockpit/packages/protocol/test  packages/decision-protocol/test
-cp -R ~/code/pm-cockpit/packages/protocol/schema packages/decision-protocol/schema
-cp ~/code/pm-cockpit/packages/protocol/vitest.config.ts packages/decision-protocol/vitest.config.ts
+cp -R ~/code/cockpit-consumer/packages/protocol/src   packages/decision-protocol/src
+cp -R ~/code/cockpit-consumer/packages/protocol/test  packages/decision-protocol/test
+cp -R ~/code/cockpit-consumer/packages/protocol/schema packages/decision-protocol/schema
+cp ~/code/cockpit-consumer/packages/protocol/vitest.config.ts packages/decision-protocol/vitest.config.ts
 cp packages/db/tsconfig.json packages/decision-protocol/tsconfig.json
 ```
 - [ ] **Step 2: Write `package.json`** — name `@runforge/decision-protocol`, zod ^4.3.6, zod-to-json-schema ^3.25.1 (zod4-compatible peer). `test: vitest run`, `typecheck: tsc --noEmit`. Match `typescript` version from `packages/db/package.json`.
@@ -46,15 +46,15 @@ Known zod 3→4 fix points in `src/`: `z.record(z.unknown())` now needs `z.recor
 
 ## Task 2: Port `@pm/index` → `@runforge/decision-index` (drizzle0.45, better-sqlite3^12)
 
-**Files:** Create `packages/decision-index/{package.json,tsconfig.json,vitest.config.ts,drizzle.config.ts}`, `src/**` (+ `src/migrations/*.sql`), `test/**` (copied from `~/code/pm-cockpit/packages/index`).
+**Files:** Create `packages/decision-index/{package.json,tsconfig.json,vitest.config.ts,drizzle.config.ts}`, `src/**` (+ `src/migrations/*.sql`), `test/**` (copied from `~/code/cockpit-consumer/packages/index`).
 
 - [ ] **Step 1: Copy src/, test/, drizzle.config.ts, configs**
 ```bash
 cd ~/code/runforge-wt-decision-emitter && mkdir -p packages/decision-index
-cp -R ~/code/pm-cockpit/packages/index/src  packages/decision-index/src
-cp -R ~/code/pm-cockpit/packages/index/test packages/decision-index/test
-cp ~/code/pm-cockpit/packages/index/drizzle.config.ts packages/decision-index/drizzle.config.ts
-cp ~/code/pm-cockpit/packages/index/vitest.config.ts packages/decision-index/vitest.config.ts
+cp -R ~/code/cockpit-consumer/packages/index/src  packages/decision-index/src
+cp -R ~/code/cockpit-consumer/packages/index/test packages/decision-index/test
+cp ~/code/cockpit-consumer/packages/index/drizzle.config.ts packages/decision-index/drizzle.config.ts
+cp ~/code/cockpit-consumer/packages/index/vitest.config.ts packages/decision-index/vitest.config.ts
 cp packages/db/tsconfig.json packages/decision-index/tsconfig.json
 ```
 - [ ] **Step 2: `package.json`** — name `@runforge/decision-index`; deps `@runforge/decision-protocol: workspace:*`, `drizzle-orm ^0.45.2`, `ajv ^8.20.0`, `ulid ^2.3.0`, `zod ^4.3.6`, `better-sqlite3 ^12.0.0`; dev `@types/better-sqlite3`, `drizzle-kit ^0.30.0`, `vitest ^3.2.4`, `typescript`. (better-sqlite3 is a normal dep — see Task 3/8 for the gating reality.)
@@ -73,7 +73,7 @@ grep -rn "server-only" packages/decision-index   # remove import + the `.server`
 
 **Files:** Create `packages/daemon/src/control-plane/decision-escalation/{adapters.ts,ledger.ts,manager.ts}` (+ `.test.ts` each). Modify `packages/daemon/package.json` (add `@runforge/decision-protocol` + `@runforge/decision-index` as `workspace:*` deps).
 
-- [ ] **Step 1: v1 adapters** (`adapters.ts`) — daemon-owned no-op/log implementations of `Notifier`, `SourceSink`, `ResumeDispatcher` matching the ported contracts. **Critical: mirror the package's own test fakes so the lifecycle actually advances** (read `~/code/pm-cockpit/packages/index/test/helpers` for `FakeNotifier`/`FakeSourceSink`/`FakeResumeDispatcher`):
+- [ ] **Step 1: v1 adapters** (`adapters.ts`) — daemon-owned no-op/log implementations of `Notifier`, `SourceSink`, `ResumeDispatcher` matching the ported contracts. **Critical: mirror the package's own test fakes so the lifecycle actually advances** (read `~/code/cockpit-consumer/packages/index/test/helpers` for `FakeNotifier`/`FakeSourceSink`/`FakeResumeDispatcher`):
   - `Notifier.notify`→log+`'sent'`; `Notifier.probe`→track effect IDs seen, `'applied'` for known else `'absent'`.
   - `SourceSink.writeResponse`→record + return `'written'` (track the effect ID); `SourceSink.exists`→`'applied'` for recorded IDs else `'absent'`; **`SourceSink.currentEtag`→`{status:'equal'}` by default** (the real `runEffect('requeue')` defers unless equal — a vague `'unknown'` strands the row at `source_written`); `markSuperseded`→record.
   - `ResumeDispatcher.resume`→record + `'acked'`; `status`→`'applied'` for recorded.
@@ -171,7 +171,7 @@ export class DecisionIndexManager {
 
 **Files:** Modify `.github/workflows/*` (test job); `.specify/traceability.yml` (add the now-existing code_paths/test_paths to the two STACK entries — they were deferred pending these files).
 
-- [ ] **Step 1:** **better-sqlite3 native build is a workspace install concern** (codex: optionalDeps does NOT isolate `packages/*` install). Ensure the CI test job builds native deps (node-gyp toolchain present on the mac-mini runner; add an explicit `pnpm rebuild better-sqlite3` step if needed). Grep `.github/workflows/`.
+- [ ] **Step 1:** **better-sqlite3 native build is a workspace install concern** (codex: optionalDeps does NOT isolate `packages/*` install). Ensure the CI test job builds native deps (node-gyp toolchain present on the macOS host runner; add an explicit `pnpm rebuild better-sqlite3` step if needed). Grep `.github/workflows/`.
 - [ ] **Step 2:** `pnpm -r test && pnpm -r typecheck` from root — all green (ported protocol + decision-index suites + daemon suite).
 - [ ] **Step 3:** Now that `packages/decision-protocol/`, `packages/decision-index/`, `packages/daemon/src/control-plane/decision-escalation/` exist, add their paths to `STACK-AC-DECISION-ESCALATION-STORE` / `-EMITTER` in `.specify/traceability.yml` (the path validator now passes). Run `pnpm --filter @runforge/daemon test -- traceability-paths`. **Commit.**
 

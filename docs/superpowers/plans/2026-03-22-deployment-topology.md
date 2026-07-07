@@ -4,13 +4,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Unify Docker Compose configuration so the same file runs on Mac Mini (LAN, no auth) and Hetzner (public, TLS, OAuth), then deploy the stack on the Mac Mini.
+**Goal:** Unify Docker Compose configuration so the same file runs on the macOS host (LAN, no auth) and Hetzner (public, TLS, OAuth), then deploy the stack on the macOS host.
 
 **Architecture:** Single `docker-compose.yml` with Docker Compose profiles (Caddy gated behind `public` profile) and interpolated `env_file` paths. Auth bypass via `AUTH_DISABLED` env var propagated through proxy, auth helper, server actions, and API routes.
 
 **Tech Stack:** Docker Compose, Next.js 16, Supabase, Caddy
 
-**Important context:** The Mac Mini currently runs `pipeline.sh`, `reviewer.sh`, and `developer.sh` via launchd plists. These scripts must be stopped before starting the Docker daemon to avoid dual operation. The cutover happens in the final task.
+**Important context:** The macOS host currently runs `pipeline.sh`, `reviewer.sh`, and `developer.sh` via launchd plists. These scripts must be stopped before starting the Docker daemon to avoid dual operation. The cutover happens in the final task.
 
 ---
 
@@ -19,7 +19,7 @@
 | File | Responsibility | Action |
 |------|---------------|--------|
 | `docker-compose.yml` | Unified compose (replaces both existing compose files) | Rewrite |
-| `.env.mac.example` | Mac Mini environment template | Create |
+| `.env.mac.example` | macOS host environment template | Create |
 | `.env.prod.example` | Hetzner environment template (add new vars) | Modify |
 | `packages/dashboard/lib/auth.ts` | Auth helper with `AUTH_DISABLED` support | Modify |
 | `packages/dashboard/proxy.ts` | Request proxy with auth bypass | Modify |
@@ -143,7 +143,7 @@ git rm docker-compose.prod.yml
 
 ```bash
 git add docker-compose.yml
-git commit -m "feat: unify docker-compose with profiles for Mac Mini and Hetzner
+git commit -m "feat: unify docker-compose with profiles for the macOS host and Hetzner
 
 Replace docker-compose.prod.yml and dev-only docker-compose.yml with a
 single file. Caddy gated behind 'public' profile. env_file interpolated
@@ -161,7 +161,7 @@ via ENV_FILE variable."
 - [ ] **Step 1: Create .env.mac.example**
 
 ```bash
-# === Mac Mini Environment ===
+# === macOS Host Environment ===
 # Copy to .env.mac and fill in values:  cp .env.mac.example .env.mac
 
 # Dashboard port binding — exposed on LAN
@@ -171,7 +171,7 @@ DASHBOARD_PORT=0.0.0.0:3000:3000
 AUTH_DISABLED=true
 
 # Site URL — used for internal redirects
-NEXT_PUBLIC_SITE_URL=http://localhost:3000
+NEXT_PUBLIC_SITE_URL=http://macos-host.local:3000
 
 # Daemon URL — Docker service name resolution (do not change)
 DAEMON_URL=http://daemon:3847
@@ -208,7 +208,7 @@ DASHBOARD_PORT=127.0.0.1:3000:3000
 
 ```bash
 git add .env.mac.example .env.prod.example
-git commit -m "feat: add Mac Mini env template, update prod template with DASHBOARD_PORT"
+git commit -m "feat: add macOS host env template, update prod template with DASHBOARD_PORT"
 ```
 
 ---
@@ -497,16 +497,16 @@ Replace all `docker-compose.prod.yml` references:
 - Line 94: `docker compose -f docker-compose.prod.yml up --build -d` → `docker compose --env-file .env.prod --profile public up --build -d`
 - Line 128: `docker compose -f docker-compose.prod.yml down` → `docker compose --env-file .env.prod --profile public down`
 
-Add a "Mac Mini" section after "Running in Production" (line 95):
+Add a "macOS host" section after "Running in Production" (line 95):
 
 ```markdown
-## Running on Mac Mini
+## Running on the macOS host
 
 ```bash
 ENV_FILE=.env.mac docker compose --env-file .env.mac up --build -d
 ```
 
-Dashboard is available at `http://localhost:3000` on the local network. Auth is disabled.
+Dashboard is available at `http://macos-host.local:3000` on the local network. Auth is disabled.
 ```
 
 - [ ] **Step 2: Update docs/hetzner-setup.md**
@@ -548,7 +548,7 @@ git commit -m "chore: update traceability.yml for unified docker-compose.yml"
 
 ---
 
-### Task 9: Create .env.mac and deploy on Mac Mini
+### Task 9: Create .env.mac and deploy on the macOS host
 
 **Important:** This task involves stopping the currently running launchd scripts. The daemon will be offline for a few minutes during cutover.
 
@@ -594,7 +594,7 @@ Expected: `dashboard`, `daemon`, and `briefing-summarizer` all show status `runn
 
 - [ ] **Step 6: Verify dashboard is accessible**
 
-Open `http://localhost:3000` in a browser (or `curl http://localhost:3000`).
+Open `http://macos-host.local:3000` in a browser (or `curl http://localhost:3000`).
 Expected: Dashboard loads without login redirect (auth disabled).
 
 - [ ] **Step 7: Verify daemon connectivity**
@@ -607,7 +607,7 @@ Expected: JSON response with `{ state: "running" | "paused", ... }`. If the daem
 
 - [ ] **Step 8: Verify briefing page loads**
 
-Open `http://localhost:3000/briefing` in a browser.
+Open `http://macos-host.local:3000/briefing` in a browser.
 Expected: Briefing page renders (may show empty state if no briefings exist yet).
 
 ---

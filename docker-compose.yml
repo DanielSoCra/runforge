@@ -76,7 +76,7 @@ services:
       - ./plugins:/app/plugins:ro
     networks:
       - app
-    # On Mac Mini: daemon runs natively, dashboard reaches it via host.docker.internal
+    # On the macOS host: daemon runs natively, dashboard reaches it via host.docker.internal
     # On Hetzner: daemon runs in Docker, dashboard reaches it via Docker service name
     extra_hosts:
       - "host.docker.internal:host-gateway"

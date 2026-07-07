@@ -36,7 +36,7 @@ beforeEach(() => {
   vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
   authMocks.requireDashboardAdmin.mockReset();
   authMocks.requireDashboardAdmin.mockResolvedValue({
-    user: { id: 'admin-1', email: 'admin@example.com', role: 'admin' },
+    user: { id: 'admin-1', email: 'admin@acme.de', role: 'admin' },
   });
   fetchMock = vi.fn();
   globalThis.fetch = fetchMock as typeof fetch;

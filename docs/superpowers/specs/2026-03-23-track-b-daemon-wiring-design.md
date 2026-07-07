@@ -34,7 +34,7 @@ Each daemon instance manages exactly one repository. Multiple repos means multip
 
 | Phase | Runtime | Fleet management |
 |---|---|---|
-| Now (1-3 repos) | launchd on Mac mini | Shell script |
+| Now (1-3 repos) | launchd on the macOS host | Shell script |
 | Soon (10-20 repos) | Docker Compose | `docker compose up -d` |
 | Scale (100+ repos) | Kubernetes | Helm chart + repo controller |
 

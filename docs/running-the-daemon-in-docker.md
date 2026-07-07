@@ -133,7 +133,7 @@ self-heals across crashes once the Docker engine is up.
 | Job | Installs via | Keeps alive |
 |-----|--------------|-------------|
 | `com.runforge.creds-sync` | `scripts/install-creds-sync.sh /private/tmp/pilot-claude` | refreshes the container's subscription token from the host Keychain every 15 min (token life ~1 h) — the #1 overnight killer |
-| `com.pmcockpit.watcher-pilot` | `pm-cockpit: packages/watcher/scripts/install-pilot-watcher.sh` | KeepAlive-restarts the watcher that owns the intent socket delivering gate approvals; secrets resolved at launch (`gh auth token` + `~/.agents/pm/.protected-key`), none in the plist; `/health` on `127.0.0.1:8799` |
+| `com.pmcockpit.watcher-pilot` | the cockpit consumer: `packages/watcher/scripts/install-pilot-watcher.sh` | KeepAlive-restarts the watcher that owns the intent socket delivering gate approvals; secrets resolved at launch (`gh auth token` + `~/.agents/pm/.protected-key`), none in the plist; `/health` on `127.0.0.1:8799` |
 | `com.runforge.docker-autostart` | `cp scripts/com.runforge.docker-autostart.plist …` (sub `__HOME__`) + `launchctl load -w` | `open -g -a Docker` at login → the engine comes up → the `unless-stopped` container resurrects after a reboot |
 
 ```bash

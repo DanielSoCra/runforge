@@ -50,4 +50,4 @@ cp runforge.config.example.json runforge.config.json
 pnpm --filter @runforge/daemon start
 ```
 
-Fill in credentials and deployment-specific values before starting the daemon. See `docs/running.md` for setup, configuration, Docker, Mac Mini hybrid, Hetzner, and operator commands.
+Fill in credentials and deployment-specific values before starting the daemon. See `docs/running.md` for setup, configuration, Docker, macOS hybrid, Hetzner, and operator commands.

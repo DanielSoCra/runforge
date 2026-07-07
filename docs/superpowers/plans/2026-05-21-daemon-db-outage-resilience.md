@@ -20,7 +20,7 @@
 - The control server binds at `daemon.ts:934` (`createControlServer(...).start()`); instance lock = the port `listen()` at `server.ts:180`. `/health`→`{ok:true}` (server.ts:51).
 - DB-dependent startup steps (fail if Postgres down): `configReader.start()` (201), `runMaintenance.markInProgressRunsStuck()` (212), `repoManager.initialize()` (925). In E′ these are unchanged and all run after config load.
 - Tests: per-package, `cd packages/<pkg> && pnpm vitest run <path>`. Root `pnpm -r run {typecheck,lint,test}`. `pnpm install` required in worktree first.
-- The Mac Mini daemon runs under launchd (`scripts/com.runforge.daemon.plist`, `KeepAlive`+`ThrottleInterval=30`). Plist is NOT changed.
+- The macOS host daemon runs under launchd (`scripts/com.runforge.daemon.plist`, `KeepAlive`+`ThrottleInterval=30`). Plist is NOT changed.
 
 ---
 

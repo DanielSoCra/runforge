@@ -7,24 +7,24 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>~/code/runforge/scripts/developer.sh</string>
+    <string>__REPO_ROOT__/scripts/developer.sh</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>~/code/runforge</string>
+  <string>__REPO_ROOT__</string>
   <key>KeepAlive</key>
   <true/>
   <key>ThrottleInterval</key>
   <integer>60</integer>
   <key>StandardOutPath</key>
-  <string>~/logs/claude-developer.log</string>
+  <string>__HOME__/logs/claude-developer.log</string>
   <key>StandardErrorPath</key>
-  <string>~/logs/claude-developer.log</string>
+  <string>__HOME__/logs/claude-developer.log</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+    <string>__PATH__</string>
     <key>HOME</key>
-    <string>~</string>
+    <string>__HOME__</string>
   </dict>
 </dict>
 </plist>

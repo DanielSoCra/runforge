@@ -53,7 +53,7 @@ mostCautiousLane: standard-hold     # hold-for-operator variant used for fallbac
 lifecycleModes:
   phases: [velocity, hardening, clinical]   # names are pack data, not spec
 deployments:
-  acme:      { lifecyclePhase: velocity }   # pre-production (2026-06): wider
+  regulated-pilot: { lifecyclePhase: velocity }   # pre-production (2026-06): wider
                                                # autonomous scope, lighter per-lane
                                                # gate-sets; QA + review weight stays
                                                # high — trust rests on QA results.
@@ -65,7 +65,7 @@ Per-mode lane variance (only `gateSet` and `mergePolicy` may vary by phase):
 
 ```yaml
 lanes:
-  - name: standard            # acme deployment override, illustrative
+  - name: standard            # regulated-pilot deployment override, illustrative
     gateSet:     { velocity: gate1-plus-review, clinical: full-ladder }
     mergePolicy: { velocity: review-then-auto,  clinical: hold }
 ```
@@ -117,12 +117,12 @@ steering:
 
 ## Stability bar — confirmed initial value (masterplan Q4, Operator-confirmed 2026-06-11)
 
-The merge-decision and operator-surface specs reference a *configured stability bar*; this is its confirmed initial value, gating (a) acme GREEN/YELLOW autonomous merge and (b) the start of the pm-cockpit fold:
+The merge-decision and operator-surface specs reference a *configured stability bar*; this is its confirmed initial value, gating (a) the regulated pilot's GREEN/YELLOW autonomous merge and (b) the start of the cockpit-consumer fold:
 
 ```yaml
 stabilityBar:
   unattendedDays: 7            # zero manual rescues throughout
-  canary: content-site           # risky behaviors prove on the canary, never acme
+  canary: canary-deployment    # risky behaviors prove on the canary, never the regulated pilot
   e2eSmokeRuns: { issue: 681, requiredPasses: 2 }
   manualRescues: 0
 ```
@@ -131,7 +131,7 @@ stabilityBar:
 
 ```yaml
 postMergeBatchReview: on-for-auto-merge-lanes     # nightly
-acmeFastLanes: earn-in                          # 20 clean merges + 7d zero bounces
+regulatedPilotFastLanes: earn-in                      # 20 clean merges + 7d zero bounces
 notesAndRunVerbs: enabled
 adapterSmokeTest: on-startup-and-on-wiring-change
 ```

@@ -908,6 +908,6 @@ Stored in `schemas/` directory, used with `--json-schema` for validated structur
 - **OpenClaw** — 24/7 daemon model, skills system, self-improving agent, messaging-based interface
 - **StrongDM Dark Factory** — spec-as-source, nondeterministic idempotence, holdout testing, Digital Twin Universe
 - **Gas Town** — batched parallel agents, Git-backed state, Coordinator/Worker model
-- **Example-Project (product)** — role-based team structure, meeting protocol, recipe workflows (simplified here to a fixed pipeline with intelligent decomposition)
+- **A role-based agency system** — role-based team structure, meeting protocol, recipe workflows (simplified here to a fixed pipeline with intelligent decomposition)
 - **Aperant** — worker thread isolation, complexity-gated pipeline, memory observer with 2ms budget constraint, between-step gotcha injection, circular fix detection, agent config registry, recovery manager with checkpoint/resume, multi-account profile scoring
 - **Karpathy's autoresearch** — immutable harness + mutable target + scalar metric pattern, git-as-ratchet (only improvements survive), results ledger, output redirection to prevent context flooding, "if context doesn't fit one window, decompose further" heuristic

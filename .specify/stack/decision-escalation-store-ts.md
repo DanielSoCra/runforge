@@ -22,7 +22,7 @@ test_paths:
 
 ## Pattern
 
-**Fold the proven pm-cockpit `protocol` + `index` packages in as the Decision Store — port, do not rewrite.** These packages already implement exactly the L2's data model and lifecycle: the `DecisionRequest`/`DecisionResponse`/`SensitivePayload` contracts, the §6.2 status machine as an explicit transition table, transition-key idempotency, and a **two-phase outbox** with deterministic, probeable effect IDs. They carry 270+ unit tests plus a live real-GitHub e2e, so the win is reuse, not reinvention. They move into runforge's monorepo as `packages/decision-protocol` (was `@pm/protocol`) and `packages/decision-index` (was `@pm/index`), keeping their internal contracts intact.
+**Fold the proven cockpit consumer's `protocol` + `index` packages in as the Decision Store — port, do not rewrite.** These packages already implement exactly the L2's data model and lifecycle: the `DecisionRequest`/`DecisionResponse`/`SensitivePayload` contracts, the §6.2 status machine as an explicit transition table, transition-key idempotency, and a **two-phase outbox** with deterministic, probeable effect IDs. They carry 270+ unit tests plus a live real-GitHub e2e, so the win is reuse, not reinvention. They move into runforge's monorepo as `packages/decision-protocol` and `packages/decision-index`, keeping their internal contracts intact.
 
 The durability spine is **deterministic effect IDs reconstructable from item state without the outbox row** — `effectId = <decision_id>:<kind>:<semantic_key>` — so a crash between *execute* and *commit* is recoverable by probing the downstream with the same id rather than trusting a persisted flag. State is always re-derivable from the store; `reconcile()` is the single recovery path.
 

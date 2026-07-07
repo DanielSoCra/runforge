@@ -9,15 +9,15 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>~/code/runforge-ops/health-poll.sh</string>
+    <string>__OPS_DIR__/health-poll.sh</string>
   </array>
   <key>StartInterval</key>
   <integer>300</integer>
   <key>RunAtLoad</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>~/code/runforge-ops/logs/health-poll.err.log</string>
+  <string>__OPS_DIR__/logs/health-poll.err.log</string>
   <key>StandardErrorPath</key>
-  <string>~/code/runforge-ops/logs/health-poll.err.log</string>
+  <string>__OPS_DIR__/logs/health-poll.err.log</string>
 </dict>
 </plist>

@@ -22,7 +22,7 @@ test_paths:
 
 ## Pattern
 
-**Better Auth with the Drizzle adapter + a server-side `require-session` gate fronting a pure `gateDecision` predicate, with an app-owned `role` column.** Modeled on the `acme/apps/ops` auth shape (`betterAuth({ database: drizzleAdapter(db, { provider: 'pg' }) })`, server-only `require-session.ts`, a pure decision function, `advanced.database.generateId: 'uuid'`).
+**Better Auth with the Drizzle adapter + a server-side `require-session` gate fronting a pure `gateDecision` predicate, with an app-owned `role` column.** Modeled on the regulated pilot deployment's ops-app auth shape (`betterAuth({ database: drizzleAdapter(db, { provider: 'pg' }) })`, server-only `require-session.ts`, a pure decision function, `advanced.database.generateId: 'uuid'`).
 
 Chosen over a hand-rolled session system (security risk, the issue forbids weakening auth) and over keeping storage-layer RLS for authorization (the issue mandates moving authorization into the application). Better Auth gives project-owned `users`/`sessions`/`accounts`/`verifications` tables created through our own migrations, and the pure predicate keeps the gate unit-testable.
 
@@ -30,7 +30,7 @@ Chosen over a hand-rolled session system (security risk, the issue forbids weake
 
 - **Better Auth + Drizzle adapter** — auth tables defined in the shared `packages/db` schema but **created by the Data Platform Migration Runner** (STACK-AC-DATA-PLATFORM owns ordering; this spec owns their definition and semantics).
 - **Server-side enforcement only** — a `requireSession()` in route handlers and server components; the client-asserted role is never trusted. Daemon control routes sit behind an admin-only variant.
-- **Pure `gateDecision` predicate** — `(session, { localBypass }) → '/login' | null | 'deny'`; no I/O, fully unit-tested, mirrors the acme `gate-decision.ts` split.
+- **Pure `gateDecision` predicate** — `(session, { localBypass }) → '/login' | null | 'deny'`; no I/O, fully unit-tested, mirrors the regulated pilot deployment's `gate-decision.ts` split.
 - **App-owned `role`** — `administrator | viewer` on the membership/user record, enforced in application code; Supabase `is_admin()`/`is_member()` SQL and all RLS policies are removed.
 - **`AUTH_DISABLED` → `LOCAL_AUTH_BYPASS`** — the blunt switch is replaced by a named local-only bypass that activates only when an explicit local flag is set **and** no production indicator (`NODE_ENV=production`, deploy markers) is present; it refuses in production and logs the refusal.
 - **Continuity** — preserve first-user-is-admin bootstrap and the invitation flow; `team_members` / `invitations` semantics carry over with documented operator migration.

@@ -123,7 +123,7 @@ describe.skipIf(!REAL_PG)('operator reveal — revealProtected (real Postgres)',
     const id = 'issue-1:l2-gate:1';
     const ref = await raiseWithheld(ledger, writer.protectedStore, id, 'TOP-SECRET');
 
-    const revealed = await ledger.revealProtected(id, ref, 'admin@example.com');
+    const revealed = await ledger.revealProtected(id, ref, 'admin@acme.de');
     expect(revealed.field).toBe('context');
     expect(revealed.value).toBe('TOP-SECRET');
     await writer.close();
@@ -133,13 +133,13 @@ describe.skipIf(!REAL_PG)('operator reveal — revealProtected (real Postgres)',
     const { writer, ledger } = await makeWriter();
     const id = 'issue-2:l2-gate:1';
     const ref = await raiseWithheld(ledger, writer.protectedStore, id, 'S');
-    await ledger.revealProtected(id, ref, 'admin@example.com');
+    await ledger.revealProtected(id, ref, 'admin@acme.de');
 
     const audit = await writer.reader.audit(id);
     const reveal = audit.find((e) => e.event === 'reveal');
     expect(reveal).toBeDefined();
     // accountability: the audit view surfaces WHO revealed (requires AuditView.actor).
-    expect(reveal!.actor).toBe('admin@example.com');
+    expect(reveal!.actor).toBe('admin@acme.de');
     await writer.close();
   });
 

@@ -33,7 +33,7 @@ Sparring with codex picked option E over: A (bounded retry then exit), B (last-k
 ### Rejected alternatives
 
 - **Persisted last-known-good config (option B).** Adds correctness risk: repo list might be stale, plugin set might be stale, daemon might claim work against a config that no longer reflects the operator's truth. Defer until we have a forcing function.
-- **Skip the inline-retry, go straight to degraded (option C).** A fresh boot-race against Docker startup almost always recovers within 5–10s; making every Mac mini boot read `degraded` for the first poll interval is noisy and degrades the signal value of `/health.degraded`.
+- **Skip the inline-retry, go straight to degraded (option C).** A fresh boot-race against Docker startup almost always recovers within 5–10s; making every macOS host boot read `degraded` for the first poll interval is noisy and degrades the signal value of `/health.degraded`.
 - **Walk back to launchd as the sole recovery loop (option A).** Hours of opaque crash-loop on a dependency outage is exactly the failure mode this incident exposed; we should not leave it intact.
 
 ### Integration details

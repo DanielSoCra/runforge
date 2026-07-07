@@ -16,15 +16,21 @@ variable "hcloud_token" {
 }
 
 variable "ssh_public_key_path" {
-  default = "~/.ssh/id_ed25519.pub"
+  description = "Path to the SSH public key uploaded to Hetzner and allowed for root login."
+  default     = "~/.ssh/id_ed25519.pub"
 }
 
+# Your own public IPs — used to restrict SSH (22) and the daemon API (3847) to
+# you only. No default on purpose: set these in a gitignored terraform.tfvars
+# (see terraform.tfvars.example) so a real address is never committed.
 variable "my_ipv6" {
-  default = "2001:db8::/56"
+  description = "Operator public IPv6 prefix allowed to reach SSH + daemon port, e.g. 2001:db8::/56."
+  type        = string
 }
 
 variable "my_ipv4" {
-  default = "203.0.113.10"
+  description = "Operator public IPv4 allowed to reach SSH + daemon port (no CIDR suffix)."
+  type        = string
 }
 
 # --- SSH Key ---

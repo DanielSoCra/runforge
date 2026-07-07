@@ -1,6 +1,6 @@
 # Phase 0 — Safety-Floor Honesty: Task-Level Plan
 
-> Expansion of **Phase 0** of `docs/superpowers/plans/2026-07-02-first-production-deployment-regulated-full-l0.md` (Revision v2, Operator-approved) into implementable tasks. Branch: `plan/first-production-deployment-regulated-full-l0`; build branch: `codex/phase0-safety-floors-build`. Delivered via the delegated sparring pipeline (gate → work-order → external implementer → deep-review).
+> Expansion of **Phase 0** of `docs/superpowers/plans/2026-07-02-first-production-deployment-full-l0.md` (Revision v2, Operator-approved) into implementable tasks. Branch: `plan/first-production-deployment-full-l0`; build branch: `codex/phase0-safety-floors-build`. Delivered via the delegated sparring pipeline (gate → work-order → external implementer → deep-review).
 >
 > **Line numbers in this plan are anchors verified 2026-07-02 — they WILL drift. Always `grep -n` for the named symbol before editing; never trust a line number.**
 
@@ -168,7 +168,7 @@ pnpm --filter @runforge/daemon test <gate test paths> && pnpm --filter @runforge
 
 - All gate tests green via `verify_command`; no gate/spec/plan file modified by the implementer.
 - Full daemon suite: no new failures vs. pre-change baseline; typecheck + lint green; traceability-paths test green.
-- PR opened against `plan/first-production-deployment-regulated-full-l0` (base), branch `codex/phase0-safety-floors-build`.
+- PR opened against `plan/first-production-deployment-full-l0` (base), branch `codex/phase0-safety-floors-build`.
 
 **NOT in this PR (Phase-0 done-evidence, post-merge — program plan requires a live run, never green tests):** the execution log with (a) a live worker session where an out-of-scope write is blocked mid-session, (b) a seeded secret in output failing a session, (c) the halt drill — long-running live session killed via `POST /halt`, run parked, later resumed. That is the orchestrator's Phase 9 after the Operator merges, and it gates P2 entry.
 

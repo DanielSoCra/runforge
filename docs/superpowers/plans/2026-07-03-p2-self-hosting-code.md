@@ -2,7 +2,7 @@
 
 > Expansion of program-plan Phase 2, scoped to the **autonomously-buildable code+config unit**: runforge's own deployment profile, the **execution-time verifier gate** (#774 step 4 — the one genuinely net-new piece), the self-hosting hardening (prompt boot-freeze, `allowSelfRepair` removal, Gate-1 baseline flip + tainted-status), and the self-hosting posture doc. Governed by **FUNC-AC-FLEET** (approved) + **FUNC-AC-VERIFIER-GATE** (L1 approved; L2/L3 draft → flesh via guardian) + **FUNC-AC-QUALITY** (draft, Gate-1 in scope). No new L1. Branch: `plan/p2-self-hosting`; build branch: `codex/p2-self-hosting-build`.
 >
-> **NOT in this unit — the LIVE self-run (Phase 9), which needs the Operator:** the daemon running on the Mac mini against runforge itself, merging a real change into `runforge/main` via the P1 lane. That requires (a) refreshing the 365-commit-stale installed daemon worktree (`runtime-current @ 232e078`, still `branches.staging:'dev'`) to origin/main, and (b) the Operator's explicit go-ahead for runforge to govern itself (bridge #63). The P2 entry gate — P0.5's `POST /halt` — is live, so the remote-abort substrate exists. This code unit makes the self-run *possible*; the run itself is Operator-gated.
+> **NOT in this unit — the LIVE self-run (Phase 9), which needs the Operator:** the daemon running on the macOS host against runforge itself, merging a real change into `runforge/main` via the P1 lane. That requires (a) refreshing the 365-commit-stale installed daemon worktree (`runtime-current @ 232e078`, still `branches.staging:'dev'`) to origin/main, and (b) the Operator's explicit go-ahead for runforge to govern itself (bridge #63). The P2 entry gate — P0.5's `POST /halt` — is live, so the remote-abort substrate exists. This code unit makes the self-run *possible*; the run itself is Operator-gated.
 >
 > **Line anchors verified 2026-07-03 @ origin/main 0f729f0 — grep for symbols, never trust line numbers.**
 
@@ -53,7 +53,7 @@ Add a `deployment` block (mirror `cause-driven-tasks.config.json`'s shape) + `ru
 ## Definition of done (code unit)
 Gate green; daemon suite no new failures; typecheck/lint/traceability green; PR against `main`.
 
-**NOT in this PR — the Phase-9 live self-run (Operator-gated, bridge #63):** one unattended run of the daemon against runforge itself on the Mac mini — issue → implement → review → PR → checks green → verifier-gated auto-merge into `runforge/main` — plus one red-path run escalating to the inbox and resuming after the Operator answers from the UI. Prerequisites: refresh the stale `runtime-current` worktree to origin/main; the Operator's go-ahead. **This log is the single most important artifact in the whole program plan** — but it is a live operational event, not code, and it is the Operator's to trigger.
+**NOT in this PR — the Phase-9 live self-run (Operator-gated, bridge #63):** one unattended run of the daemon against runforge itself on the macOS host — issue → implement → review → PR → checks green → verifier-gated auto-merge into `runforge/main` — plus one red-path run escalating to the inbox and resuming after the Operator answers from the UI. Prerequisites: refresh the stale `runtime-current` worktree to origin/main; the Operator's go-ahead. **This log is the single most important artifact in the whole program plan** — but it is a live operational event, not code, and it is the Operator's to trigger.
 
 ## Follow-ups
 - The live self-run (Phase 9) — after the worktree refresh + the Operator's go-ahead.

@@ -14,3 +14,13 @@ infra/terraform.tfvars
 infra/.terraform/
 infra/*.tfstate*
 workspaces/
+# Operator-specific deployment coordinates (real paths/DB/labels). Template: deployment0.env.example
+deploy/**/deployment0.env
+# Local archive of internal session artifacts moved out of the tree
+.local-archive/
+# Local session/tooling artifacts (not part of the project)
+.playwright-mcp/
+.goal/
+outputs/
+cause-driven-tasks.config.json
+.claude/agents/

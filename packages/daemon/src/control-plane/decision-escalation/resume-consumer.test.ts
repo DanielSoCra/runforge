@@ -130,7 +130,7 @@ describe('parseCockpitAnswer', () => {
   });
 
   it('GROUND TRUTH: recognizes the EXACT live cockpit writeback (issue-3, minimal JSON, decision_id only in the marker)', () => {
-    // Byte-for-byte from DANIELSOCRAHANDLEZZ/pm-cockpit-selftest#3 (live).
+    // Byte-for-byte from a live cockpit selftest run.
     const liveBody = [
       '<!-- pm-cockpit:effect:issue-3:l2-gate:1:write_response:e2e-approve-1:etag=sha256:d7a8087139a57f7bda694297df63bcad6b29b24b3ab73864af732a0ba2ca3448 -->',
       '**DecisionResponse**',

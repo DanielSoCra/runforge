@@ -133,7 +133,7 @@ For `gh_log_scan`, `mail_triage`, `web_fetch_long`: the tool handler dispatches 
 
 Cloudflare Access policies attached:
 - Slack route: service-token policy (Slack signs via signing-secret; CF Access only verifies the request is from cloudflared, no SSO)
-- Board route: Google SSO restricted to `operator@example.com`
+- Board route: Google SSO restricted to the Operator's account
 
 ## Tests
 
@@ -142,7 +142,7 @@ Cloudflare Access policies attached:
 - `slack/adapter.test.ts` — signature verification, event normalisation
 - `confirmation/state-machine.test.ts` — full lifecycle (pending → approved/denied/expired)
 - `memory/sqlite.test.ts` — schema migration forward-only invariant
-- `memory/vault.test.ts` — allow-list enforcement; client-folder always-confirms
+- `memory/vault.test.ts` — allow-list enforcement; client-notes area always-confirms
 - `observer/chokidar.test.ts` — ignore-list (`.env`, `secrets/`) drops events
 - `tools/registry.test.ts` — name-uniqueness, namespace-prefix conventions
 

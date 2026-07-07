@@ -13,18 +13,18 @@
 **Successor design doc:** `docs/superpowers/specs/2026-05-01-concierge-design.md` — read it first if you have not already.
 
 **Research integration:** Four parallel research streams informed the spec content:
-- **Hermes (NousResearch):** skill-distillation closed loop — concierge promotes recurring trajectories to named skill files in knowledge-vault. Reflected in `FUNC-CONCIERGE` "Learning loop" section.
+- **Hermes (NousResearch):** skill-distillation closed loop — concierge promotes recurring trajectories to named skill files in the knowledge vault. Reflected in `FUNC-CONCIERGE` "Learning loop" section.
 - **Archon (coleam00):** deterministic DAG-around-LLM pattern. Deferred to a post-Phase-7 enhancement; noted in `FUNC-CONCIERGE` future work but not implemented v1.
 - **OpenClaw:** SOUL.md / AGENTS.md / TOOLS.md prompt separation — adopted. The concierge process loads three distinct files at boot.
 - **Manus context-engineering playbook:** stable prompt prefix with cache control, file-system-as-memory, recitation, recoverable compression — these are MANDATORY rules in `STACK-CONCIERGE-NODE`.
 - **Cognition "Don't Build Multi-Agents":** single-threaded linear concierge; subagents only for read-heavy noisy tools. Reflected in `ARCH-CONCIERGE-RUNTIME`.
-- **Local repo audit:** `~/code/knowledge-vault-slack-bot` already exists as a Slack↔Obsidian Python daemon. Concierge **subsumes** it — its capture, briefing, and agent-routing duties become concierge tools. Existing daemon marked deprecated-by-concierge in its README at end of Phase 0; actual deletion comes in Phase 2 once concierge has feature parity. Documented in `L0-CONCIERGE-VISION`.
+- **Local repo audit:** a separate personal project (a Slack↔Obsidian daemon) already exists. Concierge **subsumes** it — its capture, briefing, and agent-routing duties become concierge tools. Existing daemon marked deprecated-by-concierge in its README at end of Phase 0; actual deletion comes in Phase 2 once concierge has feature parity. Documented in `L0-CONCIERGE-VISION`.
 
 ---
 
 ## Daemon coexistence
 
-The runforge daemon is running on the Mac mini. Phase 0 only edits specs, prompts, traceability, and adds tests. **No production code under `packages/` is modified.** No daemon restart is required. After Phase 0 commits land on `dev`, the daemon will pick up the new traceability tree on its next config sync.
+The runforge daemon is running on the macOS host. Phase 0 only edits specs, prompts, traceability, and adds tests. **No production code under `packages/` is modified.** No daemon restart is required. After Phase 0 commits land on `dev`, the daemon will pick up the new traceability tree on its next config sync.
 
 ---
 
@@ -271,21 +271,21 @@ layer: 0
 
 # L0-CONCIERGE-VISION — Concierge
 
-**Concierge** is a single conversational entry point — a Slack DM with a bot, served from the Operator's Mac mini — that turns intent into action across all his tools. It is an LLM agent with a fixed toolbox (runforge, knowledge-vault Obsidian vault, Slack, calendar, email, GitHub, web, observer) and a single mobile-friendly triage board for the small set of items that genuinely need human judgment.
+**Concierge** is a single conversational entry point — a Slack DM with a bot, served from the Operator's macOS host — that turns intent into action across all their tools. It is an LLM agent with a fixed toolbox (runforge, the knowledge vault, Slack, calendar, email, GitHub, web, observer) and a single mobile-friendly triage board for the small set of items that genuinely need human judgment.
 
-**Why:** the Operator runs three workstreams in parallel — a B2B CTO role, a freelance product project, and church ministry — plus operates an autonomous software-development pipeline (runforge). Each surface (GitHub issues, Obsidian, Slack, email, calendar) demands its own context switch. The cost is not the individual tools; it is the routing decision he makes a hundred times a day: "where does this thing live, who needs to act on it, when do I get back to it?" The concierge collapses that routing to one chat.
+**Why:** the Operator runs multiple parallel workstreams, plus operates an autonomous software-development pipeline (runforge). Each surface (GitHub issues, the knowledge vault, Slack, email, calendar) demands its own context switch. The cost is not the individual tools; it is the routing decision made a hundred times a day: "where does this thing live, who needs to act on it, when do I get back to it?" The concierge collapses that routing to one chat.
 
 **For:** the Operator, single-tenant. No multi-user mode. No team accounts.
 
 **What the concierge provides:**
 
 - **One inbox** — a Slack DM with the bot is the primary input/output. Long-form work, decisions, "remember this", "did X happen?", "kick off Y" — all flow through the DM.
-- **One triage board** — a small mobile-friendly web view (behind Cloudflare Tunnel from the Mac mini, Cloudflare-Access-gated to the Operator's email) holding two sections: items that need the Operator's decision and items currently in flight. Glanceable; not a notification firehose.
+- **One triage board** — a small mobile-friendly web view (behind Cloudflare Tunnel from the macOS host, Cloudflare-Access-gated to the Operator's email) holding two sections: items that need the Operator's decision and items currently in flight. Glanceable; not a notification firehose.
 - **A fixed toolbox** — the concierge has direct, audited tool calls into ~10 subsystems. Most actions happen autonomously. High-blast-radius actions (external email, public Slack post, merge-to-main, vault writes under client folders) require a Slack-confirm tap before executing.
-- **Two-tier memory** — the Obsidian vault at `~/code/knowledge-vault` is the durable cortex (decisions, captures, daily summaries written nightly via MCP). A local SQLite store is the ephemeral hippocampus (recent threads, audit log, board cards, 7-day rolling summaries). Older memory always falls back to vault search.
-- **Coexistence with manual sessions** — the Operator runs Claude Code, Codex, and pi.dev sessions on his own initiative. The concierge **observes** (commits, branches, worktrees) but never manages or warns about manual work. He can ask the concierge "what am I in the middle of?"; the concierge never volunteers it.
-- **Skill-distillation loop (Hermes-inspired)** — when the concierge executes the same multi-step pattern several times, it proposes (with confirmation) a distilled skill file in the knowledge-vault `personal-claude` plugin marketplace, named after the pattern. Future executions invoke the skill instead of re-deriving the steps.
-- **Subsumes the existing `~/code/knowledge-vault-slack-bot`** — the Python daemon currently doing Slack capture, briefing, and agent routing. Its responsibilities are absorbed by the concierge in Phase 1+; the existing daemon stays running until feature parity is reached, then is retired (deprecation note in its README at end of Phase 0).
+- **Two-tier memory** — the knowledge vault is the durable cortex (decisions, captures, daily summaries written nightly via MCP). A local SQLite store is the ephemeral hippocampus (recent threads, audit log, board cards, 7-day rolling summaries). Older memory always falls back to vault search.
+- **Coexistence with manual sessions** — the Operator runs Claude Code, Codex, and pi.dev sessions on their own initiative. The concierge **observes** (commits, branches, worktrees) but never manages or warns about manual work. They can ask the concierge "what am I in the middle of?"; the concierge never volunteers it.
+- **Skill-distillation loop (Hermes-inspired)** — when the concierge executes the same multi-step pattern several times, it proposes (with confirmation) a distilled skill file in the knowledge vault's plugin marketplace, named after the pattern. Future executions invoke the skill instead of re-deriving the steps.
+- **Subsumes a separate personal project (a Slack↔Obsidian daemon)** — the daemon currently doing Slack capture, briefing, and agent routing. Its responsibilities are absorbed by the concierge in Phase 1+; the existing daemon stays running until feature parity is reached, then is retired (deprecation note in its README at end of Phase 0).
 
 **What the harness does NOT provide:**
 
@@ -295,7 +295,7 @@ layer: 0
 - Notification firehose. Only events the concierge has classified as relevant ever surface to the Operator.
 - A general-purpose chatbot. The concierge has a toolbox and an opinion. Out-of-scope requests get a polite "that's not what I do."
 
-**Operator role (the Operator):**
+**Operator role:**
 
 1. Author L1 specs when adding new subsystems.
 2. Approve production releases of any subsystem.
@@ -309,9 +309,9 @@ The existing `packages/daemon` (the GitHub-issue → PR pipeline) is one subsyst
 
 **Boundaries:**
 
-- Never sends external email, posts to non-DM Slack channels, merges to `main`, or writes vault notes under `20-Areas/clients/` without explicit Slack confirmation.
+- Never sends external email, posts to non-DM Slack channels, merges to `main`, or writes vault notes under the client notes area without explicit Slack confirmation.
 - Never deletes vault content, edits knowledge-vault notes outside its allow-listed paths, or modifies its own implementation/specs.
-- Never warns the Operator about his own manual coding sessions.
+- Never warns the Operator about their own manual coding sessions.
 - Never spawns parallel writer agents for one logical task (single-threaded linear agent per Cognition's "Don't Build Multi-Agents"). Subagents are spawned only for read-heavy noisy tools (gh log scans, web fetches, email triage) where they return a short summary instead of polluting the main loop.
 
 **Success:** On a typical Tuesday, the Operator sends ≤3 chat messages, glances at the board ≤2 times, and the system handles ≥80 % of routine coordination work — issue triage, draft replies, calendar prep, knowledge-vault captures, runforge babysitting — without further input.
@@ -359,13 +359,13 @@ layer: 1
 
 ## Problem Statement
 
-the Operator needs one conversational surface that accepts intent in any form (a one-liner, a paragraph, a voice note transcribed by Slack), routes it to the right subsystem, executes what it can autonomously, and asks for confirmation only when blast radius requires it. The surface must remember what was said, what was done, and what was decided across days — without becoming an unmanaged log.
+The Operator needs one conversational surface that accepts intent in any form (a one-liner, a paragraph, a voice note transcribed by Slack), routes it to the right subsystem, executes what it can autonomously, and asks for confirmation only when blast radius requires it. The surface must remember what was said, what was done, and what was decided across days — without becoming an unmanaged log.
 
 ## Actors
 
-- **Operator** — the Operator. Single user.
+- **Operator** — the single user.
 - **Concierge** — the LLM agent that owns the conversation.
-- **Tool** — a callable subsystem (runforge, knowledge-vault, Slack-send, calendar, email, gh, web, observer).
+- **Tool** — a callable subsystem (runforge, the knowledge vault, Slack-send, calendar, email, gh, web, observer).
 - **Confirmation Gate** — the mechanism that intercepts high-blast-radius tool calls and routes them to a Slack confirm message before execution.
 
 ## Behavior
@@ -425,7 +425,7 @@ the Operator needs one conversational surface that accepts intent in any form (a
 - Given the concierge has executed the same ordered sequence of ≥3 tool calls ≥3 times across distinct conversations
 - When the recognizer detects the pattern
 - Then the concierge proposes a distilled skill file (named after the pattern, parametrised on inputs) via Slack confirm message
-- And confirmed → the skill file is written to knowledge-vault's `30-Resources/personal-claude-skills/` via MCP
+- And confirmed → the skill file is written to the knowledge vault's skills area via MCP
 - And future invocations of similar intent prefer calling the skill over re-deriving steps
 
 ### Coexistence with manual sessions
@@ -439,9 +439,9 @@ the Operator needs one conversational surface that accepts intent in any form (a
 ## Constraints
 
 - **Single-threaded agent.** One LLM loop per conversation. No parallel writer subagents. Read-heavy noisy tools (gh log scans, web fetch, email triage) MAY be dispatched to a subagent that returns a structured summary, never raw content. (Cognition "Don't Build Multi-Agents".)
-- **Tool naming convention.** Tools are namespaced by subsystem prefix: `ac_*` for runforge, `sb_*` for knowledge-vault, `gh_*` for GitHub, `cal_*` for calendar, `mail_*` for email, `slack_*` for Slack-send-elsewhere, `web_*` for web fetch, `obs_*` for observer. The LLM groups tools cognitively by prefix.
+- **Tool naming convention.** Tools are namespaced by subsystem prefix: `ac_*` for runforge, `sb_*` for the knowledge vault, `gh_*` for GitHub, `cal_*` for calendar, `mail_*` for email, `slack_*` for Slack-send-elsewhere, `web_*` for web fetch, `obs_*` for observer. The LLM groups tools cognitively by prefix.
 - **No timestamps or dynamic IDs in the prompt prefix.** Cache stability is critical (5 m TTL on rolling summary, 1 h TTL on system+tools). Timestamps in the prefix nuke cache hits.
-- **No autonomous external sends.** Email to anyone outside the Operator's own addresses, Slack messages to channels other than the operator DM, GitHub merges to `main`, and vault writes under `20-Areas/clients/` always go through the confirmation gate.
+- **No autonomous external sends.** Email to anyone outside the Operator's own addresses, Slack messages to channels other than the operator DM, GitHub merges to `main`, and vault writes under the client notes area always go through the confirmation gate.
 - **No spec self-modification.** The concierge cannot edit `.specify/`, `prompts/`, or its own L0/L1.
 - **Audit trail mandatory.** Every tool call (allowed, confirmed, denied, errored) is logged to `tool_calls` with timestamp, args, result, latency, cost.
 
@@ -451,7 +451,7 @@ On any given conversation, the concierge:
 1. Replies coherently within the same Slack thread.
 2. Executes routine intent without confirmation.
 3. Surfaces high-blast actions for explicit approval.
-4. Persists durable knowledge to knowledge-vault on operator request and on nightly consolidation.
+4. Persists durable knowledge to the knowledge vault on operator request and on nightly consolidation.
 5. Never warns about manual coding sessions; always answers when asked about them.
 
 ## Out of Scope
@@ -506,7 +506,7 @@ A concierge that helps across days needs durable memory of decisions, captures, 
 
 ## Actors
 
-- **Operator** — the Operator; the only writer of curated content into the durable layer (manually or via concierge with confirmation).
+- **Operator** — the only writer of curated content into the durable layer (manually or via concierge with confirmation).
 - **Concierge** — reads both tiers; writes ephemeral to SQLite directly; writes durable to vault only via MCP and only into allow-listed paths.
 - **Consolidator** — a nightly job (launchd `StartCalendarInterval`) that promotes ephemeral logs into a daily summary in the vault.
 
@@ -518,24 +518,24 @@ A concierge that helps across days needs durable memory of decisions, captures, 
 - Given the operator types "remember I prefer X" or equivalent intent
 - When the concierge processes the turn
 - Then a Slack confirm message is posted showing the proposed vault write (path, frontmatter, body)
-- And confirmed → write executes via `mcp__obsidian__patch_note` or `write_note` to `00-inbox/<slug>.md`
+- And confirmed → write executes via `mcp__obsidian__patch_note` or `write_note` to the capture inbox (`<slug>.md`)
 - And denied → no write, the LLM is told the operator declined
 
 **Scenario: Concierge writes a daily summary**
 - Given the consolidator job runs at 03:00 local
 - When yesterday's `tool_calls` audit log + Slack thread cache exist
 - Then the concierge composes a structured summary (decisions made, work executed, items deferred)
-- And the summary is written via MCP to `~/code/knowledge-vault/50-Daily/YYYY-MM-DD.md`
-- And the write does not require a Slack confirm (50-Daily is allow-listed, no client data)
+- And the summary is written via MCP to the daily notes area (`YYYY-MM-DD.md`)
+- And the write does not require a Slack confirm (the daily notes area is allow-listed, no client data)
 
-**Scenario: Vault write under `20-Areas/clients/`**
-- Given the concierge wants to write any path under `20-Areas/clients/`
+**Scenario: Vault write under the client notes area**
+- Given the concierge wants to write any path under the client notes area
 - When the tool router intercepts the call
 - Then a Slack confirm message is posted regardless of operator intent (always-confirm rule)
 - And confirmed → write executes; denied → no write
 
 **Scenario: Vault write outside allow-list**
-- Given the concierge attempts to write to a path not on the allow-list (e.g., `30-Resources/Tools/`)
+- Given the concierge attempts to write to a path not on the allow-list (e.g., a reference resource area)
 - When the tool router checks the path
 - Then the call returns an error to the LLM ("write not permitted: <path>")
 - And no Slack confirm is shown (denied-by-policy, not denied-by-operator)
@@ -564,7 +564,7 @@ A concierge that helps across days needs durable memory of decisions, captures, 
 - Given a row in `tool_calls` or `messages` is older than 30 days
 - When the consolidator job runs
 - Then the row is deleted from SQLite
-- And the durable summary in `50-Daily/` retains the structured information
+- And the durable summary in the daily notes area retains the structured information
 
 ### Recoverable compression
 
@@ -577,8 +577,8 @@ A concierge that helps across days needs durable memory of decisions, captures, 
 
 ## Constraints
 
-- **All vault writes go through `mcp__obsidian__*` MCP tools.** Never raw file writes. Preserves frontmatter integrity per `~/code/knowledge-vault/00-Meta/agent-access.md`.
-- **Allow-listed write paths:** `00-inbox/`, `50-Daily/`, project-specific paths the operator explicitly grants per-project. Everything under `20-Areas/clients/` always-confirms. Everything under `00-Meta/`, `30-Resources/Frameworks/`, `30-Resources/Tools/` is **read-only** for the concierge.
+- **All vault writes go through `mcp__obsidian__*` MCP tools.** Never raw file writes. Preserves frontmatter integrity per the knowledge vault's agent-access guide.
+- **Allow-listed write paths:** the capture inbox, the daily notes area, project-specific paths the operator explicitly grants per-project. Everything under the client notes area always-confirms. Everything under the meta area and the reference resource areas is **read-only** for the concierge.
 - **No lossy LLM summarization of audit trails.** The `tool_calls` table is the ground truth for "what did the bot do today." Summaries derived from it can be lossy; the source must not be.
 - **No vector embeddings of vault content as primary recall.** Obsidian's full-text search + frontmatter + explicit links is the primary read mechanism. Embeddings may be added later only if grep stops finding things.
 - **Read latency budget.** A single LLM turn must not require more than 1 round-trip to Obsidian MCP for context. Anything more goes via the precomputed 7-day summary.
@@ -593,7 +593,7 @@ A concierge that helps across days needs durable memory of decisions, captures, 
 
 ## Out of Scope
 
-- Any cross-vault sync (operator's vault is on this Mac mini only).
+- Any cross-vault sync (operator's vault is on this macOS host only).
 - Vector search over chat history.
 - LLM-summarised compression of `tool_calls` (use raw rows; trust them).
 - Memory tiering beyond cortex/hippocampus (no "neocortex" / extra layer).
@@ -629,17 +629,17 @@ layer: 1
 
 ## Problem Statement
 
-The Slack DM is great for back-and-forth and natural language. But scanning "what needs me right now?" or "what's currently in flight?" in a conversational stream is awful: items get pushed up, no batch view, no swipe affordances. the Operator needs a small, fast, mobile-first surface that shows two sections — items needing his decision, items currently being worked on — with one-tap actions.
+The Slack DM is great for back-and-forth and natural language. But scanning "what needs me right now?" or "what's currently in flight?" in a conversational stream is awful: items get pushed up, no batch view, no swipe affordances. The Operator needs a small, fast, mobile-first surface that shows two sections — items needing his decision, items currently being worked on — with one-tap actions.
 
 ## Actors
 
-- **Operator** — the Operator; views the board on phone or laptop; taps card actions.
+- **Operator** — views the board on phone or laptop; taps card actions.
 - **Concierge** — writes/updates cards; reacts to operator actions by triggering tool calls.
 - **Event bus** — feeds the board with classified events (see `ARCH-EVENT-BUS`).
 
 ## Boundary vs. `FUNC-AC-DASHBOARD`
 
-The runforge dashboard at `packages/dashboard/` (governed by `FUNC-AC-DASHBOARD`) remains the **operator's deep-control surface for the runforge subsystem** — repository config, API keys, run history, cost reports, briefings. the Operator uses it occasionally on a laptop to manage the runforge pipeline.
+The runforge dashboard at `packages/dashboard/` (governed by `FUNC-AC-DASHBOARD`) remains the **operator's deep-control surface for the runforge subsystem** — repository config, API keys, run history, cost reports, briefings. The Operator uses it occasionally on a laptop to manage the runforge pipeline.
 
 The concierge board is the **ambient mobile triage surface for the entire concierge** — across all subsystems, not just runforge. It does not duplicate dashboard responsibilities (no repo config, no API key management, no cost reports). It only surfaces actionable items.
 
@@ -695,7 +695,7 @@ The two surfaces share no code, no schema, no auth provider. Cross-deep-link is 
 **Scenario: Operator opens the board URL**
 - Given the operator visits `board.<your-domain>` from any device
 - When the request hits Cloudflare Tunnel
-- Then Cloudflare Access enforces Google SSO restricted to `operator@example.com`
+- Then Cloudflare Access enforces Google SSO restricted to the Operator's email
 - And on auth success → request is forwarded to the board-server with the user identity in headers
 - And the board-server trusts the Cloudflare-Access JWT (no app-side auth code)
 
@@ -723,7 +723,7 @@ The two surfaces share no code, no schema, no auth provider. Cross-deep-link is 
 
 ## Success Criterion
 
-1. the Operator opens the board on his phone in <500 ms (Mac mini → Cloudflare → phone).
+1. The Operator opens the board on their phone in <500 ms (macOS host → Cloudflare → phone).
 2. The needs-you section shows ≤5 items in steady state.
 3. Tapping any action either fires a tool or presents a confirm — never a "what next?" question.
 4. Snoozed items reappear at the snooze time without further input.
@@ -767,11 +767,11 @@ layer: 1
 
 ## Problem Statement
 
-The concierge needs an always-available conversational surface that delivers reliable mobile push, supports threading for parallel topics, and accepts both natural-language input and structured replies (button taps, slash commands). Slack provides all three via Bolt-for-JS in the Operator's pre-existing `softwarecrafting` workspace.
+The concierge needs an always-available conversational surface that delivers reliable mobile push, supports threading for parallel topics, and accepts both natural-language input and structured replies (button taps, slash commands). Slack provides all three via Bolt-for-JS in the Operator's pre-existing Slack workspace.
 
 ## Actors
 
-- **Operator** — the Operator; DMs the bot; replies in threads; taps confirmation buttons.
+- **Operator** — DMs the bot; replies in threads; taps confirmation buttons.
 - **Concierge** — receives normalised events; produces text replies and Block Kit confirm messages.
 - **Slack** — the platform delivering events via webhook and accepting outbound messages via API.
 
@@ -834,7 +834,7 @@ The concierge needs an always-available conversational surface that delivers rel
 
 ## Constraints
 
-- **One bot user, one workspace.** The bot is installed only in `softwarecrafting`. No multi-workspace support in v1.
+- **One bot user, one workspace.** The bot is installed only in a single Slack workspace. No multi-workspace support in v1.
 - **Operator scope.** The bot only responds to DMs from the Operator's own user. Messages from any other user (in case the bot is ever invited to a channel) are ignored with a polite ephemeral reply.
 - **Bolt-for-JS.** The adapter uses `@slack/bolt` for event handling and `@slack/web-api` for outbound calls. No custom webhook server.
 - **Webhook reachability.** Slack's Events API URL is `https://concierge-events.<your-domain>` served via Cloudflare Tunnel (separate route from the board URL).
@@ -1005,7 +1005,7 @@ references: FUNC-CONCIERGE
 
 ## Overview
 
-The concierge runtime is a single Node process (`concierge-core`) on the Mac mini that owns the LLM loop, tool router, conversation memory, and Slack adapter. Two sibling processes (`observer`, `board-server`) share the same SQLite file and run under their own launchd plists. This spec defines the runtime's process layout, schema, tool-router contract, and inter-process boundaries.
+The concierge runtime is a single Node process (`concierge-core`) on the macOS host that owns the LLM loop, tool router, conversation memory, and Slack adapter. Two sibling processes (`observer`, `board-server`) share the same SQLite file and run under their own launchd plists. This spec defines the runtime's process layout, schema, tool-router contract, and inter-process boundaries.
 
 ## Process layout
 
@@ -1111,15 +1111,15 @@ In-process. Uses `@slack/bolt`. Verifies signing secret on every event. Normalis
   "modelId": "claude-sonnet-4-6",
   "tunnelHostname": "concierge.<your-domain>",
   "boardHostname": "board.<your-domain>",
-  "vaultPath": "~/code/knowledge-vault",
-  "watchedRepos": ["~/code/runforge"],
+  "vaultPath": "/path/to/knowledge-vault",
+  "watchedRepos": ["/path/to/runforge"],
   "operatorEmail": "operator@example.com"
 }
 ```
 
 ## launchd
 
-`com.concierge.core`, `com.concierge.observer`, `com.concierge.board` plists. All three: `RunAtLoad: true`, `KeepAlive: true`, `WorkingDirectory: ~/code/runforge`, env loaded from `~/Library/Application Support/concierge/env`.
+`com.concierge.core`, `com.concierge.observer`, `com.concierge.board` plists. All three: `RunAtLoad: true`, `KeepAlive: true`, `WorkingDirectory: /path/to/runforge`, env loaded from `~/Library/Application Support/concierge/env`.
 
 ## Cloudflare Tunnel
 
@@ -1127,7 +1127,7 @@ Two routes from a single tunnel:
 - `concierge-events.<your-domain>` → `localhost:3848` (slack-adapter webhook)
 - `board.<your-domain>` → `localhost:3849` (board-server)
 
-Cloudflare Access policy: Google SSO restricted to `operator@example.com`, applied to both routes (the Slack webhook route uses Cloudflare Access service tokens; the board route uses interactive SSO).
+Cloudflare Access policy: Google SSO restricted to the Operator's email, applied to both routes (the Slack webhook route uses Cloudflare Access service tokens; the board route uses interactive SSO).
 
 ## Failure modes
 
@@ -1302,9 +1302,9 @@ These minimal entries live in `packages/concierge/src/tools/registry.ts` (TBD in
 | `ac_merge_to_main` | runforge | high | yes | always confirm |
 | `sb_read` | knowledge-vault | safe | no | `{path: string}` |
 | `sb_search` | knowledge-vault | safe | no | `{query: string}` |
-| `sb_append_inbox` | knowledge-vault | medium | no | `{slug, body}` → 00-inbox/ |
+| `sb_append_inbox` | knowledge-vault | medium | no | `{slug, body}` → the capture inbox |
 | `sb_write_decision` | knowledge-vault | medium | no | project notes only |
-| `sb_write_client` | knowledge-vault | high | yes | always confirm (20-Areas/clients/) |
+| `sb_write_client` | knowledge-vault | high | yes | always confirm (the client notes area) |
 | `gh_search` | gh | safe | no | read-only query |
 | `gh_comment` | gh | medium | no | non-issue comments below |
 | `cal_read` | calendar | safe | no | read events |
@@ -1595,7 +1595,7 @@ For `gh_log_scan`, `mail_triage`, `web_fetch_long`: the tool handler dispatches 
 `scripts/com.concierge.core.plist`, `.observer.plist`, `.board.plist`. All three:
 - `RunAtLoad: true`
 - `KeepAlive: true`
-- `WorkingDirectory: ~/code/runforge`
+- `WorkingDirectory: /path/to/runforge`
 - `StandardOutPath` and `StandardErrorPath` to `~/Library/Logs/concierge/<process>.log` with rotation
 - `EnvironmentVariables` loads from a single `~/Library/Application Support/concierge/env` file (so secrets stay out of plists)
 - `ProcessType: Background`
@@ -1609,7 +1609,7 @@ For `gh_log_scan`, `mail_triage`, `web_fetch_long`: the tool handler dispatches 
 
 Cloudflare Access policies attached:
 - Slack route: service-token policy (Slack signs via signing-secret; CF Access only verifies the request is from cloudflared, no SSO)
-- Board route: Google SSO restricted to `operator@example.com`
+- Board route: Google SSO restricted to the Operator's email
 
 ## Tests
 
@@ -1754,7 +1754,7 @@ The HTML is server-rendered. The client just swaps the matching DOM node by id.
 - `theme_color: "#1a1a1a"`
 - `icons` (192, 512 PNG sized)
 
-No service worker in v1 — online-only is fine (the board is useless without the Mac mini reachable anyway).
+No service worker in v1 — online-only is fine (the board is useless without the macOS host reachable anyway).
 
 ## Boundaries
 
@@ -2108,17 +2108,17 @@ git commit -m "docs(scaffold): note that scaffolder creates AC-style L0 only"
 
 ---
 
-### Task 21: Mark `~/code/knowledge-vault-slack-bot` as deprecated-by-concierge
+### Task 21: Mark the separate personal Slack daemon as deprecated-by-concierge
 
-**Why:** That Python daemon currently does Slack↔Obsidian capture/briefing/agent-routing. The concierge subsumes it in Phase 1+. Add a deprecation note so a future operator (or the operator themselves in 6 months) sees the migration path.
+**Why:** That daemon currently does Slack↔Obsidian capture/briefing/agent-routing. The concierge subsumes it in Phase 1+. Add a deprecation note so a future operator (or the Operator themselves in 6 months) sees the migration path.
 
 **Files:**
-- Modify: `~/code/knowledge-vault-slack-bot/README.md` (NOT in this repo)
+- Modify: `~/code/personal-slack-daemon/README.md` (NOT in this repo)
 
 - [ ] **Step 1: Append a deprecation note to that repo's README**
 
 ```bash
-cd ~/code/knowledge-vault-slack-bot
+cd ~/code/personal-slack-daemon
 ```
 
 Add to top of README (after the title, before any other content):
@@ -2136,7 +2136,7 @@ Add to top of README (after the title, before any other content):
 - [ ] **Step 2: Commit in that repo**
 
 ```bash
-cd ~/code/knowledge-vault-slack-bot
+cd ~/code/personal-slack-daemon
 git add README.md
 git commit -m "docs: mark deprecated; concierge subsumes responsibilities
 
@@ -2271,7 +2271,7 @@ gh pr create --base dev --title "Concierge Phase 0 — spec ladder + integration
 - Adds multi-L0 root scanning to `spec-loader.ts` (~50 LOC + 3 tests).
 - Updates traceability.yml with concierge subtree (additive — AC subtree unchanged).
 - Updates prompts (l2-designer, l3-generator, spec-implementer), spec-guardian skills, and the integration.ts comment to be L0-agnostic.
-- Marks `~/code/knowledge-vault-slack-bot` as deprecated-by-concierge in its README.
+- Marks the separate personal Slack daemon as deprecated-by-concierge in its README.
 
 Per Codex pair-review, the L0-AC-VISION subtree is **unchanged**. Concierge tree is purely additive. Relationship between the two L0s is expressed in prose; no `parent:` field linking them.
 
@@ -2356,5 +2356,5 @@ Tasks 4–8 and 9–12 can be parallel within each group via subagent dispatch (
 |---|---|
 | Daemon doesn't recognise FUNC-CONCIERGE issue type | Task 23 Step 4 has a diagnose loop. Worst case: implement Phase 1 manually using subagent-driven-development. |
 | Spec-loader change breaks an existing prompt that loads L0 by path | The path stays at `.specify/L0-vision.md`; only the id within changes. Task 17 (integration.ts) and Task 18 (prompts) explicitly cover comment / instruction wording. |
-| the Operator disagrees with a draft L1 spec content | All L1 commits are separate atomic commits. Revert is a one-liner per spec. |
+| The Operator disagrees with a draft L1 spec content | All L1 commits are separate atomic commits. Revert is a one-liner per spec. |
 | Codex review surfaces a structural change after plan execution starts | Acceptable — the plan was reviewed before execution. New findings get folded into Phase 1 specs, not Phase 0. |

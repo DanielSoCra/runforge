@@ -55,12 +55,12 @@ The two-phase outbox + boot reconcile keep the index's *own* state crash-safe; h
 
 v1 is a **scoped, honest subset** of the L1 — not full compliance. Stated explicitly so nothing is silently dropped:
 - **Realized:** uniform decision record (raise); answer-once; no-resume-before-answer-recorded; crash-safe `answered`→`resumed` ordering; idempotent dedup across both repeated scans and distinct rounds (epoch); withdraw-on-moot; overdue *marking*; pending-decisions read.
-- **Deferred (each gets a follow-up issue):** outbound notification *delivery* / overdue re-surfacing channel; mid_run resume; decisions for `stuck`/`humanActionRequired` pauses (l2-gate only in v1); the index as source-of-truth (S1); PHI/protected-content beyond structured-fields-only.
+- **Deferred (each gets a follow-up issue):** outbound notification *delivery* / overdue re-surfacing channel; mid_run resume; decisions for `stuck`/`humanActionRequired` pauses (l2-gate only in v1); the index as source-of-truth (S1); sensitive/protected-content beyond structured-fields-only.
 - **Sensitive-withhold (v1 minimal):** only structured, known-safe fields (question, phase, choices, run ref) enter the index. Free-form operator/external text (`handoffNotes`, `l2Feedback`, raw failure messages) is **not** copied into shared decision fields.
 
 ## Integration details
 
-- **New packages:** `packages/protocol` (`@runforge/protocol`) and `packages/decision-index` (`@runforge/decision-index`). `server-only` is dropped (no Next.js boundary in the daemon); the `.server` protected-resolve export is omitted in v1 (PHI dormant).
+- **New packages:** `packages/protocol` (`@runforge/protocol`) and `packages/decision-index` (`@runforge/decision-index`). `server-only` is dropped (no Next.js boundary in the daemon); the `.server` protected-resolve export is omitted in v1 (sensitive-data handling dormant).
 - **Daemon deps:** add `@runforge/protocol` (`workspace:*`) to `packages/daemon/package.json`. **Do NOT add `better-sqlite3` to the daemon** — it lives only inside `@runforge/decision-index`. To keep a native-build failure from breaking daemon install when the feature is unused, `@runforge/decision-index` is an **`optionalDependencies`** entry of the daemon (and `better-sqlite3` is an optional dep within that package); the daemon never statically imports or re-exports it. Dynamic import alone gates *runtime* load; optional-dependency placement gates *install/build*.
 - **Location + gating (native dep truly gated):** decision-index SQLite at `state/decision-index.sqlite` (absolute-resolved at startup), gated by `RUNFORGE_DECISION_INDEX_ENABLED` (default **off**), optional `RUNFORGE_DECISION_INDEX_PATH`. `better-sqlite3` lives **only** in `@runforge/decision-index`; the daemon **dynamically imports** that package **only inside the enabled branch**, never at module top-level — so a disabled deployment never loads native code, and an install/build/native-load failure cannot break the daemon when the flag is off (a disabled-mode test asserts no SQLite load). A daemon-owned **`DecisionIndexManager`** (not `StateManager`, which today owns only `stateDir`) handles init/accessors/close in the daemon lifecycle. **`backend-kind.ts` stays Postgres-only** — the index is a separate control-plane store, not daemon persistence, and does not consume the Postgres pool. **Failure handling distinguishes disabled vs enabled-but-failed:** flag **off** → the old label path runs unchanged (no-op, no SQLite load). Flag **on** but the index is unavailable (open/native-load failure) → **fail closed** for decision-managed l2-gate resumes: the run stays parked and `resumeParkedRuns()` refuses to requeue it until `answered` can be durably recorded (it does NOT fall back to the unguarded label path, which would advance a run on unconfirmed state — violating answered-before-requeue). The daemon itself keeps running; only l2-gate resume is held.
 - **raise hook:** the **l2-gate phase handler / pipeline park point** (the caller performing the park) — NOT the pure `classifyPhaseFailure()` classifier (it has no daemon call site and must stay side-effect-free). The `DecisionRequest` id is **deterministic on `(runId, phase, decisionKind, decisionEpoch)`**, where `decisionEpoch` is a per-pause counter persisted on `RunState`, incremented on each fresh park at a phase. Repeated per-tick scans of the *same* pause reuse the id (idempotent); a *later distinct* pause of the same run+phase (an l2-gate re-review after rework) gets a new epoch → a new decision, so answer-once and pending visibility are never collapsed across rounds.
@@ -86,7 +86,7 @@ v1 is a **scoped, honest subset** of the L1 — not full compliance. Stated expl
 
 1. **zod4 migration** breaks protocol inference / discriminated unions (zod 3→4 has breaking changes). *Verify: port compiles + protocol tests green.*
 2. **drizzle 0.36→0.45** changes migration/query behavior. *Verify: index migrations apply + index tests green.*
-3. **better-sqlite3 ^12 native build** fails in the mac-mini CI runner. *Verify: CI installs + a smoke open/close passes on the runner.*
+3. **better-sqlite3 ^12 native build** fails in the macOS host CI runner. *Verify: CI installs + a smoke open/close passes on the runner.*
 4. **Idempotency dedupe** — repeated pause scans must not create duplicate DecisionRequests. *Verify: deterministic-id raise test.*
 5. **Label/answer race** — `resumeParkedRuns` recording an answer concurrently with phase reset could record stale. *Verify: answer-once + ordering test.*
 6. **State dir not writable** (read-only mount) → index open fails. *Verify: graceful-degrade test.*
@@ -98,9 +98,9 @@ v1 is a **scoped, honest subset** of the L1 — not full compliance. Stated expl
 - **Decisions for `stuck` / `humanActionRequired` pauses** — need a real executor first (those terminate at `stuck` today with no resume path); v1 is l2-gate-only.
 - **mid_run** session resume (requires session-runtime pause/resume hooks that don't exist today).
 - **Outbound notifier delivery** (Slack/email/dashboard push).
-- **PHI / protected-content** behavior (acme-runtime concern; carried dormant).
+- **Sensitive / protected-content** behavior (deployment-runtime concern; carried dormant).
 - **`server.ts POST /retry`** boot endpoint (operator-triggered restart-with-answer).
 
 ## Migration plan
 
-Additive and **env-gated (default off)** → zero disruption to existing deployments. Land the packages + wiring dark; enable `RUNFORGE_DECISION_INDEX_ENABLED=true` first on the mini (acme deployment #1) once the live e2e passes. No data migration (new store).
+Additive and **env-gated (default off)** → zero disruption to existing deployments. Land the packages + wiring dark; enable `RUNFORGE_DECISION_INDEX_ENABLED=true` first on the macOS host (the regulated pilot deployment #1) once the live e2e passes. No data migration (new store).

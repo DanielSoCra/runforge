@@ -71,8 +71,8 @@ describe('buildDashboardAuthOptions', () => {
       mapProfileToUser(profile: { login: string; name: string }): { name: string };
     };
 
-    expect(github.mapProfileToUser({ login: 'daniel', name: 'the Operator' })).toEqual({
-      name: 'daniel',
+    expect(github.mapProfileToUser({ login: 'operator', name: 'Operator' })).toEqual({
+      name: 'operator',
     });
   });
 

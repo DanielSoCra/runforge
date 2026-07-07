@@ -1,7 +1,7 @@
 # Slice 3 — strip hardcoded classification, content-agnostic ingest (codex-decomposed)
 
 **Branch:** `feat/sanitization-strip` (stacked on `feat/sanitization-pkg` → `feat/sanitization-specs`).
-**Goal:** remove the inert acme-ported sensitivity classifier from the decision path; ingest becomes content-agnostic. Confidentiality becomes a config-driven sanitizer (ARCH-AC-SANITIZATION). NO pipeline injection yet — that's Slice 4.
+**Goal:** remove the inert sensitivity classifier (ported from the regulated pilot deployment) from the decision path; ingest becomes content-agnostic. Confidentiality becomes a config-driven sanitizer (ARCH-AC-SANITIZATION). NO pipeline injection yet — that's Slice 4.
 
 ## Decisions (codex planning, 2026-06-18)
 

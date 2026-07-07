@@ -1,6 +1,6 @@
 # P4 (partial) — Escalation Metric + Deployment Budget Abort: Task-Level Plan (4.1 + 4.4)
 
-> Expansion of program-plan Phase 4 (`docs/superpowers/plans/2026-07-02-first-production-deployment-regulated-full-l0.md`), the **fully-provable approved-spec subset**: 4.1 escalation-rate metric ("measurably asks less" — L0's headline differentiator) + 4.4 deployment-level budget abort. Both governed by **approved** L1s (FUNC-AC-OPERATOR-LEARNING v2, FUNC-AC-MERGE-DECISION, FUNC-AC-FLEET). Branch: `plan/p4-earning-half`; build branch: `codex/p4-earning-half-build`.
+> Expansion of program-plan Phase 4 (`docs/superpowers/plans/2026-07-02-first-production-deployment-full-l0.md`), the **fully-provable approved-spec subset**: 4.1 escalation-rate metric ("measurably asks less" — L0's headline differentiator) + 4.4 deployment-level budget abort. Both governed by **approved** L1s (FUNC-AC-OPERATOR-LEARNING v2, FUNC-AC-MERGE-DECISION, FUNC-AC-FLEET). Branch: `plan/p4-earning-half`; build branch: `codex/p4-earning-half-build`.
 >
 > **Line anchors verified 2026-07-02 at origin/main 14e5578 — grep for symbols, never trust line numbers.**
 
@@ -101,4 +101,4 @@ Gate green; both suites no new failures; typecheck/lint/traceability green; PR a
 ## Follow-ups (documented)
 - 4.2 earn-in wiring + debut-witness gate (bundle with Phase 5 — the debut gate makes live auto-widening Phase-5-gated; see the Operator FYI).
 - 4.3 rung-3 act-side (D5).
-- Escalation metric on the acme deployment (P7+).
+- Escalation metric on the regulated pilot deployment (deployment #1) (P7+).

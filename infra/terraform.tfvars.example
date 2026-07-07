@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (gitignored) and fill in your own values.
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# ssh_public_key_path defaults to ~/.ssh/id_ed25519.pub — override if yours differs.
+# my_ipv4 / my_ipv6 lock SSH (22) and the daemon API (3847) to your own address.
+
+# ssh_public_key_path = "~/.ssh/id_ed25519.pub"
+my_ipv4 = "203.0.113.10"          # <- your public IPv4 (no CIDR)
+my_ipv6 = "2001:db8:1234::/56"    # <- your public IPv6 prefix

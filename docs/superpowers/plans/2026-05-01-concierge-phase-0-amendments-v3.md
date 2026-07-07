@@ -106,7 +106,7 @@ The v2 amendment said "no existing production code under `packages/daemon/` or `
 ```markdown
 ## Daemon coexistence
 
-The runforge daemon is running on the Mac mini. Phase 0 makes:
+The runforge daemon is running on the macOS host. Phase 0 makes:
 
 - A small additive change to `packages/daemon/src/infra/spec-loader.ts`
   (multi-L0 root scan, ~50 LOC) and its tests. Backward-compatible — the

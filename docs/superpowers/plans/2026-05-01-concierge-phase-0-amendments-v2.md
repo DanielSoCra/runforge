@@ -180,7 +180,7 @@ After Task 15 v2, Phase 0 creates `packages/concierge/` placeholder directory + 
 ```markdown
 ## Daemon coexistence
 
-The runforge daemon is running on the Mac mini. Phase 0 edits specs, prompts, traceability, tests, and creates a placeholder `packages/concierge/` skeleton (empty package.json + README + .gitkeep). **No existing production code under `packages/daemon/` or `packages/dashboard/` is modified.** The placeholder package adds no runtime behaviour — the daemon does not pick it up because it has no work-detection rules for it. After Phase 0 commits land on `dev`, the daemon picks up the new traceability tree and the FUNC-CONCIERGE issue (per Task 23 amendment) on its next poll cycle.
+The runforge daemon is running on the macOS host. Phase 0 edits specs, prompts, traceability, tests, and creates a placeholder `packages/concierge/` skeleton (empty package.json + README + .gitkeep). **No existing production code under `packages/daemon/` or `packages/dashboard/` is modified.** The placeholder package adds no runtime behaviour — the daemon does not pick it up because it has no work-detection rules for it. After Phase 0 commits land on `dev`, the daemon picks up the new traceability tree and the FUNC-CONCIERGE issue (per Task 23 amendment) on its next poll cycle.
 ```
 
 ---

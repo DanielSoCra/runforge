@@ -111,9 +111,9 @@ Core containers start:
 
 Dashboard is available at `https://app.example.com` (or your configured domain).
 
-## Running on Mac Mini
+## Running on a macOS host
 
-The Mac Mini uses a **hybrid deployment**: dashboard and briefing-summarizer run in Docker, but the daemon runs natively (via launchd or direct process). This is because the daemon spawns Claude Code CLI sessions that require Max subscription OAuth tokens — these expire and can't be refreshed inside a container.
+The macOS host uses a **hybrid deployment**: dashboard and briefing-summarizer run in Docker, but the daemon runs natively (via launchd or direct process). This is because the daemon spawns Claude Code CLI sessions that require Max subscription OAuth tokens — these expire and can't be refreshed inside a container.
 
 ```bash
 # 1. Start the daemon natively (if not already running via launchd)
@@ -140,7 +140,7 @@ docker compose --env-file .env.prod exec -T postgres sh -c \
   > "backups/runforge-$(date +%Y%m%d-%H%M%S).dump"
 ```
 
-For a Mac Mini deployment, use `.env.mac` in the command above.
+For a macOS host deployment, use `.env.mac` in the command above.
 
 To restore, stop consumers first so no process writes while the database is being replaced. This overwrites the current database contents.
 

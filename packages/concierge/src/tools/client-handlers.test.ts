@@ -83,7 +83,7 @@ describe('external client tool handlers', () => {
       .resolves.toEqual({ paused: true });
   });
 
-  it('routes knowledge-vault operations through the vault policy and client', async () => {
+  it('routes knowledge-base operations through the vault policy and client', async () => {
     const handlers = createSecondBrainToolHandlers({
       vaultPath: '/vault',
       allowList: ['00-inbox', '10-projects'],

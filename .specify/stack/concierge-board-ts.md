@@ -98,7 +98,7 @@ The HTML is server-rendered. The client just swaps the matching DOM node by id.
 - `theme_color: "#1a1a1a"`
 - `icons` (192, 512 PNG sized)
 
-No service worker in v1 — online-only is fine (the board is useless without the Mac mini reachable anyway).
+No service worker in v1 — online-only is fine (the board is useless without the macOS host reachable anyway).
 
 ## Boundaries
 

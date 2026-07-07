@@ -16,12 +16,12 @@
 
 Four PRs are validated but unmerged; they must land (clean `main`) before the engine fixes.
 
-**Files:** none (review/merge ops). PRs: runforge #709 (workspace clone-on-startup + token-sync), #710 (gate1 baseline), #711 (l2-designer output paths); pm-cockpit #7 (answerable inbox: colon-id 404 + inline cards + timeout).
+**Files:** none (review/merge ops). PRs: runforge #709 (workspace clone-on-startup + token-sync), #710 (gate1 baseline), #711 (l2-designer output paths); the cockpit consumer #7 (answerable inbox: colon-id 404 + inline cards + timeout).
 
 - [ ] **Step 1:** `/deep-review` #711 (smallest, prompt-only) → address findings → merge.
 - [ ] **Step 2:** `/deep-review` #709 → address → merge. Rebase #710 on the new main.
 - [ ] **Step 3:** `/deep-review` #710 → address → resolve any `config.ts` conflict (workspaceRoot vs baselinePreexistingFailures are different keys) → merge.
-- [ ] **Step 4:** `/deep-review` pm-cockpit #7 → merge.
+- [ ] **Step 4:** `/deep-review` the cockpit consumer #7 → merge.
 - [ ] **Step 5:** Verify each repo's `main` is green in CI (`gh run list --limit 1`). Pull `main` locally; rebase `feat/company-os-phase0` onto it.
 
 **Acceptance:** both repos green on `main`; #709/#710/#711/#7 merged; #41 closed.
@@ -147,4 +147,4 @@ P7 set up the credential store only on the clone path; on `force-recreate` the c
 - **Spec coverage (§7):** consolidate (T1), fix #49 (T2+T3), gap-8 (T4), e2e (T5), smoke (T6), live proof (T7). ✓
 - **Placeholders:** none — each code task names file+test+approach; bug-fix tasks reproduce-then-fix (exact fix code shown for T2/T3/T4).
 - **Type consistency:** `mergeProposal`/`ensureGitCredentials`/`inFlightResumes` introduced once, used consistently.
-- **Out of scope (later slices):** the goal primitive (Slice 2), cockpit v2 real build (Slice 3), multiplayer (Slice 4), acme wiring + side-project reconcile (Slice 5).
+- **Out of scope (later slices):** the goal primitive (Slice 2), cockpit v2 real build (Slice 3), multiplayer (Slice 4), the regulated pilot deployment (deployment #1) wiring + another deployment reconcile (Slice 5).

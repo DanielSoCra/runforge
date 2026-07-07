@@ -6,14 +6,14 @@ describe('prompt block assembly', () => {
     const first = buildPromptBlocks({
       systemPrompt: 'You are the concierge.',
       toolDescriptions: 'ac_status: read daemon status',
-      operatorProfile: 'the Operator prefers concise answers.',
+      operatorProfile: 'The operator prefers concise answers.',
       rollingSummary: 'No open reminders.',
       recentTurns: [{ role: 'operator', text: 'status?' }],
     });
     const second = buildPromptBlocks({
       systemPrompt: 'You are the concierge.',
       toolDescriptions: 'ac_status: read daemon status',
-      operatorProfile: 'the Operator prefers concise answers.',
+      operatorProfile: 'The operator prefers concise answers.',
       rollingSummary: 'No open reminders.',
       recentTurns: [{ role: 'operator', text: 'again' }],
     });
