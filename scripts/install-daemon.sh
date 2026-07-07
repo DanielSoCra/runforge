@@ -18,14 +18,17 @@ provision_control_token() {
     return
   fi
 
-  # shellcheck disable=SC1090
-  if source "$ENV_FILE" 2>/dev/null && [ -n "${RUNFORGE_CONTROL_TOKEN:-}" ]; then
+  # Keep the env file private even if it already exists.
+  chmod 600 "$ENV_FILE" 2>/dev/null || true
+
+  # Check the file itself, not inherited shell env, so a token exported in the
+  # operator's shell does not mask a missing .env.mac entry.
+  if grep -q '^RUNFORGE_CONTROL_TOKEN=' "$ENV_FILE"; then
     return
   fi
 
   local token
   token="$(openssl rand -hex 32)"
-  chmod 600 "$ENV_FILE" 2>/dev/null || true
   printf '\nRUNFORGE_CONTROL_TOKEN=%s\n' "$token" >> "$ENV_FILE"
   log "Generated RUNFORGE_CONTROL_TOKEN in $ENV_FILE"
 }

@@ -47,6 +47,9 @@ if ! creds_json="$(security find-generic-password -s "${KEYCHAIN_SERVICE}" -a "$
   exit 1
 fi
 
+# Ensure the mounted creds dir exists before writing the validation log.
+mkdir -p "${CREDS_DIR}"
+
 # 2. Validate shape (access token present) WITHOUT printing the secret.
 # Write validation log to a 0600 file inside the creds dir, never world-readable /tmp.
 VALIDATE_LOG="$(mktemp "${CREDS_DIR}/.sync-claude-creds.validate.XXXXXX")"
@@ -67,7 +70,7 @@ except Exception as e:
 fi
 
 # 3. Atomic, 0600 write into the mounted creds dir.
-mkdir -p "${CREDS_DIR}"
+# (CREDS_DIR was created in step 2 before the validation log.)
 target="${CREDS_DIR}/.credentials.json"
 tmp="$(mktemp "${CREDS_DIR}/.credentials.json.XXXXXX")"
 trap 'rm -f "${tmp}"' EXIT
