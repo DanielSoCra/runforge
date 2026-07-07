@@ -40,7 +40,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const items = Array.isArray(json) ? json : (json.items ?? []);
     return NextResponse.json({ items });
   } catch (e) {
-    if (e instanceof DaemonConfigError || e instanceof DaemonAuthError) {
+    if (e instanceof DaemonAuthError) {
+      // Auth failures are actionable: surface the message so operators can
+      // fix RUNFORGE_CONTROL_TOKEN, instead of collapsing into "unavailable data".
+      console.error('Daemon control token rejected by decisions/pending:', e.message);
+      return NextResponse.json({ error: e.message }, { status: 500 });
+    }
+    if (e instanceof DaemonConfigError) {
       return NextResponse.json({ items: [], unavailable: true });
     }
     return NextResponse.json({ items: [], unavailable: true });
