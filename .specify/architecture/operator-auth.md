@@ -40,7 +40,7 @@ These records physically reside in the shared operational data store, but their 
 
 - The **Auth Service** owns identity, sessions, role assignment, invitations, bootstrap state, and every authorization decision.
 - The **Dashboard** enforces the session-and-role gate on the server side before any privileged view or change; it never trusts a role asserted by the client.
-- **Agent Service and daemon control operations** are protected by the same administrator-only gate.
+- The **Agent Service and daemon control operations** are protected by the same administrator-only gate; the daemon independently enforces a bearer-token boundary on its control-plane routes.
 - The **Data Service** provides only the shared store instance and the Migration Runner that physically create authorization records. No authorization logic lives in the data store; the data store's own policy engine is not used for access control.
 - **Coexistence during the staged transition:** the existing Dashboard architecture remains authoritative for current sign-in behavior until the project-owned replacement lands. This architecture defines the target. Governed paths and the deprecation of superseded stack specifications transfer only in later implementation work, recorded via metadata, never by deletion.
 

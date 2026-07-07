@@ -14,7 +14,7 @@ import {
   getDashboardAuthError,
   requireDashboardUser,
 } from '@/lib/auth/require-session';
-import { daemonFetch, DaemonConfigError } from '@/lib/daemon-fetch';
+import { daemonFetch, DaemonAuthError, DaemonConfigError } from '@/lib/daemon-fetch';
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
@@ -40,6 +40,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       ...(json.unavailable === true ? { unavailable: true } : {}),
     });
   } catch (e) {
+    if (e instanceof DaemonAuthError) {
+      // Auth failures are actionable: surface the message so operators can
+      // fix RUNFORGE_CONTROL_TOKEN, instead of collapsing into "unavailable data".
+      console.error('Daemon control token rejected by metrics/escalation:', e.message);
+      return NextResponse.json({ error: e.message }, { status: 500 });
+    }
     if (e instanceof DaemonConfigError) {
       return NextResponse.json({ weeks: [], unavailable: true });
     }

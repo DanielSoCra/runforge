@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import { config as loadDotenv } from 'dotenv';
 import { startDaemon } from './control-plane/daemon.js';
 import { processSingleIssue } from './control-plane/process-single.js';
+import { resolveControlToken } from './control-plane/resolve-control-token.js';
 
 const program = new Command();
 program
@@ -140,6 +141,8 @@ async function callApi(port: number, method: string, path: string): Promise<void
   try {
     const headers: Record<string, string> = {};
     if (method === 'POST') headers['X-Requested-By'] = 'cli';
+    const token = resolveControlToken();
+    if (token !== undefined) headers.Authorization = `Bearer ${token}`;
     const res = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers });
     let body: unknown;
     try {

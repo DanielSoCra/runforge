@@ -7,7 +7,7 @@ import {
 } from '@/components/decisions/decision-inbox';
 import { DaemonControls } from '@/components/steering/daemon-controls';
 import { isDashboardAdmin } from '@/lib/auth/require-session';
-import { daemonFetch } from '@/lib/daemon-fetch';
+import { daemonFetch, DaemonAuthError } from '@/lib/daemon-fetch';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,10 +42,8 @@ async function readDecisionInbox(): Promise<{
       : ((json.items ?? []) as RankedListItem[]);
     return { items, unavailable: false };
   } catch (err) {
-    console.error(
-      '[decisions-inbox] unreachable:',
-      err instanceof Error ? err.message : err,
-    );
+    const message = err instanceof DaemonAuthError ? err.message : (err instanceof Error ? err.message : String(err));
+    console.error('[decisions-inbox] unreachable:', message);
     return { items: [], unavailable: true };
   }
 }

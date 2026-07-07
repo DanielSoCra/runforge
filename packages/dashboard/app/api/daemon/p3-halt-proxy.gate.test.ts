@@ -141,7 +141,7 @@ describe('POST /api/daemon/halt', () => {
     );
   });
 
-  it('forwards Authorization: Bearer from RUNFORGE_CONTROL_TOKEN when configured', async () => {
+  it('forwards Authorization: Bearer from RUNFORGE_CONTROL_TOKEN via daemonFetch when configured', async () => {
     vi.stubEnv('RUNFORGE_CONTROL_TOKEN', 'dashboard-secret');
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ halted: true }), { status: 200 }),
@@ -168,5 +168,18 @@ describe('POST /api/daemon/halt', () => {
     const init = latestFetchInit();
     expect(headerValue(init.headers, 'X-Requested-By')).toBe('dashboard');
     expect(headerValue(init.headers, 'Authorization')).toBeNull();
+  });
+
+  it('maps daemon 401 to a 500 auth-error JSON with an actionable message', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response('unauthorized', { status: 401 }),
+    );
+    const { POST } = await importHaltRoute();
+
+    const res = await POST();
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toMatch(/RUNFORGE_CONTROL_TOKEN/);
   });
 });

@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { EscalationTrendChart } from '@/components/metrics/escalation-trend-chart';
-import { daemonFetch } from '@/lib/daemon-fetch';
+import { daemonFetch, DaemonAuthError } from '@/lib/daemon-fetch';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +27,8 @@ async function readEscalationMetrics(): Promise<EscalationResponse> {
       unavailable: json.unavailable === true,
     };
   } catch (e) {
-    console.error('[metrics] failed to load escalation metrics:', e);
+    const message = e instanceof DaemonAuthError ? e.message : String(e);
+    console.error('[metrics] failed to load escalation metrics:', message);
     return { weeks: [], unavailable: true };
   }
 }

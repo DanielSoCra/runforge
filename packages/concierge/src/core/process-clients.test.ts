@@ -116,6 +116,40 @@ describe('process runtime clients', () => {
     ]);
   });
 
+  it('sends Authorization Bearer when RUNFORGE_CONTROL_TOKEN is set', async () => {
+    const originalToken = process.env.RUNFORGE_CONTROL_TOKEN;
+    process.env.RUNFORGE_CONTROL_TOKEN = 'secrettoken';
+
+    try {
+      const requests: Array<{ url: string; init?: RequestInit }> = [];
+      const client = createObserverProcessClient({
+        runforgeBaseUrl: 'http://127.0.0.1:3847',
+        watchedRepos: [],
+        fetch: async (url, init) => {
+          requests.push({ url: String(url), init });
+          return new Response(JSON.stringify({ paused: true }), { status: 200 });
+        },
+        execFile: async () => ({ stdout: '' }),
+      });
+
+      await client.daemonState();
+
+      expect(requests[0]).toEqual({
+        url: 'http://127.0.0.1:3847/status',
+        init: {
+          method: 'GET',
+          headers: { Authorization: 'Bearer secrettoken' },
+        },
+      });
+    } finally {
+      if (originalToken === undefined) {
+        delete process.env.RUNFORGE_CONTROL_TOKEN;
+      } else {
+        process.env.RUNFORGE_CONTROL_TOKEN = originalToken;
+      }
+    }
+  });
+
   it('uses Mail through osascript for drafts and confirmed sends', async () => {
     const calls: Array<{ file: string; args: string[] }> = [];
     const client = createMailAppleScriptClient({

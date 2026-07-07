@@ -94,10 +94,16 @@ export async function collectSignals(
 async function collectDaemonStatus(daemonUrl: string): Promise<DaemonStatus> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
+  const token = process.env.RUNFORGE_CONTROL_TOKEN;
+  const headers: Record<string, string> = {};
+  if (token !== undefined && token !== '') {
+    headers.Authorization = `Bearer ${token}`;
+  }
 
   try {
     const res = await fetch(`${daemonUrl}/status`, {
       signal: controller.signal,
+      headers,
     });
     if (!res.ok) throw new Error(`Daemon status returned ${res.status}`);
     return (await res.json()) as DaemonStatus;

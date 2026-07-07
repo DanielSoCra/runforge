@@ -17,7 +17,7 @@ import {
   getDashboardAuthError,
   requireDashboardAdmin,
 } from '@/lib/auth/require-session';
-import { daemonFetch, DaemonConfigError } from '@/lib/daemon-fetch';
+import { daemonFetch, DaemonAuthError, DaemonConfigError } from '@/lib/daemon-fetch';
 
 export async function POST() {
   try {
@@ -28,14 +28,7 @@ export async function POST() {
   }
 
   try {
-    const token = process.env.RUNFORGE_CONTROL_TOKEN;
-    const res = await daemonFetch('/halt', {
-      method: 'POST',
-      headers:
-        token !== undefined && token !== ''
-          ? { Authorization: `Bearer ${token}` }
-          : undefined,
-    });
+    const res = await daemonFetch('/halt', { method: 'POST' });
     let json: unknown;
     try {
       json = await res.json();
@@ -47,7 +40,7 @@ export async function POST() {
     }
     return NextResponse.json(json, { status: res.status });
   } catch (e) {
-    if (e instanceof DaemonConfigError) {
+    if (e instanceof DaemonConfigError || e instanceof DaemonAuthError) {
       return NextResponse.json({ error: e.message }, { status: 500 });
     }
     return NextResponse.json({ error: 'Daemon unreachable' }, { status: 503 });

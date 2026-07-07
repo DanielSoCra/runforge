@@ -10,6 +10,7 @@ vi.mock('@/actions/briefing', () => ({
 vi.mock('@/lib/daemon-fetch', () => ({
   daemonFetch: mocks.daemonFetch,
   DaemonConfigError: class DaemonConfigError extends Error {},
+  DaemonAuthError: class DaemonAuthError extends Error {},
 }));
 
 vi.mock('next/navigation', () => ({

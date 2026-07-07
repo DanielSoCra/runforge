@@ -14,10 +14,25 @@ export function createRunforgeToolHandlers(
 ): Record<'ac_status' | 'ac_pause' | 'ac_unstuck' | 'ac_run' | 'ac_merge_to_main', ToolEntry['handler']> {
   const fetchImpl = options.fetch ?? fetch;
   const requestedBy = options.requestedBy ?? 'concierge';
+  const controlToken = process.env.RUNFORGE_CONTROL_TOKEN;
 
   const request = async (path: string, init: RequestInit = {}): Promise<unknown> => {
     const url = `${options.baseUrl.replace(/\/+$/, '')}${path}`;
-    const response = await fetchImpl(url, init);
+    const headers: Record<string, string> = {};
+    if (controlToken !== undefined && controlToken !== '') {
+      headers.Authorization = `Bearer ${controlToken}`;
+    }
+    if (init.headers !== undefined) {
+      const initHeaders = init.headers as Record<string, string | string[]>;
+      for (const key of Object.keys(initHeaders)) {
+        const value = initHeaders[key];
+        if (value !== undefined) {
+          headers[key] = typeof value === 'string' ? value : value.join(', ');
+        }
+      }
+    }
+    const requestInit = Object.keys(headers).length > 0 ? { ...init, headers } : init;
+    const response = await fetchImpl(url, requestInit);
     const body = await readResponseBody(response);
     if (!response.ok) {
       const message = readErrorMessage(body);

@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { resolveControlToken } from './resolve-control-token.js';
 
 export function createCli(): Command {
   const program = new Command();
@@ -63,6 +64,8 @@ async function callApi(port: number, method: string, path: string): Promise<void
   try {
     const headers: Record<string, string> = {};
     if (method === 'POST') headers['X-Requested-By'] = 'cli';
+    const token = resolveControlToken();
+    if (token !== undefined) headers.Authorization = `Bearer ${token}`;
     const res = await fetch(`http://127.0.0.1:${port}${path}`, { method, headers });
     const body = await res.json();
     console.log(JSON.stringify(body, null, 2));

@@ -67,6 +67,7 @@ Runforge's dashboard relies on an external hosted provider to sign operators in 
 - The administrator-versus-viewer capability distinction is enforced before any privileged view or change, is decided by the application's own rules rather than by where data is stored, and defaults to refusal.
 - The all-or-nothing sign-in bypass is replaced by an explicit, named, local-only convenience mode that cannot activate in a production environment.
 - Every operator and role present before the move has documented, verified equivalent access afterward, and no operator capability is weakened relative to the prior system.
+- The daemon's control-plane routes require `Authorization: Bearer <RUNFORGE_CONTROL_TOKEN>` for every route except `GET /health`, and refuse to start on a non-loopback bind without a token.
 
 ## Constraints
 

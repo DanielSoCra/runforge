@@ -35,6 +35,8 @@
     <string>__DAEMON_DATA_BACKEND__</string>
     <key>ENCRYPTION_KEY</key>
     <string>__ENCRYPTION_KEY__</string>
+    <key>RUNFORGE_CONTROL_TOKEN</key>
+    <string>__RUNFORGE_CONTROL_TOKEN__</string>
   </dict>
 </dict>
 </plist>
