@@ -31,6 +31,7 @@ cp .env.prod.example .env.prod
 |----------|----------|-------------|
 | `GITHUB_TOKEN` | Yes | GitHub PAT with `repo` scope |
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
+| `RUNFORGE_CONTROL_TOKEN` | Yes | Shared secret for daemon control-plane bearer auth |
 | `POSTGRES_DB` | Yes | Compose-managed Postgres database name |
 | `POSTGRES_USER` | Yes | Compose-managed Postgres user |
 | `POSTGRES_PASSWORD` | Yes | Compose-managed Postgres password |
@@ -119,11 +120,18 @@ The macOS host uses a **hybrid deployment**: dashboard and briefing-summarizer r
 # 1. Start the daemon natively (if not already running via launchd)
 cd packages/daemon && pnpm start &
 
-# 2. Start Postgres, migrations, dashboard, and briefing-summarizer in Docker
+# 2. Start Postgres, migrations, dashboard, and briefing-summarizer in Docker.
+#    Both ENV_FILE and --env-file are required: ENV_FILE feeds each service's
+#    env_file:, --env-file feeds the ${...:?} interpolation in the compose file.
 ENV_FILE=.env.mac docker compose --env-file .env.mac up --build -d
 ```
 
-Dashboard is available at `http://localhost:3000` on the local network. Auth is disabled. The dashboard connects to the native daemon via `host.docker.internal:3847`.
+Dashboard is available at `http://localhost:3000` on the local network. Auth is disabled. The dashboard connects to the native daemon via `host.docker.internal:3847` and forwards `RUNFORGE_CONTROL_TOKEN` on every control-plane request.
+
+> **Token rotation:** update `RUNFORGE_CONTROL_TOKEN` in `.env.mac`, run
+> `ENV_FILE=.env.mac docker compose --env-file .env.mac up -d` to recreate the
+> containers, and reinstall/reload the native daemon plist so the new token is
+> in the daemon's environment.
 
 ## Database Migrations
 
@@ -284,11 +292,15 @@ Use `/pause` when you want the daemon to stop picking up work but let current ru
 # Emergency halt (requires X-Requested-By; Bearer token if RUNFORGE_CONTROL_TOKEN is set)
 curl -fsS -X POST localhost:3847/halt \
   -H 'X-Requested-By: operator' \
-  -H 'Authorization: Bearer <token>'
+  -H "Authorization: Bearer ${RUNFORGE_CONTROL_TOKEN}"
 
 # Pause / resume
-curl -fsS -X POST localhost:3847/pause -H 'X-Requested-By: operator'
-curl -fsS -X POST localhost:3847/resume -H 'X-Requested-By: operator'
+curl -fsS -X POST localhost:3847/pause \
+  -H 'X-Requested-By: operator' \
+  -H "Authorization: Bearer ${RUNFORGE_CONTROL_TOKEN}"
+curl -fsS -X POST localhost:3847/resume \
+  -H 'X-Requested-By: operator' \
+  -H "Authorization: Bearer ${RUNFORGE_CONTROL_TOKEN}"
 ```
 
 A paused daemon also gates integrate entry: a run that reaches the `integrate` phase while paused is parked at `pausedAtPhase: 'integrate'` instead of merging, then resumes through the normal integrate arm after `/resume`.

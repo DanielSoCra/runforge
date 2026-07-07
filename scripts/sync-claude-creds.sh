@@ -48,6 +48,9 @@ if ! creds_json="$(security find-generic-password -s "${KEYCHAIN_SERVICE}" -a "$
 fi
 
 # 2. Validate shape (access token present) WITHOUT printing the secret.
+# Write validation log to a 0600 file inside the creds dir, never world-readable /tmp.
+VALIDATE_LOG="$(mktemp "${CREDS_DIR}/.sync-claude-creds.validate.XXXXXX")"
+chmod 600 "${VALIDATE_LOG}"
 if ! printf '%s' "${creds_json}" | python3 -c '
 import json,sys
 try:
@@ -58,8 +61,8 @@ try:
     print(f"OK accessToken len={len(tok)} expiresAt={exp}", file=sys.stderr)
 except Exception as e:
     print(f"INVALID creds json: {e}", file=sys.stderr); sys.exit(1)
-' 2>>/tmp/sync-claude-creds.validate; then
-  log "ERROR keychain credential did not validate (see /tmp/sync-claude-creds.validate)"
+' 2>>"${VALIDATE_LOG}"; then
+  log "ERROR keychain credential did not validate (see ${VALIDATE_LOG})"
   exit 1
 fi
 
