@@ -2,7 +2,7 @@ import { Server as HttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createControlServer, type ControlHandlers } from '../server.js';
-import { ControlBindError } from '../control-auth';
+import { ControlBindError } from '../control-auth.js';
 
 const controlToken = 'secrettoken';
 const wrongToken = 'wrongtoken1';

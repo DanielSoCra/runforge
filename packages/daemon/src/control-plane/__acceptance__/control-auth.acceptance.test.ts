@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isLoopbackHost, assertBindAllowed, checkAuthorization, ControlBindError } from '../control-auth';
+import { isLoopbackHost, assertBindAllowed, checkAuthorization, ControlBindError } from '../control-auth.js';
 
 describe('control-plane auth primitives', () => {
   describe('assertBindAllowed', () => {
