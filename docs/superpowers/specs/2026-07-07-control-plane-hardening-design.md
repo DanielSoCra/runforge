@@ -19,7 +19,9 @@ Address the production-readiness findings from the 2026-07-07 external engineeri
 - `server.ts:147-177` — `/halt` requires `Authorization: Bearer $RUNFORGE_CONTROL_TOKEN` **only if** the env var is set; unset → reachable with CSRF header alone ("fail-safe toward halting").
 - `server.ts:552-554` — comment: daemon is not role-aware; dashboard enforces admin-only.
 - Bind: `createControlServer(port, handlers, host='127.0.0.1')` (`server.ts:85-89`); Docker sets `DAEMON_HOST=0.0.0.0` on the internal `app` network, `ports: []` (nothing published). Compose sets **no** `RUNFORGE_CONTROL_TOKEN`.
-- `packages/dashboard/lib/daemon-fetch.ts` — single choke-point client; injects `X-Requested-By: dashboard`; no bearer logic. Only `app/api/daemon/halt/route.ts` forwards the bearer, ad hoc.
+- `packages/dashboard/lib/daemon-fetch.ts` — the intended choke-point client; injects `X-Requested-By: dashboard`; no bearer logic. Only `app/api/daemon/halt/route.ts` forwards the bearer, ad hoc.
+- **daemonFetch is NOT the only caller.** Direct control-plane callers that must not break: `packages/dashboard/app/(dashboard)/page.tsx:24` (direct `fetch(${DAEMON_URL}/status)`), `packages/briefing-summarizer/src/signals.ts:99` (`GET /status`), `packages/concierge/src/observer/daemon-poll.ts:45` (`GET /status`), and the daemon CLI itself — `packages/daemon/src/main.ts` `callApi()` (:139) hits `http://127.0.0.1:<port>` for `GET /status`, `GET /health`, `POST /pause|/resume|/retry/:issue` with only `X-Requested-By: cli`.
+- **A second server exists:** `packages/daemon/src/control-plane/degraded-server.ts:36-43` serves unauthenticated `GET /health` and `GET /status` during degraded startup; it is started with the same resolved host (`daemon.ts:672-678`). The effective bind host is resolved at `daemon.ts:604-607` (`DAEMON_HOST ?? config.controlHost ?? default`) and **rejected unless `isIP(host) === 4`** (`daemon.ts:608-612`) — the daemon has an IPv4-only host contract; `localhost`/`::1` are already invalid values today.
 - `scripts/install-daemon.sh` — seds `GITHUB_TOKEN`, `RUNFORGE_DATABASE_URL`, `ENCRYPTION_KEY` into the launchd plist (0600); does not provision `RUNFORGE_CONTROL_TOKEN`.
 - `scripts/sync-claude-creds.sh` — creds file itself is 0600+atomic (fine); validation log goes to world-readable `/tmp/sync-claude-creds.validate`.
 - Root `package.json` / `pnpm-workspace.yaml` — no overrides mechanism at all. `next@16.2.0` in `packages/dashboard`.
@@ -30,30 +32,34 @@ Address the production-readiness findings from the 2026-07-07 external engineeri
 ### D1. Daemon-side bearer auth on the control plane
 
 - **Token:** `RUNFORGE_CONTROL_TOKEN` (existing var, widened role — no new var).
-- **Startup gate (bind-host based, not per-request):** if the effective bind host is non-loopback (`0.0.0.0`, `::`, or any non-`127.0.0.1`/`::1`/`localhost` value) and the token is unset/empty → **refuse to start** with an actionable error. Docker's internal bridge is non-loopback and gets no exemption: "internal app network" is not an auth boundary.
+- **Shared module:** implement the auth pieces once in a new `packages/daemon/src/control-plane/control-auth.ts` — `assertBindAllowed(host, token)` (startup gate) and `isAuthorized(req, token)` (request check) — consumed by **both** `server.ts` (`createControlServer`) and `degraded-server.ts`. The degraded server must not remain an unauthenticated bypass: its `/status` follows the same rule; `/health` stays exempt.
+- **Startup gate (bind-host based, not per-request):** the daemon's IPv4-only host contract stands (`isIP(host) === 4`, `daemon.ts:608-612`); loopback therefore means an IPv4 `127.0.0.0/8` address (in practice `127.0.0.1`). If the effective bind host is non-loopback and the token is unset/empty → **refuse to start** with an actionable error. Enforced where the host is resolved (`daemon.ts:604-612`) before either server starts, and re-asserted inside `createControlServer`/`createDegradedServer` via `assertBindAllowed` (defense in depth — tests and other callers construct these servers directly). Docker's internal bridge is non-loopback and gets no exemption: "internal app network" is not an auth boundary.
 - **Legacy loopback mode:** loopback bind + no token → start, but emit a loud startup warning and a per-request warning (rate-limited) that unauthenticated control-plane access is deprecated. This prevents bricking existing native installs whose dashboard doesn't yet send the bearer.
-- **Request rule (token configured):** every route **except `GET /health`** requires `Authorization: Bearer <token>` — mutating POST/PUT *and* sensitive GETs (`/status`, `/dashboard`, `/api/runs`, `/decisions/*`, `/spend/*`, `/metrics/*`). Read exposure of decisions/spend/run metadata to co-resident containers is in scope. `GET /health` never requires auth (compose healthcheck/liveness).
+- **Request rule (token configured):** every route **except `GET /health`** requires `Authorization: Bearer <token>`. Full inventory (keep the "everything except /health" rule authoritative; this list is for the test matrix): mutating POST — `/pause`, `/halt`, `/resume`, `/drain`, `/drain/cancel`, `/repos/reload`, `/remote-control/restart`, `/issues/scan`, `/release`, `/release/preview`, `/release/completion`, `/ideas`, `/po/interactive-session`, `/decisions/:id/answer`, `/decisions/:id/reveal`, `/deployments/:id/widen`, `/retry/:id`; mutating PUT — `/spend/pricing-reference`; sensitive GET — `/status`, `/dashboard`, `/api/runs`, `/decisions/pending`, `/decisions/:id`, `/metrics/escalation`, `/spend/*`; degraded-server GET `/status`. Read exposure of decisions/spend/run metadata to co-resident containers is in scope. `GET /health` never requires auth (compose healthcheck/liveness) on either server.
 - **`/halt` semantics preserved:** in legacy loopback mode `/halt` stays token-optional (the deliberate safe-stop escape hatch). Once a token is configured, `/halt` requires it like everything else. The non-loopback+no-token case no longer exists (refuse-to-start).
 - **Mechanics:** shared `isAuthorized(req)` check before route dispatch and before body reads. Normalize the `Authorization` header to a single string; require exact `Bearer <token>` scheme; compare byte lengths first, then `crypto.timingSafeEqual` (it throws on length mismatch). 401 when header missing, 403 when invalid.
 - **`X-Requested-By` is kept** for mutating methods as CSRF/provenance defense, demoted from "the auth" to defense-in-depth. Bearer check runs first.
 - **Audit-log actor fallback** (`server.ts:555-562`) unchanged.
 
-### D2. Dashboard client
+### D2. Clients — every control-plane caller sends the bearer
 
-- `daemonFetch` injects `Authorization: Bearer $RUNFORGE_CONTROL_TOKEN` on **all** requests (GET included) when the env var is set; the header is set after caller headers so it cannot be overridden. Remove the ad-hoc bearer logic from `app/api/daemon/halt/route.ts`.
+- **daemonFetch** injects `Authorization: Bearer $RUNFORGE_CONTROL_TOKEN` on **all** requests (GET included) when the env var is set; the header is set after caller headers so it cannot be overridden. Remove the ad-hoc bearer logic from `app/api/daemon/halt/route.ts`.
+- **`app/(dashboard)/page.tsx`**: replace the direct `fetch(${DAEMON_URL}/status)` with `daemonFetch('/status', …)` so it inherits the bearer (keep its existing error handling for `DaemonConfigError`).
+- **briefing-summarizer** (`src/signals.ts`) and **concierge** (`src/observer/daemon-poll.ts`): add the bearer header from `process.env.RUNFORGE_CONTROL_TOKEN` when set (small inline change; no new shared package for two call sites).
+- **daemon CLI** (`main.ts` `callApi`): send the bearer from `process.env.RUNFORGE_CONTROL_TOKEN`; if unset, fall back to reading `RUNFORGE_CONTROL_TOKEN` from the repo-root `.env.mac` when the file exists (the operator's interactive shell won't have the launchd plist env). `/health` keeps working tokenless either way.
 - No module-load/startup hard failure in Next (breaks builds/tests/serverless): missing token when the daemon rejects → surface per-request as a clear error (extend the existing `DaemonConfigError` pattern, e.g. map daemon 401/403 to an actionable message).
 
 ### D3. Deployment plumbing
 
-- **docker-compose.yml:** daemon + dashboard services get `RUNFORGE_CONTROL_TOKEN: ${RUNFORGE_CONTROL_TOKEN:?set RUNFORGE_CONTROL_TOKEN in the selected env file}`. Note `${...}` interpolation reads the shell/project `--env-file`, not `env_file:` — document in `.env.prod.example`.
-- **install-daemon.sh:** generate a token if absent (`openssl rand -hex 32`), persist it into `.env.mac` (0600), inject into the plist like the other vars. `.env.mac` is the local SSOT the dashboard shares. Rotation = update env source, reinstall/reload daemon, restart dashboard (documented).
+- **docker-compose.yml:** every service that calls the daemon — daemon (containerized-daemon profile), dashboard, briefing-summarizer, and concierge if composed — gets `RUNFORGE_CONTROL_TOKEN: ${RUNFORGE_CONTROL_TOKEN:?set RUNFORGE_CONTROL_TOKEN in the selected env file}`, following the established `RUNFORGE_DOCKER_DATABASE_URL:?` pattern (services already use `env_file: ${ENV_FILE:-.env.prod}` for delivery; the `${…:?}` interpolation reads the shell/`--env-file`, not `env_file:` — same invocation contract as today, document it in `.env.prod.example`).
+- **install-daemon.sh:** generate a token if absent (`openssl rand -hex 32`), persist it into `.env.mac` (0600), inject into the plist like the other vars. `.env.mac` is the local SSOT; the dashboard/summarizer containers on the same host consume it by launching compose with that env file (`ENV_FILE=.env.mac` / `--env-file .env.mac`) — this delivery path is documented explicitly, not assumed. Rotation = update env source, reinstall/reload daemon, restart dashboard (documented).
 - **com.runforge.daemon.plist:** add the `RUNFORGE_CONTROL_TOKEN` placeholder.
 - **Env examples/docs:** `.env.mac.example`, `.env.prod.example`, `docs/running.md` updated.
 
 ### D4. Dependency hygiene
 
-- Add root `pnpm.overrides` with **minimal, exact pins** for the vulnerable transitive packages (path-to-regexp, picomatch, fast-uri, undici, vite, hono, …) and upgrade direct deps (`next` within v16) until **`pnpm audit --prod --audit-level high` exits 0**. Exact versions are resolved at implementation time from the registry — the plan does not invent version numbers. If a "prod" finding is actually dev-graph noise (better-auth's peer graph attaching vitest/jsdom), fix classification/upgrade rather than blanket-override.
-- **CI:** new `security` job — `pnpm audit --prod --audit-level high` (gate: exit 0, no allowlist) + full-history `gitleaks detect --redact` (no baseline; repo is currently clean). Full-history catches committed-then-removed secrets; revisit commit-range scanning only if runtime hurts.
+- Add overrides in the **root `package.json` nested field `"pnpm": { "overrides": { … } }`** (pnpm@10; NOT a top-level `overrides` key, NOT `pnpm-workspace.yaml`) with **minimal, exact pins** for the vulnerable transitive packages (path-to-regexp, picomatch, fast-uri, undici, vite, hono, …) and upgrade direct deps (`next` within v16) until **`pnpm audit --prod --audit-level high` exits 0**. Exact versions are resolved at implementation time from the registry — the plan does not invent version numbers. Comment each override with its advisory ID. If a "prod" finding is actually dev-graph noise (better-auth's peer graph attaching vitest/jsdom), fix classification/upgrade rather than blanket-override.
+- **CI:** new `security` job — `pnpm audit --prod --audit-level high` (gate: exit 0, no allowlist) + full-history `gitleaks detect --redact` (no baseline; repo is currently clean). **Constraint from `scripts/check-ci-workflows.mjs:9-13,104-115`:** the guard forbids job-level `services:`, `container:`, and `uses: docker://…` — install gitleaks as a plain shell step (download the release binary, or `docker run` in a shell step like the existing Postgres pattern at `ci.yml:66-87`); never a Docker action/service container. Full-history catches committed-then-removed secrets; revisit commit-range scanning only if runtime hurts.
 
 ### D5. Secrets fix
 
@@ -62,7 +68,7 @@ Address the production-readiness findings from the 2026-07-07 external engineeri
 ### D6. Spec/traceability alignment (required by repo governance)
 
 - Extend `STACK-AC-OPERATOR-AUTH` (and its ARCH/FUNC parents where behavior is described) to own the daemon control-plane auth: bearer requirement, bind-host startup gate, legacy loopback mode, `/health` exemption, `X-Requested-By` demotion.
-- `.specify/traceability.yml`: add `server.ts`, `daemon-fetch.ts`, compose/installer files under the operator-auth spec's `code_paths`; add `server.test.ts` to `test_paths`.
+- `.specify/traceability.yml`: add `server.ts`, `degraded-server.ts`, `control-auth.ts`, `daemon-fetch.ts`, compose/installer files under the operator-auth spec's `code_paths`; add `server.test.ts` (and the new auth test files) to `test_paths`.
 
 ## Rejected Alternatives
 
@@ -82,10 +88,12 @@ Address the production-readiness findings from the 2026-07-07 external engineeri
 
 ## Test Strategy
 
-- `server.test.ts`: matrix — {loopback, non-loopback} × {token set, unset} × {mutating, sensitive GET, /health, /halt} → expected {200-family, 401, 403, refuse-to-start}. Timing-safe compare: wrong token same length / different length both → 403, no throw.
-- `daemon-fetch` tests: bearer present on GET+POST when env set; absent when unset; caller cannot override the header.
-- Halt proxy route test updated (bearer now via daemonFetch).
-- Shell: installer idempotence (token generated once, reused on re-run) — assert via bats-style or a plan-level manual check; at minimum grep-able acceptance checks.
+- **`control-auth.test.ts` (new, unit):** `assertBindAllowed` matrix — {127.0.0.1, 0.0.0.0, other IPv4} × {token set, unset} → {ok, ok-with-warning, throw}; `isAuthorized` — valid token, wrong token same length, wrong token different length (no throw — byte-length check before `timingSafeEqual`), missing header (401), wrong scheme (403).
+- **`server.test.ts`:** request-level matrix with the server constructed directly (as today, `server.test.ts:61-67`): {token set, unset} × {mutating route, sensitive GET, `/health`, `/halt`} → {2xx, 401, 403}. **Env hygiene:** save/restore `RUNFORGE_CONTROL_TOKEN` per test following the existing pattern in `phase0-halt.gate.test.ts:15,102-104` — the current `afterEach` only closes the server.
+- **Degraded server:** `/status` requires bearer when token set; `/health` open — in its own test file or `daemon.test.ts` (the startup-gate/host-resolution behavior lives at daemon level, not in `server.test.ts`, which never exercises host resolution).
+- **`daemon-fetch` tests:** bearer present on GET+POST when env set; absent when unset; caller cannot override the header. Halt proxy route test updated (bearer now via daemonFetch).
+- **Client call sites:** briefing-summarizer/concierge/CLI — bearer attached when env set (unit-level where tests exist).
+- Shell: installer idempotence (token generated once, reused on re-run) — grep-able acceptance checks at minimum.
 - CI security job proves itself on the PR run (audit exit 0, gitleaks clean).
 
 ## Risks
