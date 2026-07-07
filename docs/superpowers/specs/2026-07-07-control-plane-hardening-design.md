@@ -60,7 +60,7 @@ Address the production-readiness findings from the 2026-07-07 external engineeri
 ### D4. Dependency hygiene
 
 - Add overrides in the **root `package.json` nested field `"pnpm": { "overrides": { … } }`** (pnpm@10; NOT a top-level `overrides` key, NOT `pnpm-workspace.yaml`) with **minimal, exact pins** for the vulnerable transitive packages (path-to-regexp, picomatch, fast-uri, undici, vite, hono, …) and upgrade direct deps (`next` within v16) until **`pnpm audit --prod --audit-level high` exits 0**. Exact versions are resolved at implementation time from the registry — the plan does not invent version numbers. `package.json` is strict JSON (no comments): record each override's advisory ID in `docs/security-overrides.md` (one line per override: package, pinned version, advisory, date) and in the PR body. If a "prod" finding is actually dev-graph noise (better-auth's peer graph attaching vitest/jsdom), fix classification/upgrade rather than blanket-override.
-- **CI:** new `security` job — `pnpm audit --prod --audit-level high` (gate: exit 0, no allowlist) + full-history `gitleaks detect --redact` (no baseline; repo is currently clean). **Constraint from `scripts/check-ci-workflows.mjs:9-13,104-115`:** the guard forbids job-level `services:`, `container:`, and `uses: docker://…` — install gitleaks as a plain shell step (download the release binary, or `docker run` in a shell step like the existing Postgres pattern at `ci.yml:66-87`); never a Docker action/service container. Full-history catches committed-then-removed secrets; revisit commit-range scanning only if runtime hurts.
+- **CI:** security steps **inside the existing required `ci` job** (NOT a sibling job — the autonomous merge gate polls only `requiredChecks: ["ci"]` per `runforge.config.json:60` / `await-checks.ts:104`, so a sibling job would not block landing): `pnpm audit --prod --audit-level high` (gate: exit 0, no allowlist) + full-history `gitleaks detect --redact` (no baseline; repo is currently clean; requires `fetch-depth: 0`). **Constraint from `scripts/check-ci-workflows.mjs:9-13,104-115`:** the guard forbids job-level `services:`, `container:`, and `uses: docker://…` — install gitleaks as a plain shell step (download the release binary, or `docker run` in a shell step like the existing Postgres pattern at `ci.yml:66-87`); never a Docker action/service container. Full-history catches committed-then-removed secrets; revisit commit-range scanning only if runtime hurts.
 
 ### D5. Secrets fix
 
@@ -95,7 +95,7 @@ Address the production-readiness findings from the 2026-07-07 external engineeri
 - **`daemon-fetch` tests:** bearer present on GET+POST when env set; absent when unset; caller cannot override the header. Halt proxy route test updated (bearer now via daemonFetch).
 - **Client call sites:** briefing-summarizer/concierge/CLI — bearer attached when env set (unit-level where tests exist).
 - Shell: installer idempotence (token generated once, reused on re-run) — grep-able acceptance checks at minimum.
-- CI security job proves itself on the PR run (audit exit 0, gitleaks clean).
+- The CI security steps prove themselves on the PR's `ci` job run (audit exit 0, gitleaks clean).
 
 ## Risks
 

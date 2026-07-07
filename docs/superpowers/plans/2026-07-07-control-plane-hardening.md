@@ -117,14 +117,14 @@ pnpm audit --prod --audit-level high   # inventory first
 
 Commit: `chore(deps): clear high prod audit findings via upgrades + pnpm overrides`
 
-## Task 10 — CI security job
+## Task 10 — CI security steps (inside the `ci` job)
 
 File: `.github/workflows/ci.yml`.
 
 - **Gating constraint:** the autonomous merge gate polls only the exact required check names (`runforge.config.json:60` → `requiredChecks: ["ci"]`; `packages/daemon/src/control-plane/await-checks.ts:104`). A sibling job would NOT block landing. Therefore add the security steps **inside the existing `ci` job**, early (right after `pnpm install --frozen-lockfile`, before lint): step `Audit (prod, high)` → `pnpm audit --prod --audit-level high`; step `Gitleaks (full history)` → download a pinned gitleaks release binary (verify sha256 checksum) and run `gitleaks detect --redact`. The `ci` job's checkout needs `fetch-depth: 0` for full-history scanning. Do NOT change `requiredChecks` (that is deployment policy). CONSTRAINT: no job-level `services:`/`container:`/`uses: docker://…` (`scripts/check-ci-workflows.mjs` guard).
 - Verify locally: `node scripts/check-ci-workflows.mjs` exits 0.
 
-Commit: `ci: add security job (prod audit gate + gitleaks full-history)`
+Commit: `ci: add security steps to ci job (prod audit gate + gitleaks full-history)`
 
 ## Task 11 — full gates
 
@@ -138,7 +138,7 @@ All green before opening the PR.
 
 ## Dependency order
 
-Task 1 independent. Task 2 → {3,4,5}. Task 6,7 depend on 3 (behavior locked). Task 8 independent after 5. Task 9,10 independent. Task 11 last.
+Task 1 independent. Task 2 → {3,4,5}. Task 6,7 depend on 3 (behavior locked). Task 8 depends on 5, 6 AND 7 — never token-enable the composed daemon before every client forwards the bearer. Task 9,10 independent. Task 11 last.
 
 ## Verification design (Phase 9, post-merge, run by conductor)
 
