@@ -1709,10 +1709,19 @@ STACK-AC-OPERATOR-AUTH:
     - packages/dashboard/lib/auth/**
     - packages/dashboard/app/api/auth/**
     - packages/dashboard/app/(auth)/**
+    - packages/daemon/src/control-plane/server.ts
+    - packages/daemon/src/control-plane/degraded-server.ts
+    - packages/daemon/src/control-plane/control-auth.ts
+    - packages/dashboard/lib/daemon-fetch.ts
+    - docker-compose.yml
+    - scripts/install-daemon.sh
+    - scripts/com.runforge.daemon.plist
   test_paths:
     - packages/auth/**/*.test.ts
     - packages/dashboard/lib/auth/**/*.test.ts
     - packages/dashboard/app/api/auth/**/*.test.ts
+    - packages/daemon/src/control-plane/server.test.ts
+    - packages/daemon/src/control-plane/control-auth.test.ts
   status: draft
 
 # Operator-approved production release (D5). FUNC status: draft pending Operator approval

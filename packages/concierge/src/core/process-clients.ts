@@ -97,8 +97,14 @@ export function createObserverProcessClient(options: {
     },
 
     daemonState: async () => {
+      const token = process.env.RUNFORGE_CONTROL_TOKEN;
+      const headers: Record<string, string> = {};
+      if (token !== undefined && token !== '') {
+        headers.Authorization = `Bearer ${token}`;
+      }
       const response = await options.fetch(`${options.runforgeBaseUrl.replace(/\/+$/, '')}/status`, {
         method: 'GET',
+        headers,
       });
       return readJsonBody(response);
     },

@@ -4,6 +4,8 @@ import {
   type ServerResponse,
 } from 'http';
 
+import { checkAuthorization, assertBindAllowed } from './control-auth.js';
+
 import type { ConfigFetchError } from '../data/config-reader.js';
 import { err, ok, type Result } from '../lib/result.js';
 
@@ -27,6 +29,8 @@ export function createDegradedServer(
   host: string,
   getState: () => DegradedState,
 ): { start: () => Promise<Result<void>>; handle: DegradedServerHandle } {
+  assertBindAllowed(host, process.env.RUNFORGE_CONTROL_TOKEN);
+
   const server = createServer(
     (req: IncomingMessage, res: ServerResponse) => {
       const url = new URL(req.url ?? '/', `http://localhost:${port}`);
@@ -36,6 +40,15 @@ export function createDegradedServer(
       if (method === 'GET' && url.pathname === '/health') {
         json(res, 200, { ok: true, degraded: true, lastConfigError });
       } else if (method === 'GET' && url.pathname === '/status') {
+        const controlToken = process.env.RUNFORGE_CONTROL_TOKEN;
+        const tokenConfigured = typeof controlToken === 'string' && controlToken !== '';
+        if (tokenConfigured) {
+          const auth = checkAuthorization(req.headers.authorization, controlToken);
+          if (!auth.ok) {
+            json(res, auth.status, { error: auth.error });
+            return;
+          }
+        }
         json(res, 200, {
           degraded: true,
           lastConfigError,

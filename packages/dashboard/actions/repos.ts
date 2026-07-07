@@ -3,7 +3,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireDashboardAdmin } from '@/lib/auth/require-session';
 import { getDashboardStores } from '@/lib/data/stores';
-import { daemonFetch } from '@/lib/daemon-fetch';
+import { daemonFetch, DaemonAuthError } from '@/lib/daemon-fetch';
 
 const SAFE_PATTERN = /^[a-zA-Z0-9._-]+$/;
 
@@ -41,7 +41,11 @@ function notifyDaemonReload() {
   daemonFetch('/repos/reload', {
     method: 'POST',
     signal: AbortSignal.timeout(3000),
-  }).catch(() => {});
+  }).catch((e) => {
+    if (e instanceof DaemonAuthError) {
+      console.error('[repos] daemon reload failed:', e.message);
+    }
+  });
 }
 
 function readBranch(value: FormDataEntryValue | null, fallback: string) {

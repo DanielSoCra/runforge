@@ -2,6 +2,7 @@ import { PageError } from '@/components/page-error';
 import { StatsCards } from '@/components/stats-cards';
 import { RunTable } from '@/components/run-table';
 import { getDashboardStores } from '@/lib/data/stores';
+import { daemonFetch, DaemonAuthError } from '@/lib/daemon-fetch';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,17 +18,17 @@ export default async function HomePage() {
   }
 
   let daemonStatus: 'running' | 'paused' | 'offline' = 'offline';
-  if (!process.env.DAEMON_URL) {
-    console.error('[daemon-status] DAEMON_URL is not configured');
-  } else {
-    try {
-      const res = await fetch(`${process.env.DAEMON_URL}/status`, {
-        cache: 'no-store',
-        signal: AbortSignal.timeout(3000),
-      });
-      const json = await res.json().catch(() => null);
-      daemonStatus = json?.state ?? (res.ok ? 'running' : 'offline');
-    } catch (err) {
+  try {
+    const res = await daemonFetch('/status', {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(3000),
+    });
+    const json = await res.json().catch(() => null);
+    daemonStatus = json?.state ?? (res.ok ? 'running' : 'offline');
+  } catch (err) {
+    if (err instanceof DaemonAuthError) {
+      console.error('[daemon-status] auth error:', err.message);
+    } else {
       console.error('[daemon-status] unreachable:', err instanceof Error ? err.message : err);
     }
   }

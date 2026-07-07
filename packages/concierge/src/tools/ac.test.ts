@@ -40,6 +40,42 @@ describe('runforge tool handlers', () => {
     });
   });
 
+  it('sends Authorization Bearer when RUNFORGE_CONTROL_TOKEN is set', async () => {
+    const originalToken = process.env.RUNFORGE_CONTROL_TOKEN;
+    process.env.RUNFORGE_CONTROL_TOKEN = 'secrettoken';
+
+    try {
+      const requests: Array<{ url: string; init?: RequestInit }> = [];
+      const handlers = createRunforgeToolHandlers({
+        baseUrl: 'http://daemon',
+        requestedBy: 'concierge-test',
+        fetch: async (url, init) => {
+          requests.push({ url: String(url), init });
+          return new Response(JSON.stringify({ retrying: 504 }), { status: 200 });
+        },
+      });
+
+      await handlers.ac_unstuck({ issue: 504 }, { conversationId: 'c1', toolCallId: 't1' });
+
+      expect(requests[0]).toEqual({
+        url: 'http://daemon/retry/504',
+        init: {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer secrettoken',
+            'X-Requested-By': 'concierge-test',
+          },
+        },
+      });
+    } finally {
+      if (originalToken === undefined) {
+        delete process.env.RUNFORGE_CONTROL_TOKEN;
+      } else {
+        process.env.RUNFORGE_CONTROL_TOKEN = originalToken;
+      }
+    }
+  });
+
   it('throws readable errors for non-2xx daemon responses', async () => {
     const handlers = createRunforgeToolHandlers({
       baseUrl: 'http://daemon',

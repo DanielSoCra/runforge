@@ -14,7 +14,7 @@ import {
   getDashboardAuthError,
   requireDashboardUser,
 } from '@/lib/auth/require-session';
-import { daemonFetch, DaemonConfigError } from '@/lib/daemon-fetch';
+import { daemonFetch, DaemonAuthError, DaemonConfigError } from '@/lib/daemon-fetch';
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
@@ -40,7 +40,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       ...(json.unavailable === true ? { unavailable: true } : {}),
     });
   } catch (e) {
-    if (e instanceof DaemonConfigError) {
+    if (e instanceof DaemonConfigError || e instanceof DaemonAuthError) {
       return NextResponse.json({ weeks: [], unavailable: true });
     }
     return NextResponse.json({ weeks: [], unavailable: true });

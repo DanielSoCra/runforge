@@ -22,7 +22,7 @@ import {
   requireDashboardAdmin,
   type DashboardSession,
 } from '@/lib/auth/require-session';
-import { daemonFetch, DaemonConfigError } from '@/lib/daemon-fetch';
+import { daemonFetch, DaemonAuthError, DaemonConfigError } from '@/lib/daemon-fetch';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -129,7 +129,7 @@ export async function POST(
 
     return NextResponse.json(json, { status: res.status });
   } catch (e) {
-    if (e instanceof DaemonConfigError) {
+    if (e instanceof DaemonConfigError || e instanceof DaemonAuthError) {
       return NextResponse.json({ error: e.message }, { status: 500 });
     }
     return NextResponse.json(

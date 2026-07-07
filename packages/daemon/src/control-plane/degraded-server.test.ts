@@ -1,10 +1,11 @@
 import { createServer } from 'net';
 import type { AddressInfo } from 'net';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ConfigFetchError } from '../data/config-reader.js';
 import { createDegradedServer, type DegradedState } from './degraded-server.js';
+import { ControlBindError } from './control-auth.js';
 
 const HOST = '127.0.0.1';
 
@@ -18,10 +19,21 @@ const sampleError: ConfigFetchError = {
 };
 
 let toClose: { close: () => Promise<void> }[] = [];
+let originalControlToken: string | undefined;
+
+beforeEach(() => {
+  originalControlToken = process.env.RUNFORGE_CONTROL_TOKEN;
+});
 
 afterEach(async () => {
   for (const handle of toClose) await handle.close();
   toClose = [];
+
+  if (originalControlToken === undefined) {
+    delete process.env.RUNFORGE_CONTROL_TOKEN;
+  } else {
+    process.env.RUNFORGE_CONTROL_TOKEN = originalControlToken;
+  }
 });
 
 // createDegradedServer's handle does not expose the underlying server, so the
@@ -171,5 +183,39 @@ describe('createDegradedServer', () => {
     }));
     await expect(handle.close()).resolves.toBeUndefined();
     await expect(handle.close()).resolves.toBeUndefined();
+  });
+
+  it('requires bearer auth on /status when RUNFORGE_CONTROL_TOKEN is set', async () => {
+    process.env.RUNFORGE_CONTROL_TOKEN = 'testtoken';
+    const { port } = await startServerOnFreePort({ lastConfigError: null });
+
+    const withoutBearer = await fetch(`http://${HOST}:${port}/status`);
+    expect(withoutBearer.status).toBe(401);
+
+    const withWrongBearer = await fetch(`http://${HOST}:${port}/status`, {
+      headers: { Authorization: 'Bearer wrongtoken' },
+    });
+    expect(withWrongBearer.status).toBe(403);
+
+    const withBearer = await fetch(`http://${HOST}:${port}/status`, {
+      headers: { Authorization: 'Bearer testtoken' },
+    });
+    expect(withBearer.status).toBe(200);
+  });
+
+  it('/health stays open even when RUNFORGE_CONTROL_TOKEN is set', async () => {
+    process.env.RUNFORGE_CONTROL_TOKEN = 'testtoken';
+    const { port } = await startServerOnFreePort({ lastConfigError: null });
+
+    const res = await fetch(`http://${HOST}:${port}/health`);
+    expect(res.status).toBe(200);
+  });
+
+  it('refuses tokenless non-loopback binds before listening', async () => {
+    delete process.env.RUNFORGE_CONTROL_TOKEN;
+    const port = await freePort();
+    expect(() => createDegradedServer(port, '0.0.0.0', () => ({ lastConfigError: null }))).toThrow(
+      ControlBindError,
+    );
   });
 });

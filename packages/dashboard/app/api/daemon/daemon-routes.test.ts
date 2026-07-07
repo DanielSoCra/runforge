@@ -117,6 +117,19 @@ describe.each(adminRoutes)('POST /api/daemon/$name', ({ path, daemonPath }) => {
     );
   });
 
+  it('returns 500 when daemon rejects with 401/403 (auth error)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response('unauthorized', { status: 401 }),
+    );
+    const { POST } = await import(path);
+
+    const res = await POST();
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toMatch(/RUNFORGE_CONTROL_TOKEN/);
+  });
+
   it('returns 503 when daemon is unreachable', async () => {
     fetchMock.mockRejectedValueOnce(new Error('Connection refused'));
     const { POST } = await import(path);
@@ -277,6 +290,19 @@ describe('GET /api/daemon/status', () => {
     );
     const callArgs = fetchMock.mock.calls[0][1];
     expect(callArgs).not.toHaveProperty('next');
+  });
+
+  it('returns 500 when daemon rejects with 401/403 (auth error)', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response('unauthorized', { status: 401 }),
+    );
+    const { GET } = await import('./status/route.js');
+
+    const res = await GET();
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toMatch(/RUNFORGE_CONTROL_TOKEN/);
   });
 
   it('returns 503 with fallback body when daemon is unreachable', async () => {

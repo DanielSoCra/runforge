@@ -10,6 +10,7 @@ let serverRef: Server | undefined;
 // stopServer() the port is no longer listening, which is exactly what the
 // connection-failure tests need.
 let port = 0;
+let originalControlToken: string | undefined;
 
 const handlers = {
   getStatus: () => ({ activeRuns: 0, paused: false }),
@@ -49,11 +50,17 @@ beforeEach(async () => {
   process.exitCode = undefined;
   handlers.pause.mockClear();
   handlers.resume.mockClear();
+  originalControlToken = process.env.RUNFORGE_CONTROL_TOKEN;
   await startServer();
 });
 
 afterEach(async () => {
   await stopServer();
+  if (originalControlToken === undefined) {
+    delete process.env.RUNFORGE_CONTROL_TOKEN;
+  } else {
+    process.env.RUNFORGE_CONTROL_TOKEN = originalControlToken;
+  }
 });
 
 describe('createCli', () => {
@@ -66,6 +73,14 @@ describe('createCli', () => {
 
 describe('CLI commands send X-Requested-By header on POST', () => {
   it('pause command succeeds (not 403)', async () => {
+    const cli = createCli();
+    await cli.parseAsync(['node', 'runforge', 'pause', '-p', String(port)]);
+    expect(handlers.pause).toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('pause command sends Authorization Bearer when RUNFORGE_CONTROL_TOKEN is set', async () => {
+    process.env.RUNFORGE_CONTROL_TOKEN = 'clitoken';
     const cli = createCli();
     await cli.parseAsync(['node', 'runforge', 'pause', '-p', String(port)]);
     expect(handlers.pause).toHaveBeenCalled();

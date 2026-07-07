@@ -1,6 +1,7 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { createControlServer, type ControlHandlers } from './server.js';
 import { err } from '../lib/result.js';
+import { ControlBindError } from './control-auth.js';
 import type { Server } from 'http';
 import type { AddressInfo } from 'net';
 import * as results from './results.js';
@@ -8,6 +9,11 @@ import { DeploymentRegistry } from './deployment-registry/registry.js';
 import type { RiskClass, AutonomyLevel } from './deployment-registry/types.js';
 
 let serverRef: Server | undefined;
+let originalControlToken: string | undefined;
+
+beforeEach(() => {
+  originalControlToken = process.env.RUNFORGE_CONTROL_TOKEN;
+});
 
 // Close a server and await the close, clearing serverRef if it's the one being
 // closed so afterEach doesn't issue a redundant second close (handle leak /
@@ -38,6 +44,12 @@ afterEach(async () => {
     const s = serverRef;
     serverRef = undefined;
     await new Promise<void>((resolve) => s.close(() => resolve()));
+  }
+
+  if (originalControlToken === undefined) {
+    delete process.env.RUNFORGE_CONTROL_TOKEN;
+  } else {
+    process.env.RUNFORGE_CONTROL_TOKEN = originalControlToken;
   }
 });
 
@@ -120,6 +132,68 @@ describe('ControlServer', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.paused).toBe(true);
+  });
+
+  describe('bearer token enforcement', () => {
+    const controlToken = 'testtoken';
+
+    it('requires bearer auth on control routes when token is set', async () => {
+      process.env.RUNFORGE_CONTROL_TOKEN = controlToken;
+      const { port } = await startServer();
+
+      const pauseWithoutBearer = await fetch(`http://127.0.0.1:${port}/pause`, {
+        method: 'POST',
+        headers: { 'X-Requested-By': 'test' },
+      });
+      expect(pauseWithoutBearer.status).toBe(401);
+
+      const pauseWithWrongBearer = await fetch(`http://127.0.0.1:${port}/pause`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer wrongtoken', 'X-Requested-By': 'test' },
+      });
+      expect(pauseWithWrongBearer.status).toBe(403);
+
+      const pauseWithBearer = await fetch(`http://127.0.0.1:${port}/pause`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${controlToken}`, 'X-Requested-By': 'test' },
+      });
+      expect(pauseWithBearer.status).toBe(200);
+
+      const statusWithoutBearer = await fetch(`http://127.0.0.1:${port}/status`);
+      expect(statusWithoutBearer.status).toBe(401);
+
+      const statusWithBearer = await fetch(`http://127.0.0.1:${port}/status`, {
+        headers: { Authorization: `Bearer ${controlToken}` },
+      });
+      expect(statusWithBearer.status).toBe(200);
+
+      const healthWithoutBearer = await fetch(`http://127.0.0.1:${port}/health`);
+      expect(healthWithoutBearer.status).toBe(200);
+    });
+
+    it('keeps legacy loopback access when token is unset', async () => {
+      delete process.env.RUNFORGE_CONTROL_TOKEN;
+      const { port } = await startServer();
+
+      const pause = await fetch(`http://127.0.0.1:${port}/pause`, {
+        method: 'POST',
+        headers: { 'X-Requested-By': 'test' },
+      });
+      expect(pause.status).toBe(200);
+
+      const status = await fetch(`http://127.0.0.1:${port}/status`);
+      expect(status.status).toBe(200);
+    });
+
+    it('retains X-Requested-By CSRF check after valid bearer auth', async () => {
+      process.env.RUNFORGE_CONTROL_TOKEN = controlToken;
+      const { port } = await startServer();
+      const res = await fetch(`http://127.0.0.1:${port}/pause`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${controlToken}` },
+      });
+      expect(res.status).toBe(403);
+    });
   });
 
   it('GET /decisions/:id decodes a URL-encoded decision id before lookup (codex)', async () => {
@@ -496,9 +570,11 @@ describe('ControlServer', () => {
     }
   });
 
-  it('binds to custom host when provided (Docker compatibility)', async () => {
+  it('binds to custom host with a token (Docker compatibility)', async () => {
     // Regression test for #147: daemon must accept a configurable bind host
-    // so it can bind 0.0.0.0 in Docker for cross-container access
+    // so it can bind 0.0.0.0 in Docker for cross-container access. With a token
+    // configured, non-loopback binds are allowed.
+    process.env.RUNFORGE_CONTROL_TOKEN = 'testtoken';
     const { server, start } = createControlServer(0, handlers, '0.0.0.0');
     const result = await start();
     expect(result.ok).toBe(true);
@@ -514,6 +590,14 @@ describe('ControlServer', () => {
     } finally {
       await closeServer(server);
     }
+  });
+
+  it('refuses tokenless non-loopback binds before listening', async () => {
+    delete process.env.RUNFORGE_CONTROL_TOKEN;
+
+    expect(() => createControlServer(0, handlers, '0.0.0.0')).toThrow(
+      ControlBindError,
+    );
   });
 
   it('defaults to 127.0.0.1 when no host provided (secure default)', async () => {

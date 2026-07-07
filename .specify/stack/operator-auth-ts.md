@@ -29,8 +29,9 @@ Chosen over a hand-rolled session system (security risk, the issue forbids weake
 ## Key Decisions
 
 - **Better Auth + Drizzle adapter** — auth tables defined in the shared `packages/db` schema but **created by the Data Platform Migration Runner** (STACK-AC-DATA-PLATFORM owns ordering; this spec owns their definition and semantics).
-- **Server-side enforcement only** — a `requireSession()` in route handlers and server components; the client-asserted role is never trusted. Daemon control routes sit behind an admin-only variant.
-- **Pure `gateDecision` predicate** — `(session, { localBypass }) → '/login' | null | 'deny'`; no I/O, fully unit-tested, mirrors the regulated pilot deployment's `gate-decision.ts` split.
+ - **Server-side enforcement only** — a `requireSession()` in route handlers and server components; the client-asserted role is never trusted. Dashboard enforces roles; the daemon enforces the bearer boundary on the control plane with `RUNFORGE_CONTROL_TOKEN`.
+ - **Daemon control-plane auth model** — the daemon guards every control-plane route except `GET /health` with `Authorization: Bearer <RUNFORGE_CONTROL_TOKEN>`; the bind host must be IPv4 loopback (`127.0.0.0/8`) when no token is configured, otherwise non-loopback binds are refused at startup. A legacy loopback mode allows tokenless operation on loopback with loud deprecation warnings. `X-Requested-By` is kept as CSRF/provenance defense on mutating methods, running after the bearer check. The built-in HTML dashboard is legacy/loopback-only.
+ - **Pure `gateDecision` predicate** — `(session, { localBypass }) → '/login' | null | 'deny'`; no I/O, fully unit-tested, mirrors the regulated pilot deployment's `gate-decision.ts` split.
 - **App-owned `role`** — `administrator | viewer` on the membership/user record, enforced in application code; Supabase `is_admin()`/`is_member()` SQL and all RLS policies are removed.
 - **`AUTH_DISABLED` → `LOCAL_AUTH_BYPASS`** — the blunt switch is replaced by a named local-only bypass that activates only when an explicit local flag is set **and** no production indicator (`NODE_ENV=production`, deploy markers) is present; it refuses in production and logs the refusal.
 - **Continuity** — preserve first-user-is-admin bootstrap and the invitation flow; `team_members` / `invitations` semantics carry over with documented operator migration.

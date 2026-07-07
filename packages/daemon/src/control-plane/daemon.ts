@@ -25,6 +25,7 @@ import {
 import { ImplementationCoordinator } from '../implementation/coordinator.js';
 import { StateManager } from './state.js';
 import { createControlServer } from './server.js';
+import { assertBindAllowed, ControlBindError, isLoopbackHost } from './control-auth.js';
 import {
   createDegradedServer,
   type DegradedServerHandle,
@@ -610,6 +611,33 @@ export async function startDaemon(
       new Error(
         `Invalid ${daemonHostSource}: "${daemonHost}" — must be a valid IPv4 address`,
       ),
+    );
+  }
+
+  // Bind-host startup gate: non-loopback binds require a non-empty control token.
+  // Loopback + no token is allowed as a legacy mode with a loud warning.
+  try {
+    assertBindAllowed(daemonHost, process.env.RUNFORGE_CONTROL_TOKEN);
+  } catch (e) {
+    if (e instanceof ControlBindError) {
+      return err(
+        new Error(
+          `${e.message} ` +
+            `Set RUNFORGE_CONTROL_TOKEN or bind 127.0.0.1 to start the daemon.`,
+        ),
+      );
+    }
+    return err(e instanceof Error ? e : new Error(String(e)));
+  }
+
+  if (
+    isLoopbackHost(daemonHost) &&
+    (process.env.RUNFORGE_CONTROL_TOKEN === undefined ||
+      process.env.RUNFORGE_CONTROL_TOKEN === '')
+  ) {
+    console.warn(
+      '[daemon] Starting in legacy loopback mode: control-plane requests are ' +
+        'unauthenticated. Set RUNFORGE_CONTROL_TOKEN to secure this deployment.',
     );
   }
 

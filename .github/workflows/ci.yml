@@ -53,6 +53,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
 
@@ -62,6 +64,33 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+
+      - name: Audit (prod, high)
+        run: pnpm audit --prod --audit-level high
+
+      - name: Gitleaks (full history)
+        run: |
+          set -u
+          VERSION=8.30.1
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            arm64)
+              FILE="gitleaks_${VERSION}_darwin_arm64.tar.gz"
+              CHECKSUM="b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5"
+              ;;
+            x86_64)
+              FILE="gitleaks_${VERSION}_darwin_x64.tar.gz"
+              CHECKSUM="dfe101a4db2255fc85120ac7f3d25e4342c3c20cf749f2c20a18081af1952709"
+              ;;
+            *)
+              echo "::error::Unsupported architecture: $ARCH"
+              exit 1
+              ;;
+          esac
+          curl -sL -o "/tmp/$FILE" "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/$FILE"
+          echo "$CHECKSUM  /tmp/$FILE" | shasum -a 256 -c
+          tar -xzf "/tmp/$FILE" -C /tmp
+          /tmp/gitleaks detect --redact
 
       # Real Postgres for the decision-index integration suite. The runner is
       # self-hosted (macOS), where GitHub `services:` containers are Linux-only,

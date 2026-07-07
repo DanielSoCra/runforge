@@ -67,6 +67,7 @@ services:
       NODE_ENV: production
       PLUGINS_DIR: /app/plugins
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in the selected env file}
+      RUNFORGE_CONTROL_TOKEN: ${RUNFORGE_CONTROL_TOKEN:?set RUNFORGE_CONTROL_TOKEN in the selected env file}
     ports:
       - "${DASHBOARD_PORT:-127.0.0.1:3000:3000}"
     depends_on:
@@ -93,6 +94,7 @@ services:
       DAEMON_HOST: "0.0.0.0"
       DAEMON_DATA_BACKEND: ${DAEMON_DATA_BACKEND:-postgres}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY in the selected env file}
+      RUNFORGE_CONTROL_TOKEN: ${RUNFORGE_CONTROL_TOKEN:?set RUNFORGE_CONTROL_TOKEN in the selected env file}
       # The container IS the externally-managed sandbox, so workers run with
       # --dangerously-skip-permissions to clear the CLI "Workspace not trusted"
       # gate on dynamic worktree cwds. The daemon's PreToolUse containment hooks
@@ -142,6 +144,7 @@ services:
       BRIEFING_DATA_BACKEND: ${BRIEFING_DATA_BACKEND:-postgres}
       NODE_ENV: production
       GIT_REPO_PATH: /repo
+      RUNFORGE_CONTROL_TOKEN: ${RUNFORGE_CONTROL_TOKEN:?set RUNFORGE_CONTROL_TOKEN in the selected env file}
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -65,11 +65,60 @@ describe('daemonFetch', () => {
     expect(fetchMock.mock.calls[0][1].signal).toBe(customSignal);
   });
 
-  it('passes through additional options like cache', async () => {
+  it('adds Authorization: Bearer from RUNFORGE_CONTROL_TOKEN on GET when set', async () => {
     vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
+    vi.stubEnv('RUNFORGE_CONTROL_TOKEN', 'secret-token');
     fetchMock.mockResolvedValueOnce(new Response('ok'));
     const { daemonFetch } = await import('./daemon-fetch');
-    await daemonFetch('/status', { cache: 'no-store' });
-    expect(fetchMock.mock.calls[0][1].cache).toBe('no-store');
+    await daemonFetch('/status');
+    expect(fetchMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      headers: expect.objectContaining({ 'Authorization': 'Bearer secret-token' }),
+    }));
+  });
+
+  it('adds Authorization: Bearer from RUNFORGE_CONTROL_TOKEN on POST when set', async () => {
+    vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
+    vi.stubEnv('RUNFORGE_CONTROL_TOKEN', 'secret-token');
+    fetchMock.mockResolvedValueOnce(new Response('ok'));
+    const { daemonFetch } = await import('./daemon-fetch');
+    await daemonFetch('/pause', { method: 'POST' });
+    expect(fetchMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+      headers: expect.objectContaining({ 'Authorization': 'Bearer secret-token' }),
+    }));
+  });
+
+  it('omits Authorization when RUNFORGE_CONTROL_TOKEN is unset', async () => {
+    vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
+    vi.stubEnv('RUNFORGE_CONTROL_TOKEN', '');
+    fetchMock.mockResolvedValueOnce(new Response('ok'));
+    const { daemonFetch } = await import('./daemon-fetch');
+    await daemonFetch('/status');
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.headers).not.toHaveProperty('Authorization');
+  });
+
+  it('does not allow callers to override Authorization', async () => {
+    vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
+    vi.stubEnv('RUNFORGE_CONTROL_TOKEN', 'secret-token');
+    fetchMock.mockResolvedValueOnce(new Response('ok'));
+    const { daemonFetch } = await import('./daemon-fetch');
+    await daemonFetch('/status', { headers: { Authorization: 'Bearer attacker-token' } });
+    const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer secret-token');
+  });
+
+  it('throws DaemonAuthError when daemon responds with 401', async () => {
+    vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
+    fetchMock.mockResolvedValueOnce(new Response('unauthorized', { status: 401 }));
+    const { daemonFetch, DaemonAuthError } = await import('./daemon-fetch');
+    await expect(daemonFetch('/status')).rejects.toThrow(DaemonAuthError);
+  });
+
+  it('throws DaemonAuthError when daemon responds with 403', async () => {
+    vi.stubEnv('DAEMON_URL', 'http://localhost:9800');
+    fetchMock.mockResolvedValueOnce(new Response('forbidden', { status: 403 }));
+    const { daemonFetch, DaemonAuthError } = await import('./daemon-fetch');
+    await expect(daemonFetch('/status')).rejects.toThrow(DaemonAuthError);
   });
 });
+

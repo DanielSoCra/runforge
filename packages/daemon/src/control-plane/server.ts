@@ -1,6 +1,22 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'http';
 import { ok, err, type Result } from '../lib/result.js';
+import { checkAuthorization, assertBindAllowed } from './control-auth.js';
 import { getDashboardHtml } from './dashboard.js';
+
+let lastLegacyWarningAt = 0;
+const LEGACY_WARNING_INTERVAL_MS = 60_000;
+
+function maybeWarnLegacyLoopback(): void {
+  const now = Date.now();
+  if (now - lastLegacyWarningAt > LEGACY_WARNING_INTERVAL_MS) {
+    lastLegacyWarningAt = now;
+    console.warn(
+      '[control-plane] Unauthenticated control-plane access on loopback is deprecated. ' +
+        'Set RUNFORGE_CONTROL_TOKEN to secure this deployment.',
+    );
+  }
+}
+
 import { readResults } from './results.js';
 import type { ProposeResult } from './release/executor.js';
 import type { PreviewResult } from './release/types.js';
@@ -87,9 +103,26 @@ export function createControlServer(
   handlers: ControlHandlers,
   host: string = '127.0.0.1',
 ): { server: Server; start: () => Promise<Result<void>> } {
+  assertBindAllowed(host, process.env.RUNFORGE_CONTROL_TOKEN);
+
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', `http://localhost:${port}`);
     const method = req.method ?? 'GET';
+    const isHealth = method === 'GET' && url.pathname === '/health';
+
+    // Bearer boundary on every route except GET /health. In legacy loopback mode
+    // (token unset) allow the request but warn about deprecation.
+    const controlToken = process.env.RUNFORGE_CONTROL_TOKEN;
+    const tokenConfigured = typeof controlToken === 'string' && controlToken !== '';
+    if (!isHealth && tokenConfigured) {
+      const auth = checkAuthorization(req.headers.authorization, controlToken);
+      if (!auth.ok) {
+        json(res, auth.status, { error: auth.error });
+        return;
+      }
+    } else if (!isHealth && !tokenConfigured) {
+      maybeWarnLegacyLoopback();
+    }
 
     // CSRF protection: require a custom header on mutating (POST/PUT) requests.
     // Browsers enforce CORS preflight for requests with custom headers,
@@ -145,25 +178,6 @@ export function createControlServer(
       handlers.pause();
       json(res, 200, { paused: true });
     } else if (method === 'POST' && url.pathname === '/halt') {
-      // P0.5 emergency halt. When RUNFORGE_CONTROL_TOKEN is set, require a
-      // valid Bearer token in addition to the CSRF header. Halting is the safe
-      // direction, so the token being UNSET does not block the emergency stop
-      // locally — but production deployments should always configure it.
-      const controlToken = process.env.RUNFORGE_CONTROL_TOKEN;
-      if (controlToken !== undefined && controlToken !== '') {
-        const authHeader = Array.isArray(req.headers.authorization)
-          ? req.headers.authorization[0]
-          : req.headers.authorization;
-        if (authHeader === undefined) {
-          json(res, 401, { error: 'Authorization header required' });
-          return;
-        }
-        const parts = authHeader.split(' ');
-        if (parts[0]?.toLowerCase() !== 'bearer' || parts[1] !== controlToken) {
-          json(res, 403, { error: 'Invalid control token' });
-          return;
-        }
-      }
       if (handlers.halt) {
         try {
           const result = await handlers.halt();

@@ -40,9 +40,14 @@ export function createDaemonStatusPoller(options: DaemonStatusPollerOptions): Da
 export function createDaemonStatusHttpClient(options: DaemonStatusHttpClientOptions): DaemonStatusClient {
   const fetchImpl = options.fetch ?? fetch;
   const baseUrl = options.baseUrl.replace(/\/+$/, '');
+  const token = process.env.RUNFORGE_CONTROL_TOKEN;
+  const headers: Record<string, string> = {};
+  if (token !== undefined && token !== '') {
+    headers.Authorization = `Bearer ${token}`;
+  }
   return {
     async status(): Promise<unknown> {
-      const response = await fetchImpl(`${baseUrl}/status`, { method: 'GET' });
+      const response = await fetchImpl(`${baseUrl}/status`, { method: 'GET', headers });
       if (!response.ok) throw new Error(`daemon status failed: ${response.status}`);
       const text = await response.text();
       if (!text) return {};

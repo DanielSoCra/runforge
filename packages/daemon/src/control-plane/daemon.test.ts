@@ -933,6 +933,54 @@ describe('daemon', () => {
       }
     });
 
+    it('returns error when controlHost is non-loopback and RUNFORGE_CONTROL_TOKEN is unset', async () => {
+      mockLoadConfig.mockResolvedValue(
+        ok(makeConfig({ controlHost: '0.0.0.0' })),
+      );
+      const originalToken = process.env.RUNFORGE_CONTROL_TOKEN;
+      delete process.env.RUNFORGE_CONTROL_TOKEN;
+
+      try {
+        const { startDaemon } = await loadDaemon();
+        const result = await startDaemon('config.json');
+
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.error.message).toContain('RUNFORGE_CONTROL_TOKEN');
+        }
+        expect(mockServerStart).not.toHaveBeenCalled();
+      } finally {
+        if (originalToken === undefined) {
+          delete process.env.RUNFORGE_CONTROL_TOKEN;
+        } else {
+          process.env.RUNFORGE_CONTROL_TOKEN = originalToken;
+        }
+      }
+    });
+
+    it('warns once when starting in legacy loopback mode without RUNFORGE_CONTROL_TOKEN', async () => {
+      const originalToken = process.env.RUNFORGE_CONTROL_TOKEN;
+      delete process.env.RUNFORGE_CONTROL_TOKEN;
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      try {
+        const { startDaemon } = await loadDaemon();
+        const result = await startDaemon('config.json');
+
+        expect(result.ok).toBe(true);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('legacy loopback mode'),
+        );
+      } finally {
+        warnSpy.mockRestore();
+        if (originalToken === undefined) {
+          delete process.env.RUNFORGE_CONTROL_TOKEN;
+        } else {
+          process.env.RUNFORGE_CONTROL_TOKEN = originalToken;
+        }
+      }
+    });
+
     it('returns error when config loading fails', async () => {
       mockLoadConfig.mockResolvedValue(err(new Error('bad config')));
 

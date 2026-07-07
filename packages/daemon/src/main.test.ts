@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { createControlServer } from './control-plane/server.js';
 import { formatStartupError } from './main.js';
 import type { Server } from 'http';
@@ -9,6 +9,7 @@ import type { AddressInfo } from 'net';
 // We test the actual fetch behavior that main.ts uses, not the CLI wrapper.
 
 let serverRef: Server | undefined;
+let originalControlToken: string | undefined;
 
 const handlers = {
   getStatus: () => ({ activeRuns: 0, paused: false }),
@@ -24,11 +25,20 @@ const handlers = {
     ),
 };
 
+beforeEach(() => {
+  originalControlToken = process.env.RUNFORGE_CONTROL_TOKEN;
+});
+
 afterEach(async () => {
   if (serverRef) {
     const s = serverRef;
     serverRef = undefined;
     await new Promise<void>((resolve) => s.close(() => resolve()));
+  }
+  if (originalControlToken === undefined) {
+    delete process.env.RUNFORGE_CONTROL_TOKEN;
+  } else {
+    process.env.RUNFORGE_CONTROL_TOKEN = originalControlToken;
   }
 });
 
@@ -96,5 +106,20 @@ describe('main.ts callApi X-Requested-By header (#148)', () => {
     // This is what the old callApi did — no headers
     const res = await fetch(`http://127.0.0.1:${port}/pause`, { method: 'POST' });
     expect(res.status).toBe(403);
+  });
+
+  it('POST forwards RUNFORGE_CONTROL_TOKEN as Authorization Bearer when set', async () => {
+    process.env.RUNFORGE_CONTROL_TOKEN = 'clitoken';
+    const { server, start } = createControlServer(0, handlers);
+    serverRef = server;
+    await start();
+    const port = (server.address() as AddressInfo).port;
+
+    const headers: Record<string, string> = {};
+    headers['X-Requested-By'] = 'cli';
+    headers.Authorization = 'Bearer clitoken';
+    const res = await fetch(`http://127.0.0.1:${port}/pause`, { method: 'POST', headers });
+    expect(res.status).toBe(200);
+    expect(handlers.pause).toHaveBeenCalled();
   });
 });
