@@ -2,7 +2,7 @@
 
 Spec: `docs/superpowers/specs/2026-07-07-control-plane-hardening-design.md` (codex-reviewed CLEAN, 5 iterations). Read it first; it is authoritative on behavior. This plan sequences the work.
 
-Branch: `codex/control-plane-hardening-build` (off this plan branch). All commands run from the repo root. Gate: acceptance tests in `packages/daemon/src/control-plane/__acceptance__/` (authored separately, immovable — do NOT modify them).
+Branch: `codex/control-plane-hardening-build` (off this plan branch). All commands run from the repo root. Gate: acceptance tests in `packages/daemon/src/control-plane/__acceptance__/` (authored separately, immovable — do NOT modify them). They are plain Vitest files named `*.test.ts` so the daemon's default `vitest run` (root `src`, no custom include) picks them up.
 
 ## Task 0 — Baseline
 
@@ -13,7 +13,7 @@ pnpm --filter @runforge/daemon test   # must pass before starting
 
 ## Task 1 — `.specify` spec + traceability updates
 
-Files: `.specify/specs/` STACK-AC-OPERATOR-AUTH (and ARCH/FUNC parents where behavior is described), `.specify/traceability.yml`.
+Files: `.specify/stack/operator-auth-ts.md` (STACK-AC-OPERATOR-AUTH), `.specify/architecture/operator-auth.md`, `.specify/functional/operator-auth.md`, `.specify/traceability.yml`.
 
 - Extend `STACK-AC-OPERATOR-AUTH` with the daemon control-plane auth model: bearer `RUNFORGE_CONTROL_TOKEN` on every route except `GET /health` (both servers); bind-host startup gate (IPv4-only contract, loopback = `127.0.0.0/8`; non-loopback + no token = refuse to start); legacy loopback mode (loopback + no token = start with loud warnings, `/halt` token-optional); `X-Requested-By` demoted to CSRF/provenance defense on mutating methods; built-in HTML dashboard = legacy/loopback-only.
 - Update ARCH/FUNC parents only where they describe the boundary ("role enforcement happens in the dashboard" must become "dashboard enforces roles; daemon enforces the bearer boundary").
@@ -80,7 +80,7 @@ Files: `packages/dashboard/lib/daemon-fetch.ts`, `packages/dashboard/app/(dashbo
 - `daemonFetch`: when `process.env.RUNFORGE_CONTROL_TOKEN` set, set `Authorization: Bearer <token>` AFTER merging caller headers (caller cannot override). On daemon 401/403 throw new typed `DaemonAuthError` (message: control token missing or invalid — set `RUNFORGE_CONTROL_TOKEN` in the dashboard environment). Export it next to `DaemonConfigError`.
 - `page.tsx:24`: replace direct `fetch(${DAEMON_URL}/status)` with `daemonFetch('/status', …)`, keep error handling.
 - `halt/route.ts`: delete the ad-hoc bearer injection (:31-38) — daemonFetch owns it.
-- Sweep EVERY `daemonFetch` caller (grep is authoritative): add `DaemonAuthError` handling returning 500-family JSON with the actionable message. Known floor: `app/api/daemon/{status,pause,resume,halt,release,issues/scan,remote-control/restart,repos-reload}/route.ts`, `app/api/decisions/pending/route.ts`, `app/api/decisions/[id]/route.ts`, `app/api/decisions/answer/route.ts`, `app/api/decisions/[id]/reveal/route.ts`, `app/api/metrics/escalation/route.ts`.
+- Sweep EVERY `daemonFetch` caller (grep is authoritative). API routes: add `DaemonAuthError` handling returning 500-family JSON with the actionable message. Known floor: `app/api/daemon/{status,pause,resume,halt,release,issues/scan,remote-control/restart,repos-reload}/route.ts`, `app/api/decisions/pending/route.ts`, `app/api/decisions/[id]/route.ts`, `app/api/decisions/answer/route.ts`, `app/api/decisions/[id]/reveal/route.ts`, `app/api/metrics/escalation/route.ts`. Non-route callers — server actions (`actions/repos.ts:40`, `actions/github-connections.ts:9`) and server components (`app/(dashboard)/metrics/page.tsx:22`, `app/(dashboard)/steering/page.tsx:37`, `app/(dashboard)/page.tsx`): treat `DaemonAuthError` exactly like their existing `DaemonConfigError`/unreachable handling (degrade to offline/error state), but include the auth message so the operator can distinguish misconfiguration from a down daemon.
 - Tests: daemon-fetch unit tests (bearer on GET+POST when set; absent when unset; not overridable; 401→DaemonAuthError); update halt proxy test; representative proxy-route tests (one mutating, one GET) asserting the auth-error JSON.
 
 Commit: `feat(dashboard): forward control token on all daemon calls; map auth errors`
@@ -119,7 +119,7 @@ Commit: `chore(deps): clear high prod audit findings via upgrades + pnpm overrid
 
 File: `.github/workflows/ci.yml`.
 
-- New job `security` (alongside `guard`/`ci`): checkout, pnpm setup + `pnpm install --frozen-lockfile`, step `pnpm audit --prod --audit-level high`; step gitleaks full-history: download the gitleaks release binary (pin version + checksum) and run `gitleaks detect --redact` (needs `fetch-depth: 0`). CONSTRAINT: no job-level `services:`/`container:`/`uses: docker://…` (`scripts/check-ci-workflows.mjs` guard).
+- **Gating constraint:** the autonomous merge gate polls only the exact required check names (`runforge.config.json:60` → `requiredChecks: ["ci"]`; `packages/daemon/src/control-plane/await-checks.ts:104`). A sibling job would NOT block landing. Therefore add the security steps **inside the existing `ci` job**, early (right after `pnpm install --frozen-lockfile`, before lint): step `Audit (prod, high)` → `pnpm audit --prod --audit-level high`; step `Gitleaks (full history)` → download a pinned gitleaks release binary (verify sha256 checksum) and run `gitleaks detect --redact`. The `ci` job's checkout needs `fetch-depth: 0` for full-history scanning. Do NOT change `requiredChecks` (that is deployment policy). CONSTRAINT: no job-level `services:`/`container:`/`uses: docker://…` (`scripts/check-ci-workflows.mjs` guard).
 - Verify locally: `node scripts/check-ci-workflows.mjs` exits 0.
 
 Commit: `ci: add security job (prod audit gate + gitleaks full-history)`
