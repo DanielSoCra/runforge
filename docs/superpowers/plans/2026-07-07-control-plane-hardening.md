@@ -17,7 +17,7 @@ Files: `.specify/stack/operator-auth-ts.md` (STACK-AC-OPERATOR-AUTH), `.specify/
 
 - Extend `STACK-AC-OPERATOR-AUTH` with the daemon control-plane auth model: bearer `RUNFORGE_CONTROL_TOKEN` on every route except `GET /health` (both servers); bind-host startup gate (IPv4-only contract, loopback = `127.0.0.0/8`; non-loopback + no token = refuse to start); legacy loopback mode (loopback + no token = start with loud warnings, `/halt` token-optional); `X-Requested-By` demoted to CSRF/provenance defense on mutating methods; built-in HTML dashboard = legacy/loopback-only.
 - Update ARCH/FUNC parents only where they describe the boundary ("role enforcement happens in the dashboard" must become "dashboard enforces roles; daemon enforces the bearer boundary").
-- `traceability.yml`: under the operator-auth stack spec add `code_paths`: `packages/daemon/src/control-plane/server.ts`, `packages/daemon/src/control-plane/degraded-server.ts`, `packages/daemon/src/control-plane/control-auth.ts`, `packages/dashboard/lib/daemon-fetch.ts`, `docker-compose.yml`, `scripts/install-daemon.sh`, `scripts/com.runforge.daemon.plist`; `test_paths`: `packages/daemon/src/control-plane/control-auth.test.ts`, `packages/daemon/src/control-plane/server.test.ts`.
+- `traceability.yml`: under the operator-auth stack spec add `code_paths` for files that exist NOW: `packages/daemon/src/control-plane/server.ts`, `packages/daemon/src/control-plane/degraded-server.ts`, `packages/dashboard/lib/daemon-fetch.ts`, `docker-compose.yml`, `scripts/install-daemon.sh`, `scripts/com.runforge.daemon.plist`; `test_paths`: `packages/daemon/src/control-plane/server.test.ts`. (The `control-auth.ts`/`control-auth.test.ts` entries are added in Task 2, in the same commit that creates them — `pnpm check:traceability` must pass at every commit boundary.)
 - Verify: `pnpm check:traceability` exits 0.
 
 Commit: `spec(operator-auth): daemon control-plane bearer boundary + traceability`
@@ -40,6 +40,8 @@ export function checkAuthorization(authorizationHeader: string | string[] | unde
 ```
 
 Tests (write first, red → green): loopback/non-loopback × token matrix for `assertBindAllowed`; `checkAuthorization` — valid; wrong same-length; wrong different-length (no throw); missing (401); `Basic` scheme (403); array header normalized.
+
+Also in this commit: add `control-auth.ts` + `control-auth.test.ts` to `.specify/traceability.yml` (see Task 1 note); `pnpm check:traceability` exits 0.
 
 Commit: `feat(daemon): control-plane auth primitives (bind gate + bearer check)`
 
@@ -95,8 +97,8 @@ Commit: `feat: all control-plane clients send the bearer token`
 
 ## Task 8 — deployment plumbing
 
-- `docker-compose.yml`: add `RUNFORGE_CONTROL_TOKEN: ${RUNFORGE_CONTROL_TOKEN:?set RUNFORGE_CONTROL_TOKEN in the selected env file}` to daemon, dashboard, and briefing-summarizer services (pattern of `RUNFORGE_DOCKER_DATABASE_URL`).
-- `scripts/install-daemon.sh`: if `RUNFORGE_CONTROL_TOKEN` absent from `.env.mac`, generate `openssl rand -hex 32`, append to `.env.mac` (file kept 0600), and substitute into the plist. Idempotent: re-run reuses the existing token.
+- `docker-compose.yml`: add `RUNFORGE_CONTROL_TOKEN: ${RUNFORGE_CONTROL_TOKEN:?set RUNFORGE_CONTROL_TOKEN in the selected env file}` to daemon, dashboard, briefing-summarizer, **and any concierge service if one is composed** (grep the compose file — every service whose code calls the daemon; pattern of `RUNFORGE_DOCKER_DATABASE_URL`).
+- `scripts/install-daemon.sh`: if `RUNFORGE_CONTROL_TOKEN` absent from `.env.mac`, generate `openssl rand -hex 32`, append to `.env.mac` (file kept 0600), and substitute into the plist. Idempotent: re-run reuses the existing token. Support `RUNFORGE_ENV_MAC_PATH` override for the env-file location so idempotence is testable without touching the real `.env.mac`. **Acceptance check (run it):** point `RUNFORGE_ENV_MAC_PATH` at a temp file, run the token-provisioning step twice, assert the token line is identical both times and the file mode is 0600 (a small shell check is fine; skip launchctl in the check).
 - `scripts/com.runforge.daemon.plist`: add `RUNFORGE_CONTROL_TOKEN` placeholder in `EnvironmentVariables`.
 - `scripts/sync-claude-creds.sh`: validation log → 0600 file inside `$CREDS_DIR` (or `mktemp` with 0600), not `/tmp/sync-claude-creds.validate`.
 - `.env.mac.example`, `.env.prod.example`, `docs/running.md`: document the token, rotation, and the exact compose invocation `ENV_FILE=.env.mac docker compose --env-file .env.mac …` (both mechanisms required — interpolation vs service `env_file`).
@@ -143,7 +145,7 @@ Task 1 independent. Task 2 → {3,4,5}. Task 6,7 depend on 3 (behavior locked). 
 1. Start daemon locally with `RUNFORGE_CONTROL_TOKEN=testtoken` (loopback): `curl -s -o /dev/null -w '%{http_code}' localhost:3847/status` → 401; with `-H 'Authorization: Bearer testtoken'` → 200; `POST /pause` with bearer+`X-Requested-By` → 200; `GET /health` tokenless → 200.
 2. `DAEMON_HOST=0.0.0.0` without token → process exits with ControlBindError message.
 3. Tokenless loopback start → warning logged, requests work (legacy mode).
-4. `pnpm audit --prod --audit-level high` → exit 0. `gh run list --workflow=ci.yml` → security job present + green on the PR run.
+4. `pnpm audit --prod --audit-level high` → exit 0. On the PR's CI run, the `ci` job contains green `Audit (prod, high)` and `Gitleaks (full history)` steps.
 5. Dashboard (if running): status page renders via daemonFetch with bearer.
 
 ## Follow-up issues to file (Phase 8/9, `gh issue create`)
