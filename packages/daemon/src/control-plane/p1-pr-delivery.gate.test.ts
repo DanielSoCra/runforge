@@ -76,6 +76,8 @@ interface DeliveryArgs {
   awaitRequiredChecks: (args: AwaitRequiredChecksArgs) => Promise<AwaitRequiredChecksResult>;
   pushFeatureBranch: (args: PushFeatureBranchArgs) => Promise<unknown>;
   trigger: { kind: 'auto-merge' | 'operator-approved-epoch'; detail: string };
+  checkBudgetMs?: number;
+  checkPollMs?: number;
 }
 
 type DeliverCodeChangeViaPR = (args: DeliveryArgs) => Promise<unknown>;
@@ -102,7 +104,14 @@ async function loadDeliverCodeChangeViaPR(): Promise<DeliverCodeChangeViaPR> {
   return deliver!;
 }
 
-function makeOctokit(options: { existingPulls?: PullRequestSummary[]; prNumber?: number; mergeSha?: string } = {}) {
+function makeOctokit(
+  options: {
+    existingPulls?: PullRequestSummary[];
+    prNumber?: number;
+    mergeSha?: string;
+    mergeResponse?: { merged: boolean; sha: string; message?: string };
+  } = {},
+) {
   const existingPulls = options.existingPulls ?? [];
   const prNumber = options.prNumber ?? 101;
   const mergeSha = options.mergeSha ?? 'squash-merge-sha-101';
@@ -120,9 +129,14 @@ function makeOctokit(options: { existingPulls?: PullRequestSummary[]; prNumber?:
           base: { ref: 'staging' },
         },
       })),
-      merge: vi.fn(async (_params: PullsMergeParams): Promise<{ data: { merged: true; sha: string } }> => ({
-        data: { merged: true, sha: mergeSha },
-      })),
+      merge: vi.fn(
+        async (
+          _params: PullsMergeParams,
+        ): Promise<{ data: { merged: boolean; sha: string; message?: string } }> =>
+          options.mergeResponse !== undefined
+            ? { data: options.mergeResponse }
+            : { data: { merged: true, sha: mergeSha } },
+      ),
     },
   };
 }
@@ -252,6 +266,42 @@ describe('G2 deliverCodeChangeViaPR', () => {
       merged: false,
       prNumber: 202,
     });
+  });
+
+  it('records merged only when the provider confirms it — merged:false parks with the provider reason', async () => {
+    const deliver = await loadDeliverCodeChangeViaPR();
+    const octokit = makeOctokit({
+      prNumber: 404,
+      mergeResponse: { merged: false, sha: '', message: 'Base branch was modified. Review and try the merge again.' },
+    });
+    const args = makeArgs({ octokit });
+
+    const result = await deliver(args);
+
+    expect(octokit.pulls.merge).toHaveBeenCalledWith(
+      expect.objectContaining({ pull_number: 404, merge_method: 'squash' }),
+    );
+    expect(result).toMatchObject({ merged: false, prNumber: 404 });
+    expect((result as { reason?: string }).reason).toContain('Base branch was modified');
+    expect((result as { mergeSha?: string }).mergeSha).toBeUndefined();
+    expect(args.phaseArtifact.status).not.toBe('joined');
+  });
+
+  it('forwards the configured required-check budget and poll interval to awaitRequiredChecks', async () => {
+    const deliver = await loadDeliverCodeChangeViaPR();
+    const awaitRequiredChecks = vi.fn(async (): Promise<AwaitRequiredChecksResult> => ({ status: 'green' }));
+
+    await deliver(
+      makeArgs({
+        awaitRequiredChecks,
+        checkBudgetMs: 300_000,
+        checkPollMs: 10_000,
+      }),
+    );
+
+    expect(awaitRequiredChecks).toHaveBeenCalledWith(
+      expect.objectContaining({ budgetMs: 300_000, pollMs: 10_000 }),
+    );
   });
 
   it('uses the same PR delivery lane for auto-merge decisions and operator-approved epoch re-entry', async () => {

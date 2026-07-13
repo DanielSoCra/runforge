@@ -107,6 +107,12 @@ const LandingTargetSchema = z
      * merge path. Absent or empty for a governed deployment fails closed.
      */
     requiredChecks: z.array(z.string().min(1)).optional(),
+    /**
+     * OPTIONAL required-check wait policy: total budget and poll interval in
+     * milliseconds. Absent falls back to the await-checks defaults.
+     */
+    checkBudgetMs: z.number().int().positive().optional(),
+    checkPollMs: z.number().int().positive().optional(),
   })
   .strict();
 

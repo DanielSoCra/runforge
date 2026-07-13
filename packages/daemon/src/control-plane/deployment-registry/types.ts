@@ -93,6 +93,12 @@ export interface LandingTarget {
    * treated as fail-closed (escalate) — never as an implicit green.
    */
   requiredChecks?: string[];
+  /**
+   * OPTIONAL required-check wait policy in milliseconds. Absent falls back to
+   * the await-checks defaults (60s budget / 5s poll).
+   */
+  checkBudgetMs?: number;
+  checkPollMs?: number;
 }
 
 /** For each shared capability, the identified version this deployment is bound to. */
