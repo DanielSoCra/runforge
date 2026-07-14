@@ -1755,3 +1755,9 @@ STACK-AC-RELEASE:
     - packages/release-ledger/test/ledger.test.ts
     - packages/release-ledger/test/marker.test.ts
   status: draft
+
+# Target-repository integration contract (GitHub issue #2). L1 drafted from the
+# Operator-authored issue; status: draft pending Operator approval of the L1
+# content (the Operator's gate per L0). L2/L3 follow after approval.
+FUNC-AC-TARGET-INTEGRATION:
+  status: draft

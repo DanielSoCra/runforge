@@ -361,6 +361,8 @@ export function createPhaseHandlers(
   function isLandingTarget(value: unknown): value is {
     landsOn: string;
     requiredChecks?: string[];
+    checkBudgetMs?: number;
+    checkPollMs?: number;
   } {
     return (
       typeof value === 'object' &&
@@ -373,7 +375,14 @@ export function createPhaseHandlers(
 
   function readLandingTarget(
     deploymentId: string,
-  ): { landsOn: string; requiredChecks: string[] } | undefined {
+  ):
+    | {
+        landsOn: string;
+        requiredChecks: string[];
+        checkBudgetMs?: number;
+        checkPollMs?: number;
+      }
+    | undefined {
     if (registry === undefined) return undefined;
     const declared = registry.readDeclaredData(deploymentId, 'landing');
     if (declared.kind !== 'found' || !isLandingTarget(declared.value)) {
@@ -382,6 +391,8 @@ export function createPhaseHandlers(
     return {
       landsOn: declared.value.landsOn,
       requiredChecks: declared.value.requiredChecks ?? [],
+      checkBudgetMs: declared.value.checkBudgetMs,
+      checkPollMs: declared.value.checkPollMs,
     };
   }
 
@@ -2732,6 +2743,8 @@ export function createPhaseHandlers(
         phaseArtifact: integrateArtifact,
         awaitRequiredChecks: (args) =>
           awaitRequiredChecks({ octokit, ...args }),
+        checkBudgetMs: landing?.checkBudgetMs,
+        checkPollMs: landing?.checkPollMs,
         pushFeatureBranch,
         trigger: isApprovedReEntry
           ? { kind: 'operator-approved-epoch', detail: 'mergeDecisionApprovedEpoch re-entry' }

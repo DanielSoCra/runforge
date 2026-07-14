@@ -85,6 +85,29 @@ describe('parseProfile — fail-closed rejections (real zod / composed parsers)'
     if (!r.ok) expect(r.offenders.join()).toContain('deploymentName');
   });
 
+  it('landing accepts an explicit required-check wait policy (checkBudgetMs / checkPollMs)', () => {
+    const withWaitPolicy = structuredClone(validProfile) as Record<string, unknown>;
+    withWaitPolicy.landing = {
+      ...validProfile.landing,
+      requiredChecks: ['daemon / test'],
+      checkBudgetMs: 900_000,
+      checkPollMs: 15_000,
+    };
+    const r = parseProfile('dep-a', withWaitPolicy);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.profile.landing.checkBudgetMs).toBe(900_000);
+      expect(r.profile.landing.checkPollMs).toBe(15_000);
+    }
+  });
+
+  it('a non-positive checkBudgetMs is rejected', () => {
+    const bad = structuredClone(validProfile) as Record<string, unknown>;
+    bad.landing = { ...validProfile.landing, checkBudgetMs: 0 };
+    const r = parseProfile('dep-a', bad);
+    expect(r.ok).toBe(false);
+  });
+
   it('a malformed lane set (duplicate lane name) rejects the whole profile', () => {
     const bad = structuredClone(validProfile);
     bad.laneSet.lanes[0]!.name = 'standard'; // duplicates lanes[1]

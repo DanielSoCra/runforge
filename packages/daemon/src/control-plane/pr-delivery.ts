@@ -46,7 +46,7 @@ export interface DeliverCodeChangeViaPRArgs {
         repo: string;
         pull_number: number;
         merge_method: 'squash';
-      }) => Promise<{ data: { merged: boolean; sha: string } }>;
+      }) => Promise<{ data: { merged: boolean; sha: string; message?: string } }>;
     };
   };
   owner: string;
@@ -70,6 +70,10 @@ export interface DeliverCodeChangeViaPRArgs {
   trigger: { kind: 'auto-merge' | 'operator-approved-epoch'; detail: string };
   /** Internal seam: when true the PR is opened/adopted but never merged. */
   skipMerge?: boolean;
+  /** Total wait budget for required checks; falls back to awaitRequiredChecks' default. */
+  checkBudgetMs?: number;
+  /** Poll interval for required checks; falls back to awaitRequiredChecks' default. */
+  checkPollMs?: number;
 }
 
 export interface DeliverCodeChangeViaPRResult {
@@ -118,6 +122,8 @@ export async function deliverCodeChangeViaPR({
   awaitRequiredChecks,
   pushFeatureBranch,
   skipMerge = false,
+  checkBudgetMs,
+  checkPollMs,
 }: DeliverCodeChangeViaPRArgs): Promise<DeliverCodeChangeViaPRResult> {
   try {
     const now = new Date().toISOString();
@@ -228,6 +234,8 @@ export async function deliverCodeChangeViaPR({
       repo,
       ref: featureBranch,
       requiredChecks,
+      ...(checkBudgetMs !== undefined ? { budgetMs: checkBudgetMs } : {}),
+      ...(checkPollMs !== undefined ? { pollMs: checkPollMs } : {}),
     });
 
     if (checkResult.status !== 'green') {
@@ -238,13 +246,22 @@ export async function deliverCodeChangeViaPR({
       };
     }
 
-    // 3. Squash-merge.
+    // 3. Squash-merge. The join transition is recorded ONLY on provider-confirmed
+    // `merged: true`; a 200 with `merged: false` parks with GitHub's reason.
     const mergeResponse = await octokit.pulls.merge({
       owner,
       repo,
       pull_number: prNumber,
       merge_method: 'squash',
     });
+
+    if (mergeResponse.data.merged !== true) {
+      return {
+        merged: false,
+        prNumber,
+        reason: `provider did not confirm merge: ${mergeResponse.data.message ?? 'no reason given'}`,
+      };
+    }
 
     phaseArtifact.status = 'joined';
     phaseArtifact.mergeIdentifier = mergeResponse.data.sha;
